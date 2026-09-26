@@ -22,7 +22,7 @@ Learn English prompting from your own Vietnamese prompts, on Paseo desktop.
   Explicit `/caveman` or `$caveman` commands in the draft take priority over the dropdown.
 - Mode instructions use native `UserPromptSubmit` **hidden context**. The plugin never inserts
   mode commands or a response-mode block into existing agents' prompts.
-  New-thread composers keep their selection locally: the first send prepends `$caveman <mode>`
+  New-thread composers keep their selection locally: the first send prepends `/caveman <mode>`
   for a non-Default selection unless the draft already contains an explicit Caveman command.
   The native hook initializes that agent's mode from the command; subsequent sends use hidden context. Enhancement changes only the
   prompt content; reply-language preferences also travel through the hook.
@@ -50,6 +50,12 @@ This appends only this plugin's hook to `~/.claude/settings.json` and `~/.codex/
 preserves other settings, and makes a private `.prompt-translate-backup` beside each config.
 It records the installed Caveman path under the Paseo home, never in Git. Re-run after moving
 Node, this plugin, or Caveman. Do not restore the full backup over later unrelated config edits.
+
+For Claude, the hook is registered for `UserPromptSubmit` and `SessionStart` with `--claude`.
+Disable the native Claude plugin (`"caveman@caveman": false` in `enabledPlugins`): its hooks
+write the shared `~/.claude/.caveman-active`, so one agent's `/caveman` command leaks into every
+Claude session. The bridge keeps Paseo agents isolated and runs the installed Caveman
+`caveman-activate.js` and `caveman-mode-tracker.js` for Claude sessions outside Paseo.
 
 Codex requires reviewing/trusting the exact new hook through `/hooks`. Trust only the
 `prompt-translate/server/caveman-hook.cjs` entry. Existing Paseo Codex agents need

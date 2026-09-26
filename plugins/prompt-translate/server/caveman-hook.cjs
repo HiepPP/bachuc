@@ -16,13 +16,37 @@ const modes = new Set([
 ]);
 const digest = (text) =>
   crypto.createHash("sha256").update(text.replace(/\r\n/g, "\n")).digest("hex");
+const dataRoot = (env) =>
+  path.join(env.PASEO_HOME || path.join(os.homedir(), ".paseo"), "plugin-data/prompt-translate");
+// The native Claude Caveman plugin is disabled because its hooks write the shared
+// ~/.claude flag, leaking one agent's mode into every Claude session. Claude sessions
+// outside Paseo get the same Caveman hooks through this bridge instead.
+function native(data, env = process.env) {
+  const script =
+    data.hook_event_name === "SessionStart" ? "caveman-activate.js" : "caveman-mode-tracker.js";
+  const { cavemanRoot } = JSON.parse(
+    fs.readFileSync(path.join(dataRoot(env), "hook-runtime.json"), "utf8"),
+  );
+  return execFileSync(process.execPath, [path.join(cavemanRoot, "src/hooks", script)], {
+    input: JSON.stringify(data),
+    env: { ...env, CLAUDE_PLUGIN_ROOT: cavemanRoot },
+    timeout: 4000,
+    maxBuffer: 1024 * 1024,
+    encoding: "utf8",
+  });
+}
+function example(config, mode, hookDir) {
+  if (typeof config.loadFilteredRuleset !== "function") return null;
+  const label = config.canonicalModeLabel?.(mode) ?? mode;
+  const lines = (config.loadFilteredRuleset(mode, hookDir) || "").split("\n");
+  const at = lines.findIndex((line) => line.startsWith(`- ${label}: `));
+  const question = lines.slice(0, at).findLast((line) => line.startsWith('Example "'));
+  return at < 0 || !question ? null : { label, question, answer: lines[at] };
+}
 function run(data, env = process.env) {
   const agentId = env.PASEO_AGENT_ID;
   if (!uuid.test(agentId || "") || typeof data.prompt !== "string") return {};
-  const root = path.join(
-    env.PASEO_HOME || path.join(os.homedir(), ".paseo"),
-    "plugin-data/prompt-translate",
-  );
+  const root = dataRoot(env);
   const dir = path.join(root, "agents", agentId);
   const modeFile = path.join(dir, "mode.json");
   const initial = !fs.existsSync(modeFile);
@@ -100,8 +124,13 @@ function run(data, env = process.env) {
     context.push(
       "Respond in literary Chinese for this turn unless the user explicitly requests another language.",
     );
-  if (output.hookSpecificOutput?.additionalContext)
-    context.push(output.hookSpecificOutput.additionalContext);
+  const nativeContext = output.hookSpecificOutput?.additionalContext || "";
+  if (nativeContext) context.push(nativeContext);
+  // Later turns get only Caveman's one-line reminder, and replies drift back to prose.
+  // One level example from Caveman's own SKILL.md anchors the expected density.
+  const sample = active && example(config, active, hookDir);
+  if (sample && !nativeContext.includes(sample.answer))
+    context.push(`Match this ${sample.label} density. ${sample.question} ${sample.answer}`);
   if (!active)
     context.push(
       "Normal mode. Stop caveman. Reset earlier Caveman style and Wenyan language instructions. Follow the agent's normal response style and the current request's language unless explicitly requested otherwise.",
@@ -147,8 +176,10 @@ function run(data, env = process.env) {
     hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext },
   };
 }
-module.exports = { run, digest };
+module.exports = { run, native, digest };
 if (require.main === module) {
+  // Only the Claude registration passes --claude; Codex keeps its own Caveman plugin.
+  const outside = process.argv.includes("--claude") && !uuid.test(process.env.PASEO_AGENT_ID || "");
   // Paseo launches Claude with CAVEMAN_DEFAULT_MODE=off only to silence the native
   // Caveman plugin; bare commands handled here still use the user's own default.
   const saved = process.env.PROMPT_TRANSLATE_CAVEMAN_DEFAULT_MODE;
@@ -161,10 +192,12 @@ if (require.main === module) {
   });
   process.stdin.on("end", () => {
     try {
-      process.stdout.write(JSON.stringify(run(JSON.parse(input))));
+      const data = JSON.parse(input);
+      process.stdout.write(outside ? native(data) : JSON.stringify(run(data)));
     } catch (error) {
       process.stderr.write(`prompt-translate hook: ${error.message.split("\n")[0]}\n`);
-      process.exitCode = 2;
+      // Exit 2 blocks the prompt; a native Caveman failure must not block plain Claude.
+      process.exitCode = outside ? 1 : 2;
     }
   });
 }

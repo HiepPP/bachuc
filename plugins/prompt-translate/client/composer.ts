@@ -125,7 +125,7 @@ export function installComposer(
         const original = previous?.prompt === draft ? previous.original : draft;
         const explicit = preserveCavemanCommand("", original);
         const prompt =
-          explicit || mode === "follow-agent" ? original : `$caveman ${mode}\n\n${original}`;
+          explicit || mode === "follow-agent" ? original : `/caveman ${mode}\n\n${original}`;
         firstTurnText.set(field, { prompt, original });
         if (prompt !== draft) {
           if (!fillField(field, prompt, doc)) return;

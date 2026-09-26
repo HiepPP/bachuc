@@ -734,7 +734,7 @@ test("new-thread draft sends unchanged without calling agent mode RPCs", async (
 });
 
 for (const [mode, original, expected] of [
-  ["lite", "hello", "$caveman lite\n\nhello"],
+  ["lite", "hello", "/caveman lite\n\nhello"],
   ["wenyan-ultra", "$caveman off\n\nhello", "$caveman off\n\nhello"],
 ] as const)
   test(`draft first send: ${mode} respects explicit commands`, async () => {
@@ -783,7 +783,7 @@ test("unsent first turn replaces its generated command when selection changes", 
     mode = "wenyan-ultra";
     composer.onKeydown(key(field, { metaKey: false }).event);
     await wait(10);
-    assert.equal(sent[1]?.value, "$caveman wenyan-ultra\n\nhello");
+    assert.equal(sent[1]?.value, "/caveman wenyan-ultra\n\nhello");
     mode = "follow-agent";
     composer.onKeydown(key(field, { metaKey: false }).event);
     await wait(10);
@@ -809,7 +809,7 @@ test("new-thread enhancement uses the mode selected while enhancement runs", asy
     mode = "wenyan-ultra";
     result.resolve("enhanced");
     await wait(15);
-    assert.equal(sent[0]?.value, "$caveman wenyan-ultra\n\nenhanced");
+    assert.equal(sent[0]?.value, "/caveman wenyan-ultra\n\nenhanced");
   } finally {
     composer.stop();
   }

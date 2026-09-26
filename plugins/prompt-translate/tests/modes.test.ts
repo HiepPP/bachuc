@@ -20,7 +20,7 @@ async function fixture(nativeRules = "Native rules") {
   await mkdir(root, { recursive: true });
   await writeFile(
     path.join(native, "caveman-config.js"),
-    `const fs=require('fs');const path=require('path'); exports.getDefaultMode=()=>process.env.CAVEMAN_DEFAULT_MODE||'full'; exports.resolveActiveMode=d=>{try{return JSON.parse(fs.readFileSync(path.join(d,'mode.json'))).mode;}catch{return null;}};`,
+    `const fs=require('fs');const path=require('path'); exports.getDefaultMode=()=>process.env.CAVEMAN_DEFAULT_MODE||'full'; exports.resolveActiveMode=d=>{try{return JSON.parse(fs.readFileSync(path.join(d,'mode.json'))).mode;}catch{return null;}}; exports.canonicalModeLabel=m=>m==='wenyan'?'wenyan-full':m; exports.loadFilteredRuleset=m=>'Example "Why re-render?"\\n- '+(m==='wenyan'?'wenyan-full':m)+': "'+m+' sample."';`,
   );
   await writeFile(
     path.join(native, "caveman-parse.js"),
@@ -29,6 +29,10 @@ async function fixture(nativeRules = "Native rules") {
   await writeFile(
     path.join(native, "caveman-mode-tracker.js"),
     `const fs=require('fs');const path=require('path');let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const mode=JSON.parse(s).prompt.split(/\\s/)[1]||process.env.CAVEMAN_DEFAULT_MODE||'full';fs.writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR,'mode.json'),JSON.stringify({mode:mode==='off'?null:mode}));console.log(JSON.stringify({hookSpecificOutput:{additionalContext:mode==='off'||process.env.CAVEMAN_DEFAULT_MODE==='off'?'':${JSON.stringify(nativeRules)}+' '+mode}}));});`,
+  );
+  await writeFile(
+    path.join(native, "caveman-activate.js"),
+    `process.stdout.write('Activated '+require('path').basename(process.env.CLAUDE_PLUGIN_ROOT));`,
   );
   await writeFile(
     path.join(root, "hook-runtime.json"),
@@ -190,4 +194,54 @@ test("a global default of off keeps the selected mode's native rules", async () 
     run({ prompt: "next" }, off).hookSpecificOutput.additionalContext,
     /Native rules ultra/,
   );
+});
+
+test("Claude sessions outside Paseo run native Caveman hooks against their own config", async () => {
+  const { home, env } = await fixture();
+  const hook = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../server/caveman-hook.cjs",
+  );
+  const claudeDir = path.join(home, "claude");
+  await mkdir(claudeDir);
+  const call = (args: string[], data: object, extra: object) =>
+    execFileSync(process.execPath, [hook, ...args], {
+      input: JSON.stringify(data),
+      env: { ...env, PASEO_AGENT_ID: "", CLAUDE_CONFIG_DIR: claudeDir, ...extra },
+      encoding: "utf8",
+    });
+  const prompt = { hook_event_name: "UserPromptSubmit", prompt: "/caveman lite" };
+  assert.match(call(["--claude"], prompt, {}), /Native rules lite/);
+  assert.deepEqual(JSON.parse(await readFile(path.join(claudeDir, "mode.json"), "utf8")), {
+    mode: "lite",
+  });
+  assert.equal(call(["--claude"], { hook_event_name: "SessionStart" }, {}), "Activated caveman");
+  // Codex registration and Paseo agents never touch the shared Claude config.
+  assert.equal(call([], prompt, {}), "{}");
+  await writeFile(path.join(claudeDir, "mode.json"), "{}");
+  assert.equal(call(["--claude"], { hook_event_name: "SessionStart" }, { PASEO_AGENT_ID: A }), "{}");
+  assert.match(call(["--claude"], prompt, { PASEO_AGENT_ID: A }), /Use Caveman lite/);
+  assert.equal(await readFile(path.join(claudeDir, "mode.json"), "utf8"), "{}");
+});
+
+test("every active turn carries one example of the running level", async () => {
+  const { modes, env } = await fixture();
+  await modes.set(A, "ultra");
+  const reminder = run({ prompt: "request" }, env).hookSpecificOutput.additionalContext;
+  assert.match(reminder, /Match this ultra density\. Example "Why re-render\?" - ultra: "ultra sample\."/);
+  await modes.set(A, "wenyan-ultra");
+  assert.match(
+    run({ prompt: "next" }, env).hookSpecificOutput.additionalContext,
+    /Match this wenyan-ultra density\. .* - wenyan-ultra: "wenyan-ultra sample\."/,
+  );
+  await modes.set(A, "follow-agent");
+  assert.doesNotMatch(run({ prompt: "plain" }, env).hookSpecificOutput.additionalContext, /density/);
+});
+
+test("the example is not repeated when native rules already include it", async () => {
+  const { modes, env } = await fixture('- ultra: "ultra sample."');
+  await modes.set(A, "ultra");
+  const context = run({ prompt: "request" }, env).hookSpecificOutput.additionalContext;
+  assert.equal(context.split('- ultra: "ultra sample."').length, 2);
+  assert.doesNotMatch(context, /density/);
 });
