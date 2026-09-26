@@ -38,3 +38,27 @@ test("extra or quoted recap content retains the original rendering", () => {
     assert.equal(message.innerHTML, before);
   }
 });
+
+test("Did may hold a nested list; other fields may not", () => {
+  const nested = `<div data-paseo-markdown-tag="ul">${item("Added config.")}${item("Fixed bridge.")}</div>`;
+  const didList = recap().replace('Did: Read the <a href="/report">report</a>.', `Did:${nested}`);
+  const { document } = parseHTML(`<div id="message">${didList}</div>`);
+  const message = document.querySelector("#message")!;
+  const before = message.innerHTML;
+  const cleanup = decorateRecap(message as unknown as Node);
+  assert.ok(cleanup);
+  assert.deepEqual(
+    Array.from(message.querySelectorAll("[data-npa-recap-field]")).map((field) =>
+      (field as Node).getAttribute("data-npa-recap-field"),
+    ),
+    ["branch", "did", "commit/push"],
+  );
+  cleanup();
+  assert.equal(message.innerHTML, before);
+
+  const branchList = recap().replace("Branch: ", `Branch: ${nested}`);
+  const other = parseHTML(`<div id="message">${branchList}</div>`).document.querySelector(
+    "#message",
+  )!;
+  assert.equal(decorateRecap(other as unknown as Node), null);
+});

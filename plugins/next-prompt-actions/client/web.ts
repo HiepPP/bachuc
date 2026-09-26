@@ -166,6 +166,8 @@ const styles = `
 [${OWNER}] .npa-did::first-letter {text-transform:uppercase;}
 [${OWNER}] .npa-did *, [${OWNER}] .npa-next-intro * {display:inline!important;margin:0!important;font-size:inherit!important;line-height:inherit!important;}
 [${OWNER}] .npa-next-intro > * {display:block!important;}
+[${OWNER}] .npa-did [data-npa-list] {display:block!important;}
+[${OWNER}] .npa-did [data-npa-list="li"] {display:flex!important;gap:8px;margin-top:2px!important;}
 [${OWNER}] [data-npa-code] {font-family:var(--npa-mono)!important;font-size:.88em!important;padding:1px 5px!important;border-radius:6px;background:var(--npa-chip)!important;color:var(--npa-ink,inherit)!important;}
 [${OWNER}] .npa-chip * {display:inline!important;margin:0!important;padding:0!important;background:none!important;font-size:inherit!important;line-height:inherit!important;}
 [${OWNER}] .npa-next-head {margin-bottom:16px;}

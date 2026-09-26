@@ -1005,3 +1005,61 @@ test("a timeline read that started before rows mounted does not clear their pane
     else Reflect.deleteProperty(globalThis, "MutationObserver");
   }
 });
+
+test("Recap Did with nested bullets keeps them as a list in the panel", async () => {
+  const block = JSON.stringify({
+    version: 1,
+    prompts: [{ id: "verify", prompt: "Verify the layout." }],
+    exclusiveGroups: [],
+    allowedCombinations: [],
+  });
+  const message = `## Recap\n- Branch: main\n- Did:\n  - Added config.\n  - Fixed bridge.\n- Commit/push: none\n\n## What Next\n\`\`\`next-prompts\n${block}\n\`\`\``;
+  const item = (value: string) =>
+    `<div data-paseo-markdown-tag="li"><span data-paseo-markdown-ignore="true" data-paseo-markdown-list-marker="true">•</span><div><span>${value}</span></div></div>`;
+  const nested = `<div data-paseo-markdown-tag="ul">${item("Added config.")}${item("Fixed bridge.")}</div>`;
+  const candidate = {
+    ...snapshot.candidates[0],
+    block,
+    source: message,
+    text: "Verify the layout.",
+    selection: { blockKey: "nested", id: "verify", exclusiveGroups: [], allowedCombinations: [] },
+  };
+  const { document, window } = parseHTML(
+    `<html><head></head><body><textarea data-composer-input=""></textarea><div data-testid="assistant-message"><div data-paseo-markdown-tag="h2"><span>Recap</span></div><div data-paseo-markdown-tag="ul">${item("Branch: main")}${item(`Did:${nested}`)}${item("Commit/push: none")}</div><div data-paseo-markdown-tag="h2"><span>What Next</span></div><div data-paseo-markdown-tag="pre"><span data-paseo-markdown-tag="code"></span></div></div></body></html>`,
+  );
+  document.querySelector(
+    '[data-paseo-markdown-tag="pre"] [data-paseo-markdown-tag="code"]',
+  )!.textContent = block;
+  const assistant = document.querySelector('[data-testid="assistant-message"]')!;
+  const before = assistant.innerHTML;
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "MutationObserver");
+  Object.defineProperty(globalThis, "MutationObserver", {
+    value: window.MutationObserver,
+    configurable: true,
+  });
+  const cleanup = install(
+    {
+      inspect: async () => ({ ...snapshot, candidates: [candidate] }),
+      send: async () => ({ sent: true }),
+    },
+    document as unknown as Parameters<typeof install>[1],
+    () => ({ ...context, message }),
+  );
+  try {
+    await pause();
+    const did = document.querySelector("[data-next-prompt-actions] .npa-did")!;
+    assert.equal(did.tagName, "DIV");
+    const bullets = Array.from(did.querySelectorAll('[data-npa-list="li"]'));
+    assert.deepEqual(
+      bullets.map((bullet) => (bullet as Node).textContent!.replace("•", "").trim()),
+      ["Added config.", "Fixed bridge."],
+    );
+    assert.equal(did.querySelectorAll("[data-paseo-markdown-list-marker]").length, 2);
+    assert.equal(document.querySelectorAll("[data-npa-folded]").length, 3);
+  } finally {
+    cleanup();
+    assert.equal(assistant.innerHTML, before);
+    if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
+    else Reflect.deleteProperty(globalThis, "MutationObserver");
+  }
+});

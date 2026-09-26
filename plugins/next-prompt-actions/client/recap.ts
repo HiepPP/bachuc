@@ -14,7 +14,7 @@ export const recapStyles = `
 [data-npa-recap-field]:first-child {padding-left:0!important;border-left:0;}
 [data-npa-recap-field]:last-child {padding-right:0!important;}
 [data-npa-recap-field] * {font-size:inherit!important;line-height:inherit!important;}
-[data-npa-recap-field] [data-paseo-markdown-list-marker] {display:none!important;}
+[data-npa-recap-field] > [data-paseo-markdown-list-marker] {display:none!important;}
 [data-npa-recap-field] [data-paseo-markdown-tag="p"] {margin:0!important;}
 [data-npa-recap-field] [data-paseo-markdown-tag="code"] {border-radius:6px;padding:1px 5px!important;background:color-mix(in srgb,currentColor 6%,transparent)!important;}
 [data-npa-folded] {display:none!important;}
@@ -49,8 +49,10 @@ export function decorateRecap(message: Node): (() => void) | null {
   });
   if (topBlocks.length !== 1 || topBlocks[0].getAttribute(TAG) !== "ul") return null;
   const list = topBlocks[0];
-  const fields = Array.from(list.querySelectorAll(`[${TAG}="li"]`));
-  if (fields.length !== 3 || list.querySelector(`[${TAG}="ul"], [${TAG}="ol"]`)) return null;
+  const fields = items(list);
+  // Only Did may carry a nested list, e.g. one bullet per change.
+  const nested = Array.from(list.querySelectorAll(`[${TAG}="ul"], [${TAG}="ol"]`));
+  if (fields.length !== 3 || !nested.every((node) => fields[1].contains?.(node))) return null;
   const labels = ["branch", "did", "commit/push"];
   if (
     !fields.every((field, index) => {
@@ -74,6 +76,14 @@ export function decorateRecap(message: Node): (() => void) | null {
       else node.setAttribute(name, before);
     }
   };
+}
+
+function items(list: Node) {
+  return Array.from(list.querySelectorAll(`[${TAG}="li"]`)).filter((item) => {
+    let parent = item.parentElement;
+    while (parent && !/^[uo]l$/.test(parent.getAttribute(TAG) ?? "")) parent = parent.parentElement;
+    return parent === list;
+  });
 }
 
 // Paseo renders each Markdown block of one reply as its own history row; the rows share a message ID.
@@ -107,10 +117,16 @@ function topLevel(message: Node) {
 // host's copy logic never mistake them for message content.
 function copy(node: Node) {
   const clone = node.cloneNode!(true);
-  for (const marker of Array.from(clone.querySelectorAll("[data-paseo-markdown-list-marker]")))
-    marker.remove();
+  // Keep markers of nested list items; drop only the copied item's own marker.
+  for (const marker of Array.from(clone.querySelectorAll("[data-paseo-markdown-list-marker]"))) {
+    const item = marker.parentElement?.closest(`[${TAG}="li"]`);
+    if (!item || item === clone) marker.remove();
+  }
   for (const inner of [clone, ...Array.from(clone.querySelectorAll("*"))]) {
-    if (inner.getAttribute(TAG) === "code") inner.setAttribute("data-npa-code", "true");
+    const tag = inner.getAttribute(TAG) ?? "";
+    if (tag === "code") inner.setAttribute("data-npa-code", "true");
+    if (inner !== clone && (tag === "li" || /^[uo]l$/.test(tag)))
+      inner.setAttribute("data-npa-list", tag);
     for (const name of [TAG, "data-npa-recap-field"]) inner.removeAttribute(name);
   }
   return clone;
@@ -187,7 +203,7 @@ export function foldPanel(
     recapTitle?.getAttribute("data-npa-recap-heading") === "true"
   ) {
     hidden.unshift(recapTitle, list);
-    const [branch, did, commit] = Array.from(list.querySelectorAll(`[${TAG}="li"]`));
+    const [branch, did, commit] = items(list);
     const recap = element("div", "npa-section npa-recap");
     recap.setAttribute("role", "group");
     recap.setAttribute("aria-label", "Recap");
@@ -210,7 +226,8 @@ export function foldPanel(
     meta.appendChild(status);
     head.appendChild(meta);
     recap.appendChild(head);
-    recap.appendChild(value(did, element("p", "npa-did")));
+    const bullets = did.querySelector(`[${TAG}="ul"], [${TAG}="ol"]`);
+    recap.appendChild(value(did, element(bullets ? "div" : "p", "npa-did")));
     panel.prepend!(recap);
     added.push(recap);
   }
