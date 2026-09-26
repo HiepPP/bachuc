@@ -13,6 +13,9 @@ export const runSchema = z.object({
   projectId: z.string().optional(),
   cwd: z.string().optional(),
   provider: z.string(),
+  // Raw ids in the store; the snapshot RPC replaces them with provider labels.
+  model: z.string().nullable().optional(),
+  effort: z.string().nullable().optional(),
   status: z.enum(["running", "completed", "failed", "cancelled", "unknown"]),
   startedAt: z.string().nullable(),
   endedAt: z.string().nullable(),

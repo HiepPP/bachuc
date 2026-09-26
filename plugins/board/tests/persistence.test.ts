@@ -129,20 +129,36 @@ test("Board RPC loads saved cards and reconciles missing active runs", async (t)
   const paseo = {
     agents: {
       list: async () => ({ entries: [], pageInfo: { hasMore: false } }),
-      ref: () => ({ refresh: async () => null }),
+      ref: (id: string) => ({
+        refresh: async () =>
+          id === "finished"
+            ? { agent: { model: "gpt-5.5", effectiveThinkingOptionId: "xhigh" }, project: null }
+            : null,
+      }),
+    },
+    providers: {
+      listModels: async () => ({
+        models: [
+          {
+            id: "gpt-5.5",
+            label: "GPT-5.5",
+            thinkingOptions: [{ id: "xhigh", label: "Extra High" }],
+          },
+        ],
+      }),
     },
     projects: { list: async () => ({ projects: [] }) },
   } as unknown as PaseoApi;
   const cleanup = contribute(server);
   try {
     const result = (await handlers.get("board.snapshot")!({}, { paseo })) as {
-      runs: { id: string; status: string }[];
+      runs: { id: string; status: string; model?: string | null; effort?: string | null }[];
     };
     assert.deepEqual(
-      result.runs.map((run) => [run.id, run.status]),
+      result.runs.map((run) => [run.id, run.status, run.model, run.effort]),
       [
-        ["interrupted", "unknown"],
-        ["finished", "completed"],
+        ["interrupted", "unknown", null, null],
+        ["finished", "completed", "GPT-5.5", "Extra High"],
       ],
     );
     const persisted = (await createRunPersistence(file).load())!;

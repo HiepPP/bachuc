@@ -23,6 +23,8 @@ type Run = RunState["active"][number];
 export type ActiveAgent = PluginHookAgent & {
   project?: string;
   projectKey?: string;
+  model?: string | null;
+  effort?: string | null;
   pendingPermissions?: readonly unknown[];
   attentionReason?: "finished" | "error" | "permission" | null;
   activeTurn?: { turnId: string; startedAt: string | null } | null;
@@ -59,6 +61,8 @@ export function createRunStore(now = () => new Date().toISOString()) {
           }
         : {}),
       starred,
+      model: prior?.model,
+      effort: prior?.effort,
       promptTitle: prior?.promptTitle,
       needsInput: false,
       title: title || "Untitled run",
@@ -212,7 +216,23 @@ export function createRunStore(now = () => new Date().toISOString()) {
         run.project = agent.project || run.project;
         if (agent.projectKey) run.projectKey = `project:${agent.projectKey}`;
         run.projectResolved = true;
+        if (agent.model !== undefined) {
+          run.model = agent.model;
+          run.effort = agent.effort ?? null;
+        }
       }
+    },
+    /** Runs whose model was never read, such as subagents that finished between polls. */
+    unresolvedModels() {
+      return [...active.values(), ...finished]
+        .filter((run) => !run.dismissed && run.model === undefined)
+        .map((run) => run.agentId);
+    },
+    updateModel(agentId: string, model: string | null, effort: string | null) {
+      const run = active.get(agentId) ?? finished.find((item) => item.agentId === agentId);
+      if (!run || run.model !== undefined) return;
+      run.model = model;
+      run.effort = effort;
     },
     setStarred(id: string, scope: string, starred: boolean) {
       if (scope !== observingSince) return false;

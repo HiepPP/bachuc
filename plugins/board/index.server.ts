@@ -11,7 +11,7 @@ import { boardRpc, removeRunRpc, starRunRpc } from "./shared/board";
 import { createRecapStore, parseRecap, recapEntry } from "./server/recaps";
 import { recapsRpc } from "./shared/recaps";
 import { firstPromptTitle, isCommandTitle } from "./server/title";
-import type { PaseoApi } from "@getpaseo/client";
+import type { PaseoApi, PaseoProviderModelsResult } from "@getpaseo/client";
 
 export default function contribute(server: PluginServerContext) {
   server.registerSettings(projectColors);
@@ -89,6 +89,17 @@ export default function contribute(server: PluginServerContext) {
     },
   );
   let pending: Promise<void> | undefined;
+  // Provider model catalogs rarely change; a failed read is retried on the next poll.
+  const catalogs = new Map<string, Promise<PaseoProviderModelsResult["models"]>>();
+  const catalog = (paseo: PaseoApi, provider: string) => {
+    let models = catalogs.get(provider);
+    if (!models) {
+      models = paseo.providers.listModels(provider).then((result) => result.models);
+      models.catch(() => catalogs.delete(provider));
+      catalogs.set(provider, models);
+    }
+    return models.catch(() => undefined);
+  };
   server.handle(starRunRpc, async ({ id, observingSince, starred }) => {
     await ready;
     ensureActive();
@@ -138,6 +149,22 @@ export default function contribute(server: PluginServerContext) {
             }),
           );
           await Promise.all(
+            store.unresolvedModels().map(async (agentId) => {
+              // A missing agent resolves to null so it is not read again; errors retry later.
+              const current = await paseo.agents
+                .ref(agentId)
+                .refresh()
+                .catch(() => undefined);
+              if (current === undefined || controller.signal.aborted) return;
+              const agent = current?.agent;
+              store.updateModel(
+                agentId,
+                agent?.model ?? null,
+                agent?.effectiveThinkingOptionId ?? agent?.thinkingOptionId ?? null,
+              );
+            }),
+          );
+          await Promise.all(
             store
               .snapshot()
               .runs.filter((run) => run.title === "Untitled run")
@@ -162,9 +189,26 @@ export default function contribute(server: PluginServerContext) {
       projects.map((project) => [`project:${project.projectId}`, project.projectId]),
     );
     const snapshot = store.snapshot();
+    const providers = [...new Set(snapshot.runs.map((run) => run.provider))];
+    const lists = new Map(
+      await Promise.all(
+        providers.map(async (provider) => [provider, await catalog(paseo, provider)] as const),
+      ),
+    );
     return {
       ...snapshot,
-      runs: snapshot.runs.map((run) => ({ ...run, projectId: ids.get(run.projectKey) })),
+      runs: snapshot.runs.map((run) => {
+        const model = lists
+          .get(run.provider)
+          ?.find((item) => item.id === run.model || item.aliases?.includes(run.model ?? ""));
+        const effort = model?.thinkingOptions?.find((option) => option.id === run.effort);
+        return {
+          ...run,
+          model: model?.label ?? run.model,
+          effort: effort?.label ?? run.effort,
+          projectId: ids.get(run.projectKey),
+        };
+      }),
     };
   });
   return async () => {

@@ -20,6 +20,7 @@ runInNewContext(compiled, {
   exports,
   require: (id: string) => {
     if (id === "react/jsx-runtime") return require(id);
+    if (id === "../shared/effort") return require("../shared/effort");
     if (id === "./clock") return { useClock: (read: (now: number) => unknown) => read(Date.now()) };
     if (id === "react")
       return {
@@ -231,4 +232,38 @@ test("child grid responds to its own panel width and Board scale", () => {
   nodes = view();
   assert.equal(width("child"), "100%");
   measuredPanelWidth = 0;
+});
+
+test("grouped cards omit the project and show model with effort", () => {
+  const [tree] = buildRunTrees([
+    {
+      ...base,
+      id: "parent",
+      agentId: "parent",
+      title: "Parent",
+      model: "Opus 5.5",
+      effort: "High",
+    },
+    { ...base, id: "child", agentId: "child", title: "Child", parentAgentId: "parent" },
+  ]);
+  const nodes = elements(
+    render(
+      exports.RunCluster!({
+        tree,
+        compact: false,
+        collapsed: new Set(),
+        scale: 1,
+        theme,
+        inheritedProject: true,
+        onStar: async () => {},
+        onToggle: () => {},
+      }),
+    ),
+  );
+  const text = (value: string) => nodes.filter((node) => node.props.children === value).length;
+  assert.equal(text("App"), 0);
+  assert.equal(text("Opus 5.5"), 1);
+  assert.equal(text("High"), 1);
+  // A subagent whose model is not read yet falls back to its provider.
+  assert.equal(text("codex"), 1);
 });

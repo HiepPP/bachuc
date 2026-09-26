@@ -17,6 +17,8 @@ export async function listRunning(paseo: Pick<PaseoApi, "agents">, signal: Abort
         ...agent,
         workspaceId: agent.workspaceId ?? null,
         parentAgentId: getParentAgentIdFromLabels(agent.labels),
+        model: agent.model,
+        effort: agent.effectiveThinkingOptionId ?? agent.thinkingOptionId ?? null,
         project: project?.projectName,
         projectKey: project?.projectKey,
       });
