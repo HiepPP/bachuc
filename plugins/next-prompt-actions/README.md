@@ -58,6 +58,11 @@ Use one JSON fence with the language `next-prompts`. The first suggestion is the
 - Other suggestions use checkboxes. Nothing is selected automatically. Clear selection resets all controls.
 - `allowedCombinations` lists exact permitted sets of IDs. Subsets, supersets, and transitive combinations are not inferred.
 - Both relationship arrays may be omitted; the default is no permitted bulk sends. Single sends remain available.
+- Checkboxes are grouped by declared combinations ([design](../../docs/designs/next-prompts-combos-2026-09-27/combos.html)):
+  Send together holds suggestions linked by combinations (numbered sets when there are several), Follow-up holds those
+  whose combinations include an exclusive choice, and Send alone holds suggestions in no combination.
+- A suggestion that no declared combination can join with the current selection is disabled and labelled
+  "Not with selection" or "Send alone". A selection that fits a combination only partially keeps Send disabled.
 - The server revalidates every selection from the current reply. Separate fences cannot be combined.
 - Selected prompts are sent in authored order as one numbered message. Only `prompt` text is sent, never IDs, relationships, or reasons.
 - Busy, stale, duplicate, uncertain-send, and individual Git-action guards still apply. Blocks containing Git actions use individual controls.

@@ -6,7 +6,7 @@ import { orbSettings } from "./shared/orb";
 import { projectColors } from "./shared/project-colors";
 import { createRunStore } from "./server/store";
 import { createRunPersistence } from "./server/persistence";
-import { listRunning } from "./server/snapshot";
+import { listBoardAgents } from "./server/snapshot";
 import { boardRpc, removeRunRpc, starRunRpc } from "./shared/board";
 import { createRecapStore, parseRecap, recapEntry } from "./server/recaps";
 import { recapsRpc } from "./shared/recaps";
@@ -131,10 +131,10 @@ export default function contribute(server: PluginServerContext) {
     ensureActive();
     if (!pending) {
       const revision = store.revision;
-      pending = listRunning(paseo, controller.signal)
-        .then(async (agents) => {
+      pending = listBoardAgents(paseo, controller.signal)
+        .then(async ({ agents, visibleAgentIds }) => {
           ensureActive();
-          store.reconcile(agents, revision);
+          store.reconcile(agents, revision, visibleAgentIds);
           await Promise.all(
             store.unresolvedProjects().map(async ({ agentId, cwd }) => {
               // Placement enrichment must not hide the board when an agent is unavailable.

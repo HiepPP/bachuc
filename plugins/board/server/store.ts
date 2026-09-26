@@ -183,11 +183,21 @@ export function createRunStore(now = () => new Date().toISOString()) {
       run.title = agent.title || run.title;
       finish(run, outcome.kind === "canceled" ? "cancelled" : outcome.kind);
     },
-    reconcile(agents: ActiveAgent[], expectedRevision: number) {
+    reconcile(
+      agents: ActiveAgent[],
+      expectedRevision: number,
+      visibleAgentIds?: ReadonlySet<string>,
+    ) {
       // Discard a list captured across a lifecycle event; the next refresh retries.
       if (revision !== expectedRevision) return;
       const present = new Set(agents.map((a) => a.id));
       for (const run of active.values()) if (!present.has(run.agentId)) finish(run, "unknown");
+      // Retain tombstones so delayed terminal events cannot restore archived cards.
+      if (visibleAgentIds) {
+        for (const run of finished) {
+          if (!visibleAgentIds.has(run.agentId)) run.dismissed = true;
+        }
+      }
       for (const agent of agents) {
         let run = active.get(agent.id);
         const snapshotId = agent.activeTurn?.turnId ?? null;

@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>What Next combinations, v4</title>
+<!-- Taste rules: ../recap-next-panel-2026-09-25/TASTE.md. Base styles: panel-v3.html. Icons: Phosphor regular, MIT. -->
+<style>
+:root {
+  --page: #fafafa; --canvas: #ffffff;
+  --ink: #27272a; --strong: #18181b; --soft: #52525b; --muted: #71717a;
+  --line: #e4e4e7; --line-strong: #d4d4d8;
+  --accent: #0f7b5f;
+  --shadow: 0 1px 2px rgb(24 24 27 / .04), 0 10px 28px -16px rgb(24 24 27 / .14);
+  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+}
+.dark {
+  --canvas: #18181b;
+  --ink: #e4e4e7; --strong: #fafafa; --soft: #b4b4bb; --muted: #8b8b93;
+  --line: #2e2e33; --line-strong: #3f3f46;
+  --accent: #3ccf9e;
+  --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 12px 32px -18px rgb(0 0 0 / .6);
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.6 -apple-system, "SF Pro Text", system-ui, sans-serif; color: var(--ink); background: var(--page); -webkit-font-smoothing: antialiased; }
+.stage { max-width: 800px; margin: 0 auto; padding: 48px 24px 80px; display: grid; gap: 40px; }
+.caption { margin: 0 0 10px; font-size: 13px; font-weight: 500; color: #a1a1aa; }
+.chat { background: var(--canvas); color: var(--ink); border: 1px solid #e4e4e7; border-radius: 12px; padding: 28px 32px 32px; }
+.chat.dark { border-color: #27272a; }
+.chat > p { margin: 0 0 20px; max-width: 68ch; }
+.ic { width: 15px; height: 15px; flex: none; fill: currentColor; }
+
+/* Panel: 12px container, 8px surfaces and controls, 6px chips */
+.np {
+  --surface: color-mix(in srgb, var(--ink) 2.5%, var(--canvas));
+  --hover: color-mix(in srgb, var(--ink) 4%, transparent);
+  --chip: color-mix(in srgb, var(--ink) 6%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 9%, transparent);
+  border: 1px solid var(--line); border-radius: 12px; background: var(--canvas); box-shadow: var(--shadow); overflow: hidden;
+}
+.np h3 { margin: 0; }
+
+/* Recap: recessed and neutral; it reports finished work */
+.np-recap { padding: 14px 20px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.np-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.np-label { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; letter-spacing: -.005em; color: var(--strong); }
+.np-label .ic { width: 16px; height: 16px; color: var(--muted); }
+.np-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 6px; background: var(--chip); color: var(--soft); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.chip .ic { width: 13px; height: 13px; color: var(--muted); }
+.chip.mono { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--strong); }
+.np-did { margin: 0; font-size: 14px; line-height: 1.6; color: var(--soft); max-width: 72ch; text-wrap: pretty; }
+.np code { font-family: var(--mono); font-size: .88em; padding: 1px 5px; border-radius: 6px; background: var(--chip); color: var(--strong); }
+
+/* What next: the forward action area; the only place the accent appears */
+.np-next { padding: 18px 20px 20px; }
+.np-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; letter-spacing: -.005em; color: var(--strong); }
+.np-title .accent { width: 16px; height: 16px; color: var(--accent); }
+.np-intro { margin: 4px 0 16px 24px; color: var(--soft); max-width: 68ch; text-wrap: pretty; }
+
+/* Single suggestion: a raised card, because it is the one actionable object */
+.pick { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px 24px; align-items: end; padding: 16px 16px 16px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--canvas); transition: border-color .15s ease; }
+.pick:hover { border-color: var(--line-strong); }
+.pick-text { margin: 0; font-weight: 400; color: var(--strong); text-wrap: pretty; overflow-wrap: anywhere; }
+.why { display: block; margin-top: 4px; font-size: 13px; line-height: 1.5; font-weight: 400; color: var(--muted); }
+.why b { font-weight: 600; color: var(--soft); }
+.actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--canvas); color: var(--strong); font: inherit; font-size: 13px; font-weight: 500; line-height: 1; cursor: pointer; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease, transform .1s ease; }
+.btn .ic { width: 14px; height: 14px; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--strong); color: var(--canvas); border-color: var(--strong); }
+.btn.primary:hover { background: color-mix(in srgb, var(--strong) 86%, var(--canvas)); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); padding: 0 8px; }
+.btn.quiet:hover { color: var(--strong); }
+.btn:active { transform: scale(.98); }
+.btn:focus-visible, .opt input:focus-visible + .mark { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn:disabled { opacity: .4; cursor: default; transform: none; }
+
+/* Selection */
+.group + .group { margin-top: 16px; }
+.group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.group-name { font-size: 13px; font-weight: 600; color: var(--strong); }
+.group-hint { font-size: 12.5px; color: var(--muted); }
+.opts { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.opt { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 12px; padding: 12px 14px; cursor: pointer; transition: background-color .15s ease; }
+.opt + .opt { border-top: 1px solid var(--line); }
+.opt:hover { background: var(--hover); }
+.opt:has(input:checked) { background: var(--accent-soft); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.mark { display: grid; place-items: center; width: 18px; height: 18px; margin-top: 3px; border: 1.5px solid var(--line-strong); border-radius: 50%; background: var(--canvas); transition: border-color .15s ease, background-color .15s ease; }
+.opt input[type=checkbox] + .mark { border-radius: 6px; }
+.opt input:checked + .mark { border-color: var(--accent); }
+.opt input[type=radio]:checked + .mark::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.opt input[type=checkbox]:checked + .mark { background: var(--accent); }
+.opt input[type=checkbox]:checked + .mark::after { content: ""; width: 9px; height: 5px; border: 2px solid var(--canvas); border-top: 0; border-right: 0; transform: translateY(-1px) rotate(-45deg); }
+.opt-text { font-weight: 400; color: var(--strong); overflow-wrap: anywhere; }
+
+/* Footer */
+.np-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--surface); }
+.count { display: flex; flex-direction: column; font-size: 13px; font-weight: 600; color: var(--strong); font-variant-numeric: tabular-nums; }
+.count .detail { font-size: 12.5px; font-weight: 400; color: var(--muted); }
+
+@media (max-width: 560px) {
+  .chat { padding: 20px 16px; }
+  .np-recap, .np-next { padding-left: 16px; padding-right: 16px; }
+  .np-foot { padding: 12px 16px; }
+  .np-intro { margin-left: 0; }
+  .pick { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { .btn, .opt, .mark, .pick { transition: none; } }
+
+/* v4: combination groups */
+.group-name .n { font-weight: 500; color: var(--muted); }
+.opt { grid-template-columns: 18px minmax(0, 1fr) auto; }
+.opt-state { font-size: 12px; color: var(--muted); white-space: nowrap; padding-top: 3px; }
+.opt-state:empty { display: none; }
+.opt:has(input:disabled) { cursor: default; background: transparent; }
+.opt:has(input:disabled) .opt-text, .opt:has(input:disabled) .mark { opacity: .45; }
+.count .detail[data-warn] { color: var(--strong); font-weight: 500; }
+</style>
+</head>
+<body>
+<main class="stage" id="stage"></main>
+<script>
+const ICONS = { edit: `<svg class="ic" aria-hidden="true" viewBox="0 0 256 256" fill="currentColor"><path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z"/></svg>`, send: `<svg class="ic" aria-hidden="true" viewBox="0 0 256 256" fill="currentColor"><path d="M205.66,117.66a8,8,0,0,1-11.32,0L136,59.31V216a8,8,0,0,1-16,0V59.31L61.66,117.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0l72,72A8,8,0,0,1,205.66,117.66Z"/></svg>`, arrow: `<svg class="ic accent" aria-hidden="true" viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,157.66l-48,48a8,8,0,0,1-11.32-11.32L204.69,160H128A104.11,104.11,0,0,1,24,56a8,8,0,0,1,16,0,88.1,88.1,0,0,0,88,88h76.69l-34.35-34.34a8,8,0,0,1,11.32-11.32l48,48A8,8,0,0,1,229.66,157.66Z"/></svg>` };
+const hook = {
+  intro: "Mục 1 lợi nhất và chỉ sửa một file. Đo trước để so sánh được trước và sau khi sửa.",
+  prompts: [
+    { id: "measure", prompt: "Đọc file last-hook.json của prompt-translate. Báo contextBytes trung bình mỗi turn của caveman-hook.cjs. Không sửa code." },
+    { id: "slim", prompt: "Sửa plugins/prompt-translate/server/caveman-hook.cjs. Chỉ inject ruleset đầy đủ ở turn đầu hoặc khi đổi mode. Chạy test của plugin." },
+    { id: "stop-gate", prompt: "Thiết kế hook Stop kiểm tra last_assistant_message có ## Recap. Chỉ viết đề xuất, không sửa code." },
+  ],
+  exclusiveGroups: [],
+  allowedCombinations: [["measure", "stop-gate"]],
+};
+const settings = {
+  intro: "Choose one approach. Add the follow-up if useful.",
+  prompts: [
+    { id: "implement", prompt: "Implement the settings redesign.", why: "Apply the agreed layout changes." },
+    { id: "review", prompt: "Do not implement the redesign. Review it only.", why: "Identify issues without changing code." },
+    { id: "risks", prompt: "List remaining questions and risks." },
+    { id: "commit", prompt: "Commit the settings redesign." },
+  ],
+  exclusiveGroups: [["implement", "review"]],
+  allowedCombinations: [["implement", "risks"], ["review", "risks"]],
+};
+const DEMOS = [
+  { caption: "Disjoint sets, nothing selected: the together set and the send-alone suggestion are separate groups", d: hook, pick: [] },
+  { caption: "One selected: suggestions that cannot join the selection are disabled and say why", d: hook, pick: ["measure"] },
+  { caption: "Send-alone suggestion selected: every other suggestion is disabled", d: hook, pick: ["slim"] },
+  { caption: "Exclusive choice plus follow-up: the follow-up names the group it joins", d: settings, pick: ["review"] },
+  { caption: "Dark theme", d: hook, pick: ["measure", "stop-gate"], dark: true },
+];
+
+// Layout: exclusive groups become radio groups. Other suggestions that share an allowed
+// combination form one "Send together" group; suggestions in no combination form "Send alone".
+function layout(d) {
+  const groups = [];
+  const exclusive = new Map();
+  d.exclusiveGroups.forEach((g, i) => g.forEach((id) => exclusive.set(id, i)));
+  d.exclusiveGroups.forEach((ids, i) => groups.push({ kind: "choice", ids, index: i }));
+  const rest = d.prompts.map((p) => p.id).filter((id) => !exclusive.has(id));
+  const seen = new Set();
+  for (const id of rest) {
+    if (seen.has(id)) continue;
+    const combos = d.allowedCombinations.filter((c) => c.includes(id));
+    if (!combos.length) continue;
+    // Connected suggestions through shared combinations stay in one group.
+    const ids = [id];
+    seen.add(id);
+    for (let i = 0; i < ids.length; i++)
+      for (const c of d.allowedCombinations.filter((c) => c.includes(ids[i])))
+        for (const other of c)
+          if (!exclusive.has(other) && !seen.has(other)) { seen.add(other); ids.push(other); }
+    const joinsChoice = ids.some((x) => d.allowedCombinations.some((c) => c.includes(x) && c.some((y) => exclusive.has(y))));
+    groups.push({ kind: joinsChoice ? "addon" : "together", ids });
+  }
+  const alone = rest.filter((id) => !d.allowedCombinations.some((c) => c.includes(id)));
+  if (alone.length) groups.push({ kind: "alone", ids: alone });
+  const together = groups.filter((g) => g.kind === "together");
+  together.forEach((g, i) => (g.n = together.length > 1 ? i + 1 : 0));
+  return groups;
+}
+const same = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+const allowed = (d, sel) => sel.length <= 1 || d.allowedCombinations.some((c) => same(c, sel));
+// A suggestion stays enabled when some allowed combination still covers it with the selection.
+function reachable(d, sel, id) {
+  const g = d.exclusiveGroups.find((g) => g.includes(id)) ?? [];
+  const next = [...sel.filter((x) => !g.includes(x)), id];
+  return next.length === 1 || d.allowedCombinations.some((c) => next.every((x) => c.includes(x)));
+}
+function head(g, d) {
+  if (g.kind === "choice") return [d.exclusiveGroups.length > 1 ? `Choice ${g.index + 1} · choose one` : "Choose one", "Pick at most one"];
+  if (g.kind === "addon") return ["Follow-up", "Can be added to the choice above"];
+  if (g.kind === "together") return [g.n ? `Send together <span class=n>· set ${g.n}</span>` : "Send together", "Pick one or send the set as one message"];
+  return ["Send alone", "Cannot be combined with other suggestions"];
+}
+function render(demo, i) {
+  const { d } = demo;
+  const text = (id) => d.prompts.find((p) => p.id === id);
+  const groups = layout(d);
+  const sel = [...demo.pick];
+  const section = document.createElement("section");
+  section.innerHTML = `<p class="caption">${demo.caption}</p><div class="chat${demo.dark ? " dark" : ""}"><article class="np">
+    <section class="np-next"><h3 class="np-title">${ICONS.arrow}What next</h3><p class="np-intro">${d.intro}</p>
+    ${groups.map((g) => { const [name, hint] = head(g, d); return `<div class="group"><div class="group-head"><span class="group-name">${name}</span><span class="group-hint">${hint}</span></div><div class="opts">${g.ids.map((id) => `<label class="opt"><input type="${g.kind === "choice" ? "radio" : "checkbox"}" name="g${i}-${g.index ?? "x"}" value="${id}"><span class="mark"></span><span class="opt-text">${text(id).prompt}${text(id).why ? `<span class="why">${text(id).why}</span>` : ""}</span><span class="opt-state"></span></label>`).join("")}</div></div>`; }).join("")}
+    </section><footer class="np-foot"><div class="count"><span data-count></span><span class="detail" data-detail></span></div>
+    <div class="actions"><button class="btn quiet" type="button" data-clear>Clear</button><button class="btn" type="button" data-edit>${ICONS.edit}Edit selected</button><button class="btn primary" type="button" data-send>${ICONS.send}<span></span></button></div></footer></article></div>`;
+  const inputs = [...section.querySelectorAll("input")];
+  const refresh = () => {
+    for (const input of inputs) {
+      input.checked = sel.includes(input.value);
+      const ok = input.checked || reachable(d, sel, input.value);
+      input.disabled = !ok;
+      const alone = !d.allowedCombinations.some((c) => c.includes(input.value));
+      input.closest(".opt").querySelector(".opt-state").textContent = ok ? "" : sel.length && !alone ? "Not with selection" : "Send alone";
+    }
+    const valid = allowed(d, sel);
+    section.querySelector("[data-count]").textContent = `${sel.length} selected`;
+    const detail = section.querySelector("[data-detail]");
+    detail.toggleAttribute("data-warn", !valid);
+    detail.textContent = !sel.length ? "Choose a suggestion to continue" : !valid ? "Add or remove a suggestion to match a set" : sel.length > 1 ? "One numbered message" : "One prompt";
+    section.querySelector("[data-send] span").textContent = sel.length ? `Send selected (${sel.length})` : "Send selected";
+    section.querySelector("[data-send]").disabled = section.querySelector("[data-edit]").disabled = !sel.length || !valid;
+    section.querySelector("[data-clear]").disabled = !sel.length;
+  };
+  inputs.forEach((input) => input.addEventListener("change", () => {
+    const g = d.exclusiveGroups.find((g) => g.includes(input.value)) ?? [];
+    const kept = sel.filter((x) => x !== input.value && (!input.checked || !g.includes(x)));
+    sel.splice(0, sel.length, ...kept, ...(input.checked ? [input.value] : []));
+    refresh();
+  }));
+  section.querySelector("[data-clear]").addEventListener("click", () => { sel.length = 0; refresh(); });
+  refresh();
+  document.getElementById("stage").appendChild(section);
+}
+DEMOS.forEach(render);
+</script>
+</body>
+</html>

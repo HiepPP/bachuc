@@ -95,7 +95,7 @@ test("rejects invalid saved state instead of replacing it", async (t) => {
   assert.equal(JSON.parse(await readFile(file, "utf8")).version, 2);
 });
 
-test("Board RPC loads saved cards and reconciles missing active runs", async (t) => {
+test("Board RPC restores idle cards, hides archived cards, and persists refreshed membership", async (t) => {
   const home = await mkdtemp(path.join(tmpdir(), "board-server-"));
   const file = path.join(home, "plugin-data/board/runs.json");
   t.after(async () => {
@@ -113,6 +113,7 @@ test("Board RPC loads saved cards and reconciles missing active runs", async (t)
   const saved = createRunStore();
   saved.end(agent, "done", { kind: "completed" });
   saved.start({ ...agent, id: "interrupted" }, "live");
+  saved.end({ ...agent, id: "archived" }, "done", { kind: "completed" });
   await createRunPersistence(file).save(saved.exportState());
 
   type Handler = (input: unknown, context: { paseo: PaseoApi }) => Promise<unknown>;
@@ -126,9 +127,16 @@ test("Board RPC loads saved cards and reconciles missing active runs", async (t)
       handlers.set(contract.name, handler);
     },
   } as unknown as PluginServerContext;
+  let visibleIds = ["finished", "interrupted"];
   const paseo = {
     agents: {
-      list: async () => ({ entries: [], pageInfo: { hasMore: false } }),
+      list: async () => ({
+        entries: visibleIds.map((id) => ({
+          agent: { ...agent, id, status: "idle", labels: {} },
+          project: null,
+        })),
+        pageInfo: { hasMore: false },
+      }),
       ref: (id: string) => ({
         refresh: async () =>
           id === "finished"
@@ -163,6 +171,17 @@ test("Board RPC loads saved cards and reconciles missing active runs", async (t)
     );
     const persisted = (await createRunPersistence(file).load())!;
     assert.equal(persisted.finished[0].status, "unknown");
+    assert.equal(persisted.finished.find((run) => run.id === "archived")?.dismissed, true);
+    visibleIds = ["interrupted"];
+    const refreshed = (await handlers.get("board.snapshot")!({}, { paseo })) as {
+      runs: { id: string }[];
+    };
+    assert.deepEqual(
+      refreshed.runs.map((run) => run.id),
+      ["interrupted"],
+    );
+    const after = (await createRunPersistence(file).load())!;
+    assert.equal(after.finished.find((run) => run.id === "finished")?.dismissed, true);
   } finally {
     await cleanup();
   }

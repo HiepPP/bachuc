@@ -15,43 +15,48 @@ export function renderSelection(
     pending = false;
   const selected = new Set<string>();
   const inputs = new Map<string, Node>();
-  const groups = candidates[0].selection!.exclusiveGroups;
+  const { exclusiveGroups: groups, allowedCombinations: combos } = candidates[0].selection!;
   const list = doc.createElement("div");
   list.setAttribute("class", "npa-selection-list");
   root.appendChild(list);
-  const containers = new Map<number, Node>();
+  const containers = new Map<string, Node>();
+  for (const group of layout(
+    candidates.map((c) => c.selection!.id),
+    groups,
+    combos,
+  )) {
+    const fieldset = doc.createElement("fieldset");
+    fieldset.setAttribute("class", "npa-choice-group");
+    fieldset.setAttribute("data-group", group.kind);
+    const legend = doc.createElement("legend");
+    const hint = doc.createElement("span");
+    hint.setAttribute("class", "npa-group-hint");
+    [legend.textContent, hint.textContent] =
+      group.kind === "choice"
+        ? [
+            groups.length === 1 ? "Choose one" : `Choice ${group.index + 1} · choose one`,
+            "Pick at most one",
+          ]
+        : group.kind === "follow-up"
+          ? ["Follow-up", "Can be added to the choice above"]
+          : group.kind === "together"
+            ? [
+                group.set ? `Send together · set ${group.set}` : "Send together",
+                "Pick one or send the set as one message",
+              ]
+            : ["Send alone", "Cannot be combined with other suggestions"];
+    fieldset.appendChild(legend);
+    fieldset.appendChild(hint);
+    const options = doc.createElement("div");
+    options.setAttribute("class", "npa-choice-options");
+    fieldset.appendChild(options);
+    list.appendChild(fieldset);
+    for (const id of group.ids) containers.set(id, options);
+  }
   for (const [index, candidate] of candidates.entries()) {
     const id = candidate.selection!.id;
     const groupIndex = groups.findIndex((group) => group.includes(id));
-    if (!containers.has(groupIndex)) {
-      const fieldset = doc.createElement("fieldset");
-      fieldset.setAttribute("class", "npa-choice-group");
-      const legend = doc.createElement("legend");
-      legend.textContent =
-        groupIndex < 0
-          ? groups.length
-            ? "Additional suggestions"
-            : "Suggestions"
-          : groups.length === 1
-            ? "Choose one"
-            : `Choice ${groupIndex + 1} · choose one`;
-      fieldset.appendChild(legend);
-      const hint = doc.createElement("span");
-      hint.setAttribute("class", "npa-group-hint");
-      hint.textContent =
-        groupIndex >= 0
-          ? "Cannot be combined"
-          : candidates[0].selection!.allowedCombinations.length
-            ? "Can be sent with a compatible choice"
-            : "Send one at a time";
-      fieldset.appendChild(hint);
-      const options = doc.createElement("div");
-      options.setAttribute("class", "npa-choice-options");
-      fieldset.appendChild(options);
-      list.appendChild(fieldset);
-      containers.set(groupIndex, options);
-    }
-    const container = containers.get(groupIndex)!;
+    const container = containers.get(id)!;
     const row = doc.createElement("label");
     row.setAttribute("class", "npa-choice");
     const input = doc.createElement("input");
@@ -142,17 +147,26 @@ export function renderSelection(
       chosen.length > 1
         ? allowed
           ? "One numbered message"
-          : "These suggestions cannot be combined. Change your selection."
+          : "Add or remove a suggestion to match a set"
         : chosen.length
           ? "One prompt"
           : "Choose a suggestion to continue";
     summary.setAttribute("data-invalid", String(chosen.length > 1 && !allowed));
+    const ids = chosen.map((c) => c.selection!.id);
     for (const [index, candidate] of current.entries()) {
       const input = inputs.get(candidate.key)!;
       input.checked = selected.has(candidate.key);
+      const id = candidate.selection!.id;
+      // Suggestions that no declared combination can join with the selection are locked.
+      const blocked = !input.checked && !reachable(ids, id, groups, combos);
       input.disabled =
-        pending || latest.busy || candidate.state !== "ready" || latest.note === "Jev reviewing...";
+        blocked ||
+        pending ||
+        latest.busy ||
+        candidate.state !== "ready" ||
+        latest.note === "Jev reviewing...";
       input.parentElement!.setAttribute("data-selected", String(input.checked));
+      input.parentElement!.setAttribute("data-blocked", String(blocked));
       root.querySelector(`[data-choice-index="${index}"]`)!.textContent =
         candidate.state === "sent"
           ? "Sent"
@@ -160,7 +174,11 @@ export function renderSelection(
             ? "Check chat"
             : candidate.state === "sending"
               ? "Sending..."
-              : "";
+              : !blocked
+                ? ""
+                : combos.some((combo) => combo.includes(id))
+                  ? "Not with selection"
+                  : "Send alone";
     }
     clear.disabled = pending || !selected.size;
     edit.disabled = send.disabled = !ready();
@@ -202,4 +220,57 @@ export function renderSelection(
     latest = snapshot;
     refresh();
   };
+}
+
+type Group =
+  | { kind: "choice"; index: number; ids: string[] }
+  | { kind: "together"; set: number; ids: string[] }
+  | { kind: "follow-up" | "alone"; ids: string[] };
+
+// Exclusive groups become radio groups. Other suggestions linked by allowed combinations share a
+// group: "follow-up" when a linked combination includes an exclusive choice, else "together".
+// Suggestions in no combination are grouped as "alone".
+export function layout(order: string[], groups: string[][], combos: string[][]): Group[] {
+  const exclusive = new Set(groups.flat());
+  const result: Group[] = groups.map((ids, index) => ({ kind: "choice", index, ids }));
+  const seen = new Set<string>();
+  const together: { set: number }[] = [];
+  for (const id of order) {
+    if (exclusive.has(id) || seen.has(id) || !combos.some((c) => c.includes(id))) continue;
+    const ids = [id];
+    seen.add(id);
+    for (let i = 0; i < ids.length; i++)
+      for (const combo of combos)
+        if (combo.includes(ids[i]))
+          for (const other of combo)
+            if (!exclusive.has(other) && !seen.has(other)) {
+              seen.add(other);
+              ids.push(other);
+            }
+    const follow = combos.some(
+      (c) => c.some((x) => ids.includes(x)) && c.some((x) => exclusive.has(x)),
+    );
+    if (follow) result.push({ kind: "follow-up", ids });
+    else {
+      const group = { kind: "together" as const, set: 0, ids };
+      together.push(group);
+      result.push(group);
+    }
+  }
+  if (together.length > 1) together.forEach((group, index) => (group.set = index + 1));
+  const alone = order.filter((id) => !exclusive.has(id) && !combos.some((c) => c.includes(id)));
+  if (alone.length) result.push({ kind: "alone", ids: alone });
+  return result;
+}
+
+// A radio replaces its exclusive group's selection; the result must fit one declared combination.
+export function reachable(
+  selected: string[],
+  id: string,
+  groups: string[][],
+  combos: string[][],
+): boolean {
+  const group = groups.find((g) => g.includes(id)) ?? [];
+  const next = [...selected.filter((x) => !group.includes(x)), id];
+  return next.length === 1 || combos.some((combo) => next.every((x) => combo.includes(x)));
 }

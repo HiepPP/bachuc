@@ -63,10 +63,7 @@ test("v1 radio groups and checkboxes enforce selection, preview exact prompts, s
     assert.ok(checkbox);
     assert.equal(radios[0].closest("fieldset"), radios[1].closest("fieldset"));
     assert.notEqual(radios[0].closest("fieldset"), checkbox.closest("fieldset"));
-    assert.equal(
-      checkbox.closest("fieldset")!.querySelector("legend")!.textContent,
-      "Additional suggestions",
-    );
+    assert.equal(checkbox.closest("fieldset")!.querySelector("legend")!.textContent, "Follow-up");
     const send = document.querySelector(".npa-selection-send")!;
     assert.equal(send.disabled, true, "no implicit selection");
     const select = (node: typeof checkbox) => {
@@ -74,14 +71,17 @@ test("v1 radio groups and checkboxes enforce selection, preview exact prompts, s
       node.dispatchEvent(new window.Event("change"));
     };
     select(radios[0]);
+    assert.equal(checkbox.disabled, true, "undeclared combination is locked");
+    assert.equal(
+      checkbox.closest(".npa-choice")!.textContent!.includes("Not with selection"),
+      true,
+    );
     select(checkbox);
-    assert.equal(send.textContent, "Send selected (2)");
-    assert.equal(send.disabled, true, "undeclared combination is blocked");
-    document.querySelector(".npa-selection-edit")!.dispatchEvent(new window.Event("click"));
-    send.dispatchEvent(new window.Event("click"));
-    assert.equal(document.querySelector("textarea")!.value, "draft");
-    assert.deepEqual(sent, []);
+    assert.equal(checkbox.checked, false);
+    assert.equal(send.textContent, "Send selected (1)");
     select(radios[1]);
+    assert.equal(checkbox.disabled, false);
+    select(checkbox);
     assert.equal(radios[0].checked, false, "exclusive choice replaced");
     assert.equal(radios[1].checked, true);
     assert.equal(send.disabled, false);

@@ -29,6 +29,49 @@ function setup() {
   let tick = 0;
   return createRunStore(() => new Date(1_700_000_000_000 + tick++ * 1000).toISOString());
 }
+test("directory reconciliation hides archived cards, preserving idle agents and live children", () => {
+  const s = setup();
+  s.end(agent, "finished", { kind: "completed" });
+  s.end({ ...agent, id: "idle" }, "idle-turn", { kind: "completed" });
+  s.start({ ...agent, id: "child", parentAgentId: agent.id }, "child-turn");
+  s.reconcile(
+    [{ ...agent, id: "child", parentAgentId: agent.id }],
+    s.revision,
+    new Set(["idle", "child"]),
+  );
+  assert.deepEqual(
+    s
+      .snapshot()
+      .runs.map((run) => run.agentId)
+      .sort(),
+    ["child", "idle"],
+  );
+  assert.equal(s.snapshot().runs.find((run) => run.agentId === "idle")?.status, "completed");
+  s.end(agent, "finished", { kind: "completed" });
+  assert.equal(
+    s.snapshot().runs.some((run) => run.agentId === agent.id),
+    false,
+  );
+  const restored = setup();
+  restored.restore(structuredClone(s.exportState()));
+  assert.equal(
+    restored.snapshot().runs.some((run) => run.agentId === agent.id),
+    false,
+  );
+});
+
+test("restored running cards archived while offline disappear; stale directory reads cannot hide a new turn", () => {
+  const s = setup();
+  s.start(agent, "first");
+  const restored = setup();
+  restored.restore(structuredClone(s.exportState()));
+  restored.reconcile([], restored.revision, new Set());
+  assert.deepEqual(restored.snapshot().runs, []);
+  const revision = s.revision;
+  s.start({ ...agent, id: "new" }, "new-turn");
+  s.reconcile([], revision, new Set());
+  assert.equal(s.snapshot().runs.length, 2);
+});
 test("known conversation titles survive new turns with untitled lifecycle payloads", () => {
   const s = setup();
   s.start(agent, "first");

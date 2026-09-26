@@ -25,11 +25,11 @@ Supports Paseo daemon and client 0.8.x and 0.9.0-beta.2. Uses standard plugin su
 - On desktop, the project name in Paseo's workspace header (beside the workspace title) is shown as a bold chip with the project mark. The chip uses the project's Board color once Board has assigned one, otherwise a neutral tint. Paseo hides that name when it matches the workspace title, and project names shared by several projects stay neutral. Colors and names refresh every 10 seconds. The chip is a scoped style over Paseo's `workspace-header-subtitle` element; if Paseo renames that element, the header keeps its default look. Native clients keep Paseo's header.
 - A removed conversation appears again when it starts a new turn. Status and duration describe the latest turn.
 - Remove hides a finished card, and its finished subagents, from Board on all connected clients. It never deletes or archives the agent or chat.
-- Running cards refresh from the host every two seconds while the page is open.
+- Cards refresh from the host every two seconds while the page is open. Archived or deleted agents disappear on the next successful refresh, including cards restored after a restart. Idle unarchived conversations keep their finished cards.
 - Completion, failure, and cancellation come from actual lifecycle outcomes. Idle never implies success.
 - Missing terminal events show Outcome unknown. A later terminal event can resolve that state.
 - Keeps the latest 50 finished conversations and running metadata in `$PASEO_HOME/plugin-data/board/runs.json` (default `~/.paseo`) with mode `0600`. Stars and removed-card state survive plugin reload, disable, and daemon restart. When upgrading an in-memory Board, visible cards must be saved before the first reload; the old snapshot cannot recover cards already removed.
-- On the first Board read after startup, saved running cards are checked against the host. Cards still running stay active; missing cards move to Just finished with Outcome unknown unless a terminal event confirms their result. Other runs already active when Board opens are recovered from the host.
+- On the first Board read after startup, saved running cards are checked against the host. Cards still running stay active; unarchived cards that stopped move to Just finished with Outcome unknown unless a terminal event confirms their result. Archived or deleted cards are hidden. Other runs already active when Board opens are recovered from the host.
 - Start times use the daemon timestamp when available. Hook-only times and end times are observed locally.
 - A missing start time has no duration. Lifecycle delivery is best-effort; this is not an audit log.
 - Project names use the host placement when available, otherwise the working directory name.
