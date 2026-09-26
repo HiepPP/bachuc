@@ -2,6 +2,7 @@ import type { PluginHookAgent, PluginTurnOutcome } from "@getpaseo/plugin/server
 import { z } from "zod";
 import { runSchema } from "../shared/board";
 import type { BoardRun } from "../shared/board";
+import { isCommandTitle } from "./title";
 
 const persistedRunSchema = runSchema.extend({
   cwd: z.string(),
@@ -9,6 +10,8 @@ const persistedRunSchema = runSchema.extend({
   snapshotTurnId: z.string().nullable(),
   dismissed: z.boolean().optional(),
   projectResolved: z.boolean(),
+  // Goal from the first prompt when the host title is a Caveman command; null when unavailable.
+  promptTitle: z.string().nullable().optional(),
 });
 export const runStateSchema = z.object({
   version: z.literal(1),
@@ -56,6 +59,7 @@ export function createRunStore(now = () => new Date().toISOString()) {
           }
         : {}),
       starred,
+      promptTitle: prior?.promptTitle,
       needsInput: false,
       title: title || "Untitled run",
       id: agent.id,
@@ -65,6 +69,9 @@ export function createRunStore(now = () => new Date().toISOString()) {
       startedAt,
       endedAt: null,
     };
+  }
+  function display(run: Pick<Run, "title" | "promptTitle">) {
+    return run.promptTitle && isCommandTitle(run.title) ? run.promptTitle : run.title;
   }
   function finish(run: Run, status: BoardRun["status"]) {
     run.status = status;
@@ -109,6 +116,21 @@ export function createRunStore(now = () => new Date().toISOString()) {
       if (!title) return;
       const run = active.get(agentId) ?? finished.find((item) => item.agentId === agentId);
       if (run) run.title = title;
+    },
+    pendingPromptTitles() {
+      return [...active.values(), ...finished]
+        .filter(
+          (run) => !run.dismissed && run.promptTitle === undefined && isCommandTitle(run.title),
+        )
+        .map((run) => ({ agentId: run.agentId, title: run.title }));
+    },
+    setPromptTitle(agentId: string, title: string, promptTitle: string | null) {
+      const run = active.get(agentId) ?? finished.find((item) => item.agentId === agentId);
+      if (run?.title === title) run.promptTitle = promptTitle;
+    },
+    displayTitle(agentId: string) {
+      const run = active.get(agentId) ?? finished.find((item) => item.agentId === agentId);
+      return run && display(run);
     },
     start(agent: PluginHookAgent, turnId: string | null) {
       revision++;
@@ -229,8 +251,9 @@ export function createRunStore(now = () => new Date().toISOString()) {
             snapshotTurnId: _s,
             dismissed: _d,
             projectResolved: _r,
+            promptTitle: _t,
             ...run
-          }) => run,
+          }) => ({ ...run, title: display({ ...run, promptTitle: _t }) }),
         );
       return { runs, observingSince };
     },

@@ -10,6 +10,8 @@ import { listRunning } from "./server/snapshot";
 import { boardRpc, removeRunRpc, starRunRpc } from "./shared/board";
 import { createRecapStore, parseRecap, recapEntry } from "./server/recaps";
 import { recapsRpc } from "./shared/recaps";
+import { firstPromptTitle, isCommandTitle } from "./server/title";
+import type { PaseoApi } from "@getpaseo/client";
 
 export default function contribute(server: PluginServerContext) {
   server.registerSettings(projectColors);
@@ -28,6 +30,17 @@ export default function contribute(server: PluginServerContext) {
   void ready.catch((error: unknown) =>
     console.error(`[board] could not load runs: ${String(error)}`),
   );
+  const resolvePromptTitles = (paseo: PaseoApi, agentId?: string) =>
+    Promise.all(
+      store
+        .pendingPromptTitles()
+        .filter((run) => !agentId || run.agentId === agentId)
+        .map(async ({ agentId, title }) => {
+          // A missing prompt keeps the host title; null stops repeated lookups.
+          const promptTitle = await firstPromptTitle(paseo, agentId, title).catch(() => null);
+          if (!controller.signal.aborted) store.setPromptTitle(agentId, title, promptTitle);
+        }),
+    );
   const removeStart = server.on("agent.turn_started", async ({ agent, turnId }) => {
     await ready;
     ensureActive();
@@ -52,18 +65,21 @@ export default function contribute(server: PluginServerContext) {
             .ref(agent.id)
             .refresh()
             .catch(() => null)
-            .then((current) =>
-              recaps.add(
+            .then(async (current) => {
+              await resolvePromptTitles(paseo, agent.id);
+              const title =
+                agent.title && isCommandTitle(agent.title) ? store.displayTitle(agent.id) : null;
+              return recaps.add(
                 recapEntry(
-                  agent,
+                  title ? { ...agent, title } : agent,
                   turnId,
                   fields,
                   endedAt,
                   current?.project ?? null,
                   current?.agent.title,
                 ),
-              ),
-            )
+              );
+            })
             .catch((error: unknown) =>
               console.error(`[board] could not save recap: ${String(error)}`),
             );
@@ -132,6 +148,7 @@ export default function contribute(server: PluginServerContext) {
                 }
               }),
           );
+          await resolvePromptTitles(paseo);
         })
         .finally(() => {
           pending = undefined;
