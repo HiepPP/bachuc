@@ -78,9 +78,14 @@ function run(data, env = process.env) {
   const hookPrompt = change ? userPrompt : `/caveman ${requested}`;
   const nativeDir = path.join(dir, "native");
   fs.mkdirSync(nativeDir, { recursive: true });
+  const trackerEnv = { ...env, CLAUDE_CONFIG_DIR: nativeDir };
+  // A global defaultMode "off" silences native Claude Caveman, but the tracker also drops
+  // the ruleset for any active mode under "off". The mode chosen here must keep its rules.
+  const trackerMode = change ? (change.action === "set" ? change.mode : null) : requested;
+  if (trackerMode && trackerMode !== "off") trackerEnv.CAVEMAN_DEFAULT_MODE = trackerMode;
   const result = execFileSync(process.execPath, [path.join(hookDir, "caveman-mode-tracker.js")], {
     input: JSON.stringify({ ...data, session_id: data.session_id || agentId, prompt: hookPrompt }),
-    env: { ...env, CLAUDE_CONFIG_DIR: nativeDir },
+    env: trackerEnv,
     timeout: 4000,
     maxBuffer: 1024 * 1024,
     encoding: "utf8",
@@ -144,6 +149,11 @@ function run(data, env = process.env) {
 }
 module.exports = { run, digest };
 if (require.main === module) {
+  // Paseo launches Claude with CAVEMAN_DEFAULT_MODE=off only to silence the native
+  // Caveman plugin; bare commands handled here still use the user's own default.
+  const saved = process.env.PROMPT_TRANSLATE_CAVEMAN_DEFAULT_MODE;
+  if (saved) process.env.CAVEMAN_DEFAULT_MODE = saved;
+  else if (saved === "") delete process.env.CAVEMAN_DEFAULT_MODE;
   let input = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => {

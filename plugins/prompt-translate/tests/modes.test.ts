@@ -4,6 +4,8 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { AgentModes } from "../server/modes";
 import { translateSettings } from "../shared/settings";
 const require = createRequire(import.meta.url);
@@ -18,15 +20,15 @@ async function fixture(nativeRules = "Native rules") {
   await mkdir(root, { recursive: true });
   await writeFile(
     path.join(native, "caveman-config.js"),
-    `const fs=require('fs');const path=require('path'); exports.getDefaultMode=()=> 'full'; exports.resolveActiveMode=d=>{try{return JSON.parse(fs.readFileSync(path.join(d,'mode.json'))).mode;}catch{return null;}};`,
+    `const fs=require('fs');const path=require('path'); exports.getDefaultMode=()=>process.env.CAVEMAN_DEFAULT_MODE||'full'; exports.resolveActiveMode=d=>{try{return JSON.parse(fs.readFileSync(path.join(d,'mode.json'))).mode;}catch{return null;}};`,
   );
   await writeFile(
     path.join(native, "caveman-parse.js"),
-    `exports.parseModeChange=p=>{const m=/^[/$]caveman (\\S+)/.exec(p);return m ? {action:m[1]==='off'?'clear':'set',mode:m[1]} : null;};`,
+    `exports.parseModeChange=(p,o)=>{const m=/^[/$]caveman(?:[ \\t]+(\\S+))?(?:\\s|$)/.exec(p);const mode=m&&(m[1]||o.getDefaultMode());return m ? {action:mode==='off'?'clear':'set',mode} : null;};`,
   );
   await writeFile(
     path.join(native, "caveman-mode-tracker.js"),
-    `const fs=require('fs');const path=require('path');let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const mode=JSON.parse(s).prompt.split(/\\s/)[1];fs.writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR,'mode.json'),JSON.stringify({mode:mode==='off'?null:mode}));console.log(JSON.stringify({hookSpecificOutput:{additionalContext:mode==='off'?'':${JSON.stringify(nativeRules)}+' '+mode}}));});`,
+    `const fs=require('fs');const path=require('path');let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const mode=JSON.parse(s).prompt.split(/\\s/)[1]||process.env.CAVEMAN_DEFAULT_MODE||'full';fs.writeFileSync(path.join(process.env.CLAUDE_CONFIG_DIR,'mode.json'),JSON.stringify({mode:mode==='off'?null:mode}));console.log(JSON.stringify({hookSpecificOutput:{additionalContext:mode==='off'||process.env.CAVEMAN_DEFAULT_MODE==='off'?'':${JSON.stringify(nativeRules)}+' '+mode}}));});`,
   );
   await writeFile(
     path.join(root, "hook-runtime.json"),
@@ -158,4 +160,34 @@ test("first-turn command bootstraps isolated mode for later hidden turns", async
   assert.equal((await modes.get(A)).mode, "wenyan-ultra");
   assert.equal((await modes.get(B)).mode, "follow-agent");
   assert.match(run({ prompt: "next" }, env).hookSpecificOutput.additionalContext, /wenyan-ultra/);
+});
+
+test("bridge restores the user default that Paseo hid from native Caveman", async () => {
+  const { env } = await fixture();
+  const hook = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../server/caveman-hook.cjs",
+  );
+  const out = JSON.parse(
+    execFileSync(process.execPath, [hook], {
+      input: JSON.stringify({ prompt: "$caveman\n\nhello" }),
+      env: { ...env, CAVEMAN_DEFAULT_MODE: "off", PROMPT_TRANSLATE_CAVEMAN_DEFAULT_MODE: "ultra" },
+      encoding: "utf8",
+    }),
+  );
+  assert.match(out.hookSpecificOutput.additionalContext, /Use Caveman ultra/);
+  assert.match(out.hookSpecificOutput.additionalContext, /Native rules ultra/);
+});
+
+test("a global default of off keeps the selected mode's native rules", async () => {
+  const { env } = await fixture();
+  const off = { ...env, CAVEMAN_DEFAULT_MODE: "off" };
+  assert.match(
+    run({ prompt: "$caveman ultra\n\nhello" }, off).hookSpecificOutput.additionalContext,
+    /Native rules ultra/,
+  );
+  assert.match(
+    run({ prompt: "next" }, off).hookSpecificOutput.additionalContext,
+    /Native rules ultra/,
+  );
 });

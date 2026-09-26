@@ -20,6 +20,7 @@ import { createCompleter } from "./server/llm";
 import { createService } from "./server/service";
 import { AgentModes } from "./server/modes";
 import { Store } from "./server/store";
+import { withBridgeCavemanEnv } from "./server/session-env";
 
 export default function contribute(server: PluginServerContext) {
   const home = process.env.PASEO_HOME || path.join(homedir(), ".paseo");
@@ -29,7 +30,8 @@ export default function contribute(server: PluginServerContext) {
     readFileSync(path.join(home, "server-id"), "utf8").trim();
   const settings = server.registerSettings(translateSettings);
   const store = new Store(path.join(home, "plugin-data/prompt-translate/cache.json"));
-  const modes = new AgentModes(path.join(home, "plugin-data/prompt-translate"));
+  const dataDir = path.join(home, "plugin-data/prompt-translate");
+  const modes = new AgentModes(dataDir);
   const readSettings = async () => {
     const value = await settings.read();
     return value.status === "ready" ? value.values : translateSettings.schema.parse({});
@@ -51,5 +53,11 @@ export default function contribute(server: PluginServerContext) {
   server.handle(translateRpc, (input) => service.translate(input));
   server.handle(enhanceRpc, (input) => service.enhance(input));
   server.handle(originalRpc, (input) => service.original(input));
-  return () => store.close();
+  const sessionOpen = server.before("agent.session_open", ({ request }) =>
+    withBridgeCavemanEnv(request, dataDir),
+  );
+  return () => {
+    sessionOpen();
+    store.close();
+  };
 }
