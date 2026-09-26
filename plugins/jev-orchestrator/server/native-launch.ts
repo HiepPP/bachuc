@@ -13,19 +13,35 @@ const pair = z.strictObject({
   effort: z.enum(["low", "medium", "high", "xhigh", "max"]),
   description: z.string().min(1),
 });
+const roleList = z.array(z.string().min(1).max(100)).max(50);
+// Claude routes only these source roles unless settings list others. Every routed role adds one
+// generated definition per pair to the shared agents folder and to each session's agent catalog.
+export const DEFAULT_CLAUDE_ROLES = [
+  "general-purpose",
+  "Explore",
+  "Plan",
+  "debugger",
+  "code-reviewer",
+];
 export const nativeSettingsSchema = z.strictObject({
   enabled: z.boolean(),
   pairs: z.strictObject({
     codex: z.array(pair).min(1).max(8),
     claude: z.array(pair).min(1).max(8),
   }),
+  // A missing Claude list uses DEFAULT_CLAUDE_ROLES; a missing Codex list routes every Codex role.
+  roles: z.strictObject({ codex: roleList.optional(), claude: roleList.optional() }).optional(),
 });
 export function defaultNativeSettings() {
   const get = (runtime: Runtime) =>
     nativePreset(runtime, ["default"]).routes[0].candidates.map(
       ({ agentType: _type, ...item }) => item,
     );
-  return { enabled: true, pairs: { codex: get("codex"), claude: get("claude") } };
+  return {
+    enabled: true,
+    pairs: { codex: get("codex"), claude: get("claude") },
+    roles: { claude: [...DEFAULT_CLAUDE_ROLES] },
+  };
 }
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 type Role = { fields: Record<string, unknown>; body?: string };
@@ -154,6 +170,11 @@ export async function prepareNativeLaunch(
     if (ancestor !== userHome)
       await scan(path.join(ancestor, `.${runtime}`, "agents"), runtime, roles);
   }
+  const allowed =
+    settings.roles?.[runtime] ?? (runtime === "claude" ? DEFAULT_CLAUDE_ROLES : undefined);
+  if (allowed) for (const name of roles.keys()) if (!allowed.includes(name)) roles.delete(name);
+  // Unrouted roles reach the provider unchanged, so a list with no known role disables routing.
+  if (!roles.size) return {};
   const definitions: { agentType: string; path: string; sha256: string }[] = [];
   const routes = [...roles].map(([sourceType, role]) => ({
     sourceType,

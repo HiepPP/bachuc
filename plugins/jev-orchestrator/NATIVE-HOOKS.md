@@ -43,6 +43,10 @@ allowlist for that runtime; Jev can only select among those candidates for the r
 | Codex   | `gpt-5.6-luna` / `max`              | —                          | `gpt-6-astra` / `low`       |
 | Claude  | `claude-opus-5-5` / `medium`        | `claude-opus-5-5` / `high` | `claude-opus-5-5` / `xhigh` |
 
+`settings.json` may list routed source roles per runtime under `roles`. Without a Claude list, only
+`general-purpose`, `Explore`, `Plan`, `debugger`, and `code-reviewer` are routed; without a Codex list,
+every Codex role is routed. Other roles get no `jev-native-*` files and reach the provider unchanged.
+
 The Codex pairs appeared in the installed Paseo provider catalog on 2026-09-21. The Claude pairs
 appeared there on 2026-09-27; the user dropped Fable 5.1 that day. A catalog check does not prove
 native runtime execution. The preset descriptions tell Jev to consider actual

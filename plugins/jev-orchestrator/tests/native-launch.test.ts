@@ -59,6 +59,13 @@ test("Paseo launch prepares immutable pinned variants without modifying source r
     const claudeSource =
       "---\nname: audit\ndescription: Audit role\npermissionMode: plan\ntools: [Read]\nmodel: old-model\n---\nKeep this exact body.\n";
     await writeFile(path.join(claudeRoles, "audit.md"), claudeSource);
+    await writeFile(
+      path.join(base, "settings.json"),
+      JSON.stringify({
+        ...defaultNativeSettings(),
+        roles: { claude: ["audit", "debugger", "nested"] },
+      }),
+    );
     const claudeEnv = await prepareNativeLaunch(paseoHome, userHome, temp, "claude");
     const claudeManifest = JSON.parse(await readFile(claudeEnv.PASEO_JEV_NATIVE_POLICY, "utf8"));
     const audit = claudeManifest.policy.routes.find((item: any) => item.sourceType === "audit");
@@ -127,6 +134,50 @@ test("each PASEO_HOME gets its own definition names in the shared agents folder"
       names.push(new Set(manifest.definitions.map((item: any) => item.agentType)));
     }
     assert.ok([...names[0]].every((name) => !names[1].has(name)));
+  } finally {
+    await cleanup(temp);
+  }
+});
+
+test("Claude routes only listed roles and an empty match disables native routing", async () => {
+  const temp = await mkdtemp(path.join(tmpdir(), "jev-roles-"));
+  try {
+    const userHome = path.join(temp, "user");
+    const paseoHome = path.join(temp, "paseo");
+    const base = path.join(paseoHome, "plugin-data/jev-orchestrator/native");
+    const agents = path.join(userHome, ".claude/agents");
+    await mkdir(agents, { recursive: true });
+    await mkdir(base, { recursive: true });
+    for (const name of ["debugger", "copywriter"])
+      await writeFile(
+        path.join(agents, `${name}.md`),
+        `---\nname: ${name}\ndescription: x\n---\nBody.\n`,
+      );
+    const launch = async (settings: object) => {
+      await writeFile(path.join(base, "settings.json"), JSON.stringify(settings));
+      return prepareNativeLaunch(paseoHome, userHome, temp, "claude");
+    };
+
+    const env = await launch(defaultNativeSettings());
+    const manifest = JSON.parse(await readFile(env.PASEO_JEV_NATIVE_POLICY, "utf8"));
+    assert.deepEqual(manifest.policy.routes.map((route: any) => route.sourceType).sort(), [
+      "Explore",
+      "Plan",
+      "debugger",
+      "general-purpose",
+    ]);
+    const generated = (await readdir(agents)).filter((name) => name.startsWith("jev-native-"));
+    assert.equal(generated.length, 4 * defaultNativeSettings().pairs.claude.length);
+
+    const { roles: _roles, ...withoutRoles } = defaultNativeSettings();
+    const fallback = await launch(withoutRoles);
+    const fallbackManifest = JSON.parse(await readFile(fallback.PASEO_JEV_NATIVE_POLICY, "utf8"));
+    assert.equal(fallbackManifest.policy.routes.length, 4);
+
+    assert.deepEqual(
+      await launch({ ...defaultNativeSettings(), roles: { claude: ["missing"] } }),
+      {},
+    );
   } finally {
     await cleanup(temp);
   }
