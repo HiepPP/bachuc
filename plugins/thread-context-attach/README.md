@@ -50,9 +50,11 @@ The plugin also exports every Paseo thread to markdown so agents can search it w
 - When: a thread's file is rewritten about 2 seconds after it finishes a turn. On the first hook or RPC
   after load, every non-archived thread is exported once. Files of archived threads are kept.
 - Index: the named qmd index `paseo-threads`, with one collection of the same name. The plugin adds the
-  collection when missing and runs `qmd --index paseo-threads update`, then `embed`, at most once per
-  30 seconds. The first `embed` downloads a ~330 MB model and can take a minute; later runs embed only
-  new or changed threads.
+  collection when missing and runs `qmd --index paseo-threads update` at most once per 30 seconds.
+  `embed` runs once after the first update, then only when an update reports new or updated threads,
+  at most once per 10 minutes. A thread changed in between is keyword-searchable at once but reaches
+  vector search after the next `embed`. The first `embed` downloads a ~330 MB model and can take a
+  minute; later runs embed only new or changed threads.
   The default qmd index and its collections are not touched. Without qmd, files are still exported.
 - Agents: the `paseo-thread-search` skill in [`skills/paseo-thread-search`](skills/paseo-thread-search/SKILL.md)
   tells agents to search with 2 or 3 keywords and read only the matching turn. Link it once:
