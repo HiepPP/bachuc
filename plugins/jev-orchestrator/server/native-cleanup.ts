@@ -31,6 +31,9 @@ export async function listLiveAgents(paseo: Pick<PaseoApi, "agents">): Promise<L
 export class NativeCleanup {
   private queue: Promise<unknown> = Promise.resolve();
   private readonly leaseFile: string;
+  // Launch order in this process, so a prune can keep agents opened after its agent list was read.
+  private launches = 0;
+  private readonly launchedAt = new Map<string, number>();
 
   constructor(
     private readonly base: string,
@@ -68,13 +71,38 @@ export class NativeCleanup {
       const manifest = env.PASEO_JEV_NATIVE_POLICY;
       leases[agentId] = manifest ? path.basename(manifest) : null;
       await this.writeLeases(leases);
+      this.launchedAt.set(agentId, ++this.launches);
       return env;
     });
   }
 
-  prune(live: LiveAgent[]) {
+  // Records a session that loads no native definitions. A history or other non-native open
+  // can run beside the agent's interactive session, so it never replaces that session's lease.
+  // Claude and Codex agents get no null lease: one may still run an interactive session opened
+  // before leases existed, and a lease would hide it from the keep-every-manifest check.
+  open(agentId: string, provider: string) {
+    return this.run(async () => {
+      if (NATIVE_PROVIDERS.has(provider)) return;
+      const leases = await this.readLeases();
+      if (agentId in leases) return;
+      leases[agentId] = null;
+      await this.writeLeases(leases);
+    });
+  }
+
+  // Call before reading the agent list passed to prune.
+  mark() {
+    return this.launches;
+  }
+
+  // The agent list is read outside the queue, so agents launched after `since` are kept
+  // even when that list predates them.
+  prune(live: LiveAgent[], since = this.launches) {
     return this.run(async () => {
       const liveIds = new Set(live.map(({ id }) => id));
+      for (const [id, order] of this.launchedAt)
+        if (order > since) liveIds.add(id);
+        else if (!liveIds.has(id)) this.launchedAt.delete(id);
       const leases = Object.fromEntries(
         Object.entries(await this.readLeases()).filter(([id]) => liveIds.has(id)),
       );

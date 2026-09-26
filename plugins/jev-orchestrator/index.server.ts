@@ -66,8 +66,9 @@ export default function contribute(server: PluginServerContext) {
     path.join(homedir(), ".codex/agents"),
   ]);
   async function sweep(archivedId?: string) {
+    const since = cleanup.mark();
     const live = (await listLiveAgents(getApi())).filter(({ id }) => id !== archivedId);
-    const result = await cleanup.prune(live);
+    const result = await cleanup.prune(live, since);
     if (result.manifests || result.definitions)
       console.log(
         `Jev native: removed ${result.manifests} manifests and ${result.definitions} agent definitions.`,
@@ -162,7 +163,7 @@ export default function contribute(server: PluginServerContext) {
       else native.revoke(request.agentId);
       return { ...request, env: { ...env, ...nativeEnv } };
     }
-    await cleanup.launch(request.agentId, async () => ({}));
+    await cleanup.open(request.agentId, request.provider);
     return { ...request, env };
   });
   const archived = server.on("agent.archived", async ({ agent }, context) => {

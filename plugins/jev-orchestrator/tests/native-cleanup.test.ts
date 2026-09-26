@@ -117,3 +117,75 @@ test("prune waits for a launch that is still writing its definitions", async () 
     await cleanupDirectory(temp);
   }
 });
+
+test("prune keeps an agent launched after its agent list was read", async () => {
+  const { temp, base, claude, definition, manifest } = await setup();
+  try {
+    const cleanup = new NativeCleanup(base, [claude]);
+    const since = cleanup.mark();
+    // The list was read before the new agent existed.
+    const staleList = [{ id: "other", provider: "glm-acp-agent" }];
+    const file = await definition(claude, 1, "md");
+    const current = await manifest("claude", 10, [file]);
+    await cleanup.launch("new", async () => ({ PASEO_JEV_NATIVE_POLICY: current }));
+
+    const result = await cleanup.prune(staleList, since);
+
+    assert.deepEqual(result, { manifests: 0, definitions: 0, waitingForUnknownSessions: false });
+    assert.ok((await readdir(base)).includes(path.basename(current)));
+    assert.deepEqual(await readdir(claude), [path.basename(file)]);
+    // A later sweep whose list no longer includes the agent removes it.
+    assert.deepEqual(await cleanup.prune(staleList, cleanup.mark()), {
+      manifests: 1,
+      definitions: 1,
+      waitingForUnknownSessions: false,
+    });
+  } finally {
+    await cleanupDirectory(temp);
+  }
+});
+
+test("a non-native open never replaces a running session's manifest lease", async () => {
+  const { temp, base, claude, definition, manifest } = await setup();
+  try {
+    const cleanup = new NativeCleanup(base, [claude]);
+    const file = await definition(claude, 1, "md");
+    const current = await manifest("claude", 10, [file]);
+    await cleanup.launch("live", async () => ({ PASEO_JEV_NATIVE_POLICY: current }));
+    await cleanup.open("live", "claude");
+    await cleanup.open("history-only", "glm-acp-agent");
+
+    const result = await cleanup.prune([
+      { id: "live", provider: "claude" },
+      { id: "history-only", provider: "glm-acp-agent" },
+    ]);
+
+    assert.deepEqual(result, { manifests: 0, definitions: 0, waitingForUnknownSessions: false });
+    assert.deepEqual(JSON.parse(await readFile(path.join(base, "leases.json"), "utf8")), {
+      live: path.basename(current),
+      "history-only": null,
+    });
+  } finally {
+    await cleanupDirectory(temp);
+  }
+});
+
+test("a non-interactive open of a Claude agent keeps its unknown older session protected", async () => {
+  const { temp, base, claude, definition, manifest } = await setup();
+  try {
+    const cleanup = new NativeCleanup(base, [claude]);
+    // The agent's interactive session was opened before leases existed and uses this manifest.
+    const file = await definition(claude, 1, "md");
+    const legacy = await manifest("claude", 10, [file]);
+    await cleanup.open("legacy", "claude");
+
+    const result = await cleanup.prune([{ id: "legacy", provider: "claude" }]);
+
+    assert.deepEqual(result, { manifests: 0, definitions: 0, waitingForUnknownSessions: true });
+    assert.ok((await readdir(base)).includes(path.basename(legacy)));
+    assert.deepEqual(await readdir(claude), [path.basename(file)]);
+    assert.deepEqual(JSON.parse(await readFile(path.join(base, "leases.json"), "utf8")), {});
+  } finally {
+    await cleanupDirectory(temp);
+  }
+});
