@@ -17,13 +17,17 @@ subsequent launches. No global model defaults or original agent definitions are 
 The adapter handles Codex `spawn_agent` (`Agent` alias) and Claude `Agent`/legacy `Task` calls at
 `PreToolUse`. It asks Jev once to select a configured custom-agent variant. Custom role variants pin
 model and effort while retaining the original instructions, tools and permissions.
-No Paseo source changes are required. Unknown roles, resume requests, invalid choices, evaluator
-errors and changed definition files return an explicit deny. There is no fallback or automatic retry.
+No Paseo source changes are required. Roles without a route pass through unchanged and keep the
+provider's own definition. Direct use of a reserved `jev-native-*` type, resume requests, invalid
+choices, evaluator errors and changed definition files return a deny that names the cause. There is
+no automatic retry. A Claude call without `subagent_type` routes as `general-purpose`. Calls from a
+subdirectory of the manifest workspace stay in scope.
 Luna is accepted only with `max`; use canonical model IDs, not aliases hiding the underlying model.
 
 Codex role files override explicit spawn settings, so the adapter changes `agent_type` and removes
-explicit model/effort fields. Claude has no per-call effort field: the adapter changes `subagent_type`
-to a definition with pinned effort and sets the matching `model`, which overrides the file's model.
+explicit model/effort fields. Claude has no per-call effort field, and its `Agent` `model` field
+accepts only aliases such as `sonnet`. The adapter changes `subagent_type` to a definition with the
+pinned full model ID and effort, and removes any explicit `model` so the definition applies.
 Other input fields are retained. This is a provider-level command hook, not an optional instruction
 asking the main agent to call Jev.
 
@@ -34,13 +38,14 @@ allowlist for that runtime; Jev can only select among those candidates for the r
 
 `server/native-preset.ts` supplies the user-selected initial pairs for each source role:
 
-| Runtime | Difficult or ambiguous work | Clear parent-assigned specification |
-| ------- | --------------------------- | ----------------------------------- |
-| Codex   | `gpt-6-astra` / `low`       | `gpt-5.6-luna` / `max`              |
-| Claude  | `claude-fable-5-1` / `low`  | `claude-opus-4-8` / `max`           |
+| Runtime | Clear parent-assigned specification | Verification or edge cases | Difficult or ambiguous work |
+| ------- | ----------------------------------- | -------------------------- | --------------------------- |
+| Codex   | `gpt-5.6-luna` / `max`              | —                          | `gpt-6-astra` / `low`       |
+| Claude  | `claude-opus-5-5` / `medium`        | `claude-opus-5-5` / `high` | `claude-opus-5-5` / `xhigh` |
 
-All four pairs appear in the installed Paseo provider catalogs checked on 2026-09-21. That catalog
-check does not prove native runtime execution. The preset descriptions tell Jev to consider actual
+The Codex pairs appeared in the installed Paseo provider catalog on 2026-09-21. The Claude pairs
+appeared there on 2026-09-27; the user dropped Fable 5.1 that day. A catalog check does not prove
+native runtime execution. The preset descriptions tell Jev to consider actual
 ambiguity and scope, rather than route mechanically because a prompt contains the word "spec".
 The cheaper-execution preference is user policy; savings have not been benchmarked for this adapter.
 
@@ -102,8 +107,9 @@ the adapter does not save it. Evaluation uses the existing worker timeout and no
   to Paseo-marked sessions. Their descriptions add context overhead that has not been benchmarked.
 - The built-in Claude `Explore`/`Plan` substitutes allow only `Read`, `Grep`, and `Glob`; they are narrower
   than the original built-ins. Their internal prompts cannot be copied from public definitions.
-  Other built-ins without an explicit mapping are denied. Invalid YAML or missing-name definitions
-  are not mapped. Plugin-provided role definitions are not discovered by the file scanner.
+  Other built-ins without an explicit mapping pass through unrouted. Frontmatter that strict YAML
+  rejects is read as flat `key: value` lines, as Claude Code does; nested values or a missing name
+  leave the definition unmapped. Plugin-provided role definitions are not discovered by the file scanner.
 - Configure supported model/effort pairs and role variants separately for each provider. A Codex model
   in the Paseo catalog does not establish availability in Claude's native runtime.
 - Check Claude's `availableModels` policy and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`: these can substitute

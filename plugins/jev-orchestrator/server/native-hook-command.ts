@@ -33,14 +33,25 @@ const deny = (
   },
 });
 
+const FRESH_AGENT = "Create a fresh Paseo agent.";
+
 // Hashes bind routing to reviewed role definitions, including permissions and instructions.
 // They do not prove that the provider loaded these files; activation requires a runtime check.
 export async function runNativeHookCommand(input: unknown, manifestPath: string, judge: Judge) {
+  let reason = `Jev native routing unavailable: policy manifest is unreadable or invalid. ${FRESH_AGENT}`;
   try {
     const manifestText = await readFile(manifestPath, "utf8");
     const manifest = manifestSchema.parse(JSON.parse(manifestText));
+    reason = "Native subagent routing denied: hook event has no readable cwd.";
     const event = z.object({ cwd: z.string() }).passthrough().parse(input);
-    if ((await realpath(event.cwd)) !== (await realpath(manifest.cwd))) return deny();
+    const workspace = await realpath(manifest.cwd);
+    const current = await realpath(event.cwd);
+    // Subdirectories stay in scope; only paths outside the agent workspace are denied.
+    const relative = path.relative(workspace, current);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+      return deny(
+        `Native subagent routing denied: ${current} is outside the agent workspace ${workspace}.`,
+      );
     const candidates = manifest.policy.routes.flatMap((route) => route.candidates);
     if (
       manifest.definitions.length !== candidates.length ||
@@ -49,7 +60,9 @@ export async function runNativeHookCommand(input: unknown, manifestPath: string,
         (candidate) => !manifest.definitions.some((item) => item.agentType === candidate.agentType),
       )
     )
-      return deny();
+      return deny(
+        `Jev native routing unavailable: policy routes do not match their agent definitions. ${FRESH_AGENT}`,
+      );
     const verify = async () => {
       for (const definition of manifest.definitions) {
         const contents = await readFile(definition.path);
@@ -57,13 +70,17 @@ export async function runNativeHookCommand(input: unknown, manifestPath: string,
           throw new Error("Definition changed.");
       }
     };
+    reason = `Jev native routing unavailable: a generated agent definition changed or is missing. ${FRESH_AGENT}`;
     await verify();
     const result = await routeNativeHook(input, manifest.policy, judge);
     await verify();
-    if ((await readFile(manifestPath, "utf8")) !== manifestText) return deny();
+    if ((await readFile(manifestPath, "utf8")) !== manifestText)
+      return deny(
+        `Jev native routing unavailable: policy manifest changed during evaluation. ${FRESH_AGENT}`,
+      );
     return result;
   } catch {
-    return deny();
+    return deny(reason);
   }
 }
 

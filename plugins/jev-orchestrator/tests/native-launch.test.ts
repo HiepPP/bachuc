@@ -7,7 +7,11 @@ import { promisify } from "node:util";
 import { parse } from "smol-toml";
 import { parse as parseYaml } from "yaml";
 import test from "node:test";
-import { defaultNativeSettings, prepareNativeLaunch } from "../server/native-launch";
+import {
+  defaultNativeSettings,
+  parseFlatFrontmatter,
+  prepareNativeLaunch,
+} from "../server/native-launch";
 import { installNativeHooks } from "../server/native-install";
 
 async function cleanup(directory: string) {
@@ -71,6 +75,33 @@ test("Paseo launch prepares immutable pinned variants without modifying source r
       assert.ok(generated.endsWith("Keep this exact body.\n"));
     }
     assert.equal(await readFile(path.join(claudeRoles, "audit.md"), "utf8"), claudeSource);
+    // Strict YAML rejects ": " inside a plain scalar; Claude Code still loads this role.
+    await writeFile(
+      path.join(claudeRoles, "debugger.md"),
+      "---\nname: debugger\ndescription: Use when: tests fail. Example: user: fix it\ntools: Read, Grep\nmodel: sonnet\n---\nDebug carefully.\n",
+    );
+    await writeFile(
+      path.join(claudeRoles, "nested.md"),
+      "---\nname: nested\ndescription: Use when: nested\ntools:\n  read: true\n---\nBody.\n",
+    );
+    const lenientEnv = await prepareNativeLaunch(paseoHome, userHome, temp, "claude");
+    const lenient = JSON.parse(await readFile(lenientEnv.PASEO_JEV_NATIVE_POLICY, "utf8"));
+    const debuggerRoute = lenient.policy.routes.find((item: any) => item.sourceType === "debugger");
+    assert.ok(debuggerRoute);
+    assert.equal(
+      lenient.policy.routes.some((item: any) => item.sourceType === "nested"),
+      false,
+    );
+    for (const candidate of debuggerRoute.candidates) {
+      const definition = lenient.definitions.find(
+        (item: any) => item.agentType === candidate.agentType,
+      );
+      const generated = await readFile(definition.path, "utf8");
+      const fields = parseYaml(generated.split("---\n")[1]);
+      assert.equal(fields.tools, "Read, Grep");
+      assert.equal(fields.model, candidate.model);
+      assert.ok(generated.endsWith("Debug carefully.\n"));
+    }
     const settings = defaultNativeSettings();
     settings.enabled = false;
     await writeFile(path.join(base, "settings.json"), JSON.stringify(settings));
@@ -78,6 +109,15 @@ test("Paseo launch prepares immutable pinned variants without modifying source r
   } finally {
     await cleanup(temp);
   }
+});
+
+test("flat frontmatter accepts plain scalars and refuses nested values", () => {
+  assert.deepEqual(parseFlatFrontmatter("name: a\n# note\ndescription: 'x: y'\n"), {
+    name: "a",
+    description: "x: y",
+  });
+  assert.equal(parseFlatFrontmatter("name: a\ntools:\n  - Read"), undefined);
+  assert.equal(parseFlatFrontmatter("name: a\ncontinued line"), undefined);
 });
 
 test("registration preserves existing hooks and settings and is idempotent", async () => {

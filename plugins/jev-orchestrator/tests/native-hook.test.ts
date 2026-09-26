@@ -130,7 +130,7 @@ test("Codex routing preserves unrelated input and lets the pinned agent type own
   assert.equal(event.tool_input.model, "outside-policy");
 });
 
-test("Claude routing overwrites model but leaves normal permissions and other input unchanged", async () => {
+test("Claude routing removes explicit model but leaves normal permissions and other input unchanged", async () => {
   const policy: NativePolicy = {
     runtime: "claude",
     routes: [
@@ -168,7 +168,6 @@ test("Claude routing overwrites model but leaves normal permissions and other in
       updatedInput: {
         prompt: "Implement the feature.",
         subagent_type: "jev-claude-worker",
-        model: "claude-opus-4-1",
         run_in_background: true,
       },
     },
@@ -233,71 +232,121 @@ test("policy rejects Luna below max, duplicate pairs, generated types and recurs
   );
 });
 
-test("unknown roles and unsupported events or tools deny without calling Jev", async () => {
+test("unrouted roles pass through and unsupported events or tools deny without calling Jev", async () => {
   let calls = 0;
   const judge: Judge = async () => {
     calls++;
     throw new Error("must not run");
   };
-  const inputs = [
-    {
-      hook_event_name: "PreToolUse",
-      tool_name: "spawn_agent",
-      tool_input: { message: "Do the task.", agent_type: "reviewer" },
-    },
-    {
-      hook_event_name: "PostToolUse",
-      tool_name: "spawn_agent",
-      tool_input: { message: "Do the task.", agent_type: "worker" },
-    },
-    {
-      hook_event_name: "PreToolUse",
-      tool_name: "followup_task",
-      tool_input: { message: "Do the task.", agent_type: "worker" },
-    },
+  assert.deepEqual(
+    await routeNativeHook(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "spawn_agent",
+        tool_input: { message: "Do the task.", agent_type: "reviewer" },
+      },
+      codexPolicy,
+      judge,
+    ),
+    {},
+  );
+  const inputs: [Record<string, unknown>, RegExp][] = [
+    [
+      {
+        hook_event_name: "PostToolUse",
+        tool_name: "spawn_agent",
+        tool_input: { message: "Do the task.", agent_type: "worker" },
+      },
+      /unsupported hook event/,
+    ],
+    [
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "followup_task",
+        tool_input: { message: "Do the task.", agent_type: "worker" },
+      },
+      /unsupported tool/,
+    ],
+    [
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "spawn_agent",
+        tool_input: { message: "Do the task.", agent_type: "jev-worker-low" },
+      },
+      /jev-worker-low is reserved for Jev routing/,
+    ],
+    [
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "spawn_agent",
+        tool_input: {
+          message: "Do the task.",
+          agent_type: "jev-native-0123456789abcdef01234567",
+        },
+      },
+      /reserved for Jev routing/,
+    ],
   ];
 
-  for (const event of inputs) {
+  for (const [event, reason] of inputs) {
     const output = await routeNativeHook(event, codexPolicy, judge);
-    assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
-    assert.equal(
-      output.hookSpecificOutput.permissionDecisionReason,
-      "Native subagent routing denied.",
-    );
+    assert.equal(output.hookSpecificOutput?.permissionDecision, "deny");
+    assert.match(output.hookSpecificOutput?.permissionDecisionReason ?? "", reason);
   }
   assert.equal(calls, 0);
 });
 
-test("invalid Jev choices and failures deny without exposing errors", async () => {
-  const invalid = await routeNativeHook(
+test("Claude routes an omitted subagent_type as general-purpose", async () => {
+  const policy: NativePolicy = {
+    runtime: "claude",
+    routes: [
+      {
+        sourceType: "general-purpose",
+        candidates: [
+          {
+            agentType: "jev-general",
+            model: "claude-sonnet-5",
+            effort: "medium",
+            description: "General work",
+          },
+        ],
+      },
+    ],
+  };
+  const output = await routeNativeHook(
     {
       hook_event_name: "PreToolUse",
-      tool_name: "spawn_agent",
-      tool_input: { message: "Secret task details.", agent_type: "worker" },
+      tool_name: "Agent",
+      tool_input: { prompt: "Find X." },
     },
-    codexPolicy,
-    choose("outside-policy"),
+    policy,
+    choose("c0"),
   );
-  const failed = await routeNativeHook(
-    {
-      hook_event_name: "PreToolUse",
-      tool_name: "spawn_agent",
-      tool_input: { message: "Secret task details.", agent_type: "worker" },
-    },
-    codexPolicy,
-    async () => {
-      throw new Error("vendor response containing secret task details");
-    },
-  );
-
-  assert.deepEqual(invalid, failed);
-  assert.deepEqual(failed, {
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: "Native subagent routing denied.",
-    },
+  assert.deepEqual(output.hookSpecificOutput?.updatedInput, {
+    prompt: "Find X.",
+    subagent_type: "jev-general",
   });
+});
+
+test("invalid Jev choices and failures deny with specific reasons without exposing errors", async () => {
+  const event = {
+    hook_event_name: "PreToolUse",
+    tool_name: "spawn_agent",
+    tool_input: { message: "Secret task details.", agent_type: "worker" },
+  };
+  const invalid = await routeNativeHook(event, codexPolicy, choose("outside-policy"));
+  const failed = await routeNativeHook(event, codexPolicy, async () => {
+    throw new Error("vendor response containing secret task details");
+  });
+
+  for (const [output, reason] of [
+    [invalid, /outside this route/],
+    [failed, /Jev evaluation failed/],
+  ] as const) {
+    assert.equal(output.hookSpecificOutput?.permissionDecision, "deny");
+    assert.match(output.hookSpecificOutput?.permissionDecisionReason ?? "", reason);
+    assert.doesNotMatch(output.hookSpecificOutput?.permissionDecisionReason ?? "", /secret/i);
+  }
 });
 
 test("resumption calls and missing task text deny before Jev", async () => {
@@ -330,7 +379,7 @@ test("resumption calls and missing task text deny before Jev", async () => {
 
   for (const event of events) {
     const output = await routeNativeHook(event, codexPolicy, judge);
-    assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
+    assert.equal(output.hookSpecificOutput?.permissionDecision, "deny");
   }
   assert.equal(calls, 0);
 });
@@ -344,7 +393,7 @@ test("malformed hook input denies without throwing or calling Jev", async () => 
 
   for (const input of [null, [], "event", 7]) {
     const output = await routeNativeHook(input, codexPolicy, judge);
-    assert.equal(output.hookSpecificOutput.permissionDecision, "deny");
+    assert.equal(output.hookSpecificOutput?.permissionDecision, "deny");
   }
   assert.equal(calls, 0);
 });
@@ -364,9 +413,9 @@ test("Codex v2 denies opaque tasks without evaluating or falling back", async ()
         throw new Error("must not evaluate");
       },
     );
-    assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
-    assert.match(result.hookSpecificOutput.permissionDecisionReason!, /verifiable plaintext/);
-    assert.equal(result.hookSpecificOutput.updatedInput, undefined);
+    assert.equal(result.hookSpecificOutput?.permissionDecision, "deny");
+    assert.match(result.hookSpecificOutput?.permissionDecisionReason ?? "", /verifiable plaintext/);
+    assert.equal(result.hookSpecificOutput?.updatedInput, undefined);
   }
   assert.equal(calls, 0);
 });

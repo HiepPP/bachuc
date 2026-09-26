@@ -9,8 +9,9 @@ test("native presets retain exactly the user's provider-specific pairs for every
       ["gpt-5.6-luna", "max"],
     ],
     claude: [
-      ["claude-fable-5-1", "low"],
-      ["claude-opus-4-8", "max"],
+      ["claude-opus-5-5", "medium"],
+      ["claude-opus-5-5", "high"],
+      ["claude-opus-5-5", "xhigh"],
     ],
   };
   for (const runtime of ["codex", "claude"] as const) {
@@ -25,7 +26,7 @@ test("native presets retain exactly the user's provider-specific pairs for every
     assert.equal(
       new Set(policy.routes.flatMap((route) => route.candidates.map((item) => item.agentType)))
         .size,
-      4,
+      2 * expected[runtime].length,
     );
   }
 });

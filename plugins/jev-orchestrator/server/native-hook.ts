@@ -90,8 +90,9 @@ export type NativeHookEvent = Record<string, unknown> & {
   tool_name?: unknown;
   tool_input?: unknown;
 };
+// An empty object leaves the tool call to the provider's normal permission flow.
 export type NativeHookOutput = {
-  hookSpecificOutput: {
+  hookSpecificOutput?: {
     hookEventName: "PreToolUse";
     permissionDecision?: "allow" | "deny";
     permissionDecisionReason?: string;
@@ -99,7 +100,9 @@ export type NativeHookOutput = {
   };
 };
 
-const denied = (reason = "Native subagent routing denied."): NativeHookOutput => ({
+const TIMED_OUT = "Jev native routing timed out. No subagent was started.";
+
+const denied = (reason: string): NativeHookOutput => ({
   hookSpecificOutput: {
     hookEventName: "PreToolUse",
     permissionDecision: "deny",
@@ -111,24 +114,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+type NativeRequest = { task: string; role: string; input: Record<string, unknown> };
+
+// Returns a deny reason when the event is not a routable subagent start.
 function taskAndRole(
   event: NativeHookEvent,
   runtime: NativePolicy["runtime"],
-): { task: string; role: string; input: Record<string, unknown> } | undefined {
-  if (event.hook_event_name !== "PreToolUse" || !isRecord(event.tool_input)) return;
+): NativeRequest | string {
+  if (event.hook_event_name !== "PreToolUse" || !isRecord(event.tool_input))
+    return "Native subagent routing denied: unsupported hook event.";
   const input = event.tool_input;
-  if (Object.hasOwn(input, "resume") && input.resume != null) return;
+  if (Object.hasOwn(input, "resume") && input.resume != null)
+    return "Native subagent routing denied: resuming a subagent is not routed. Start a new subagent.";
 
   if (runtime === "codex") {
-    if (event.tool_name !== "spawn_agent" && event.tool_name !== "Agent") return;
-    if (typeof input.message !== "string" || input.message.trim().length === 0) return;
-    if (input.agent_type !== undefined && typeof input.agent_type !== "string") return;
+    if (event.tool_name !== "spawn_agent" && event.tool_name !== "Agent")
+      return "Native subagent routing denied: unsupported tool.";
+    if (typeof input.message !== "string" || input.message.trim().length === 0)
+      return "Native subagent routing denied: the subagent message is empty.";
+    if (input.agent_type !== undefined && typeof input.agent_type !== "string")
+      return "Native subagent routing denied: agent_type must be a string.";
     return { task: input.message, role: input.agent_type ?? "default", input };
   }
 
-  if (event.tool_name !== "Agent" && event.tool_name !== "Task") return;
-  if (typeof input.prompt !== "string" || input.prompt.trim().length === 0) return;
-  if (typeof input.subagent_type !== "string" || input.subagent_type.trim().length === 0) return;
+  if (event.tool_name !== "Agent" && event.tool_name !== "Task")
+    return "Native subagent routing denied: unsupported tool.";
+  if (typeof input.prompt !== "string" || input.prompt.trim().length === 0)
+    return "Native subagent routing denied: the subagent prompt is empty.";
+  // Claude Code starts general-purpose when subagent_type is omitted.
+  if (input.subagent_type === undefined)
+    return { task: input.prompt, role: "general-purpose", input };
+  if (typeof input.subagent_type !== "string" || input.subagent_type.trim().length === 0)
+    return "Native subagent routing denied: subagent_type must be a non-empty string.";
   return { task: input.prompt, role: input.subagent_type, input };
 }
 
@@ -144,7 +161,13 @@ export async function routeNativeHook(
   const activeSignal = signal ?? controller!.signal;
   try {
     const parsed = nativePolicySchema.safeParse(policyInput);
-    if (!parsed.success || !isRecord(eventInput) || activeSignal.aborted) return denied();
+    if (!parsed.success)
+      return denied(
+        "Jev native routing unavailable: invalid routing policy. Create a fresh Paseo agent.",
+      );
+    if (!isRecord(eventInput))
+      return denied("Native subagent routing denied: malformed hook event.");
+    if (activeSignal.aborted) return denied(TIMED_OUT);
 
     const policy = parsed.data;
     // Codex 0.154 concatenates the namespace and tool name. Its hook event lacks
@@ -154,9 +177,21 @@ export async function routeNativeHook(
         "Jev cannot route native v2: Codex does not expose a verifiable plaintext task to this hook. No subagent was started. Do not retry or bypass routing.",
       );
     const request = taskAndRole(eventInput, policy.runtime);
-    if (!request) return denied();
+    if (typeof request === "string") return denied(request);
     const route = policy.routes.find(({ sourceType }) => sourceType === request.role);
-    if (!route) return denied();
+    if (!route) {
+      const reserved =
+        request.role.startsWith("jev-native-") ||
+        policy.routes.some(({ candidates }) =>
+          candidates.some(({ agentType }) => agentType === request.role),
+        );
+      // Unrouted roles keep the provider's own definition; reserved types would skip Jev's choice.
+      return reserved
+        ? denied(
+            `Native subagent routing denied: ${request.role} is reserved for Jev routing. Request its source agent type instead.`,
+          )
+        : {};
+    }
 
     const profiles: Profile[] = route.candidates.map((candidate, index) => ({
       id: `c${index}`,
@@ -180,9 +215,12 @@ export async function routeNativeHook(
         profiles,
         activeSignal,
       );
-      if (activeSignal.aborted) return denied();
+      if (activeSignal.aborted) return denied(TIMED_OUT);
       const selectedIndex = profiles.findIndex(({ id }) => id === decision.profileId);
-      if (selectedIndex < 0) return denied();
+      if (selectedIndex < 0)
+        return denied(
+          "Jev native routing denied: Jev chose a profile outside this route. No subagent was started.",
+        );
       const selected = route.candidates[selectedIndex];
 
       if (policy.runtime === "codex") {
@@ -203,18 +241,20 @@ export async function routeNativeHook(
         };
       }
 
-      return {
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          updatedInput: {
-            ...request.input,
-            subagent_type: selected.agentType,
-            model: selected.model,
-          },
-        },
+      // Agent's model field accepts only aliases; the pinned definition carries the full model ID.
+      const updatedInput: Record<string, unknown> = {
+        ...request.input,
+        subagent_type: selected.agentType,
       };
+      delete updatedInput.model;
+      return { hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput } };
     } catch {
-      return denied();
+      // Judge errors can echo task text; keep them out of the transcript.
+      return denied(
+        activeSignal.aborted
+          ? TIMED_OUT
+          : "Jev native routing unavailable: Jev evaluation failed. No subagent was started. Check jev-orchestrator logs.",
+      );
     }
   } finally {
     if (timer) clearTimeout(timer);

@@ -29,6 +29,22 @@ export function defaultNativeSettings() {
 }
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 type Role = { fields: Record<string, unknown>; body?: string };
+const warned = new Set<string>();
+
+// Claude Code accepts plain `key: value` frontmatter that strict YAML rejects, such as a
+// description containing ": ". Nested values are refused so a dropped `tools` list cannot
+// widen the generated role's permissions.
+export function parseFlatFrontmatter(text: string): Record<string, string> | undefined {
+  const fields: Record<string, string> = {};
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const match = /^([A-Za-z_][\w-]*):(?:\s+(.*))?$/.exec(line);
+    if (!match || !match[2]?.trim()) return;
+    const value = match[2].trim();
+    fields[match[1]] = /^(["']).*\1$/.test(value) ? value.slice(1, -1) : value;
+  }
+  return fields;
+}
 async function scan(directory: string, runtime: Runtime, roles: Map<string, Role>) {
   let entries;
   try {
@@ -56,8 +72,13 @@ async function scan(directory: string, runtime: Runtime, roles: Map<string, Role
       try {
         fields = parseYaml(match[1]);
       } catch {
-        console.warn(`Jev native: skipped invalid YAML agent definition: ${file}`);
-        continue;
+        fields = parseFlatFrontmatter(match[1]);
+        if (!fields) {
+          if (!warned.has(file))
+            console.warn(`Jev native: skipped invalid YAML agent definition: ${file}`);
+          warned.add(file);
+          continue;
+        }
       }
       if (fields && typeof fields.name === "string")
         roles.set(fields.name, { fields, body: match[2] });
