@@ -158,7 +158,8 @@ export async function prepareNativeLaunch(
   const routes = [...roles].map(([sourceType, role]) => ({
     sourceType,
     candidates: settings.pairs[runtime].map((candidate) => {
-      const agentType = `jev-native-${hash(JSON.stringify({ runtime, sourceType, role, candidate })).slice(0, 24)}`;
+      // paseoHome keeps each daemon's names apart in the shared agents folders.
+      const agentType = `jev-native-${hash(JSON.stringify({ paseoHome, runtime, sourceType, role, candidate })).slice(0, 24)}`;
       const fields = {
         ...role.fields,
         name: agentType,

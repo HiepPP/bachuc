@@ -111,6 +111,27 @@ test("Paseo launch prepares immutable pinned variants without modifying source r
   }
 });
 
+test("each PASEO_HOME gets its own definition names in the shared agents folder", async () => {
+  const temp = await mkdtemp(path.join(tmpdir(), "jev-homes-"));
+  try {
+    const userHome = path.join(temp, "user");
+    await mkdir(path.join(userHome, ".claude/agents"), { recursive: true });
+    const names: Set<string>[] = [];
+    for (const home of ["paseo-a", "paseo-b"]) {
+      const paseoHome = path.join(temp, home);
+      const base = path.join(paseoHome, "plugin-data/jev-orchestrator/native");
+      await mkdir(base, { recursive: true });
+      await writeFile(path.join(base, "settings.json"), JSON.stringify(defaultNativeSettings()));
+      const env = await prepareNativeLaunch(paseoHome, userHome, temp, "claude");
+      const manifest = JSON.parse(await readFile(env.PASEO_JEV_NATIVE_POLICY, "utf8"));
+      names.push(new Set(manifest.definitions.map((item: any) => item.agentType)));
+    }
+    assert.ok([...names[0]].every((name) => !names[1].has(name)));
+  } finally {
+    await cleanup(temp);
+  }
+});
+
 test("flat frontmatter accepts plain scalars and refuses nested values", () => {
   assert.deepEqual(parseFlatFrontmatter("name: a\n# note\ndescription: 'x: y'\n"), {
     name: "a",

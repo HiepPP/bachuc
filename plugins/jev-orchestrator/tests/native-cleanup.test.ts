@@ -74,20 +74,23 @@ test("prune removes manifests of ended sessions and definitions nothing referenc
   }
 });
 
-test("a live native session without a lease keeps every manifest", async () => {
+test("a live native session without a lease keeps every manifest and unlisted file", async () => {
   const { temp, base, claude, definition, manifest } = await setup();
   try {
     const referenced = await definition(claude, 1, "md");
-    const orphan = await definition(claude, 2, "md");
+    // Another PASEO_HOME may own a file this home's manifests never listed.
+    const unlisted = await definition(claude, 2, "md");
     const legacy = await manifest("claude", 10, [referenced]);
     const cleanup = new NativeCleanup(base, [claude]);
 
     const result = await cleanup.prune([{ id: "opened-before-leases", provider: "claude" }]);
 
-    assert.deepEqual(result, { manifests: 0, definitions: 1, waitingForUnknownSessions: true });
-    assert.deepEqual(await readdir(claude), [path.basename(referenced)]);
+    assert.deepEqual(result, { manifests: 0, definitions: 0, waitingForUnknownSessions: true });
+    assert.deepEqual(
+      (await readdir(claude)).sort(),
+      [path.basename(referenced), path.basename(unlisted)].sort(),
+    );
     assert.ok((await readdir(base)).includes(path.basename(legacy)));
-    assert.ok(!(await readdir(claude)).includes(path.basename(orphan)));
   } finally {
     await cleanupDirectory(temp);
   }
@@ -185,6 +188,42 @@ test("a non-interactive open of a Claude agent keeps its unknown older session p
     assert.ok((await readdir(base)).includes(path.basename(legacy)));
     assert.deepEqual(await readdir(claude), [path.basename(file)]);
     assert.deepEqual(JSON.parse(await readFile(path.join(base, "leases.json"), "utf8")), {});
+  } finally {
+    await cleanupDirectory(temp);
+  }
+});
+
+test("a prune in one PASEO_HOME leaves another home's definitions in the shared folder", async () => {
+  const { temp, claude, definition } = await setup();
+  try {
+    const homes = await Promise.all(
+      ["home-a", "home-b"].map(async (name) => {
+        const base = path.join(temp, name, "native");
+        await mkdir(base, { recursive: true });
+        return { base, cleanup: new NativeCleanup(base, [claude]) };
+      }),
+    );
+    const write = async (base: string, n: number, files: string[]) => {
+      const file = path.join(base, `claude-${id(n)}.json`);
+      await writeFile(file, JSON.stringify({ definitions: files.map((item) => ({ path: item })) }));
+      return file;
+    };
+    const ownA = await definition(claude, 1, "md");
+    const ownB = await definition(claude, 2, "md");
+    const manifestA = await write(homes[0].base, 10, [ownA]);
+    const manifestB = await write(homes[1].base, 11, [ownB]);
+    await homes[0].cleanup.launch("agent-a", async () => ({ PASEO_JEV_NATIVE_POLICY: manifestA }));
+    await homes[1].cleanup.launch("agent-b", async () => ({ PASEO_JEV_NATIVE_POLICY: manifestB }));
+
+    // Home B's agent ended; home B lists only its own agents.
+    const result = await homes[1].cleanup.prune([]);
+
+    assert.deepEqual(result, { manifests: 1, definitions: 1, waitingForUnknownSessions: false });
+    assert.deepEqual(await readdir(claude), [path.basename(ownA)]);
+    assert.deepEqual(
+      await readdir(homes[0].base),
+      [path.basename(manifestA), "leases.json"].sort(),
+    );
   } finally {
     await cleanupDirectory(temp);
   }

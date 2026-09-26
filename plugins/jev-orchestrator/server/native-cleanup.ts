@@ -112,35 +112,47 @@ export class NativeCleanup {
         ({ id, provider }) => NATIVE_PROVIDERS.has(provider) && !(id in leases),
       );
       const keep = new Set(Object.values(leases).filter((name): name is string => !!name));
-      let manifests = 0;
+      // Agent folders are shared by every PASEO_HOME, so only files listed in this home's own
+      // removed manifests are candidates; files of other homes are never listed here.
+      const allowed = new Set(this.agentDirectories.map((directory) => path.resolve(directory)));
+      const listed = async (file: string) => {
+        const { definitions } = JSON.parse(await readFile(file, "utf8"));
+        return (definitions as { path: string }[])
+          .map((definition) => path.resolve(definition.path))
+          .filter(
+            (item) => allowed.has(path.dirname(item)) && DEFINITION.test(path.basename(item)),
+          );
+      };
+      const removed: string[] = [];
+      const candidates = new Set<string>();
       const referenced = new Set<string>();
       for (const name of await readdir(this.base)) {
         if (!MANIFEST.test(name)) continue;
         const file = path.join(this.base, name);
-        if (!unknown && !keep.has(name)) {
-          await unlink(file);
-          manifests++;
+        if (unknown || keep.has(name)) {
+          // An unreadable kept manifest could list anything, so it stops the whole prune.
+          for (const item of await listed(file)) referenced.add(item);
           continue;
         }
-        // An unreadable kept manifest could reference anything, so skip definition removal.
-        const { definitions } = JSON.parse(await readFile(file, "utf8"));
-        for (const definition of definitions) referenced.add(path.basename(definition.path));
-      }
-      let definitions = 0;
-      for (const directory of this.agentDirectories) {
-        let names: string[];
+        removed.push(file);
         try {
-          names = await readdir(directory);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-          throw error;
-        }
-        for (const name of names) {
-          if (!DEFINITION.test(name) || referenced.has(name)) continue;
-          await unlink(path.join(directory, name));
-          definitions++;
+          for (const item of await listed(file)) candidates.add(item);
+        } catch {
+          // An unreadable old manifest is still removed; its files are left in place.
         }
       }
+      for (const file of removed) await unlink(file);
+      let definitions = 0;
+      for (const item of candidates) {
+        if (referenced.has(item)) continue;
+        try {
+          await unlink(item);
+          definitions++;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+      const manifests = removed.length;
       return { manifests, definitions, waitingForUnknownSessions: unknown };
     });
   }

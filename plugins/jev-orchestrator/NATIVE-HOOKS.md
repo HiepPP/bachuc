@@ -106,7 +106,9 @@ the adapter does not save it. Evaluation uses the existing worker timeout and no
   They can appear in native agent catalogs outside Paseo, but automatic Jev selection remains scoped
   to Paseo-marked sessions. `native/leases.json` records the manifest each Paseo agent opened with.
   After an agent is archived, and on the first hook after the plugin starts, the plugin removes
-  manifests no unarchived agent uses, then `jev-native-<hash>` files no remaining manifest lists.
+  manifests no unarchived agent uses, then the `jev-native-<hash>` files those removed manifests
+  listed and no remaining manifest lists. Names include `PASEO_HOME`, so another daemon's files
+  are never listed and never removed.
   While an unarchived Claude or Codex agent has no lease, because it opened before leases existed,
   every manifest is kept. Ticket slots (`jev-native-ticket-*`) are never touched by this cleanup. Their descriptions add context overhead that has not been benchmarked.
 - The built-in Claude `Explore`/`Plan` substitutes allow only `Read`, `Grep`, and `Glob`; they are narrower
