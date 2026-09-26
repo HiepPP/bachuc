@@ -14,6 +14,7 @@ import { directProfilesRpc, directRunRpc, directStatusRpc } from "./shared/direc
 import { DirectRouter } from "./server/direct";
 import { NativeTickets } from "./server/native-tickets";
 import { prepareNativeLaunch } from "./server/native-launch";
+import { NativeCleanup, listLiveAgents } from "./server/native-cleanup";
 
 export default function contribute(server: PluginServerContext) {
   const home = process.env.PASEO_HOME || path.join(homedir(), ".paseo");
@@ -60,6 +61,25 @@ export default function contribute(server: PluginServerContext) {
       thinkingOptionId: runtime.thinkingOptionId ?? undefined,
     };
   });
+  const cleanup = new NativeCleanup(path.join(home, "plugin-data/jev-orchestrator/native"), [
+    path.join(homedir(), ".claude/agents"),
+    path.join(homedir(), ".codex/agents"),
+  ]);
+  async function sweep(archivedId?: string) {
+    const live = (await listLiveAgents(getApi())).filter(({ id }) => id !== archivedId);
+    const result = await cleanup.prune(live);
+    if (result.manifests || result.definitions)
+      console.log(
+        `Jev native: removed ${result.manifests} manifests and ${result.definitions} agent definitions.`,
+      );
+  }
+  // The host API exists only inside hooks and RPCs, so the startup sweep waits for the first hook.
+  let startupSweep: Promise<void> | undefined;
+  const sweepOnce = () => {
+    startupSweep ??= sweep().catch((error) =>
+      console.warn(`Jev native: cleanup failed: ${(error as Error).message}`),
+    );
+  };
   const bridge = createBridge(engine, scope, (action, parentId, cwd, input) =>
     native.handle(action, parentId, cwd, input),
   );
@@ -89,6 +109,7 @@ export default function contribute(server: PluginServerContext) {
   });
   const create = server.before("agent.create", async ({ request }, context) => {
     api = context.paseo;
+    sweepOnce();
     if (
       !["codex", "claude"].includes(request.config.provider) ||
       request.env?.PASEO_ORCH_CHILD === "1" ||
@@ -122,6 +143,7 @@ export default function contribute(server: PluginServerContext) {
   });
   const open = server.before("agent.session_open", async ({ request }, context) => {
     api = context.paseo;
+    sweepOnce();
     const token = request.env?.PASEO_ORCH_TOKEN;
     if (token) bridge.bind(token, request.agentId, await realpath(request.cwd));
     const env = { ...request.env };
@@ -131,12 +153,16 @@ export default function contribute(server: PluginServerContext) {
       request.purpose === "interactive" &&
       (request.provider === "codex" || request.provider === "claude")
     ) {
-      const nativeEnv = await prepareNativeLaunch(home, homedir(), request.cwd, request.provider);
+      const provider = request.provider;
+      const nativeEnv = await cleanup.launch(request.agentId, () =>
+        prepareNativeLaunch(home, homedir(), request.cwd, provider),
+      );
       if (request.provider === "codex" && token && nativeEnv.PASEO_JEV_NATIVE_POLICY)
         await native.bind(request.agentId, request.cwd, nativeEnv.PASEO_JEV_NATIVE_POLICY);
       else native.revoke(request.agentId);
       return { ...request, env: { ...env, ...nativeEnv } };
     }
+    await cleanup.launch(request.agentId, async () => ({}));
     return { ...request, env };
   });
   const archived = server.on("agent.archived", async ({ agent }, context) => {
@@ -145,6 +171,9 @@ export default function contribute(server: PluginServerContext) {
     await native.archive(agent.id);
     for (const job of engine.list(agent.id))
       void engine.cancel(agent.id, job.task.id).catch(() => {});
+    void sweep(agent.id).catch((error) =>
+      console.warn(`Jev native: cleanup failed: ${(error as Error).message}`),
+    );
   });
   return () => {
     native.close();

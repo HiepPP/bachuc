@@ -104,7 +104,11 @@ the adapter does not save it. Evaluation uses the existing worker timeout and no
 - Codex requires review/trust of new hooks using `/hooks`; an untrusted hook is skipped. Do not bypass trust.
 - Variants are generated in the user's native `agents` directories, with reserved `jev-native-*` names.
   They can appear in native agent catalogs outside Paseo, but automatic Jev selection remains scoped
-  to Paseo-marked sessions. Their descriptions add context overhead that has not been benchmarked.
+  to Paseo-marked sessions. `native/leases.json` records the manifest each Paseo agent opened with.
+  After an agent is archived, and on the first hook after the plugin starts, the plugin removes
+  manifests no unarchived agent uses, then `jev-native-<hash>` files no remaining manifest lists.
+  While an unarchived Claude or Codex agent has no lease, because it opened before leases existed,
+  every manifest is kept. Ticket slots (`jev-native-ticket-*`) are never touched by this cleanup. Their descriptions add context overhead that has not been benchmarked.
 - The built-in Claude `Explore`/`Plan` substitutes allow only `Read`, `Grep`, and `Glob`; they are narrower
   than the original built-ins. Their internal prompts cannot be copied from public definitions.
   Other built-ins without an explicit mapping pass through unrouted. Frontmatter that strict YAML
