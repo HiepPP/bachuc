@@ -43,6 +43,18 @@ export function formatUsageFreshness(compactTimeAgo: string): string {
   return `${usageCopy.updated} ${formatCompactTimeAgoAsProse(compactTimeAgo)}`;
 }
 
+/** A user-requested refresh of one report. The previous report stays on screen throughout. */
+export type UsageRefresh = "idle" | "pending" | "failed";
+
+export function resolveUsageRefresh(mutation: {
+  isPending: boolean;
+  error: unknown;
+}): UsageRefresh {
+  if (mutation.isPending) return "pending";
+  if (mutation.error) return "failed";
+  return "idle";
+}
+
 export interface UsageQueryState {
   data: UsageReportEntry[] | undefined;
   error: unknown;

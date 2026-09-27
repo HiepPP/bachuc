@@ -4,6 +4,7 @@ import {
   groupUsageByHost,
   headlineWindow,
   resolveUsagePill,
+  resolveUsageRefresh,
   resolveUsageView,
   type UsageQueryState,
 } from "./model";
@@ -177,5 +178,19 @@ describe("formatUsageFreshness", () => {
     expect(formatUsageFreshness("now")).toBe("Updated just now");
     expect(formatUsageFreshness("3m")).toBe("Updated 3m ago");
     expect(formatUsageFreshness("Jan 15")).toBe("Updated Jan 15");
+  });
+});
+
+describe("resolveUsageRefresh", () => {
+  it("is pending while a refresh runs, even after an earlier failure", () => {
+    expect(resolveUsageRefresh({ isPending: true, error: new Error("boom") })).toBe("pending");
+  });
+
+  it("is failed after a refresh errors", () => {
+    expect(resolveUsageRefresh({ isPending: false, error: new Error("boom") })).toBe("failed");
+  });
+
+  it("is idle before and after a successful refresh", () => {
+    expect(resolveUsageRefresh({ isPending: false, error: null })).toBe("idle");
   });
 });

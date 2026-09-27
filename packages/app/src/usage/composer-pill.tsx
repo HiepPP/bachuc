@@ -1,6 +1,7 @@
-import { useCallback } from "react";
+import { RefreshCw } from "lucide-react-native";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,7 +15,7 @@ import {
 } from "@/components/ui/toolbar-label-trigger";
 import { UsageCard } from "./card";
 import { usageCopy } from "./copy";
-import type { UsagePill } from "./model";
+import type { UsagePill, UsageRefresh } from "./model";
 import { useAgentUsage } from "./queries";
 import { UsageSourceIcon } from "./source-icon";
 
@@ -22,20 +23,17 @@ function pillTriggerStyle(state: MenuTriggerState) {
   return [toolbarLabelTriggerStyle(state), styles.trigger];
 }
 
-/** The agent's plan usage beside the composer controls. Opens the usage card. */
+/**
+ * The agent's plan usage beside the composer controls. Opens the cached usage card;
+ * only Refresh asks the source for a new report.
+ */
 export function UsageComposerPill({ serverId, agentId }: { serverId: string; agentId: string }) {
-  const { pill, entry, refresh } = useAgentUsage(serverId, agentId);
-  const handleOpenChange = useCallback(
-    (open: boolean) => {
-      if (open) refresh();
-    },
-    [refresh],
-  );
+  const { pill, entry, refresh, refreshState } = useAgentUsage(serverId, agentId);
 
   if (!pill || !entry) return null;
 
   return (
-    <DropdownMenu onOpenChange={handleOpenChange}>
+    <DropdownMenu>
       <DropdownMenuTrigger
         style={pillTriggerStyle}
         accessibilityRole="button"
@@ -56,9 +54,39 @@ export function UsageComposerPill({ serverId, agentId }: { serverId: string; age
       >
         <View style={styles.popover}>
           <UsageCard entry={entry} compact />
+          <UsageRefreshRow refreshState={refreshState} onRefresh={refresh} />
         </View>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function UsageRefreshRow({
+  refreshState,
+  onRefresh,
+}: {
+  refreshState: UsageRefresh;
+  onRefresh: () => void;
+}) {
+  const isPending = refreshState === "pending";
+  return (
+    <View style={styles.refreshRow}>
+      <Text style={styles.refreshError} numberOfLines={2} testID="usage-refresh-error">
+        {refreshState === "failed" ? usageCopy.refreshFailed : null}
+      </Text>
+      <Button
+        variant="ghost"
+        size="xs"
+        leftIcon={RefreshCw}
+        loading={isPending}
+        onPress={onRefresh}
+        style={styles.refreshButton}
+        accessibilityLabel={usageCopy.refresh}
+        testID="usage-refresh"
+      >
+        {isPending ? usageCopy.refreshing : usageCopy.refresh}
+      </Button>
+    </View>
   );
 }
 
@@ -82,5 +110,20 @@ const styles = StyleSheet.create((theme) => ({
   },
   popover: {
     padding: theme.spacing[3],
+    gap: theme.spacing[2],
+  },
+  refreshRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  // The ghost button's padding hangs past the card's right rail so its label lands on it.
+  refreshButton: {
+    marginRight: -theme.spacing[3],
+  },
+  refreshError: {
+    flex: 1,
+    color: theme.colors.palette.red[300],
+    fontSize: theme.fontSize.sm,
   },
 }));

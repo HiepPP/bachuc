@@ -10,13 +10,18 @@ export interface UsageReportsFixture {
 }
 
 interface UsageReportsFixtureOptions {
-  /** Successive `usage.list_reports` responses; the last one repeats. */
-  lists?: UsageReportEntry[][];
+  /**
+   * Successive `usage.list_reports` responses; the last one repeats. `{ error }` fails that
+   * request; a function builds the response when the request arrives (e.g. a fresh `fetchedAt`).
+   */
+  lists?: Array<UsageListResponse | (() => UsageListResponse)>;
   /** Successive agent report IDs; the last one repeats. */
   agentReportIds?: Array<string | null>;
   /** Advertise `features.usageSources`. False simulates a host from before usage sources. */
   usageSources?: boolean;
 }
+
+type UsageListResponse = UsageReportEntry[] | { error: string };
 
 type WebSocketMessage = string | Buffer;
 
@@ -106,9 +111,28 @@ export async function installUsageReportsFixture(
           forceRefresh: request.forceRefresh === true,
           reportIds: Array.isArray(request.reportIds) ? (request.reportIds as string[]) : undefined,
         });
-        const available = pick(options.lists ?? [[]], listRequests.length - 1);
+        const scripted = pick(options.lists ?? [[]], listRequests.length - 1);
+        const response = typeof scripted === "function" ? scripted() : scripted;
+        if ("error" in response) {
+          ws.send(
+            JSON.stringify({
+              type: "session",
+              message: {
+                type: "rpc_error",
+                payload: {
+                  requestId,
+                  requestType: "usage.list_reports.request",
+                  error: response.error,
+                  code: "transport",
+                },
+              },
+            }),
+          );
+          listCounter.increment();
+          return;
+        }
         const ids = Array.isArray(request.reportIds) ? request.reportIds : null;
-        const reports = ids ? available.filter((entry) => ids.includes(entry.id)) : available;
+        const reports = ids ? response.filter((entry) => ids.includes(entry.id)) : response;
         ws.send(
           JSON.stringify({
             type: "session",

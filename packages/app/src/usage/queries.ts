@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useShallow } from "zustand/shallow";
 import { useFetchQueries, useFetchQuery } from "@/data/query";
 import {
@@ -13,10 +13,12 @@ import { usageCopy } from "./copy";
 import {
   groupUsageByHost,
   resolveUsagePill,
+  resolveUsageRefresh,
   resolveUsageView,
   type UsageHostGroup,
   type UsagePill,
   type UsageQueryState,
+  type UsageRefresh,
 } from "./model";
 import type { UsageReportEntry, UsageView } from "./types";
 
@@ -156,14 +158,20 @@ export function useUsageByHost(): {
 
 /**
  * The usage report for the account an agent is spending. The daemon resolves the
- * account at fetch time, so the query refetches when the model changes (a new key)
- * and when a turn completes (the query is paused while the agent runs, and its
- * data is always stale, so resuming refetches).
+ * report ID, which is re-resolved when the model changes (a new key) and when a
+ * turn completes (the query is paused while the agent runs, and its data is always
+ * stale, so resuming refetches). The report itself is read from the shared cache.
+ * `refresh` is the only path that forces the source to fetch, and only this report.
  */
 export function useAgentUsage(
   serverId: string,
   agentId: string,
-): { pill: UsagePill | null; entry: UsageReportEntry | null; refresh: () => void } {
+): {
+  pill: UsagePill | null;
+  entry: UsageReportEntry | null;
+  refresh: () => void;
+  refreshState: UsageRefresh;
+} {
   const queryClient = useQueryClient();
   const isConnected = useHostRuntimeIsConnected(serverId);
   const isSupported = useSessionStore((state) => supportsUsage(state.sessions[serverId]));
@@ -189,16 +197,19 @@ export function useAgentUsage(
     dataShape: "value",
     staleTimeMs: REPORTS_STALE_TIME_MS,
   });
+  const refreshMutation = useMutation({
+    mutationFn: (id: string) => getReport(serverId, id, true),
+    onSuccess: (report, id) => queryClient.setQueryData(reportQueryKey(serverId, id), report),
+  });
+  const { mutate } = refreshMutation;
   const refresh = useCallback(() => {
-    if (!reportId) return;
-    void queryClient
-      .fetchQuery({
-        queryKey: reportQueryKey(serverId, reportId),
-        queryFn: () => getReport(serverId, reportId, true),
-        staleTime: 0,
-      })
-      .catch(() => undefined);
-  }, [queryClient, reportId, serverId]);
+    if (reportId) mutate(reportId);
+  }, [mutate, reportId]);
   const entry = isSupported ? (query.data ?? null) : null;
-  return { pill: resolveUsagePill({ supportsUsage: isSupported, entry }), entry, refresh };
+  return {
+    pill: resolveUsagePill({ supportsUsage: isSupported, entry }),
+    entry,
+    refresh,
+    refreshState: resolveUsageRefresh(refreshMutation),
+  };
 }

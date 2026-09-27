@@ -5,6 +5,7 @@ export const usageCopy = {
   planUsage: "Plan usage",
   refresh: "Refresh",
   refreshing: "Refreshing...",
+  refreshFailed: "Unable to refresh usage",
   updated: "Updated",
   loading: "Loading usage...",
   empty: "No usage data",
