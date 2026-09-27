@@ -5,13 +5,19 @@ import { settingsStyles } from "@/styles/settings";
 import { UsageCard } from "./card";
 import type { UsageReportEntry } from "./types";
 
-export function UsageList({ reports }: { reports: UsageReportEntry[] }) {
+export function UsageList({
+  serverId,
+  reports,
+}: {
+  serverId: string;
+  reports: UsageReportEntry[];
+}) {
   return (
     <View style={settingsStyles.card}>
       {reports.map((entry, index) => (
         <Fragment key={entry.id}>
           {index > 0 ? <View style={styles.divider} /> : null}
-          <UsageCard entry={entry} />
+          <UsageCard serverId={serverId} entry={entry} />
         </Fragment>
       ))}
     </View>

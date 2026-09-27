@@ -63,7 +63,7 @@ test.describe("usage composer pill", () => {
       await expect(popover.getByText("Test plan")).toBeVisible();
       await expect(popover.getByText("42%")).toBeVisible();
 
-      await popover.getByTestId("usage-card-header").hover();
+      await popover.getByTestId("usage-refresh").hover();
       await expect(page.getByTestId("usage-freshness-tooltip")).toHaveText("Updated 2h ago");
       await expect(popover.getByTestId("usage-freshness")).toHaveCount(0);
       expect(usage.listRequests()).toHaveLength(1);
@@ -94,9 +94,11 @@ test.describe("usage composer pill", () => {
       ]);
       await expect(popover.getByText("64%")).toBeVisible();
       await expect(pill).toContainText("64%");
-      await expect(popover.getByTestId("usage-refresh")).toHaveText("Refresh");
+      await expect(popover.getByTestId("usage-refresh")).toBeEnabled();
 
-      await popover.getByTestId("usage-card-header").hover();
+      // Pressing closes the tooltip; it reopens on the next hover.
+      await popover.getByText("Fixture plan", { exact: true }).hover();
+      await popover.getByTestId("usage-refresh").hover();
       await expect(page.getByTestId("usage-freshness-tooltip")).toHaveText("Updated just now");
       expect(usage.listRequests()).toHaveLength(2);
     } finally {
@@ -133,7 +135,7 @@ test.describe("usage composer pill", () => {
       await refresh.click();
       await usage.waitForListRequests(3);
       await expect(popover.getByText("64%")).toBeVisible();
-      await expect(popover.getByTestId("usage-refresh-error")).toHaveText("");
+      await expect(popover.getByTestId("usage-refresh-error")).toHaveCount(0);
     } finally {
       await session.cleanup();
     }

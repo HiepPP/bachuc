@@ -11,11 +11,13 @@ import { UsageList } from "./list";
 import type { UsageView } from "./types";
 
 export function UsageSection({
+  serverId,
   title,
   view,
   onRefresh,
   testID,
 }: {
+  serverId: string;
   title: string;
   view: UsageView;
   onRefresh: () => void;
@@ -42,12 +44,20 @@ export function UsageSection({
 
   return (
     <SettingsSection title={title} testID={testID} trailing={refreshButton}>
-      <UsageBody view={view} onRefresh={onRefresh} />
+      <UsageBody serverId={serverId} view={view} onRefresh={onRefresh} />
     </SettingsSection>
   );
 }
 
-function UsageBody({ view, onRefresh }: { view: UsageView; onRefresh: () => void }) {
+function UsageBody({
+  serverId,
+  view,
+  onRefresh,
+}: {
+  serverId: string;
+  view: UsageView;
+  onRefresh: () => void;
+}) {
   if (view.kind === "unavailable") {
     return <UsageMessage text={view.message} />;
   }
@@ -70,7 +80,7 @@ function UsageBody({ view, onRefresh }: { view: UsageView; onRefresh: () => void
     return <UsageMessage text={usageCopy.empty} />;
   }
 
-  return <UsageList reports={view.reports} />;
+  return <UsageList serverId={serverId} reports={view.reports} />;
 }
 
 export function UsageMessage({ text }: { text: string }) {

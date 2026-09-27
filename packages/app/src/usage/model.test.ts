@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatUsageFreshness,
   groupUsageByHost,
+  replaceReport,
   headlineWindow,
   resolveUsagePill,
   resolveUsageRefresh,
@@ -192,5 +193,19 @@ describe("resolveUsageRefresh", () => {
 
   it("is idle before and after a successful refresh", () => {
     expect(resolveUsageRefresh({ isPending: false, error: null })).toBe("idle");
+  });
+});
+
+describe("replaceReport", () => {
+  const alpha = entry({ sourceId: "alpha", planLabel: "Old" });
+  const beta = entry({ sourceId: "beta" });
+
+  it("swaps only the refreshed report, in place", () => {
+    const refreshed = entry({ sourceId: "alpha", planLabel: "New" });
+    expect(replaceReport([alpha, beta], alpha.id, refreshed)).toEqual([refreshed, beta]);
+  });
+
+  it("drops a report the daemon no longer knows", () => {
+    expect(replaceReport([alpha, beta], alpha.id, null)).toEqual([beta]);
   });
 });

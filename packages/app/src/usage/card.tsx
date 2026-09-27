@@ -1,13 +1,22 @@
+import { RefreshCw } from "lucide-react-native";
 import { useMemo } from "react";
 import { Text, View, type StyleProp, type TextStyle } from "react-native";
-import { StyleSheet } from "react-native-unistyles";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import {
+  iconButtonChromeGlyphSize,
+  mutedIconColorMapping,
+  smallIconButtonChromeFrameSize,
+} from "@/components/ui/icon-button-chrome";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { ToolbarButton } from "@/components/ui/pane-content-toolbar";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
 import { useCompactTimeAgo } from "@/hooks/use-compact-time-ago";
 import { UsageBalanceBar } from "./balance-bar";
-import { formatUsageFreshness } from "./model";
+import { usageCopy } from "./copy";
+import { formatUsageFreshness, type UsageRefresh } from "./model";
+import { useReportRefresh } from "./queries";
 import { UsageSourceIcon } from "./source-icon";
 import type { UsageReport, UsageReportEntry } from "./types";
 import { UsageWindowBar } from "./window-bar";
@@ -17,15 +26,21 @@ function statusText(report: UsageReport): string | null {
   return report.status === "error" ? "Error" : "Unavailable";
 }
 
+const ThemedRefreshIcon = withUnistyles(RefreshCw);
+const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
+
 export function UsageCard({
+  serverId,
   entry,
   compact = false,
 }: {
+  serverId: string;
   entry: UsageReportEntry;
   compact?: boolean;
 }) {
   const isCompact = useIsCompactFormFactor();
-  // Where there is no hover the freshness is printed on the card; elsewhere the header's tooltip.
+  const { refresh, refreshState } = useReportRefresh(serverId, entry.id);
+  // Where there is no hover the freshness is printed on the card; elsewhere the Refresh tooltip.
   const showsFreshnessInline = isNative || isCompact;
   const usage = entry.report;
   const status = statusText(usage);
@@ -48,25 +63,27 @@ export function UsageCard({
 
   return (
     <View style={containerStyle}>
-      <Tooltip delayDuration={300} enabledOnDesktop={!isNative}>
-        <TooltipTrigger style={styles.header} accessible={false} testID="usage-card-header">
-          <UsageSourceIcon svg={entry.icon ?? null} size={14} />
-          <Text style={styles.name} numberOfLines={1}>
-            {entry.sourceLabel}
-          </Text>
-          {usage.planLabel ? <StatusBadge label={usage.planLabel} variant="muted" /> : null}
-          <View style={styles.headerSpacer} />
-          {status ? (
-            <View style={styles.statusRow}>
-              <View style={dotStyle} />
-              <Text style={styles.statusLabel}>{status}</Text>
-            </View>
-          ) : null}
-        </TooltipTrigger>
-        <TooltipContent side="top" align="start" testID="usage-freshness-tooltip">
-          <UsageFreshness fetchedAt={entry.fetchedAt} style={styles.tooltipText} />
-        </TooltipContent>
-      </Tooltip>
+      <View style={styles.header}>
+        <UsageSourceIcon svg={entry.icon ?? null} size={14} />
+        <Text style={styles.name} numberOfLines={1}>
+          {entry.sourceLabel}
+        </Text>
+        {usage.planLabel ? <StatusBadge label={usage.planLabel} variant="muted" /> : null}
+        <View style={styles.headerSpacer} />
+        {status ? (
+          <View style={styles.statusRow}>
+            <View style={dotStyle} />
+            <Text style={styles.statusLabel}>{status}</Text>
+          </View>
+        ) : null}
+        <UsageRefreshButton
+          sourceLabel={entry.sourceLabel}
+          fetchedAt={entry.fetchedAt}
+          refreshState={refreshState}
+          onRefresh={refresh}
+          compact={isCompact}
+        />
+      </View>
 
       {usage.error ? (
         <Text style={styles.error} numberOfLines={3}>
@@ -106,22 +123,94 @@ export function UsageCard({
             {footer}
           </Text>
           {showsFreshnessInline ? (
-            <UsageFreshness fetchedAt={entry.fetchedAt} style={styles.freshness} />
+            <UsageFreshness
+              fetchedAt={entry.fetchedAt}
+              style={styles.freshness}
+              testID="usage-freshness"
+            />
           ) : null}
         </View>
+      ) : null}
+
+      {refreshState === "failed" ? (
+        <Text style={styles.error} testID="usage-refresh-error">
+          {usageCopy.refreshFailed}
+        </Text>
       ) : null}
     </View>
   );
 }
 
+/** Refreshes this one report. Its tooltip says when the report on screen was fetched. */
+function UsageRefreshButton({
+  sourceLabel,
+  fetchedAt,
+  refreshState,
+  onRefresh,
+  compact,
+}: {
+  sourceLabel: string;
+  fetchedAt: string;
+  refreshState: UsageRefresh;
+  onRefresh: () => void;
+  compact: boolean;
+}) {
+  const isPending = refreshState === "pending";
+  const iconSize = iconButtonChromeGlyphSize("small", compact);
+  const freshness = useMemo(
+    () => (
+      <UsageFreshness
+        fetchedAt={fetchedAt}
+        style={styles.tooltipText}
+        testID="usage-freshness-tooltip"
+      />
+    ),
+    [fetchedAt],
+  );
+  return (
+    <ToolbarButton
+      label={`${usageCopy.refresh} ${sourceLabel}`}
+      tooltip={freshness}
+      tooltipSide="top"
+      compact={compact}
+      disabled={isPending}
+      onPress={onRefresh}
+      style={compact ? styles.refreshButtonCompact : styles.refreshButton}
+      testID="usage-refresh"
+    >
+      {isPending ? (
+        <ThemedLoadingSpinner size={iconSize} uniProps={mutedIconColorMapping} />
+      ) : (
+        <ThemedRefreshIcon size={iconSize} uniProps={mutedIconColorMapping} />
+      )}
+    </ToolbarButton>
+  );
+}
+
 /** Its own component so the relative-time clock re-renders one `<Text>`, not the card. */
-function UsageFreshness({ fetchedAt, style }: { fetchedAt: string; style: StyleProp<TextStyle> }) {
+function UsageFreshness({
+  fetchedAt,
+  style,
+  testID,
+}: {
+  fetchedAt: string;
+  style: StyleProp<TextStyle>;
+  testID: string;
+}) {
   const elapsed = useCompactTimeAgo(new Date(fetchedAt));
   return (
-    <Text style={style} numberOfLines={1} testID="usage-freshness">
+    <Text style={style} numberOfLines={1} testID={testID}>
       {formatUsageFreshness(elapsed)}
     </Text>
   );
+}
+
+// The Refresh glyph lands on the card's right rail and the header keeps its text height;
+// the button's larger hitbox overhangs both instead of pushing them.
+function iconHitboxOverhang(compact: boolean) {
+  const overhang =
+    (smallIconButtonChromeFrameSize(compact) - iconButtonChromeGlyphSize("small", compact)) / 2;
+  return { marginRight: -overhang, marginVertical: -overhang };
 }
 
 const styles = StyleSheet.create((theme) => ({
@@ -211,7 +300,9 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
   },
   tooltipText: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.base,
+    color: theme.colors.popoverForeground,
+    fontSize: theme.fontSize.sm,
   },
+  refreshButton: iconHitboxOverhang(false),
+  refreshButtonCompact: iconHitboxOverhang(true),
 }));

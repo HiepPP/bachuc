@@ -12,6 +12,7 @@ import { useSessionStore, type SessionState } from "@/stores/session-store";
 import { usageCopy } from "./copy";
 import {
   groupUsageByHost,
+  replaceReport,
   resolveUsagePill,
   resolveUsageRefresh,
   resolveUsageView,
@@ -161,18 +162,11 @@ export function useUsageByHost(): {
  * report ID, which is re-resolved when the model changes (a new key) and when a
  * turn completes (the query is paused while the agent runs, and its data is always
  * stale, so resuming refetches). The report itself is read from the shared cache.
- * `refresh` is the only path that forces the source to fetch, and only this report.
  */
 export function useAgentUsage(
   serverId: string,
   agentId: string,
-): {
-  pill: UsagePill | null;
-  entry: UsageReportEntry | null;
-  refresh: () => void;
-  refreshState: UsageRefresh;
-} {
-  const queryClient = useQueryClient();
+): { pill: UsagePill | null; entry: UsageReportEntry | null } {
   const isConnected = useHostRuntimeIsConnected(serverId);
   const isSupported = useSessionStore((state) => supportsUsage(state.sessions[serverId]));
   const { model, isRunning } = useSessionStore(
@@ -197,19 +191,30 @@ export function useAgentUsage(
     dataShape: "value",
     staleTimeMs: REPORTS_STALE_TIME_MS,
   });
-  const refreshMutation = useMutation({
-    mutationFn: (id: string) => getReport(serverId, id, true),
-    onSuccess: (report, id) => queryClient.setQueryData(reportQueryKey(serverId, id), report),
-  });
-  const { mutate } = refreshMutation;
-  const refresh = useCallback(() => {
-    if (reportId) mutate(reportId);
-  }, [mutate, reportId]);
   const entry = isSupported ? (query.data ?? null) : null;
-  return {
-    pill: resolveUsagePill({ supportsUsage: isSupported, entry }),
-    entry,
-    refresh,
-    refreshState: resolveUsageRefresh(refreshMutation),
-  };
+  return { pill: resolveUsagePill({ supportsUsage: isSupported, entry }), entry };
+}
+
+/**
+ * Forces the source to fetch one report, and only that report. The result replaces
+ * the report wherever it is cached — its own entry and its host's list — so every
+ * surface showing it moves together; until then the previous report stays on screen.
+ */
+export function useReportRefresh(
+  serverId: string,
+  reportId: string,
+): { refresh: () => void; refreshState: UsageRefresh } {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: () => getReport(serverId, reportId, true),
+    onSuccess: (report) => {
+      queryClient.setQueryData(reportQueryKey(serverId, reportId), report);
+      queryClient.setQueryData<UsageReportEntry[]>(usageReportsQueryKey(serverId), (reports) =>
+        reports ? replaceReport(reports, reportId, report) : reports,
+      );
+    },
+  });
+  const { mutate } = mutation;
+  const refresh = useCallback(() => mutate(), [mutate]);
+  return { refresh, refreshState: resolveUsageRefresh(mutation) };
 }

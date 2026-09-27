@@ -55,6 +55,19 @@ export function resolveUsageRefresh(mutation: {
   return "idle";
 }
 
+/**
+ * A host's report list with one report swapped for its refreshed copy, in place.
+ * `null` means the daemon no longer knows the ID, so the report leaves the list.
+ */
+export function replaceReport(
+  reports: readonly UsageReportEntry[],
+  reportId: string,
+  refreshed: UsageReportEntry | null,
+): UsageReportEntry[] {
+  if (!refreshed) return reports.filter((report) => report.id !== reportId);
+  return reports.map((report) => (report.id === reportId ? refreshed : report));
+}
+
 export interface UsageQueryState {
   data: UsageReportEntry[] | undefined;
   error: unknown;

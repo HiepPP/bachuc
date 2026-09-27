@@ -47,6 +47,7 @@ function HostUsageGroup({
   const handleRefresh = useCallback(() => onRefresh(group.serverId), [group.serverId, onRefresh]);
   return (
     <UsageSection
+      serverId={group.serverId}
       title={group.label}
       view={group.view}
       onRefresh={handleRefresh}

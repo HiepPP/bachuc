@@ -6,6 +6,12 @@ import { UsageSection } from "./usage-section";
 export function HostUsageSection({ serverId }: { serverId: string }) {
   const { view, refresh } = useHostUsage(serverId);
   return (
-    <UsageSection title={usageCopy.planUsage} view={view} onRefresh={refresh} testID="usage-card" />
+    <UsageSection
+      serverId={serverId}
+      title={usageCopy.planUsage}
+      view={view}
+      onRefresh={refresh}
+      testID="usage-card"
+    />
   );
 }
