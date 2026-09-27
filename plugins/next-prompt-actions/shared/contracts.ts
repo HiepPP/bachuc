@@ -22,6 +22,7 @@ export const snapshotSchema = z.object({
   enabled: z.boolean(),
   busy: z.boolean(),
   note: z.string(),
+  warning: z.string().optional(),
   candidates: z.array(candidateSchema),
 });
 export type Snapshot = z.infer<typeof snapshotSchema>;

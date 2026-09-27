@@ -88,7 +88,9 @@ Browser and native mobile clients receive no DOM contribution.
 Settings → Next prompt actions → Back to Board after send. Host setting; defaults OFF.
 When ON, any manual send action opens the Board at once while the send finishes in the background.
 The Board refreshes when the send is acknowledged and shows a warning toast if it failed or is uncertain.
-Requires the `board` plugin, which listens for `paseo-board:open`, `paseo-board:sent`, and `paseo-board:send-failed`.
+Requires the `board` plugin, which listens for `paseo-board:v2:open`, `paseo-board:v2:sent`, and `paseo-board:v2:send-failed`.
+
+Missing or disabled Board registration adds a warning to suggestion panels. Manual Send stays available.
 
 ## Jev auto-run
 
@@ -125,3 +127,7 @@ Disable removes owned DOM controls, styles, listeners, and cancels pending evalu
 
 Long threads need only a contiguous timeline tail containing the latest user message and reply.
 Older omitted turns do not hide Send; gaps or a missing latest-turn boundary still fail closed.
+
+Missing evaluator files or Gateway SDK add a specific warning. Auto-run cannot be enabled until restored; manual Send remains available.
+
+Board notifications carry the sending host ID. Update Board on that host for Back to Board support; older listeners safely ignore the versioned events.

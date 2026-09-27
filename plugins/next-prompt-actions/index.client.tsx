@@ -32,12 +32,12 @@ export default function contribute(client: PluginClientContext) {
   const cleanup = install({
     inspect: (scope) => client.rpc(inspectRpc, scope),
     send: (scope, key) => client.rpc(sendRpc, { ...scope, key }),
-    sending(outcome) {
+    sending(outcome, scope) {
       if (!backToBoard.enabled) return;
       // Leave before the acknowledgement; the Board refreshes on success and warns on failure.
-      boardEvent("paseo-board:open");
+      boardEvent("paseo-board:open", scope.serverId);
       void outcome.then((sent) =>
-        boardEvent(sent ? "paseo-board:sent" : "paseo-board:send-failed"),
+        boardEvent(sent ? "paseo-board:sent" : "paseo-board:send-failed", scope.serverId),
       );
     },
   });

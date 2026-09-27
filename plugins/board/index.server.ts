@@ -1,4 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { boardSize } from "./shared/board-size";
@@ -7,7 +8,7 @@ import { projectColors } from "./shared/project-colors";
 import { createRunStore } from "./server/store";
 import { createRunPersistence } from "./server/persistence";
 import { listBoardAgents } from "./server/snapshot";
-import { boardRpc, removeRunRpc, starRunRpc } from "./shared/board";
+import { boardHostRpc, boardRpc, removeRunRpc, starRunRpc } from "./shared/board";
 import { createRecapStore, parseRecap, recapEntry } from "./server/recaps";
 import { recapsRpc } from "./shared/recaps";
 import { firstPromptTitle, isCommandTitle } from "./server/title";
@@ -23,6 +24,9 @@ export default function contribute(server: PluginServerContext) {
     if (controller.signal.aborted) throw new Error("Board stopped.");
   };
   const home = process.env.PASEO_HOME || path.join(homedir(), ".paseo");
+  server.handle(boardHostRpc, () => ({
+    serverId: readFileSync(path.join(home, "server-id"), "utf8").trim(),
+  }));
   const persistence = createRunPersistence(path.join(home, "plugin-data/board/runs.json"));
   const ready = persistence.load().then((state) => {
     if (state) store.restore(state);

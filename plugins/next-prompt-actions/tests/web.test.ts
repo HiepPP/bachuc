@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseHTML } from "linkedom";
-import { binding, install, type Node, type Binding } from "../client/web";
+import { boardEvent, binding, install, type Node, type Binding } from "../client/web";
 import type { Snapshot } from "../shared/contracts";
 import { Engine, type Current } from "../server/engine";
 import { Store } from "../server/store";
@@ -37,6 +37,7 @@ test("v1 radio groups and checkboxes enforce selection, preview exact prompts, s
       },
     },
     async () => false,
+    () => ({ board: false, evaluator: false }),
   );
   const { document, window } = parseHTML(
     '<html><head></head><body><textarea data-composer-input="">draft</textarea><div data-testid="assistant-message"><div data-paseo-markdown-tag="pre"><span data-paseo-markdown-tag="code"></span><button id="copy">Copy</button></div></div></body></html>',
@@ -57,6 +58,8 @@ test("v1 radio groups and checkboxes enforce selection, preview exact prompts, s
   );
   try {
     await pause();
+    assert.match(document.body.textContent!, /Board unavailable/);
+    assert.match(document.body.textContent!, /Jev evaluator unavailable/);
     const radios = document.querySelectorAll('input[type="radio"]');
     const checkbox = document.querySelector('input[type="checkbox"]')!;
     assert.equal(radios.length, 2);
@@ -1062,4 +1065,15 @@ test("Recap Did with nested bullets keeps them as a list in the panel", async ()
     if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
     else Reflect.deleteProperty(globalThis, "MutationObserver");
   }
+});
+
+test("Board notifications carry the sending host and never emit legacy events", () => {
+  const { document } = parseHTML("<html><body></body></html>");
+  const received: string[] = [];
+  document.addEventListener("paseo-board:v2:open", (event: Event) =>
+    received.push((event as CustomEvent).detail.serverId),
+  );
+  document.addEventListener("paseo-board:open", () => received.push("legacy"));
+  boardEvent("paseo-board:open", "local", document as unknown as Parameters<typeof boardEvent>[2]);
+  assert.deepEqual(received, ["local"]);
 });

@@ -25,7 +25,10 @@ test("persisted reservations survive restart without replay or public file permi
     unlinkSync(file);
   }
 });
-function fixture(judge: Judge = async () => true) {
+function fixture(
+  judge: Judge = async () => true,
+  dependencies = () => ({ board: true, evaluator: true }),
+) {
   let current: Current = {
     epoch: "one",
     busy: false,
@@ -59,7 +62,7 @@ function fixture(judge: Judge = async () => true) {
       if (rejectSend) throw new Error("connection lost");
     },
   };
-  const engine = new Engine(store, driver, judge);
+  const engine = new Engine(store, driver, judge, dependencies);
   return {
     engine,
     store,
@@ -444,4 +447,47 @@ test("multiple suggestions require manual selection and context retains user con
   f.engine.started("agent");
   await f.engine.ended(scope, true);
   assert.equal(seen, undefined);
+});
+
+for (const missing of ["board", "evaluator"] as const) {
+  test(`missing ${missing} warns without blocking manual send`, async () => {
+    let evaluations = 0;
+    const f = fixture(
+      async () => {
+        evaluations++;
+        return true;
+      },
+      () => ({
+        board: missing !== "board",
+        evaluator: missing !== "evaluator",
+      }),
+    );
+    const snapshot = await f.engine.inspect(scope);
+    assert.match(
+      snapshot.warning!,
+      missing === "board" ? /Board unavailable/ : /Jev evaluator unavailable/,
+    );
+    assert.equal((await f.engine.toggle(scope, true)).enabled, missing === "board");
+    assert.equal(await f.engine.send(scope, snapshot.candidates[0].key), true);
+    assert.equal(f.sent.length, 1);
+    assert.equal(evaluations, 0);
+  });
+}
+test("evaluator removed after enabling stops auto-run before judgment", async () => {
+  let available = true;
+  let evaluations = 0;
+  const f = fixture(
+    async () => {
+      evaluations++;
+      return true;
+    },
+    () => ({ board: true, evaluator: available }),
+  );
+  await f.engine.toggle(scope, true);
+  f.engine.started(scope.agentId);
+  available = false;
+  await f.engine.ended(scope, true);
+  assert.equal(evaluations, 0);
+  assert.equal(f.sent.length, 0);
+  assert.equal((await f.engine.inspect(scope)).enabled, false);
 });

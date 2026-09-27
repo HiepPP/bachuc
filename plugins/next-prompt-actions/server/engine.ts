@@ -3,6 +3,7 @@ import type { Candidate, Scope, Snapshot } from "../shared/contracts";
 import { gitAction, joinPrompts, parsePrompts } from "../shared/prompts";
 import { selectionAllowed } from "../shared/next-prompts";
 import { Store } from "./store";
+import { dependencyWarning, type Dependencies } from "./dependencies";
 
 export type Row = {
   type: string;
@@ -33,6 +34,7 @@ export class Engine {
     readonly store: Store,
     private driver: Driver,
     private judge: Judge,
+    private dependencies: () => Dependencies = () => ({ board: true, evaluator: true }),
   ) {}
 
   private gen(id: string) {
@@ -83,6 +85,7 @@ export class Engine {
     const note = this.notes.get(scope.agentId);
     return {
       enabled: this.store.get(scope.agentId).enabled,
+      warning: dependencyWarning(this.dependencies()),
       busy: current.busy || this.locks.has(scope.agentId),
       note: note?.generation === this.gen(scope.agentId) ? note.text : "",
       candidates: this.candidates(scope, current),
@@ -95,11 +98,13 @@ export class Engine {
     this.invalidate(scope.agentId);
     this.eligible.delete(scope.agentId);
     const entry = this.store.get(scope.agentId);
-    entry.enabled = enabled;
+    entry.enabled = enabled && this.dependencies().evaluator;
     entry.remaining = 0;
     this.note(
       scope.agentId,
-      enabled ? "Jev enabled for the next new turn. Up to 3 continuations." : "Jev auto-run OFF",
+      entry.enabled
+        ? "Jev enabled for the next new turn. Up to 3 continuations."
+        : "Jev auto-run OFF",
     );
     this.store.save();
     return this.inspect(scope);
@@ -219,6 +224,12 @@ export class Engine {
     if (this.stopped || !this.eligible.delete(scope.agentId)) return;
     const entry = this.store.get(scope.agentId);
     if (!entry.enabled) return;
+    if (!this.dependencies().evaluator) {
+      entry.enabled = false;
+      entry.remaining = 0;
+      this.store.save();
+      return;
+    }
     const generation = this.generations.get(scope.agentId);
     const stamp = this.gen(scope.agentId);
     const controller = new AbortController();

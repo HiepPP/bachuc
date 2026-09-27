@@ -8,6 +8,7 @@ import { Engine } from "./server/engine";
 import { Store } from "./server/store";
 import { createDriver } from "./server/paseo";
 import { createJudge } from "./server/jev";
+import { readDependencies } from "./server/dependencies";
 import { sendSettings } from "./shared/settings";
 
 export default function contribute(server: PluginServerContext) {
@@ -27,6 +28,7 @@ export default function contribute(server: PluginServerContext) {
       return api;
     }, serverId),
     createJudge(root, configFile),
+    () => readDependencies(configFile),
   );
   server.handle(inspectRpc, (input, context) => {
     api = context.paseo;

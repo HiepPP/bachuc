@@ -36,7 +36,10 @@ export interface Document extends Node {
   head: Node;
   body: Node;
   createElement(tag: string): Node;
-  defaultView?: { Event: new (type: string, init?: { bubbles?: boolean }) => object } | null;
+  defaultView?: {
+    Event: new (type: string, init?: { bubbles?: boolean }) => object;
+    CustomEvent?: new (type: string, init: { detail: { serverId: string } }) => object;
+  } | null;
 }
 interface Fiber {
   memoizedProps?: Record<string, unknown>;
@@ -104,13 +107,18 @@ type Controller = {
   inspect(scope: Scope): Promise<Snapshot>;
   send(scope: Scope, key: string | string[]): Promise<{ sent: boolean }>;
   /** Runs on click with the pending outcome, so navigation need not wait for the send. */
-  sending?(outcome: Promise<boolean>): void;
+  sending?(outcome: Promise<boolean>, scope: Scope): void;
 };
 // The Board plugin listens for these events; plugin surfaces cannot open another plugin's surface.
 export type BoardEvent = "paseo-board:open" | "paseo-board:sent" | "paseo-board:send-failed";
-export function boardEvent(name: BoardEvent, doc: Document = document) {
+export function boardEvent(name: BoardEvent, serverId: string, doc: Document = document) {
   const view = doc.defaultView;
-  if (view) doc.dispatchEvent(new view.Event(name));
+  if (view?.CustomEvent)
+    doc.dispatchEvent(
+      new view.CustomEvent(name.replace("paseo-board:", "paseo-board:v2:"), {
+        detail: { serverId },
+      }),
+    );
 }
 const OWNER = "data-next-prompt-actions";
 // Phosphor Icons regular 2.1.1 (MIT), one family per TASTE.md.
@@ -380,6 +388,7 @@ export function install(controller: Controller, doc: Document = document, identi
       snapshot.enabled,
       snapshot.busy,
       snapshot.note,
+      snapshot.warning,
     ]);
     const current = owned.get(block);
     if (current?.structure === structure && current.intact()) {
@@ -400,6 +409,7 @@ export function install(controller: Controller, doc: Document = document, identi
     const note = doc.createElement("div");
     note.setAttribute("class", "npa-note");
     note.setAttribute("role", "status");
+    note.textContent = [snapshot.note, snapshot.warning].filter(Boolean).join(" ");
     const section = doc.createElement("div");
     section.setAttribute("class", "npa-section npa-next");
     ui.appendChild(section);
@@ -428,7 +438,7 @@ export function install(controller: Controller, doc: Document = document, identi
       });
     }
     function update(next: Candidate[], latest: Snapshot) {
-      note.textContent = latest.note;
+      note.textContent = [latest.note, latest.warning].filter(Boolean).join(" ");
       next.forEach((candidate, index) => {
         edits[index].disabled = false;
         sends[index].textContent =
@@ -485,13 +495,16 @@ export function install(controller: Controller, doc: Document = document, identi
           await action(async () => {
             const keys = picked.map((c) => c.key);
             const outcome = controller.send(context, keys.length === 1 ? keys[0] : keys);
-            controller.sending?.(outcome.then((r) => r.sent).catch(() => false));
+            controller.sending?.(
+              outcome.then((r) => r.sent).catch(() => false),
+              context,
+            );
             await outcome;
           }, "Sending...");
         },
       });
       mount((next, latest) => {
-        note.textContent = latest.note;
+        note.textContent = [latest.note, latest.warning].filter(Boolean).join(" ");
         update(next, latest);
       });
       return;
@@ -529,7 +542,10 @@ export function install(controller: Controller, doc: Document = document, identi
         send.textContent = "Sending...";
         void action(async () => {
           const outcome = controller.send(context, candidate.key);
-          controller.sending?.(outcome.then((r) => r.sent).catch(() => false));
+          controller.sending?.(
+            outcome.then((r) => r.sent).catch(() => false),
+            context,
+          );
           await outcome;
         }, "Sending...");
       });

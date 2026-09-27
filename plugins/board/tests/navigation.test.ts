@@ -42,6 +42,7 @@ function harness(platform = "web", hasSidebar = true) {
   });
   for (const installedHost of ["macmini", "macair"]) {
     entry.default!({
+      rpc: async () => ({ serverId: installedHost }),
       addSurface: () => () => {},
       addSidebarItem: () => () => {},
       addSettingsScreen: () => () => {},
@@ -51,12 +52,14 @@ function harness(platform = "web", hasSidebar = true) {
   return { opened, shortcuts, events, select: (value: string) => (host = value) };
 }
 
-test("return uses the thread's Board host, regardless of which installation handles Cmd+D or send", () => {
+test("shortcuts use the selected Board, while scoped events open their installation", () => {
   const h = harness();
   for (const host of ["macair", "macmini", "macair"]) {
     h.select(host);
-    for (const open of [...h.shortcuts, ...h.events]) open();
-    assert.deepEqual(h.opened.splice(0), [host, host, host, host]);
+    for (const open of h.shortcuts) open();
+    assert.deepEqual(h.opened.splice(0), [host, host]);
+    for (const open of h.events) open();
+    assert.deepEqual(h.opened.splice(0), ["macmini", "macair"]);
   }
 });
 

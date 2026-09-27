@@ -1,7 +1,7 @@
 declare const document:
   | {
-      addEventListener(type: string, listener: () => void): void;
-      removeEventListener(type: string, listener: () => void): void;
+      addEventListener(type: string, listener: (event: Event) => void): void;
+      removeEventListener(type: string, listener: (event: Event) => void): void;
     }
   | undefined;
 
@@ -11,7 +11,7 @@ const MISSED_FAILURE_MS = 5_000;
 
 // Other plugins cannot open this plugin's surface. next-prompt-actions opens the Board before
 // its send is acknowledged, then reports the outcome so the Board can refresh or warn.
-export function installBoardEvents(open: () => void) {
+export function installBoardEvents(open: () => void, host: () => string | undefined) {
   if (typeof document === "undefined") return () => {};
   const target = document;
   const report = (sent: boolean) => {
@@ -19,14 +19,24 @@ export function installBoardEvents(open: () => void) {
     if (!subscribers.size && !sent) missedFailureAt = Date.now();
     for (const subscriber of subscribers) subscriber(sent);
   };
-  const listeners: [string, () => void][] = [
-    ["paseo-board:open", open],
-    ["paseo-board:sent", () => report(true)],
-    ["paseo-board:send-failed", () => report(false)],
+  const listeners: [string, (event: Event) => void][] = [
+    ["paseo-board:v2:open", open],
+    ["paseo-board:v2:sent", () => report(true)],
+    ["paseo-board:v2:send-failed", () => report(false)],
   ];
-  for (const [type, listener] of listeners) target.addEventListener(type, listener);
+  const scoped = listeners.map(
+    ([type, listener]) =>
+      [
+        type,
+        (event: Event) => {
+          const serverId = (event as CustomEvent<{ serverId?: unknown }>).detail?.serverId;
+          if (typeof serverId === "string" && serverId === host()) listener(event);
+        },
+      ] as const,
+  );
+  for (const [type, listener] of scoped) target.addEventListener(type, listener);
   return () => {
-    for (const [type, listener] of listeners) target.removeEventListener(type, listener);
+    for (const [type, listener] of scoped) target.removeEventListener(type, listener);
   };
 }
 

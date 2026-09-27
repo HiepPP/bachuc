@@ -58,3 +58,9 @@ export function groupRuns(runs: readonly BoardRun[]) {
   for (const group of projects.values()) group.runs.sort(starredFirst);
   return { projects: [...projects.values()] };
 }
+
+export const boardHostRpc = defineRpc({
+  name: "board.host",
+  input: z.object({}),
+  output: z.object({ serverId: z.string() }),
+});
