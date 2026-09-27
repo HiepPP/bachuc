@@ -21,7 +21,7 @@ export function UsageCard({
 }) {
   const usage = entry.report;
   const status = statusText(usage);
-  const footer = usage.account.label ?? null;
+  const footer = entry.account.label ?? null;
   const balances = usage.balances ?? [];
   const details = usage.details ?? [];
 

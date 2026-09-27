@@ -15,11 +15,13 @@ function entry(input: {
   sourceId?: string;
 }): UsageReportEntry {
   return {
+    id: `${input.sourceId ?? "fixture"}:account-1`,
+    account: {},
+    fetchedAt: "2026-01-01T00:00:00.000Z",
     sourceId: input.sourceId ?? "fixture",
     sourceLabel: "Fixture source",
     ...(input.icon ? { icon: input.icon } : {}),
     report: {
-      account: { key: "account-1" },
       status: "available",
       ...(input.planLabel ? { planLabel: input.planLabel } : {}),
       windows: input.windows ?? [],

@@ -6,11 +6,13 @@ import { installUsageReportsFixture } from "../support/helpers/usage-reports";
 
 function agentEntry(usedPct: number): UsageReportEntry {
   return {
+    id: "fixture:fixture-account",
+    account: {},
+    fetchedAt: "2026-01-01T00:00:00.000Z",
     sourceId: "fixture",
     sourceLabel: "Fixture plan",
     icon: '<svg viewBox="0 0 24 24"><rect width="24" height="24" fill="currentColor"/></svg>',
     report: {
-      account: { key: "fixture-account" },
       status: "available",
       planLabel: "Test plan",
       windows: [
@@ -38,18 +40,19 @@ test.describe("usage composer pill", () => {
   }) => {
     test.setTimeout(180_000);
     const usage = await installUsageReportsFixture(page, {
-      agentEntries: [agentEntry(42), agentEntry(64)],
+      agentReportIds: ["fixture:fixture-account"],
+      lists: [[agentEntry(42)], [agentEntry(64)]],
     });
     const session = await openMockAgent(page);
     try {
       const pill = page.getByTestId("usage-composer-pill");
       await expect(pill).toContainText("42%", { timeout: 30_000 });
-      expect(usage.agentRequests()[0]).toEqual({ agentId: session.agentId, forceRefresh: false });
+      expect(usage.agentRequests()[0]).toEqual({ agentId: session.agentId });
 
-      const requestsBeforeOpen = usage.agentRequests().length;
+      const requestsBeforeOpen = usage.listRequests().length;
       await pill.click();
-      await usage.waitForAgentRequests(requestsBeforeOpen + 1);
-      expect(usage.agentRequests().at(-1)?.forceRefresh).toBe(true);
+      await usage.waitForListRequests(requestsBeforeOpen + 1);
+      expect(usage.listRequests().at(-1)?.forceRefresh).toBe(true);
 
       const popover = page.getByTestId("usage-composer-popover");
       await expect(popover.getByText("Fixture plan", { exact: true })).toBeVisible();
@@ -61,25 +64,27 @@ test.describe("usage composer pill", () => {
     }
   });
 
-  test("refetches the agent's report when a turn completes", async ({ page }) => {
+  test("re-resolves the report ID after a turn and reuses the cached report", async ({ page }) => {
     test.setTimeout(180_000);
     const usage = await installUsageReportsFixture(page, {
-      agentEntries: [agentEntry(42), agentEntry(77)],
+      agentReportIds: ["fixture:fixture-account"],
+      lists: [[agentEntry(42)]],
     });
     const session = await openMockAgent(page);
     try {
       const pill = page.getByTestId("usage-composer-pill");
       await expect(pill).toContainText("42%", { timeout: 30_000 });
       const requestsBeforeTurn = usage.agentRequests().length;
+      const listRequestsBeforeTurn = usage.listRequests().length;
 
       await submitMessage(page, "emit 1 coalesced agent stream update for usage composer pill.");
 
       await usage.waitForAgentRequests(requestsBeforeTurn + 1);
       expect(usage.agentRequests().at(-1)).toEqual({
         agentId: session.agentId,
-        forceRefresh: false,
       });
-      await expect(pill).toContainText("77%");
+      await expect(pill).toContainText("42%");
+      expect(usage.listRequests()).toHaveLength(listRequestsBeforeTurn);
     } finally {
       await session.cleanup();
     }
@@ -87,11 +92,12 @@ test.describe("usage composer pill", () => {
 
   test("is hidden when the agent has no usage report", async ({ page }) => {
     test.setTimeout(180_000);
-    const usage = await installUsageReportsFixture(page, { agentEntries: [null] });
+    const usage = await installUsageReportsFixture(page, { agentReportIds: [null] });
     const session = await openMockAgent(page);
     try {
       await usage.waitForAgentRequests(1);
       await expect(page.getByTestId("usage-composer-pill")).toHaveCount(0);
+      expect(usage.listRequests()).toHaveLength(0);
     } finally {
       await session.cleanup();
     }
@@ -101,7 +107,8 @@ test.describe("usage composer pill", () => {
     test.setTimeout(180_000);
     const usage = await installUsageReportsFixture(page, {
       usageSources: false,
-      agentEntries: [agentEntry(42)],
+      agentReportIds: ["fixture:fixture-account"],
+      lists: [[agentEntry(42)]],
     });
     const session = await openMockAgent(page);
     try {

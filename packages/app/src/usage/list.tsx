@@ -9,7 +9,7 @@ export function UsageList({ reports }: { reports: UsageReportEntry[] }) {
   return (
     <View style={settingsStyles.card}>
       {reports.map((entry, index) => (
-        <Fragment key={`${entry.sourceId}:${entry.report.account.key}`}>
+        <Fragment key={entry.id}>
           {index > 0 ? <View style={styles.divider} /> : null}
           <UsageCard entry={entry} />
         </Fragment>

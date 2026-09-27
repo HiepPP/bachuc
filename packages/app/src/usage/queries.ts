@@ -42,12 +42,19 @@ async function listReports(serverId: string, forceRefresh = false): Promise<Usag
   return (await requireClient(serverId).listUsageReports({ forceRefresh })).reports;
 }
 
-async function getAgentReport(
+function reportQueryKey(serverId: string, reportId: string) {
+  return ["usage", "report", serverId, reportId] as const;
+}
+
+async function getReport(
   serverId: string,
-  agentId: string,
+  reportId: string,
   forceRefresh = false,
 ): Promise<UsageReportEntry | null> {
-  return (await requireClient(serverId).getAgentUsageReport({ agentId, forceRefresh })).entry;
+  return (
+    (await requireClient(serverId).listUsageReports({ reportIds: [reportId], forceRefresh }))
+      .reports[0] ?? null
+  );
 }
 
 function supportsUsage(session: SessionState | undefined): boolean {
@@ -57,7 +64,12 @@ function supportsUsage(session: SessionState | undefined): boolean {
 async function refreshReports(queryClient: QueryClient, serverId: string): Promise<void> {
   await queryClient.fetchQuery({
     queryKey: usageReportsQueryKey(serverId),
-    queryFn: () => listReports(serverId, true),
+    queryFn: async () => {
+      const reports = await listReports(serverId, true);
+      for (const report of reports)
+        queryClient.setQueryData(reportQueryKey(serverId, report.id), report);
+      return reports;
+    },
     staleTime: 0,
   });
 }
@@ -77,7 +89,12 @@ export function useHostUsage(serverId: string): { view: UsageView; refresh: () =
   const isSupported = useSessionStore((state) => supportsUsage(state.sessions[serverId]));
   const query = useFetchQuery({
     queryKey: usageReportsQueryKey(serverId),
-    queryFn: () => listReports(serverId),
+    queryFn: async () => {
+      const reports = await listReports(serverId);
+      for (const report of reports)
+        queryClient.setQueryData(reportQueryKey(serverId, report.id), report);
+      return reports;
+    },
     enabled: isConnected && isSupported,
     dataShape: "list",
     staleTimeMs: REPORTS_STALE_TIME_MS,
@@ -156,23 +173,32 @@ export function useAgentUsage(
       return { model: agent?.model ?? null, isRunning: agent?.status === "running" };
     }),
   );
-  const queryKey = agentUsageQueryKey(serverId, agentId, model);
-  const query = useFetchQuery({
-    queryKey,
-    queryFn: () => getAgentReport(serverId, agentId),
+  const identity = useFetchQuery({
+    queryKey: agentUsageQueryKey(serverId, agentId, model),
+    queryFn: async () =>
+      (await requireClient(serverId).resolveAgentUsageReport({ agentId })).reportId,
     enabled: isConnected && isSupported && !isRunning,
     dataShape: "value",
     staleTimeMs: 0,
   });
+  const reportId = identity.data ?? null;
+  const query = useFetchQuery({
+    queryKey: reportQueryKey(serverId, reportId ?? "none"),
+    queryFn: () => getReport(serverId, reportId!),
+    enabled: isConnected && isSupported && reportId !== null,
+    dataShape: "value",
+    staleTimeMs: REPORTS_STALE_TIME_MS,
+  });
   const refresh = useCallback(() => {
+    if (!reportId) return;
     void queryClient
       .fetchQuery({
-        queryKey: agentUsageQueryKey(serverId, agentId, model),
-        queryFn: () => getAgentReport(serverId, agentId, true),
+        queryKey: reportQueryKey(serverId, reportId),
+        queryFn: () => getReport(serverId, reportId, true),
         staleTime: 0,
       })
       .catch(() => undefined);
-  }, [agentId, model, queryClient, serverId]);
+  }, [queryClient, reportId, serverId]);
   const entry = isSupported ? (query.data ?? null) : null;
   return { pill: resolveUsagePill({ supportsUsage: isSupported, entry }), entry, refresh };
 }

@@ -13,11 +13,13 @@ function report(input: {
   report: Partial<UsageReportEntry["report"]>;
 }): UsageReportEntry {
   return {
+    id: `${input.sourceId}:account`,
+    account: { label: input.sourceId === "alpha" ? "dev@example.com" : undefined },
+    fetchedAt: "2026-01-01T00:00:00.000Z",
     sourceId: input.sourceId,
     sourceLabel: input.sourceLabel,
     icon: ICON,
     report: {
-      account: { key: `${input.sourceId}-account` },
       status: "available",
       windows: [],
       ...input.report,
@@ -37,7 +39,6 @@ test.describe("usage settings", () => {
             sourceLabel: "Alpha plan",
             report: {
               planLabel: "Max",
-              account: { key: "a", label: "dev@example.com" },
               windows: [{ id: "session", label: "Session", usedPct: 7, headline: true }],
             },
           }),

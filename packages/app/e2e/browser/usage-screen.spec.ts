@@ -11,18 +11,23 @@ test.describe("usage screen", () => {
       lists: [
         [
           {
+            id: "alpha:a",
+            account: {},
+            fetchedAt: "2026-01-01T00:00:00.000Z",
             sourceId: "alpha",
             sourceLabel: "Alpha plan",
             report: {
-              account: { key: "a" },
               status: "available",
               windows: [{ id: "weekly", label: "Weekly", usedPct: 31, headline: true }],
             },
           },
           {
+            id: "beta:b",
+            account: {},
+            fetchedAt: "2026-01-01T00:00:00.000Z",
             sourceId: "beta",
             sourceLabel: "Beta plan",
-            report: { account: { key: "b" }, status: "unavailable", windows: [] },
+            report: { status: "unavailable", windows: [] },
           },
         ],
       ],
@@ -47,9 +52,12 @@ test.describe("usage screen", () => {
       lists: [
         [
           {
+            id: "alpha:a",
+            account: {},
+            fetchedAt: "2026-01-01T00:00:00.000Z",
             sourceId: "alpha",
             sourceLabel: "Alpha plan",
-            report: { account: { key: "a" }, status: "available", windows: [] },
+            report: { status: "available", windows: [] },
           },
         ],
       ],
