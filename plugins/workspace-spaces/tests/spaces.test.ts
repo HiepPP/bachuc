@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   addSpace,
   removeSpace,
+  renameSpace,
   adjacent,
   membership,
   moveProject,
@@ -183,4 +184,14 @@ test("gradual second stroke is recognized during an uninterrupted momentum tail"
   ])
     assert.equal(wheel(dx, 0, time), 0);
   assert.equal(wheel(12, 0, 240), 1);
+});
+
+test("renaming trims names and preserves identities and membership", () => {
+  const state = moveProject(addSpace(stateSchema.parse({})), "project", "space-2");
+  const renamed = renameSpace(state, "space-2", "  Công việc  ");
+  assert.deepEqual(renamed.spaces, [state.spaces[0], { id: "space-2", name: "Công việc" }]);
+  assert.deepEqual(renamed.members, state.members);
+  assert.equal(state.spaces[1].name, "Workspace 2");
+  assert.throws(() => renameSpace(state, "space-2", " \n "), /Enter a workspace name/);
+  assert.throws(() => renameSpace(state, "missing", "Work"), /no longer exists/);
 });

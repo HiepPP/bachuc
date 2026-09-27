@@ -9,9 +9,16 @@ import {
   type SidebarController,
   type SidebarSnapshot,
 } from "../client/sidebar-state";
-import { addSpace, moveProject, projectKey, removeSpace, stateSchema } from "../shared/spaces";
+import {
+  addSpace,
+  moveProject,
+  projectKey,
+  removeSpace,
+  renameSpace,
+  stateSchema,
+} from "../shared/spaces";
 
-const fixture = `<html><head></head><body><aside><section><div data-testid="sidebar-project-workspace-list-scroll"><div role="group" id="p"><button data-testid="sidebar-project-row-repo:p">P</button><span>Existing agent</span></div><div role="group" id="q"><button data-testid="sidebar-project-row-repo:q">Q</button></div><div role="group" id="unknown"><button data-testid="sidebar-project-row-other">Other host</button></div></div></section></aside><main>Chat</main><div role="menu"><div data-testid="sidebar-project-menu-open-settings-repo:p">Settings</div></div></body></html>`;
+const fixture = `<html><head></head><body><aside><section><div data-testid="sidebar-project-workspace-list-scroll"><div id="workspace-heading"><div>Workspaces</div><div><button data-testid="sidebar-display-preferences-menu">Display preferences</button></div></div><div role="group" id="p"><button data-testid="sidebar-project-row-repo:p">P</button><span>Existing agent</span></div><div role="group" id="q"><button data-testid="sidebar-project-row-repo:q">Q</button></div><div role="group" id="unknown"><button data-testid="sidebar-project-row-other">Other host</button></div></div></section></aside><main>Chat</main><div role="menu"><div data-testid="sidebar-project-menu-open-settings-repo:p">Settings</div></div></body></html>`;
 function setup(html = fixture, moveSucceeded = true, thirdSpace = false) {
   const { document, window } = parseHTML(html);
   let state = addSpace(stateSchema.parse({}));
@@ -43,6 +50,12 @@ function setup(html = fixture, moveSucceeded = true, thirdSpace = false) {
       listener();
     },
     create: async () => true,
+    rename: async (id: string, name: string) => {
+      if (!moveSucceeded) return false;
+      snapshot = { ...snapshot, state: renameSpace(snapshot.state, id, name) };
+      listener();
+      return true;
+    },
     remove: async (id: string) => {
       snapshot = { ...snapshot, state: removeSpace(snapshot.state, id) };
       listener();
@@ -316,4 +329,112 @@ test("initial load failure shows Refresh without editable defaults, then restore
   } finally {
     cleanup();
   }
+});
+
+test("tab rename saves its name without changing selection or project visibility", async () => {
+  const f = setup();
+  try {
+    const tab = f.document.querySelector('[aria-label="Workspace 2"]')!;
+    tab.click();
+    tab.dispatchEvent(new f.window.Event("contextmenu", { bubbles: true }));
+    const actions = f.document.querySelector(".paseo-spaces-bar > .paseo-spaces-menu")!;
+    actions.querySelector("button")!.click();
+    const input = actions.querySelector("input")!;
+    assert.equal(input.value, "Workspace 2");
+    input.value = "  Công việc  ";
+    const enter = new f.window.Event("keydown", { bubbles: true, cancelable: true });
+    Object.assign(enter, { key: "Enter" });
+    input.dispatchEvent(enter);
+    await Promise.resolve();
+    const renamed = f.document.querySelector('[role="tab"][aria-label="Công việc"]')!;
+    assert.equal(renamed.textContent, "2");
+    assert.equal(renamed.getAttribute("title"), "Công việc");
+    assert.equal(f.document.querySelector("#workspace-heading > div")!.textContent, "Công việc");
+    assert.equal(renamed.getAttribute("aria-selected"), "true");
+    assert.equal(f.document.querySelector("#p")!.hasAttribute("data-paseo-space-hidden"), false);
+    assert.equal(input.isConnected, false);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("rename rejects blank names, keeps failed drafts, and Escape cancels", async () => {
+  const f = setup(fixture, false);
+  try {
+    f.document
+      .querySelector('[aria-label="Workspace 1"]')!
+      .dispatchEvent(new f.window.Event("contextmenu", { bubbles: true }));
+    const actions = f.document.querySelector(".paseo-spaces-bar > .paseo-spaces-menu")!;
+    actions.querySelector("button")!.click();
+    const input = actions.querySelector("input")!;
+    const save = actions.querySelector("button")!;
+    input.value = "   ";
+    input.dispatchEvent(new f.window.Event("input"));
+    assert.equal(save.hasAttribute("disabled"), true);
+    input.value = "Draft";
+    input.dispatchEvent(new f.window.Event("input"));
+    save.click();
+    await Promise.resolve();
+    assert.equal(input.isConnected, true);
+    assert.equal(input.value, "Draft");
+    assert.equal(save.hasAttribute("disabled"), false);
+    const escape = new f.window.Event("keydown", { bubbles: true });
+    Object.assign(escape, { key: "Escape" });
+    input.dispatchEvent(escape);
+    assert.equal(input.isConnected, false);
+    assert.ok(f.document.querySelector('[role="tab"][aria-label="Workspace 1"]'));
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("rename persists through refresh and revision conflict preserves saved name", async () => {
+  let saved = addSpace(stateSchema.parse({}));
+  let conflict = false;
+  const controller = createSidebarController({
+    rpc: async (contract: { name: string }, input: { revision: string; values: typeof saved }) => {
+      if (contract.name === "spaces.catalog") return { projects: [] };
+      if (contract.name.endsWith(".read"))
+        return { status: "ready", revision: "r1", values: saved };
+      assert.equal(input.revision, "r1");
+      if (conflict) return { status: "conflict", error: "Revision conflict" };
+      saved = input.values;
+      return { status: "saved", revision: "r1", values: saved };
+    },
+  } as unknown as Parameters<typeof createSidebarController>[0]);
+  try {
+    await controller.refresh();
+    assert.equal(await controller.rename("space-2", "Work"), true);
+    await controller.refresh();
+    assert.equal(controller.get()!.state.spaces[1].name, "Work");
+    conflict = true;
+    assert.equal(await controller.rename("space-2", "Other"), false);
+    assert.equal(controller.get()!.state.spaces[1].name, "Work");
+    assert.match(controller.get()!.error, /Revision conflict/);
+  } finally {
+    controller.stop();
+  }
+});
+
+test("heading follows selection, survives host rerenders, and restores on cleanup", async () => {
+  const f = setup();
+  const heading = f.document.querySelector("#workspace-heading > div")!;
+  try {
+    assert.equal(heading.textContent, "Workspace 1");
+    f.document.querySelector('[aria-label="Workspace 2"]')!.click();
+    assert.equal(heading.textContent, "Workspace 2");
+    heading.firstChild!.nodeValue = "Workspaces";
+    f.mutations();
+    await Promise.resolve();
+    assert.equal(heading.textContent, "Workspace 2");
+    f.update("Host offline");
+    assert.equal(heading.textContent, "Workspaces");
+    f.update("");
+    assert.equal(heading.textContent, "Workspace 2");
+  } finally {
+    f.cleanup();
+  }
+  assert.equal(heading.textContent, "Workspaces");
+  assert.equal(heading.hasAttribute("data-paseo-space-heading"), false);
+  assert.equal(heading.hasAttribute("title"), false);
 });

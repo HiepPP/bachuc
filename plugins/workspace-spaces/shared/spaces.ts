@@ -46,6 +46,16 @@ export function addSpace(state: SpacesState): SpacesState {
     spaces: [...state.spaces, { id: `space-${number}`, name: `Workspace ${number}` }],
   });
 }
+export function renameSpace(state: SpacesState, id: string, name: string): SpacesState {
+  if (!state.spaces.some((space) => space.id === id))
+    throw new Error("Workspace no longer exists. Refresh first.");
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Enter a workspace name.");
+  return stateSchema.parse({
+    ...state,
+    spaces: state.spaces.map((space) => (space.id === id ? { ...space, name: trimmed } : space)),
+  });
+}
 export function moveProject(state: SpacesState, key: string, target: string): SpacesState {
   if (!state.spaces.some((s) => s.id === target))
     throw new Error("Workspace no longer exists. Refresh and try again.");

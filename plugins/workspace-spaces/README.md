@@ -1,12 +1,17 @@
 # Workspace Spaces
 
 Arc-style numbered Spaces inside Paseo's existing desktop left sidebar.
-The compact bottom strip uses numbered tabs without a caption. Use **+** to create another Space.
+The sidebar Workspaces heading shows the selected Space name.
+The compact bottom strip always uses numbered tabs; hover a tab to see its name. Use **+** to create another Space.
 Open a project's existing context menu or three-dot menu and choose a destination under
 **Move to workspace**. The whole project group, including its coding sessions, follows.
 The menu closes after a successful move and stays open if saving fails.
 Horizontal trackpad gestures across the project list switch adjacent Spaces without wrapping.
-Right-click a numbered tab (or focus it and press Delete) to remove that Space.
+Right-click a tab (or focus it and press the context-menu key) and choose **Rename workspace**.
+Enter a name, then press Enter or **Save**. **Cancel** or Escape discards the edit.
+Names are trimmed; blank names are rejected. Renaming preserves projects and the selected Space.
+The standalone Spaces page also offers **Rename workspace**.
+The same tab menu (also opened with Delete) lets you remove that Space.
 Its projects move atomically to the preceding Space, or the next one when removing the first.
 For example, removing Space 2 moves its projects to Space 1.
 The last Space cannot be removed. A failed save preserves both the Space and its memberships.

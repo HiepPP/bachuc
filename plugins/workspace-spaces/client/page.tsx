@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { PanResponder, Pressable, ScrollView, Text, View } from "react-native";
+import { PanResponder, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useRpc, useSettings, type PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { SettingsSelect } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -11,6 +11,7 @@ import {
   moveProject,
   preferences,
   projectKey,
+  renameSpace,
 } from "../shared/spaces";
 import { bindWheel } from "./web";
 import { touchDirection } from "./gesture";
@@ -31,6 +32,7 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
   });
   const [active, setActive] = useState(selections.get(host.id) ?? "space-1");
   const [moving, setMoving] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -45,6 +47,7 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
     setActive(id);
     selections.set(host.id, id);
     setMoving(null);
+    setRenaming(null);
     setNotice("");
   };
   const switchRef = useRef((_direction: number) => {});
@@ -86,6 +89,20 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
         select(next.spaces[next.spaces.length - 1].id);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not create workspace.");
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  }
+  async function rename() {
+    if (settings.status !== "ready" || pending.current || !renaming) return;
+    pending.current = true;
+    setBusy(true);
+    try {
+      const next = renameSpace(settings.values, renaming.id, renaming.name);
+      if (await settings.save(next, settings.revision)) setRenaming(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not rename workspace.");
     } finally {
       pending.current = false;
       setBusy(false);
@@ -165,6 +182,55 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
               {notice}
             </Text>
           ) : null}
+          {renaming ? (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              <TextInput
+                accessibilityLabel="Workspace name"
+                autoFocus
+                selectTextOnFocus
+                value={renaming.name}
+                editable={!busy}
+                onChangeText={(name) => setRenaming({ ...renaming, name })}
+                onSubmitEditing={() => {
+                  void rename();
+                }}
+                style={{ ...color, ...button, flexGrow: 1, minWidth: 120 }}
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy || !renaming.name.trim()}
+                onPress={() => {
+                  void rename();
+                }}
+                style={button}
+              >
+                <Text style={color}>Save</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy}
+                onPress={() => setRenaming(null)}
+                style={button}
+              >
+                <Text style={color}>Cancel</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy || settings.saving}
+              onPress={() => {
+                const space = settings.values.spaces.find((s) => s.id === selected);
+                if (space) {
+                  setNotice("");
+                  setRenaming({ ...space });
+                }
+              }}
+              style={{ ...button, alignSelf: "flex-start" }}
+            >
+              <Text style={color}>Rename workspace</Text>
+            </Pressable>
+          )}
           <View ref={region} style={{ flex: 1, minHeight: 100 }} {...pan.panHandlers}>
             <ScrollView
               ref={scroll}
@@ -267,7 +333,7 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
           </Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <ScrollView horizontal style={{ flex: 1 }} contentContainerStyle={{ gap: 8 }}>
-              {settings.values.spaces.map((space) => (
+              {settings.values.spaces.map((space, index) => (
                 <Pressable
                   key={space.id}
                   accessibilityRole="tab"
@@ -282,7 +348,7 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
                     borderColor: selected === space.id ? theme.colors.foreground : "transparent",
                   }}
                 >
-                  <Text style={color}>{space.name.replace(/^Workspace /, "")}</Text>
+                  <Text style={color}>{index + 1}</Text>
                 </Pressable>
               ))}
             </ScrollView>

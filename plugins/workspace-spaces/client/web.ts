@@ -41,6 +41,10 @@ export interface DomNode {
     options: { duration: number; easing: string; fill: string },
   ): SlideAnimation;
   dispatchEvent(event: DomEvent): boolean;
+  firstChild: { nodeValue: string | null } | null;
+  value?: string;
+  focus?(): void;
+  select?(): void;
   textContent: string | null;
   parentElement: DomNode | null;
   isConnected: boolean;
@@ -107,6 +111,8 @@ export function mountSidebar(
   const css = doc.createElement("style");
   css.setAttribute(OWNER, "true");
   css.textContent = `[${HIDDEN}]{display:none!important}.paseo-spaces-bar{flex-shrink:0;padding:6px 10px;display:flex;flex-direction:column;gap:0;border-top:1px solid #8883;font:13px system-ui;color:inherit}.paseo-spaces-tabs{display:flex;gap:4px;overflow-x:auto;padding:2px}.paseo-spaces-bar [role=status]:empty{display:none}.paseo-spaces-bar .paseo-spaces-tabs button{min-width:26px;height:26px;padding:0 7px;border-radius:6px;font-size:12px;line-height:24px}.paseo-spaces-bar button,.paseo-spaces-menu button{font:inherit;color:inherit;background:transparent;border:1px solid #8883;border-radius:8px;padding:8px 12px;cursor:pointer;flex-shrink:0}.paseo-spaces-bar button[aria-selected=true]{background:#7660de;color:white;border-color:transparent}.paseo-spaces-bar button:focus-visible,.paseo-spaces-menu button:focus-visible{outline:2px solid #7660de;outline-offset:2px}.paseo-spaces-menu{display:flex;flex-direction:column;gap:2px;border-top:1px solid #8883;margin-top:4px;padding:6px 4px 2px;font:12px/1.3 system-ui;color:inherit}.paseo-spaces-menu>div{padding:2px 8px 5px;font-size:10px;font-weight:500;opacity:.6}.paseo-spaces-menu button{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:28px;padding:5px 8px;border:0;border-radius:5px;text-align:left;font:inherit;line-height:18px}.paseo-spaces-menu button:hover:not(:disabled){background:#8882}.paseo-spaces-menu button[aria-checked=true]{background:#7660de14;font-weight:500}.paseo-spaces-menu button[aria-checked=true]::after{content:"✓";font-size:12px;color:#8b79df}.paseo-spaces-bar button:disabled,.paseo-spaces-menu button:disabled{opacity:.5;cursor:default}`;
+  css.textContent +=
+    "[data-paseo-space-heading]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}";
   doc.head.appendChild(css);
   const bar = doc.createElement("div");
   bar.setAttribute("class", "paseo-spaces-bar");
@@ -123,9 +129,37 @@ export function mountSidebar(
   actions.setAttribute("class", "paseo-spaces-menu");
   actions.setAttribute("role", "menu");
   const closeActions = () => {
+    actions.setAttribute("role", "menu");
     actions.remove();
     actions.textContent = "";
   };
+  const headings = new Map<DomNode, { text: string; title: string | null }>();
+  function updateHeading(name: string | null) {
+    const marker = scroll?.querySelector('[data-testid="sidebar-display-preferences-menu"]');
+    let parent = marker?.parentElement;
+    while (parent && parent !== scroll) {
+      const heading = Array.from(parent.querySelectorAll("div,span")).find(
+        (node) =>
+          !node.querySelector("*") && (headings.has(node) || node.textContent === "Workspaces"),
+      );
+      if (heading) {
+        if (!headings.has(heading))
+          headings.set(heading, {
+            text: heading.textContent ?? "Workspaces",
+            title: heading.getAttribute("title"),
+          });
+        const original = headings.get(heading)!;
+        const text = name ?? original.text;
+        // Preserve React's text node so subsequent host renders can still update it.
+        if (heading.firstChild && heading.textContent !== text) heading.firstChild.nodeValue = text;
+        heading.setAttribute("data-paseo-space-heading", "true");
+        if (heading.getAttribute("title") !== text) heading.setAttribute("title", text);
+        break;
+      }
+      parent = parent.parentElement;
+    }
+    for (const heading of headings.keys()) if (!heading.isConnected) headings.delete(heading);
+  }
   const hidden = new Set<DomNode>();
   const menus = new Set<DomNode>();
   let scroll: DomNode | null = null,
@@ -272,14 +306,15 @@ export function mountSidebar(
         previous.find((id) => snap.state.spaces.some((s) => s.id === id)) ??
         snap.state.spaces[0].id;
     }
+    updateHeading(snap.error ? null : snap.state.spaces.find((space) => space.id === active)!.name);
     previousOrder = snap.state.spaces.map((s) => s.id);
     const stamp = JSON.stringify([active, snap.state.spaces, snap.busy, snap.error]);
     if (stamp !== signature) {
       signature = stamp;
       tabs.textContent = "";
       error.textContent = snap.error ? `${snap.error} Use Refresh to retry.` : "";
-      for (const space of snap.state.spaces) {
-        const b = button(tabs, space.name.replace(/^Workspace /, ""), () => select(space.id));
+      for (const [index, space] of snap.state.spaces.entries()) {
+        const b = button(tabs, String(index + 1), () => select(space.id));
         b.setAttribute("role", "tab");
         b.setAttribute("aria-label", space.name);
         b.setAttribute("title", space.name);
@@ -288,6 +323,53 @@ export function mountSidebar(
           closeActions();
           const current = controller.get();
           if (!current) return;
+          const rename = button(
+            actions,
+            "Rename workspace",
+            () => {
+              closeActions();
+              actions.setAttribute("role", "group");
+              const input = doc.createElement("input");
+              input.setAttribute("aria-label", "Workspace name");
+              input.value = space.name;
+              input.style.cssText =
+                "font:inherit;color:inherit;background:transparent;border:1px solid #8886;border-radius:5px;padding:6px;min-width:0;width:100%;box-sizing:border-box";
+              actions.appendChild(input);
+              let saving = false;
+              const save = async () => {
+                if (saving || !input.value?.trim()) return;
+                saving = true;
+                input.setAttribute("disabled", "");
+                submit.setAttribute("disabled", "");
+                const ok = await controller.rename(space.id, input.value);
+                saving = false;
+                if (stopped || !input.isConnected) return;
+                input.removeAttribute("disabled");
+                submit.removeAttribute("disabled");
+                if (ok) closeActions();
+                else input.focus?.();
+              };
+              const submit = button(actions, "Save", () => {
+                void save();
+              });
+              button(actions, "Cancel", closeActions);
+              input.addEventListener("input", () => {
+                if (input.value?.trim()) submit.removeAttribute("disabled");
+                else submit.setAttribute("disabled", "");
+              });
+              input.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void save();
+                }
+              });
+              bar.appendChild(actions);
+              input.focus?.();
+              input.select?.();
+            },
+            current.busy,
+          );
+          rename.setAttribute("role", "menuitem");
           const last = current.state.spaces.length === 1;
           const target = last ? null : removalTarget(current.state, space.id);
           const name = current.state.spaces.find((s) => s.id === target)?.name;
@@ -469,6 +551,12 @@ export function mountSidebar(
     doc.removeEventListener("keydown", escape);
     closeActions();
     bar.remove();
+    for (const [heading, original] of headings) {
+      if (heading.firstChild) heading.firstChild.nodeValue = original.text;
+      heading.removeAttribute("data-paseo-space-heading");
+      if (original.title === null) heading.removeAttribute("title");
+      else heading.setAttribute("title", original.title);
+    }
     css.remove();
     controller.stop();
   };

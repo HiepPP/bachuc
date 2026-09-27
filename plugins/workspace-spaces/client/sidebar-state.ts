@@ -3,6 +3,7 @@ import type { PluginClientContext } from "@getpaseo/plugin/client";
 import {
   addSpace,
   removeSpace,
+  renameSpace,
   catalogRpc,
   moveProject,
   projectKey,
@@ -126,6 +127,7 @@ export function createSidebarController(client: Pick<PluginClientContext, "rpc">
     },
     refresh,
     create: () => save(addSpace),
+    rename: (id: string, name: string) => save((state) => renameSpace(state, id, name)),
     remove: (id: string) => save((state) => removeSpace(state, id)),
     move: (id: string, target: string) =>
       save((state) => {
