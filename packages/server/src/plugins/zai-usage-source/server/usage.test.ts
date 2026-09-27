@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchUsage } from "./usage.js";
+import { identify, fetchUsage } from "./usage.js";
 import type { UsageReport } from "@getpaseo/plugin/server/usage";
 
 function mockFetch(handlers: Map<string, () => Response>): typeof fetch {
@@ -116,4 +116,15 @@ describe("zai usage source", () => {
       details: expect.arrayContaining([{ id: "status", label: "Status", value: "VALID" }]),
     });
   });
+});
+
+it("identify uses the configured zai account key", async () => {
+  const previous = process.env["ZAI_API_KEY"];
+  try {
+    process.env["ZAI_API_KEY"] = "fixture-token";
+    expect(await identify()).toEqual({ key: "default" });
+  } finally {
+    if (previous === undefined) delete process.env["ZAI_API_KEY"];
+    else process.env["ZAI_API_KEY"] = previous;
+  }
 });

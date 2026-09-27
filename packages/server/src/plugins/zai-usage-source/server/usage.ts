@@ -57,11 +57,14 @@ export async function fetchUsage(
   }
 
   return {
-    account: { key: "default" },
     status: "available",
     planLabel: sub.productName || undefined,
     windows: [],
     balances: [],
     details,
   };
+}
+
+export async function identify() {
+  return process.env["ZAI_API_KEY"] || process.env["GLM_API_KEY"] ? { key: "default" } : null;
 }

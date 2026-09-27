@@ -258,11 +258,32 @@ export async function fetchUsage(
   if (windows[0]) windows[0].headline = true;
 
   return {
-    account: { key: "default" },
     status: windows.length > 0 ? "available" : "unavailable",
     planLabel: undefined,
     windows,
     balances: [],
     details: [],
   };
+}
+
+export async function identify() {
+  if (process.env["MINIMAX_API_KEY"]) return { key: "default" };
+  const home = join(homedir(), ".mmx");
+  try {
+    const credentials = MiniMaxCredentialsSchema.parse(
+      JSON.parse(await fs.readFile(join(home, "credentials.json"), "utf8")),
+    );
+    if (credentials.access_token) return { key: "default" };
+  } catch {
+    /* Check config next. */
+  }
+  try {
+    const config = MiniMaxConfigSchema.parse(
+      JSON.parse(await fs.readFile(join(home, "config.json"), "utf8")),
+    );
+    if (config.api_key || config.oauth?.access_token) return { key: "default" };
+  } catch {
+    /* No configured account. */
+  }
+  return null;
 }

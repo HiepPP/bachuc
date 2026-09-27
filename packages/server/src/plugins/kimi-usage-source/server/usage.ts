@@ -315,11 +315,32 @@ export async function fetchUsage(
   if (windows[0]) windows[0].headline = true;
 
   return {
-    account: { key: "default" },
     status: "available",
     planLabel: undefined,
     windows,
     balances: [],
     details: [],
   };
+}
+
+export async function identify() {
+  if (process.env["KIMI_TOKEN"] || process.env["KIMI_API_KEY"]) return { key: "default" };
+  const home = homedir();
+  const paths = [
+    join(
+      process.env["KIMI_CODE_HOME"] || join(home, ".kimi-code"),
+      "credentials",
+      "kimi-code.json",
+    ),
+    join(home, ".kimi", "credentials", "kimi-code.json"),
+  ];
+  for (const path of paths) {
+    try {
+      const auth = KimiAuthSchema.parse(JSON.parse(await fs.readFile(path, "utf8")));
+      if (auth.access_token) return { key: "default" };
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }

@@ -75,11 +75,19 @@ export async function fetchUsage(
     : [];
 
   return {
-    account: { key: "default" },
     status: "available",
     planLabel: resp.copilot_plan || undefined,
     windows: [],
     balances: [],
     details,
   };
+}
+
+export async function identify() {
+  const token =
+    process.env["COPILOT_TOKEN"] ||
+    process.env["GITHUB_TOKEN"] ||
+    process.env["GITHUB_PAT"] ||
+    (await readGithubCliToken());
+  return token ? { key: "default" } : null;
 }

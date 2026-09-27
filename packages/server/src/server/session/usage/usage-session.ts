@@ -14,12 +14,10 @@ export interface UsageSessionOptions {
   runtime?: {
     listUsageReports(options: {
       forceRefresh?: boolean;
+      reportIds?: string[];
       references: UsageReference[];
     }): Promise<UsageReportEntry[]>;
-    fetchUsageReference(
-      reference: UsageReference,
-      options: { forceRefresh?: boolean },
-    ): Promise<UsageReportEntry | null>;
+    resolveUsageReference(reference: UsageReference): Promise<string | null>;
     listLegacyUsage(): Promise<{ fetchedAt: string; providers: ProviderUsage[] }>;
   };
   logger: pino.Logger;
@@ -33,15 +31,21 @@ export class UsageSession {
   ): Promise<void> {
     try {
       if (!this.options.runtime) throw new Error("Plugin runtime is unavailable");
-      const references = (
-        await Promise.all(
-          this.options
-            .listAgents()
-            .map(async (agent) => agent.session?.getUsageReference?.().catch(() => null) ?? null),
-        )
-      ).filter((reference): reference is UsageReference => reference !== null);
+      const references =
+        msg.reportIds === undefined
+          ? (
+              await Promise.all(
+                this.options
+                  .listAgents()
+                  .map(
+                    async (agent) => agent.session?.getUsageReference?.().catch(() => null) ?? null,
+                  ),
+              )
+            ).filter((reference): reference is UsageReference => reference !== null)
+          : [];
       const reports = await this.options.runtime.listUsageReports({
         forceRefresh: msg.forceRefresh,
+        reportIds: msg.reportIds,
         references,
       });
       this.options.emit({
@@ -53,24 +57,26 @@ export class UsageSession {
     }
   }
 
-  async handleGetAgentReport(
-    msg: Extract<SessionInboundMessage, { type: "agent.get_usage_report.request" }>,
+  async handleResolveAgentReport(
+    msg: Extract<SessionInboundMessage, { type: "agent.resolve_usage_report.request" }>,
   ): Promise<void> {
     try {
       if (!this.options.runtime) throw new Error("Plugin runtime is unavailable");
-      const reference =
-        (await this.options.getAgent(msg.agentId)?.session?.getUsageReference?.()) ?? null;
-      const entry = reference
-        ? await this.options.runtime.fetchUsageReference(reference, {
-            forceRefresh: msg.forceRefresh,
-          })
+      const agent = this.options.getAgent(msg.agentId);
+      if (!agent) {
+        this.emitError(msg, new Error(`Agent not found: ${msg.agentId}`), "agent_not_found");
+        return;
+      }
+      const reference = (await agent.session?.getUsageReference?.()) ?? null;
+      const reportId = reference
+        ? await this.options.runtime.resolveUsageReference(reference)
         : null;
       this.options.emit({
-        type: "agent.get_usage_report.response",
-        payload: { requestId: msg.requestId, entry },
+        type: "agent.resolve_usage_report.response",
+        payload: { requestId: msg.requestId, reportId },
       });
     } catch (error) {
-      this.emitError(msg, error, "agent_get_usage_report_failed");
+      this.emitError(msg, error, "agent_resolve_usage_report_failed");
     }
   }
 
@@ -107,7 +113,7 @@ export class UsageSession {
   private emitError(
     msg: Extract<
       SessionInboundMessage,
-      { type: "usage.list_reports.request" | "agent.get_usage_report.request" }
+      { type: "usage.list_reports.request" | "agent.resolve_usage_report.request" }
     >,
     error: unknown,
     code: string,

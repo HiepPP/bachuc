@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchUsage } from "./usage.js";
+import { identify, fetchUsage } from "./usage.js";
 import type { UsageReport } from "@getpaseo/plugin/server/usage";
 
 function writeMiniMaxConfig(dir: string, payload: Record<string, unknown>): void {
@@ -312,4 +312,15 @@ describe("minimax usage source", () => {
       ]),
     });
   });
+});
+
+it("identify uses the configured minimax account key", async () => {
+  const previous = process.env["MINIMAX_API_KEY"];
+  try {
+    process.env["MINIMAX_API_KEY"] = "fixture-token";
+    expect(await identify()).toEqual({ key: "default" });
+  } finally {
+    if (previous === undefined) delete process.env["MINIMAX_API_KEY"];
+    else process.env["MINIMAX_API_KEY"] = previous;
+  }
 });

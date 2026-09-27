@@ -362,7 +362,10 @@ export function createPluginWorker(options: {
   }
 
   function handleUsageRequest(
-    message: Extract<PluginProcessRequest, { type: "usage.fetch" | "usage.discover" }>,
+    message: Extract<
+      PluginProcessRequest,
+      { type: "usage.identify" | "usage.fetch" | "usage.discover" }
+    >,
   ): void {
     void (async () => {
       const source = usageSources.get(message.sourceId);
@@ -370,7 +373,11 @@ export function createPluginWorker(options: {
       if (message.type === "usage.discover")
         return jsonTransportValue(source.discover ? await source.discover() : []);
       const input = await source.input.parseAsync(message.input);
-      return jsonTransportValue(await source.fetch(input));
+      return jsonTransportValue(
+        message.type === "usage.identify"
+          ? await source.identify(input)
+          : await source.fetch(input),
+      );
     })().then(
       (output) => send({ type: "result", requestId: message.requestId, output }),
       (error) => send({ type: "error", requestId: message.requestId, error: describeError(error) }),
@@ -380,6 +387,7 @@ export function createPluginWorker(options: {
   function rejectWhileStopping(message: PluginProcessRequest): void {
     if (
       message.type === "provider.catalog_key" ||
+      message.type === "usage.identify" ||
       message.type === "usage.fetch" ||
       message.type === "usage.discover"
     ) {
@@ -456,7 +464,11 @@ export function createPluginWorker(options: {
       );
       return;
     }
-    if (message.type === "usage.fetch" || message.type === "usage.discover") {
+    if (
+      message.type === "usage.identify" ||
+      message.type === "usage.fetch" ||
+      message.type === "usage.discover"
+    ) {
       handleUsageRequest(message);
       return;
     }

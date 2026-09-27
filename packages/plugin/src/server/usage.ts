@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { ZodType } from "zod";
 import type { JsonValue } from "@getpaseo/protocol/agent-types";
 
@@ -32,7 +33,6 @@ export interface UsageDetail {
 }
 
 export interface UsageReport {
-  account: { key: string; label?: string };
   status: "available" | "unavailable" | "error";
   planLabel?: string;
   windows: UsageWindow[];
@@ -46,6 +46,8 @@ export interface UsageSourceRegistration {
   label: string;
   icon?: string;
   input: ZodType;
+  /** Stable account identity, resolved without fetching usage. */
+  identify(input: unknown): Promise<{ key: string; label?: string } | null>;
   fetch(input: unknown): Promise<UsageReport>;
   discover?(): Promise<JsonValue[]>;
 }
@@ -108,9 +110,12 @@ export function usedPctOf(
   return (used / limit) * 100;
 }
 
-export function unavailableUsage(accountKey = "default"): UsageReport {
+export function hashAccountKey(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+export function unavailableUsage(): UsageReport {
   return {
-    account: { key: accountKey },
     status: "unavailable",
     windows: [],
     balances: [],

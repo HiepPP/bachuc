@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
 import {
   UsageReportSchema,
-  type UsageReportEntry,
   type ProviderUsage,
+  type UsageReportEntry,
 } from "@getpaseo/protocol/messages";
 import type { UsageReference } from "../../agent/agent-sdk-types.js";
 
@@ -11,12 +10,20 @@ export interface UsageSource {
   label: string;
   icon?: string;
   discover(): Promise<unknown[]>;
+  identify(input: unknown): Promise<{ key: string; label?: string } | null>;
   fetch(input: unknown): Promise<unknown>;
 }
 
-/** Owns running sources, account deduplication, and the five-minute fetch cache. */
+interface KnownReport {
+  source: UsageSource;
+  input: unknown;
+  label?: string;
+}
+
+/** Owns account identity, the latest input for each report, and the five-minute fetch cache. */
 export class UsageSourceRegistry {
   private readonly sources = new Map<string, UsageSource>();
+  private readonly known = new Map<string, KnownReport>();
   private readonly cache = new Map<string, { at: number; entry: UsageReportEntry }>();
   private readonly pending = new Map<string, Promise<UsageReportEntry>>();
 
@@ -32,55 +39,78 @@ export class UsageSourceRegistry {
 
   unregister(id: string): void {
     this.sources.delete(id);
+    for (const key of this.known.keys()) if (key.startsWith(`${id}:`)) this.known.delete(key);
     for (const key of this.cache.keys()) if (key.startsWith(`${id}:`)) this.cache.delete(key);
   }
 
+  async resolveReference(reference: UsageReference): Promise<string | null> {
+    const source = this.sources.get(reference.source);
+    if (!source) return null;
+    return this.identify(source, reference.input);
+  }
+
+  private async identify(source: UsageSource, input: unknown): Promise<string | null> {
+    try {
+      const account = await source.identify(input);
+      if (account === null) return null;
+      if (
+        typeof account !== "object" ||
+        (account.label !== undefined && typeof account.label !== "string")
+      )
+        throw new Error(`Invalid account identity from ${source.id}`);
+      if (typeof account.key !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(account.key))
+        throw new Error(`Invalid account key from ${source.id}`);
+      const id = `${source.id}:${account.key}`;
+      this.known.set(id, { source, input, label: account.label });
+      return id;
+    } catch (error) {
+      const id = `${source.id}:error`;
+      this.cache.set(id, { at: this.now(), entry: this.errorEntry(source, id, error) });
+      return id;
+    }
+  }
+
   async listReports(
-    options: {
-      forceRefresh?: boolean;
-      references?: UsageReference[];
-    } = {},
+    options: { forceRefresh?: boolean; reportIds?: string[]; references?: UsageReference[] } = {},
   ): Promise<UsageReportEntry[]> {
+    const ids = options.reportIds ?? (await this.discoverReportIds(options.references ?? []));
+    return Promise.all(
+      [...new Set(ids)]
+        .filter((id) => this.known.has(id) || this.cache.has(id))
+        .map((id) => this.fetchId(id, options.forceRefresh)),
+    );
+  }
+
+  private async discoverReportIds(references: UsageReference[]): Promise<string[]> {
     const discovered = await Promise.all(
       [...this.sources.values()].map(async (source) => {
         try {
           const inputs = await source.discover();
           if (!Array.isArray(inputs)) throw new Error("Usage discovery must return an array");
-          return await Promise.all(inputs.map((input) => this.fetch(source.id, input, options)));
+          return (await Promise.all(inputs.map((input) => this.identify(source, input)))).filter(
+            (id): id is string => id !== null,
+          );
         } catch (error) {
-          return [this.errorEntry(source, error)];
+          const id = `${source.id}:error`;
+          this.cache.set(id, { at: this.now(), entry: this.errorEntry(source, id, error) });
+          return [id];
         }
       }),
     );
-    const unique = new Map<string, UsageReportEntry>();
-    const referenced = await Promise.all(
-      (options.references ?? []).map(async (reference) => {
-        if (!this.sources.has(reference.source)) return null;
-        return this.fetch(reference.source, reference.input, options);
-      }),
-    );
-    for (const entry of [
-      ...discovered.flat(),
-      ...referenced.filter((result): result is UsageReportEntry => result !== null),
-    ])
-      unique.set(`${entry.sourceId}:${entry.report.account.key}`, entry);
-    return [...unique.values()];
-  }
-
-  fetchReference(
-    reference: UsageReference,
-    options: { forceRefresh?: boolean } = {},
-  ): Promise<UsageReportEntry | null> {
-    return this.sources.has(reference.source)
-      ? this.fetch(reference.source, reference.input, options)
-      : Promise.resolve(null);
+    const live = await Promise.all(references.map((reference) => this.resolveReference(reference)));
+    return [...discovered.flat(), ...live.filter((id): id is string => id !== null)];
   }
 
   // COMPAT(providerUsageList): added in v0.9.3, remove after 2027-03-26.
   async listLegacyUsage(): Promise<{ fetchedAt: string; providers: ProviderUsage[] }> {
     const reports = await this.listReports();
     return {
-      fetchedAt: new Date(this.now()).toISOString(),
+      fetchedAt: reports.length
+        ? reports.reduce(
+            (oldest, entry) => (entry.fetchedAt < oldest ? entry.fetchedAt : oldest),
+            reports[0]!.fetchedAt,
+          )
+        : new Date(this.now()).toISOString(),
       providers: reports.map((entry) => ({
         providerId: entry.sourceId,
         displayName: entry.sourceLabel,
@@ -94,49 +124,55 @@ export class UsageSourceRegistry {
     };
   }
 
-  fetch(
-    sourceId: string,
-    input: unknown,
-    options: { forceRefresh?: boolean } = {},
-  ): Promise<UsageReportEntry> {
-    const source = this.sources.get(sourceId);
-    if (!source) throw new Error(`Unknown usage source: ${sourceId}`);
-    const hash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
-    const key = `${sourceId}:${hash}`;
-    const cached = this.cache.get(key);
-    if (!options.forceRefresh && cached && this.now() - cached.at < this.ttlMs)
+  private fetchId(id: string, forceRefresh = false): Promise<UsageReportEntry> {
+    const known = this.known.get(id);
+    const cached = this.cache.get(id);
+    if (!known) return Promise.resolve(cached!.entry);
+    if (!forceRefresh && cached && this.now() - cached.at < this.ttlMs)
       return Promise.resolve(cached.entry);
-    const pending = this.pending.get(key);
+    const pending = this.pending.get(id);
     if (pending) return pending;
     const request = (async () => {
       let entry: UsageReportEntry;
       try {
-        const report = UsageReportSchema.parse(await source.fetch(input));
-        entry = { sourceId, sourceLabel: source.label, icon: source.icon, report };
+        const report = UsageReportSchema.parse(await known.source.fetch(known.input));
+        entry = {
+          id,
+          sourceId: known.source.id,
+          sourceLabel: known.source.label,
+          icon: known.source.icon,
+          account: { label: known.label },
+          fetchedAt: new Date(this.now()).toISOString(),
+          report,
+        };
       } catch (error) {
-        entry = this.errorEntry(source, error, hash);
+        entry = this.errorEntry(known.source, id, error, known.label);
       }
-      const now = this.now();
-      for (const [cachedKey, stored] of this.cache) {
-        if (now - stored.at >= this.ttlMs) this.cache.delete(cachedKey);
-      }
-      this.cache.set(key, { at: now, entry });
+      this.cache.set(id, { at: this.now(), entry });
       return entry;
     })();
-    this.pending.set(key, request);
+    this.pending.set(id, request);
     void request.finally(() => {
-      if (this.pending.get(key) === request) this.pending.delete(key);
+      if (this.pending.get(id) === request) this.pending.delete(id);
     });
     return request;
   }
 
-  private errorEntry(source: UsageSource, error: unknown, key = source.id): UsageReportEntry {
+  private errorEntry(
+    source: UsageSource,
+    id: string,
+    error: unknown,
+    label?: string,
+    fetchedAt = new Date(this.now()).toISOString(),
+  ): UsageReportEntry {
     return {
+      id,
       sourceId: source.id,
       sourceLabel: source.label,
       icon: source.icon,
+      account: { label },
+      fetchedAt,
       report: {
-        account: { key },
         status: "error",
         windows: [],
         error: error instanceof Error ? error.message : String(error),

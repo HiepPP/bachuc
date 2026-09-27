@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchUsage } from "./usage.js";
+import { identify, fetchUsage } from "./usage.js";
 import type { UsageReport } from "@getpaseo/plugin/server/usage";
 
 function writeGrokAuth(home: string, auth: Record<string, unknown>): void {
@@ -265,4 +265,15 @@ describe("grok usage source", () => {
       balances: [],
     });
   });
+});
+
+it("identify uses the configured grok account key", async () => {
+  const previous = process.env["GROK_TOKEN"];
+  try {
+    process.env["GROK_TOKEN"] = "fixture-token";
+    expect(await identify()).toEqual({ key: "default" });
+  } finally {
+    if (previous === undefined) delete process.env["GROK_TOKEN"];
+    else process.env["GROK_TOKEN"] = previous;
+  }
 });

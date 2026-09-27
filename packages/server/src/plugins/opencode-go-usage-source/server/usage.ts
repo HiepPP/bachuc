@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import {
+  hashAccountKey,
   toneFromUsedPct,
   windowFromUsedPct,
   type UsageReport,
@@ -35,7 +35,7 @@ function authPath(env: NodeJS.ProcessEnv = process.env): string {
   );
 }
 
-async function readDefaultKey(path = authPath()): Promise<string | null> {
+export async function readDefaultKey(path = authPath()): Promise<string | null> {
   try {
     const auth = authSchema.parse(JSON.parse(await readFile(path, "utf8")));
     return auth["opencode-go"]?.key ?? null;
@@ -54,14 +54,13 @@ export async function fetchUsage(
   path = authPath(),
 ): Promise<UsageReport> {
   const apiKey = "apiKey" in input ? input.apiKey : await readDefaultKey(path);
-  if (!apiKey) return { account: { key: "default" }, status: "unavailable", windows: [] };
-  const key = createHash("sha256").update(apiKey).digest("hex");
+  if (!apiKey) return { status: "unavailable", windows: [] };
   const response = await fetchApi("https://opencode.ai/zen/go/v1/usage", {
     headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
   });
   if (response.status === 401 || response.status === 403)
-    return { account: { key }, status: "unavailable", windows: [] };
+    return { status: "unavailable", windows: [] };
   if (!response.ok) throw new Error(`OpenCode Go usage API returned ${response.status}`);
   const data = responseSchema.parse(await response.json());
   const windows = (
@@ -80,5 +79,10 @@ export async function fetchUsage(
       headline: id === "rolling",
     }),
   );
-  return { account: { key }, status: "available", planLabel: "Go", windows };
+  return { status: "available", planLabel: "Go", windows };
+}
+
+export async function identify(input: Input, path = authPath()) {
+  const key = "apiKey" in input ? input.apiKey : await readDefaultKey(path);
+  return key ? { key: hashAccountKey(key) } : null;
 }

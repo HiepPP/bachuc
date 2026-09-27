@@ -25,26 +25,32 @@ test("resolves a provider plugin session reference through its usage source", as
       provider: "fixture-session-provider",
       cwd: directory,
     });
-    const result = await client.getAgentUsageReport({ agentId: agent.id });
-    expect(result.entry).toMatchObject({
+    const result = await client.resolveAgentUsageReport({ agentId: agent.id });
+    expect(result.reportId).toBe("fixture-session-usage:from-session");
+    expect(
+      (await client.listUsageReports({ reportIds: [result.reportId!] })).reports[0],
+    ).toMatchObject({
+      id: result.reportId,
       sourceId: "fixture-session-usage",
-      report: { account: { key: "from-session" }, windows: [{ usedPct: 31 }] },
+      report: { windows: [{ usedPct: 31 }] },
     });
     const reports = await client.listUsageReports();
-    expect(reports.reports.map((entry) => entry.report.account.key)).toContain("from-session");
+    expect(reports.reports.map((entry) => entry.id)).toContain(
+      "fixture-session-usage:from-session",
+    );
     const missing = await client.createAgent({
       provider: "fixture-session-provider",
       cwd: directory,
       model: "missing",
     });
-    expect((await client.getAgentUsageReport({ agentId: missing.id })).entry).toBeNull();
+    expect((await client.resolveAgentUsageReport({ agentId: missing.id })).reportId).toBeNull();
   } finally {
     await client.close();
     await daemon.close();
   }
 }, 60_000);
 
-test("agent.get_usage_report resolves source IDs from default built-in and ACP sessions", async () => {
+test("agent.resolve_usage_report resolves source IDs from default built-in and ACP sessions", async () => {
   const directory = fileURLToPath(
     new URL("./test-fixtures/session-usage-reference/", import.meta.url),
   );
@@ -131,8 +137,8 @@ test("agent.get_usage_report resolves source IDs from default built-in and ACP s
     await client.connect();
     for (const provider of providers) {
       const agent = await client.createAgent({ provider, cwd: directory });
-      const result = await client.getAgentUsageReport({ agentId: agent.id });
-      expect(result.entry?.sourceId, provider).toBe(provider);
+      const result = await client.resolveAgentUsageReport({ agentId: agent.id });
+      expect(result.reportId, provider).toBe(`${provider}:default`);
     }
   } finally {
     await client.close();

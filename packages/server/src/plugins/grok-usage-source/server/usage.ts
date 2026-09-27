@@ -147,11 +147,20 @@ export async function fetchUsage(
   if (window) window.headline = true;
 
   return {
-    account: { key: "default" },
     status: "available",
     planLabel: undefined,
     windows: window ? [window] : [],
     balances: balance ? [balance] : [],
     details: [],
   };
+}
+
+export async function identify() {
+  if (process.env["GROK_API_KEY"] || process.env["GROK_TOKEN"]) return { key: "default" };
+  try {
+    const auth = JSON.parse(await fs.readFile(join(homedir(), ".grok", "auth.json"), "utf8"));
+    return extractGrokTokenFromAuth(auth) ? { key: "default" } : null;
+  } catch {
+    return null;
+  }
 }

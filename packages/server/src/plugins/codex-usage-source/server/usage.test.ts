@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { fetchUsage } from "./usage.js";
+import { fetchUsage, identify } from "./usage.js";
 
 const originalHome = process.env["CODEX_HOME"];
 afterEach(() => {
@@ -39,7 +39,6 @@ test("default input reads CODEX_HOME auth and preserves the usage request", asyn
       response(init?.headers ?? {}, "account-default"),
     );
     expect(report).toMatchObject({
-      account: { key: "account-default" },
       status: "available",
       planLabel: "plus",
       windows: [{ id: "session", usedPct: 30, headline: true }],
@@ -56,21 +55,23 @@ test("explicit codexHome reads only that auth file", async () => {
       join(home, "auth.json"),
       JSON.stringify({ tokens: { access_token: "fixture-home", account_id: "account-home" } }),
     );
-    const report = await fetchUsage({ codexHome: home }, (_url, init) =>
+    await fetchUsage({ codexHome: home }, (_url, init) =>
       response(init?.headers ?? {}, "account-home"),
     );
-    expect(report.account.key).toBe("account-home");
+    expect(await identify({ codexHome: home })).toEqual({ key: "account-home" });
   } finally {
     await rm(home, { recursive: true, force: true });
   }
 });
 
 test("explicit access token needs no auth file", async () => {
-  const report = await fetchUsage(
+  await fetchUsage(
     { accessToken: "fixture-supplied", accountId: "account-supplied" },
     (_url, init) => response(init?.headers ?? {}, "account-supplied"),
   );
-  expect(report.account.key).toBe("account-supplied");
+  expect(
+    await identify({ accessToken: "fixture-supplied", accountId: "account-supplied" }),
+  ).toEqual({ key: "account-supplied" });
 });
 
 test("coerces credit balance and marks a 96 percent window dangerous", async () => {
@@ -132,4 +133,12 @@ test("401 leaves auth.json byte for byte unchanged and makes no refresh request"
   } finally {
     await rm(home, { recursive: true, force: true });
   }
+});
+
+test("token-only account claim survives token rotation", async () => {
+  const token = (suffix: string) =>
+    `header.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "work-id" }, suffix })).toString("base64url")}.signature`;
+  expect(await identify({ accessToken: token("first") })).toEqual({ key: "work-id" });
+  expect(await identify({ accessToken: token("second") })).toEqual({ key: "work-id" });
+  expect(await identify({ accessToken: "opaque-token" })).toBeNull();
 });

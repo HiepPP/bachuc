@@ -1777,13 +1777,13 @@ export const ProviderUsageListRequestMessageSchema = z.object({
 export const UsageListReportsRequestMessageSchema = z.object({
   type: z.literal("usage.list_reports.request"),
   requestId: z.string(),
+  reportIds: z.array(z.string()).optional(),
   forceRefresh: z.boolean().optional(),
 });
-export const AgentGetUsageReportRequestMessageSchema = z.object({
-  type: z.literal("agent.get_usage_report.request"),
+export const AgentResolveUsageReportRequestMessageSchema = z.object({
+  type: z.literal("agent.resolve_usage_report.request"),
   requestId: z.string(),
   agentId: z.string(),
-  forceRefresh: z.boolean().optional(),
 });
 
 export const ResumeAgentRequestMessageSchema = z.object({
@@ -3245,7 +3245,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProviderDiagnosticRequestMessageSchema,
   ProviderUsageListRequestMessageSchema,
   UsageListReportsRequestMessageSchema,
-  AgentGetUsageReportRequestMessageSchema,
+  AgentResolveUsageReportRequestMessageSchema,
   ResumeAgentRequestMessageSchema,
   ImportAgentRequestMessageSchema,
   RefreshAgentRequestMessageSchema,
@@ -6244,7 +6244,6 @@ export const ProviderUsageListResponseMessageSchema = z.object({
 });
 
 export const UsageReportSchema = z.object({
-  account: z.object({ key: z.string(), label: z.string().optional() }),
   status: ProviderUsageStatusSchema,
   planLabel: z.string().optional(),
   windows: z.array(ProviderUsageWindowSchema.extend({ headline: z.boolean().optional() })),
@@ -6253,6 +6252,9 @@ export const UsageReportSchema = z.object({
   error: z.string().optional(),
 });
 export const UsageReportEntrySchema = z.object({
+  id: z.string(),
+  account: z.object({ label: z.string().optional() }),
+  fetchedAt: z.string(),
   sourceId: z.string(),
   sourceLabel: z.string(),
   icon: z.string().optional(),
@@ -6262,9 +6264,9 @@ export const UsageListReportsResponseMessageSchema = z.object({
   type: z.literal("usage.list_reports.response"),
   payload: z.object({ requestId: z.string(), reports: z.array(UsageReportEntrySchema) }),
 });
-export const AgentGetUsageReportResponseMessageSchema = z.object({
-  type: z.literal("agent.get_usage_report.response"),
-  payload: z.object({ requestId: z.string(), entry: UsageReportEntrySchema.nullable() }),
+export const AgentResolveUsageReportResponseMessageSchema = z.object({
+  type: z.literal("agent.resolve_usage_report.response"),
+  payload: z.object({ requestId: z.string(), reportId: z.string().nullable() }),
 });
 
 const AgentSlashCommandSchema = z.object({
@@ -6953,7 +6955,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ProviderDiagnosticResponseMessageSchema,
   ProviderUsageListResponseMessageSchema,
   UsageListReportsResponseMessageSchema,
-  AgentGetUsageReportResponseMessageSchema,
+  AgentResolveUsageReportResponseMessageSchema,
   ListCommandsResponseSchema,
   ListTerminalsResponseSchema,
   TerminalsChangedSchema,
@@ -7135,8 +7137,8 @@ export type ProviderUsageTone = z.infer<typeof ProviderUsageToneSchema>;
 export type UsageReport = z.infer<typeof UsageReportSchema>;
 export type UsageReportEntry = z.infer<typeof UsageReportEntrySchema>;
 export type UsageListReportsResponseMessage = z.infer<typeof UsageListReportsResponseMessageSchema>;
-export type AgentGetUsageReportResponseMessage = z.infer<
-  typeof AgentGetUsageReportResponseMessageSchema
+export type AgentResolveUsageReportResponseMessage = z.infer<
+  typeof AgentResolveUsageReportResponseMessageSchema
 >;
 export type ProviderUsageStatus = z.infer<typeof ProviderUsageStatusSchema>;
 export type ProviderUsage = z.infer<typeof ProviderUsageSchema>;

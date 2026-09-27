@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -29,7 +28,7 @@ const responseSchema = z.object({
   credits: z.object({ balance: number.optional() }).nullish(),
 });
 
-async function readAuth(
+export async function readAuth(
   input: CodexUsageInput,
 ): Promise<{ token: string; accountId?: string } | null> {
   if ("accessToken" in input) return { token: input.accessToken, accountId: input.accountId };
@@ -76,8 +75,7 @@ export async function fetchUsage(
   fetchApi: typeof fetch = fetch,
 ): Promise<UsageReport> {
   const auth = await readAuth(input);
-  if (!auth) return { account: { key: "default" }, status: "unavailable", windows: [] };
-  const key = auth.accountId ?? createHash("sha256").update(auth.token).digest("hex");
+  if (!auth) return { status: "unavailable", windows: [] };
   const headers: Record<string, string> = {
     Authorization: `Bearer ${auth.token}`,
     Accept: "application/json",
@@ -89,10 +87,10 @@ export async function fetchUsage(
     signal: AbortSignal.timeout(15_000),
   });
   if (response.status === 401 || response.status === 403)
-    return { account: { key }, status: "unavailable", windows: [] };
+    return { status: "unavailable", windows: [] };
   if (!response.ok) throw new Error(`Codex usage API returned ${response.status}`);
   const text = await response.text();
-  if (text.trim().startsWith("<")) return { account: { key }, status: "unavailable", windows: [] };
+  if (text.trim().startsWith("<")) return { status: "unavailable", windows: [] };
   const usage = responseSchema.parse(JSON.parse(text));
   const windows = [
     usageWindow("session", "Session", usage.rate_limit?.primary_window, true),
@@ -101,7 +99,6 @@ export async function fetchUsage(
   ].filter((window): window is UsageWindow => window !== null);
   const balance = usage.credits?.balance;
   return {
-    account: { key, ...(usage.email ? { label: usage.email } : {}) },
     status: "available",
     planLabel: usage.plan_type,
     windows,
@@ -119,4 +116,35 @@ export async function fetchUsage(
           ],
     details: [],
   };
+}
+
+/** The account claim is decoded locally; the token itself never becomes identity. */
+export async function identify(input: CodexUsageInput) {
+  const auth = await readAuth(input);
+  if (!auth) return null;
+  const claims = (() => {
+    try {
+      const payload = auth.token.split(".")[1];
+      return payload
+        ? (JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<
+            string,
+            unknown
+          >)
+        : null;
+    } catch {
+      return null;
+    }
+  })();
+  const nested = claims?.["https://api.openai.com/auth"];
+  const claim =
+    nested && typeof nested === "object"
+      ? (nested as Record<string, unknown>)["chatgpt_account_id"]
+      : null;
+  const key =
+    auth.accountId ??
+    (typeof claim === "string" ? claim : null) ??
+    (typeof claims?.["chatgpt_account_id"] === "string"
+      ? (claims["chatgpt_account_id"] as string)
+      : null);
+  return key ? { key } : null;
 }

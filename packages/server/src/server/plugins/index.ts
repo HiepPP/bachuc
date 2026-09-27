@@ -41,6 +41,7 @@ interface PluginRuntimePort {
   clearLogs(pluginId: string): void;
   getProviderRegistrations?(pluginId: string): readonly PluginProviderMetadata[];
   getUsageSourceRegistrations(pluginId: string): readonly PluginUsageSourceMetadata[];
+  identifyUsage: PluginRuntime["identifyUsage"];
   fetchUsage: PluginRuntime["fetchUsage"];
   discoverUsage: PluginRuntime["discoverUsage"];
   connectProvider: PluginRuntime["connectProvider"];
@@ -143,12 +144,16 @@ export class PluginService {
     return [...this.providers.values()].sort((left, right) => left.id.localeCompare(right.id));
   }
 
-  listUsageReports(options?: { forceRefresh?: boolean; references?: UsageReference[] }) {
+  listUsageReports(options?: {
+    forceRefresh?: boolean;
+    reportIds?: string[];
+    references?: UsageReference[];
+  }) {
     return this.usageSources.listReports(options);
   }
 
-  fetchUsageReference(reference: UsageReference, options?: { forceRefresh?: boolean }) {
-    return this.usageSources.fetchReference(reference, options);
+  resolveUsageReference(reference: UsageReference) {
+    return this.usageSources.resolveReference(reference);
   }
 
   listLegacyUsage() {
@@ -569,6 +574,11 @@ export class PluginService {
               throw new Error(`Invalid usage discovery from ${source.id}`);
             return result;
           },
+          identify: (input) =>
+            this.runtime.identifyUsage(pluginId, source.id, input) as Promise<{
+              key: string;
+              label?: string;
+            } | null>,
           fetch: (input) => {
             return this.runtime.fetchUsage(pluginId, source.id, input);
           },

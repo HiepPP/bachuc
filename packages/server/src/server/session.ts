@@ -513,12 +513,10 @@ export interface SessionOptions {
     invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown>;
     listUsageReports(options?: {
       forceRefresh?: boolean;
+      reportIds?: string[];
       references?: UsageReference[];
     }): Promise<UsageReportEntry[]>;
-    fetchUsageReference(
-      reference: UsageReference,
-      options?: { forceRefresh?: boolean },
-    ): Promise<UsageReportEntry | null>;
+    resolveUsageReference(reference: UsageReference): Promise<string | null>;
     listLegacyUsage(): Promise<{ fetchedAt: string; providers: ProviderUsage[] }>;
   };
   orchestrationSkills?: import("./orchestration-skills/index.js").OrchestrationSkills;
@@ -3018,8 +3016,8 @@ export class Session {
         return this.usageSession.handleLegacyList(msg);
       case "usage.list_reports.request":
         return this.usageSession.handleListReports(msg);
-      case "agent.get_usage_report.request":
-        return this.usageSession.handleGetAgentReport(msg);
+      case "agent.resolve_usage_report.request":
+        return this.usageSession.handleResolveAgentReport(msg);
       default:
         return undefined;
     }

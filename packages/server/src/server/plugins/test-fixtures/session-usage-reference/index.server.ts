@@ -14,8 +14,8 @@ export default function contribute(server: PluginServerContext) {
       id,
       label: id,
       input,
+      identify: async () => ({ key: "default" }),
       fetch: async () => ({
-        account: { key: "default" },
         status: "available",
         windows: [{ id: "hour", label: "Hour", usedPct: 31, headline: true }],
       }),
@@ -25,8 +25,8 @@ export default function contribute(server: PluginServerContext) {
     id: "fixture-session-usage",
     label: "Fixture session usage",
     input: z.object({ account: z.string() }).strict(),
-    fetch: async (input) => ({
-      account: { key: (input as { account: string }).account },
+    identify: async (input) => ({ key: (input as { account: string }).account }),
+    fetch: async () => ({
       status: "available",
       windows: [{ id: "hour", label: "Hour", usedPct: 31, headline: true }],
     }),

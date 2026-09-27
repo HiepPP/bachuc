@@ -16,12 +16,12 @@ export default function contribute(server: PluginServerContext) {
       ];
       return inputs;
     },
+    identify: async (input) => ({ key: (input as { account: string }).account }),
     fetch: async (input) => {
       const account = (input as { account: string }).account;
       if (account === "throws") throw new Error("fixture failure");
       fetches++;
       return {
-        account: { key: account },
         status: "available",
         windows: [{ id: "count", label: "Count", usedPct: fetches, headline: true }],
       };

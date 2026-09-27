@@ -599,3 +599,51 @@ describe("Claude usage source scoped limit reconciliation", () => {
     ]);
   });
 });
+
+it("identify reads account and organization from the selected Claude config", async () => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { identify } = await import("./usage.js");
+  const directory = await mkdtemp(join(tmpdir(), "claude-identity-"));
+  try {
+    await writeFile(
+      join(directory, ".claude.json"),
+      JSON.stringify({
+        oauthAccount: {
+          accountUuid: "account-uuid",
+          organizationUuid: "org-uuid",
+          emailAddress: "test@example.com",
+        },
+      }),
+    );
+    expect(await identify({ configDir: directory })).toEqual({
+      key: "account-uuid.org-uuid",
+      label: "test@example.com",
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("token-only Claude inputs use a cached OAuth profile identity", async () => {
+  const { identify } = await import("./usage.js");
+  let calls = 0;
+  const fetchProfile: typeof fetch = async () => {
+    calls++;
+    return new Response(
+      JSON.stringify({
+        account: { uuid: "account-uuid", email: "test@example.com" },
+        organization: { uuid: "org-uuid" },
+      }),
+      { status: 200 },
+    );
+  };
+  expect(await identify({ accessToken: "fixture-claude-token" }, fetchProfile)).toEqual({
+    key: "account-uuid.org-uuid",
+    label: "test@example.com",
+  });
+  expect(await identify({ accessToken: "fixture-claude-token" }, fetchProfile)).toEqual({
+    key: "account-uuid.org-uuid",
+    label: "test@example.com",
+  });
+  expect(calls).toBe(1);
+});

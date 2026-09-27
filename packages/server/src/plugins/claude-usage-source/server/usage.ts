@@ -1,12 +1,12 @@
 import type { UsageInput } from "../shared/input.js";
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import {
+  hashAccountKey,
   toneFromUsedPct,
   unavailableUsage,
   windowFromUsedPct,
@@ -416,13 +416,12 @@ export async function fetchUsage(
   }
 
   const { oauth } = credentials;
-  const accountKey = createHash("sha256").update(oauth.accessToken).digest("hex");
   const plan = buildClaudePlan(oauth.subscriptionType, oauth.rateLimitTier);
   const resp = await callClaudeApi(oauth.accessToken);
 
   if (resp === "NEEDS_AUTH") {
     // Read-only on credentials; the Claude CLI owns refresh. See docs/providers.md.
-    return unavailableUsage(accountKey);
+    return unavailableUsage();
   }
 
   const scoped = reconcileScopedLimits(
@@ -450,11 +449,70 @@ export async function fetchUsage(
   }
 
   return {
-    account: { key: accountKey },
     status: "available",
     planLabel: plan ?? undefined,
     windows,
     balances: [],
     details,
   };
+}
+
+// The OAuth usage endpoint meters the active organization selected by the token.
+const ClaudeAccountSchema = z.object({
+  accountUuid: z.string().min(1),
+  organizationUuid: z.string().min(1),
+  emailAddress: z.string().optional(),
+});
+const profileCache = new Map<string, Promise<{ key: string; label?: string } | null>>();
+
+export async function identify(input: UsageInput, fetchApi: typeof fetch = fetch) {
+  const directory = "configDir" in input ? input.configDir : homedir();
+  if (!("accessToken" in input)) {
+    try {
+      const config = z
+        .object({ oauthAccount: ClaudeAccountSchema })
+        .parse(JSON.parse(await fs.readFile(join(directory, ".claude.json"), "utf8")));
+      const account = config.oauthAccount;
+      return {
+        key: `${account.accountUuid}.${account.organizationUuid}`,
+        ...(account.emailAddress ? { label: account.emailAddress } : {}),
+      };
+    } catch {
+      return null;
+    }
+  }
+  const token = input.accessToken;
+  const tokenHash = hashAccountKey(token);
+  const pending = profileCache.get(tokenHash);
+  if (pending) return pending;
+  const request = (async () => {
+    const response = await fetchApi("https://api.anthropic.com/api/oauth/profile", {
+      signal: AbortSignal.timeout(15_000),
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "anthropic-beta": CLAUDE_OAUTH_BETA,
+      },
+    });
+    if (response.status === 401 || response.status === 403) return null;
+    if (!response.ok) throw new Error(`Claude profile API returned ${response.status}`);
+    const profile = z
+      .object({
+        account: z.object({ uuid: z.string().min(1), email: z.string().optional() }),
+        organization: z.object({ uuid: z.string().min(1) }),
+      })
+      .parse(await response.json());
+    const account = profile.account;
+    return {
+      key: `${account.uuid}.${profile.organization.uuid}`,
+      ...(account.email ? { label: account.email } : {}),
+    };
+  })();
+  profileCache.set(tokenHash, request);
+  try {
+    return await request;
+  } catch (error) {
+    profileCache.delete(tokenHash);
+    throw error;
+  }
 }

@@ -21,19 +21,23 @@ test("lists internal and subprocess usage; validates input and isolates fetch er
     const first = await client.listUsageReports();
     expect(first.reports).toHaveLength(3);
     expect(first.reports[0]?.icon).toContain("<svg");
+    expect(first.reports[0]?.fetchedAt).toMatch(/^\d{4}-/);
     expect(
-      first.reports.find((entry) => entry.report.account.key === "one")?.report.windows[0]?.usedPct,
+      first.reports.find((entry) => entry.id === "fixture:one")?.report.windows[0]?.usedPct,
     ).toBe(1);
     expect(first.reports.filter((entry) => entry.report.status === "error")).toHaveLength(2);
     expect(
-      (await client.listUsageReports()).reports.find((entry) => entry.report.account.key === "one")
-        ?.report.windows[0]?.usedPct,
+      (await client.listUsageReports()).reports.find((entry) => entry.id === "fixture:one")?.report
+        .windows[0]?.usedPct,
     ).toBe(1);
     expect(
-      (await client.listUsageReports({ forceRefresh: true })).reports.find(
-        (entry) => entry.report.account.key === "one",
-      )?.report.windows[0]?.usedPct,
+      (
+        await client.listUsageReports({ reportIds: ["fixture:one"], forceRefresh: true })
+      ).reports.find((entry) => entry.id === "fixture:one")?.report.windows[0]?.usedPct,
     ).toBe(2);
+    expect(
+      (await client.listUsageReports({ reportIds: ["fixture:throws"] })).reports[0]?.report.status,
+    ).toBe("error");
     await client.patchDaemonConfig({ pluginsEnabled: true });
     await client.installDirectoryPlugin(subprocessDirectory, "fixture-directory");
     const both = await client.listUsageReports({ forceRefresh: true });

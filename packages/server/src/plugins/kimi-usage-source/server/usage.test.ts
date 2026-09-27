@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchUsage } from "./usage.js";
+import { identify, fetchUsage } from "./usage.js";
 import type { UsageReport } from "@getpaseo/plugin/server/usage";
 
 function kimiCredentialPath(dir: string): string {
@@ -367,4 +367,15 @@ describe("Kimi usage source usage windows", () => {
       "coding_limit_300_time_unit_minute_2",
     ]);
   });
+});
+
+it("identify uses the configured kimi account key", async () => {
+  const previous = process.env["KIMI_TOKEN"];
+  try {
+    process.env["KIMI_TOKEN"] = "fixture-token";
+    expect(await identify()).toEqual({ key: "default" });
+  } finally {
+    if (previous === undefined) delete process.env["KIMI_TOKEN"];
+    else process.env["KIMI_TOKEN"] = previous;
+  }
 });

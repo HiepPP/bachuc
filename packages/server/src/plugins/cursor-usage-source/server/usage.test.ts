@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchUsage } from "./usage.js";
+import { identify, fetchUsage } from "./usage.js";
 import type { UsageReport } from "@getpaseo/plugin/server/usage";
 
 // node:sqlite has no @types/node@20 typings; require it with a narrow local type.
@@ -257,4 +257,15 @@ describe("cursor usage source", () => {
     const cursor = findProvider(await service().listUsage(), "cursor");
     expect(cursor.status).toBe("unavailable");
   });
+});
+
+it("identify uses the configured cursor account key", async () => {
+  const previous = process.env["CURSOR_ACCESS_TOKEN"];
+  try {
+    process.env["CURSOR_ACCESS_TOKEN"] = "fixture-token";
+    expect(await identify()).toEqual({ key: "default" });
+  } finally {
+    if (previous === undefined) delete process.env["CURSOR_ACCESS_TOKEN"];
+    else process.env["CURSOR_ACCESS_TOKEN"] = previous;
+  }
 });

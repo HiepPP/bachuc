@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchUsage } from "./usage.js";
+import { identify, fetchUsage } from "./usage.js";
 import type { UsageReport } from "@getpaseo/plugin/server/usage";
 
 function mockFetch(handlers: Map<string, () => Response>): typeof fetch {
@@ -110,4 +110,15 @@ describe("copilot usage source", () => {
       details: [{ id: "reset", label: "Quota reset", value: "2026-07-01T00:00:00Z" }],
     });
   });
+});
+
+it("identify uses the configured copilot account key", async () => {
+  const previous = process.env["COPILOT_TOKEN"];
+  try {
+    process.env["COPILOT_TOKEN"] = "fixture-token";
+    expect(await identify()).toEqual({ key: "default" });
+  } finally {
+    if (previous === undefined) delete process.env["COPILOT_TOKEN"];
+    else process.env["COPILOT_TOKEN"] = previous;
+  }
 });

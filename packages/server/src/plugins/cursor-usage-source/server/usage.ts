@@ -222,11 +222,20 @@ export async function fetchUsage(
   }
 
   return {
-    account: { key: "default" },
     status: "available",
     planLabel: undefined,
     windows: [],
     balances,
     details: [],
   };
+}
+
+export async function identify() {
+  const home = homedir();
+  const token =
+    process.env["CURSOR_ACCESS_TOKEN"] ||
+    process.env["CURSOR_TOKEN"] ||
+    (await readCursorTokenFromSqlite(home)) ||
+    (await readCursorTokenFromAuthJson(home));
+  return token ? { key: "default" } : null;
 }

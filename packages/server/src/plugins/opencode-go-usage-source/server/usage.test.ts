@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { discover, fetchUsage } from "./usage.js";
+import { discover, fetchUsage, identify } from "./usage.js";
 
 const upstreamResponse = {
   usage: {
@@ -60,7 +60,7 @@ test("omits default discovery when auth.json lacks an OpenCode Go API key", asyn
       },
       path,
     );
-    expect(report).toEqual({ account: { key: "default" }, status: "unavailable", windows: [] });
+    expect(report).toEqual({ status: "unavailable", windows: [] });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -73,4 +73,11 @@ test.each([401, 403])("maps HTTP %i to unavailable", async (status) => {
   );
   expect(report.status).toBe("unavailable");
   expect(report.windows).toEqual([]);
+});
+
+test("identifies OpenCode Go key without a usage request", async () => {
+  const identity = await identify({ apiKey: "fixture-secret" });
+  expect(identity?.key).toMatch(/^[a-f0-9]{64}$/);
+  expect(identity?.key).not.toBe("fixture-secret");
+  expect(await identify({ apiKey: "fixture-secret" })).toEqual(identity);
 });

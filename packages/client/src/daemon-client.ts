@@ -95,7 +95,7 @@ import type {
   ProviderDiagnosticResponseMessage,
   ProviderUsageListResponseMessage,
   UsageListReportsResponseMessage,
-  AgentGetUsageReportResponseMessage,
+  AgentResolveUsageReportResponseMessage,
   DaemonGetStatusResponse,
   DaemonGetPairingOfferResponse,
   DaemonConfigReloadResponse,
@@ -562,7 +562,7 @@ type RefreshProvidersSnapshotPayload = RefreshProvidersSnapshotResponseMessage["
 type ProviderDiagnosticPayload = ProviderDiagnosticResponseMessage["payload"];
 type ProviderUsageListPayload = ProviderUsageListResponseMessage["payload"];
 type UsageListReportsPayload = UsageListReportsResponseMessage["payload"];
-type AgentGetUsageReportPayload = AgentGetUsageReportResponseMessage["payload"];
+type AgentResolveUsageReportPayload = AgentResolveUsageReportResponseMessage["payload"];
 type DaemonStatusPayload = DaemonGetStatusResponse["payload"];
 type DaemonPairingOfferPayload = DaemonGetPairingOfferResponse["payload"];
 type DiagnosticsPayload = DiagnosticsResponse["payload"];
@@ -5245,24 +5245,27 @@ export class DaemonClient {
   async listUsageReports(options?: {
     requestId?: string;
     forceRefresh?: boolean;
+    reportIds?: string[];
   }): Promise<UsageListReportsPayload> {
     return this.sendNamespacedCorrelatedSessionRequest({
       requestId: options?.requestId,
-      message: { type: "usage.list_reports.request", forceRefresh: options?.forceRefresh },
+      message: {
+        type: "usage.list_reports.request",
+        forceRefresh: options?.forceRefresh,
+        reportIds: options?.reportIds,
+      },
     });
   }
 
-  async getAgentUsageReport(options: {
+  async resolveAgentUsageReport(options: {
     agentId: string;
     requestId?: string;
-    forceRefresh?: boolean;
-  }): Promise<AgentGetUsageReportPayload> {
+  }): Promise<AgentResolveUsageReportPayload> {
     return this.sendNamespacedCorrelatedSessionRequest({
       requestId: options.requestId,
       message: {
-        type: "agent.get_usage_report.request",
+        type: "agent.resolve_usage_report.request",
         agentId: options.agentId,
-        forceRefresh: options.forceRefresh,
       },
     });
   }

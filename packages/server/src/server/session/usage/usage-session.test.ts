@@ -14,9 +14,12 @@ test("collects live references for usage reports and resolves an agent report", 
     } as AgentSession,
   };
   const entry = {
+    id: "fixture:one",
+    account: {},
+    fetchedAt: "2026-01-01T00:00:00.000Z",
     sourceId: "fixture",
     sourceLabel: "Fixture",
-    report: { account: { key: "one" }, status: "available" as const, windows: [] },
+    report: { status: "available" as const, windows: [] },
   };
   const usage = new UsageSession({
     emit: (message) => emitted.push(message),
@@ -27,9 +30,9 @@ test("collects live references for usage reports and resolves an agent report", 
         references.push(options.references);
         return [entry];
       },
-      async fetchUsageReference(value) {
+      async resolveUsageReference(value) {
         references.push(value);
-        return entry;
+        return entry.id;
       },
       async listLegacyUsage() {
         return { fetchedAt: "2026-01-01T00:00:00.000Z", providers: [] };
@@ -39,15 +42,15 @@ test("collects live references for usage reports and resolves an agent report", 
   });
 
   await usage.handleListReports({ type: "usage.list_reports.request", requestId: "list" });
-  await usage.handleGetAgentReport({
-    type: "agent.get_usage_report.request",
+  await usage.handleResolveAgentReport({
+    type: "agent.resolve_usage_report.request",
     requestId: "one",
     agentId: "one",
   });
   expect(references).toEqual([[reference], reference]);
   expect(emitted.map((message) => message.type)).toEqual([
     "usage.list_reports.response",
-    "agent.get_usage_report.response",
+    "agent.resolve_usage_report.response",
   ]);
 });
 
@@ -61,7 +64,7 @@ test("surfaces a legacy usage-list failure as an rpc_error envelope", async () =
       async listUsageReports() {
         return [];
       },
-      async fetchUsageReference() {
+      async resolveUsageReference() {
         return null;
       },
       async listLegacyUsage(): Promise<never> {
@@ -75,4 +78,25 @@ test("surfaces a legacy usage-list failure as an rpc_error envelope", async () =
     type: "rpc_error",
     payload: { requestId: "u1", code: "provider_usage_list_failed" },
   });
+});
+
+test("unknown agent returns agent_not_found", async () => {
+  const emitted: SessionOutboundMessage[] = [];
+  const usage = new UsageSession({
+    emit: (message) => emitted.push(message),
+    listAgents: () => [],
+    getAgent: () => null,
+    runtime: {
+      listUsageReports: async () => [],
+      resolveUsageReference: async () => null,
+      listLegacyUsage: async () => ({ fetchedAt: "", providers: [] }),
+    },
+    logger: pino({ level: "silent" }),
+  });
+  await usage.handleResolveAgentReport({
+    type: "agent.resolve_usage_report.request",
+    requestId: "missing",
+    agentId: "missing",
+  });
+  expect(emitted[0]).toMatchObject({ type: "rpc_error", payload: { code: "agent_not_found" } });
 });
