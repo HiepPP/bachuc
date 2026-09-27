@@ -98,7 +98,7 @@ test("invalid keys become source errors and missing identities produce no report
     }),
   );
   const reports = await registry.listReports();
-  expect(reports.map((entry) => entry.id)).toEqual(["source:error"]);
+  expect(reports.map((entry) => entry.id)).toEqual(["source:!error"]);
   expect(reports[0]?.report.status).toBe("error");
   expect(
     await registry.resolveReference({ source: "source", input: { account: "none" } }),
@@ -125,13 +125,22 @@ test("two Codex homes and a token route resolve to their vendor account IDs", as
   const personal = await mkdtemp(join(tmpdir(), "usage-personal-"));
   const work = await mkdtemp(join(tmpdir(), "usage-work-"));
   try {
+    const token = (accountId: string, email: string) =>
+      `header.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: accountId }, email })).toString("base64url")}.signature`;
     await writeFile(
       join(personal, "auth.json"),
-      JSON.stringify({ tokens: { account_id: "personal-id", access_token: "personal-token" } }),
+      JSON.stringify({
+        tokens: {
+          account_id: "personal-id",
+          access_token: token("personal-id", "personal@example.test"),
+        },
+      }),
     );
     await writeFile(
       join(work, "auth.json"),
-      JSON.stringify({ tokens: { account_id: "work-id", access_token: "work-token" } }),
+      JSON.stringify({
+        tokens: { account_id: "work-id", access_token: token("work-id", "work@example.test") },
+      }),
     );
     const registry = new UsageSourceRegistry();
     registry.register(
@@ -141,13 +150,16 @@ test("two Codex homes and a token route resolve to their vendor account IDs", as
         identify: async (input) => identify(input as Parameters<typeof identify>[0]),
       }),
     );
-    const token = `header.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "work-id" } })).toString("base64url")}.signature`;
+
     expect(
-      await registry.resolveReference({ source: "codex", input: { accessToken: token } }),
+      await registry.resolveReference({
+        source: "codex",
+        input: { accessToken: token("work-id", "work@example.test") },
+      }),
     ).toBe("codex:work-id");
-    expect((await registry.listReports()).map((entry) => entry.id)).toEqual([
-      "codex:personal-id",
-      "codex:work-id",
+    expect((await registry.listReports()).map((entry) => [entry.id, entry.account.label])).toEqual([
+      ["codex:personal-id", "personal@example.test"],
+      ["codex:work-id", "work@example.test"],
     ]);
   } finally {
     await rm(personal, { recursive: true, force: true });
@@ -178,4 +190,52 @@ test("concurrent requests for the same ID share one vendor fetch", async () => {
   const [one, two] = await Promise.all([first, second]);
   expect(one[0]).toBe(two[0]);
   expect(fetches).toBe(1);
+});
+
+test("source failure IDs cannot collide with an account named error", async () => {
+  const registry = new UsageSourceRegistry();
+  registry.register(
+    source({
+      id: "source",
+      discover: async () => [{ account: "error" }, { account: "bad:key" }],
+    }),
+  );
+  const reports = await registry.listReports();
+  expect(reports).toHaveLength(2);
+  expect(reports.find((entry) => entry.id === "source:error")?.report.status).toBe("available");
+  expect(reports.find((entry) => entry.report.status === "error")?.id).toMatch(
+    /^source:[^A-Za-z0-9._-]/,
+  );
+});
+
+test("expired cached entries are pruned when a new report is written", async () => {
+  let now = 0;
+  const registry = new UsageSourceRegistry(() => now, 100);
+  registry.register(source({ id: "source" }));
+  await registry.resolveReference({ source: "source", input: { account: "old" } });
+  await registry.listReports({ reportIds: ["source:old"] });
+  now = 101;
+  await registry.resolveReference({ source: "source", input: { account: "new" } });
+  await registry.listReports({ reportIds: ["source:new"] });
+  const cache = Reflect.get(registry, "cache") as Map<string, unknown>;
+  expect([...cache.keys()]).toEqual(["source:new"]);
+});
+
+test("discovery failures have an ID outside the account namespace", async () => {
+  const registry = new UsageSourceRegistry();
+  registry.register(
+    source({
+      id: "source",
+      discover: async () => {
+        throw new Error("discovery failed");
+      },
+    }),
+  );
+  expect(await registry.resolveReference({ source: "source", input: { account: "error" } })).toBe(
+    "source:error",
+  );
+  const discovered = await registry.listReports();
+  expect(discovered.map((entry) => entry.id)).toEqual(["source:!error"]);
+  const both = await registry.listReports({ reportIds: ["source:error", "source:!error"] });
+  expect(both.map((entry) => entry.report.status)).toEqual(["available", "error"]);
 });

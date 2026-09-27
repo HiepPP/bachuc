@@ -64,8 +64,8 @@ export class UsageSourceRegistry {
       this.known.set(id, { source, input, label: account.label });
       return id;
     } catch (error) {
-      const id = `${source.id}:error`;
-      this.cache.set(id, { at: this.now(), entry: this.errorEntry(source, id, error) });
+      const id = `${source.id}:!error`;
+      this.writeCache(id, this.errorEntry(source, id, error));
       return id;
     }
   }
@@ -91,8 +91,8 @@ export class UsageSourceRegistry {
             (id): id is string => id !== null,
           );
         } catch (error) {
-          const id = `${source.id}:error`;
-          this.cache.set(id, { at: this.now(), entry: this.errorEntry(source, id, error) });
+          const id = `${source.id}:!error`;
+          this.writeCache(id, this.errorEntry(source, id, error));
           return [id];
         }
       }),
@@ -148,7 +148,7 @@ export class UsageSourceRegistry {
       } catch (error) {
         entry = this.errorEntry(known.source, id, error, known.label);
       }
-      this.cache.set(id, { at: this.now(), entry });
+      this.writeCache(id, entry);
       return entry;
     })();
     this.pending.set(id, request);
@@ -156,6 +156,14 @@ export class UsageSourceRegistry {
       if (this.pending.get(id) === request) this.pending.delete(id);
     });
     return request;
+  }
+
+  private writeCache(id: string, entry: UsageReportEntry): void {
+    const at = this.now();
+    for (const [cachedId, cached] of this.cache) {
+      if (at - cached.at >= this.ttlMs) this.cache.delete(cachedId);
+    }
+    this.cache.set(id, { at, entry });
   }
 
   private errorEntry(
