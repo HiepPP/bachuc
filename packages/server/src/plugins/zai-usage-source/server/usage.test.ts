@@ -118,10 +118,16 @@ describe("zai usage source", () => {
   });
 });
 
-it("identify uses the configured zai account key", async () => {
+it("identify returns a key when fetch finds zai credentials", async () => {
   const previous = process.env["ZAI_API_KEY"];
   try {
     process.env["ZAI_API_KEY"] = "fixture-token";
+    let requested = false;
+    await fetchUsage({}, async () => {
+      requested = true;
+      return new Response(null, { status: 401 });
+    });
+    expect(requested).toBe(true);
     expect(await identify()).toEqual({ key: "default" });
   } finally {
     if (previous === undefined) delete process.env["ZAI_API_KEY"];

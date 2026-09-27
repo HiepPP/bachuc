@@ -647,3 +647,131 @@ it("token-only Claude inputs use a cached OAuth profile identity", async () => {
   });
   expect(calls).toBe(1);
 });
+
+it("identifies the same configDir credentials that fetch uses when oauthAccount is absent", async () => {
+  const { identify } = await import("./usage.js");
+  const directory = mkdtempSync(join(tmpdir(), "claude-credential-identity-"));
+  try {
+    writeClaudeCredentials(directory, "fixture-credential-token");
+    writeFileSync(join(directory, ".claude.json"), JSON.stringify({}));
+    let usageRequested = false;
+    await fetchUsage({ configDir: directory }, async () => {
+      usageRequested = true;
+      return new Response(null, { status: 401 });
+    });
+    expect(usageRequested).toBe(true);
+    let profileRequested = false;
+    const account = await identify({ configDir: directory }, async () => {
+      profileRequested = true;
+      return jsonResponse({
+        account: { uuid: "account-uuid", email: "owner@example.test" },
+        organization: { uuid: "org-uuid" },
+      });
+    });
+    expect(profileRequested).toBe(true);
+    expect(account).toEqual({ key: "account-uuid.org-uuid", label: "owner@example.test" });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("expires cached token profiles after five minutes", async () => {
+  const { identify } = await import("./usage.js");
+  let now = 0;
+  let calls = 0;
+  const fetchProfile: typeof fetch = async () => {
+    calls++;
+    return jsonResponse({ account: { uuid: "account-uuid" }, organization: { uuid: "org-uuid" } });
+  };
+  const input = { accessToken: "ttl-fixture-token" };
+  await identify(input, fetchProfile, () => now);
+  await identify(input, fetchProfile, () => now);
+  expect(calls).toBe(1);
+  now = 300_001;
+  await identify(input, fetchProfile, () => now);
+  expect(calls).toBe(2);
+});
+
+it("identify and fetch share the macOS keychain credential fallback", async () => {
+  const { identify } = await import("./usage.js");
+  const directory = mkdtempSync(join(tmpdir(), "claude-keychain-identity-"));
+  try {
+    const lookup = {
+      platform: "darwin" as const,
+      claudeHome: directory,
+      accountHome: directory,
+      readKeychainCredentials: async () => ({
+        claudeAiOauth: { accessToken: "keychain-fixture-token" },
+      }),
+    };
+    let usageRequested = false;
+    await fetchUsage(
+      {},
+      async () => {
+        usageRequested = true;
+        return new Response(null, { status: 401 });
+      },
+      lookup,
+    );
+    expect(usageRequested).toBe(true);
+    const account = await identify(
+      {},
+      async () =>
+        jsonResponse({
+          account: { uuid: "keychain-account" },
+          organization: { uuid: "keychain-org" },
+        }),
+      Date.now,
+      lookup,
+    );
+    expect(account).toEqual({ key: "keychain-account.keychain-org" });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("identify and fetch share the default Claude home credentials", async () => {
+  const { identify } = await import("./usage.js");
+  const directory = mkdtempSync(join(tmpdir(), "claude-home-identity-"));
+  try {
+    writeClaudeCredentials(directory, "home-fixture-token");
+    const lookup = { claudeHome: directory, accountHome: directory };
+    let usageRequested = false;
+    await fetchUsage(
+      {},
+      async () => {
+        usageRequested = true;
+        return new Response(null, { status: 401 });
+      },
+      lookup,
+    );
+    expect(usageRequested).toBe(true);
+    const identity = await identify(
+      {},
+      async () =>
+        jsonResponse({
+          account: { uuid: "home-account" },
+          organization: { uuid: "home-org" },
+        }),
+      Date.now,
+      lookup,
+    );
+    expect(identity).toEqual({ key: "home-account.home-org" });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it("bounds cached profiles across many token rotations", async () => {
+  const { identify } = await import("./usage.js");
+  let calls = 0;
+  const fetchProfile: typeof fetch = async () => {
+    calls++;
+    return jsonResponse({ account: { uuid: "account" }, organization: { uuid: "org" } });
+  };
+  for (let index = 0; index < 129; index++) {
+    await identify({ accessToken: `rotation-fixture-${index}` }, fetchProfile);
+  }
+  await identify({ accessToken: "rotation-fixture-0" }, fetchProfile);
+  expect(calls).toBe(130);
+});

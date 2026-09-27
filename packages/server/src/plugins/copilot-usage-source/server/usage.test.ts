@@ -112,10 +112,16 @@ describe("copilot usage source", () => {
   });
 });
 
-it("identify uses the configured copilot account key", async () => {
+it("identify returns a key when fetch finds copilot credentials", async () => {
   const previous = process.env["COPILOT_TOKEN"];
   try {
     process.env["COPILOT_TOKEN"] = "fixture-token";
+    let requested = false;
+    await fetchUsage({}, async () => {
+      requested = true;
+      return new Response(null, { status: 401 });
+    });
+    expect(requested).toBe(true);
     expect(await identify()).toEqual({ key: "default" });
   } finally {
     if (previous === undefined) delete process.env["COPILOT_TOKEN"];

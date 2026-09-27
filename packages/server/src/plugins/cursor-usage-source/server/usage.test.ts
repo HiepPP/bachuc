@@ -259,10 +259,16 @@ describe("cursor usage source", () => {
   });
 });
 
-it("identify uses the configured cursor account key", async () => {
+it("identify returns a key when fetch finds cursor credentials", async () => {
   const previous = process.env["CURSOR_ACCESS_TOKEN"];
   try {
     process.env["CURSOR_ACCESS_TOKEN"] = "fixture-token";
+    let requested = false;
+    await fetchUsage({}, async () => {
+      requested = true;
+      return new Response(null, { status: 401 });
+    });
+    expect(requested).toBe(true);
     expect(await identify()).toEqual({ key: "default" });
   } finally {
     if (previous === undefined) delete process.env["CURSOR_ACCESS_TOKEN"];

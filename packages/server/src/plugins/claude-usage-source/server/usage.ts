@@ -327,16 +327,51 @@ export async function readClaudeKeychainCredentials(
   return null;
 }
 
+interface ClaudeCredentialLookup {
+  platform?: NodeJS.Platform;
+  readKeychainCredentials?: () => Promise<unknown | null>;
+  claudeHome?: string;
+  accountHome?: string;
+}
+
+/** Shared credential lookup for usage fetches and account identification. */
+export async function resolveClaudeCredentials(
+  input: UsageInput,
+  lookup: ClaudeCredentialLookup = {},
+): Promise<ClaudeCredentialRecord | null> {
+  if ("accessToken" in input) return { oauth: { accessToken: input.accessToken } };
+  if ("configDir" in input) return readCredentialFile(join(input.configDir, ".credentials.json"));
+  const claudeHome = lookup.claudeHome ?? process.env["CLAUDE_HOME"] ?? join(homedir(), ".claude");
+  const fileCredentials = await readCredentialFile(join(claudeHome, ".credentials.json"));
+  if (fileCredentials) return fileCredentials;
+  if ((lookup.platform ?? process.platform) !== "darwin") return null;
+  const parsed = ClaudeCredentialsSchema.safeParse(
+    await (lookup.readKeychainCredentials ?? readClaudeKeychainCredentials)(),
+  );
+  return parsed.success ? toCredentialRecord(parsed.data) : null;
+}
+
+async function readCredentialFile(path: string): Promise<ClaudeCredentialRecord | null> {
+  if (!existsSync(path)) return null;
+  try {
+    return toCredentialRecord(
+      ClaudeCredentialsSchema.parse(JSON.parse(await fs.readFile(path, "utf8"))),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function toCredentialRecord(credentials: ClaudeCredentials): ClaudeCredentialRecord | null {
+  const oauth = credentials.claudeAiOauth;
+  return oauth?.accessToken ? { oauth: { ...oauth, accessToken: oauth.accessToken } } : null;
+}
+
 export async function fetchUsage(
   input: UsageInput,
   fetchApi: typeof fetch = fetch,
+  credentialLookup: ClaudeCredentialLookup = {},
 ): Promise<UsageReport> {
-  const claudeHome = process.env["CLAUDE_HOME"] || join(homedir(), ".claude");
-  const configDir = "configDir" in input ? input.configDir : undefined;
-  const accessToken = "accessToken" in input ? input.accessToken : undefined;
-  const readKeychainCredentials = readClaudeKeychainCredentials;
-  const platform = process.platform;
-
   /**
    * Scoped limits carried by `limits[]`.
    *
@@ -365,37 +400,6 @@ export async function fetchUsage(
     return parsed;
   }
 
-  async function readCredentials(): Promise<ClaudeCredentialRecord | null> {
-    if (accessToken) return { oauth: { accessToken: accessToken } };
-    if (configDir) return readCredentialFile(join(configDir, ".credentials.json"));
-    const credPath = join(claudeHome, ".credentials.json");
-    const fileCredentials = await readCredentialFile(credPath);
-    return fileCredentials ?? (platform === "darwin" ? await readKeychainCredential() : null);
-  }
-
-  async function readCredentialFile(path: string): Promise<ClaudeCredentialRecord | null> {
-    if (!existsSync(path)) return null;
-    try {
-      return toCredentialRecord(
-        ClaudeCredentialsSchema.parse(JSON.parse(await fs.readFile(path, "utf8"))),
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  async function readKeychainCredential(): Promise<ClaudeCredentialRecord | null> {
-    const parsed = ClaudeCredentialsSchema.safeParse(await readKeychainCredentials());
-    return parsed.success ? toCredentialRecord(parsed.data) : null;
-  }
-
-  function toCredentialRecord(
-    credentials: z.infer<typeof ClaudeCredentialsSchema>,
-  ): ClaudeCredentialRecord | null {
-    const oauth = credentials.claudeAiOauth;
-    return oauth?.accessToken ? { oauth: { ...oauth, accessToken: oauth.accessToken } } : null;
-  }
-
   async function callClaudeApi(token: string): Promise<ClaudeUsageResponse | "NEEDS_AUTH"> {
     const res = await fetchApi("https://api.anthropic.com/api/oauth/usage", {
       signal: AbortSignal.timeout(15_000),
@@ -410,7 +414,7 @@ export async function fetchUsage(
     return ClaudeUsageResponseSchema.parse(await res.json());
   }
 
-  const credentials = await readCredentials();
+  const credentials = await resolveClaudeCredentials(input, credentialLookup);
   if (!credentials) {
     return unavailableUsage();
   }
@@ -463,10 +467,25 @@ const ClaudeAccountSchema = z.object({
   organizationUuid: z.string().min(1),
   emailAddress: z.string().optional(),
 });
-const profileCache = new Map<string, Promise<{ key: string; label?: string } | null>>();
+type ClaudeIdentity = { key: string; label?: string } | null;
+const PROFILE_TTL_MS = 300_000;
+const PROFILE_CACHE_LIMIT = 128;
+const profileCache = new Map<string, { at: number; result: Promise<ClaudeIdentity> }>();
 
-export async function identify(input: UsageInput, fetchApi: typeof fetch = fetch) {
-  const directory = "configDir" in input ? input.configDir : homedir();
+function pruneProfileCache(now: number): void {
+  for (const [key, entry] of profileCache) {
+    if (now - entry.at >= PROFILE_TTL_MS) profileCache.delete(key);
+  }
+}
+
+export async function identify(
+  input: UsageInput,
+  fetchApi: typeof fetch = fetch,
+  now: () => number = Date.now,
+  credentialLookup: ClaudeCredentialLookup = {},
+) {
+  const directory =
+    "configDir" in input ? input.configDir : (credentialLookup.accountHome ?? homedir());
   if (!("accessToken" in input)) {
     try {
       const config = z
@@ -478,13 +497,21 @@ export async function identify(input: UsageInput, fetchApi: typeof fetch = fetch
         ...(account.emailAddress ? { label: account.emailAddress } : {}),
       };
     } catch {
-      return null;
+      // Credentials may still be present even when account metadata is absent.
     }
   }
-  const token = input.accessToken;
+  const credentials = await resolveClaudeCredentials(input, credentialLookup);
+  if (!credentials) return null;
+  const token = credentials.oauth.accessToken;
   const tokenHash = hashAccountKey(token);
+  pruneProfileCache(now());
   const pending = profileCache.get(tokenHash);
-  if (pending) return pending;
+  if (pending) return pending.result;
+  while (profileCache.size >= PROFILE_CACHE_LIMIT) {
+    const oldest = profileCache.keys().next().value;
+    if (oldest === undefined) break;
+    profileCache.delete(oldest);
+  }
   const request = (async () => {
     const response = await fetchApi("https://api.anthropic.com/api/oauth/profile", {
       signal: AbortSignal.timeout(15_000),
@@ -508,11 +535,11 @@ export async function identify(input: UsageInput, fetchApi: typeof fetch = fetch
       ...(account.email ? { label: account.email } : {}),
     };
   })();
-  profileCache.set(tokenHash, request);
+  profileCache.set(tokenHash, { at: now(), result: request });
   try {
     return await request;
   } catch (error) {
-    profileCache.delete(tokenHash);
+    if (profileCache.get(tokenHash)?.result === request) profileCache.delete(tokenHash);
     throw error;
   }
 }

@@ -369,10 +369,16 @@ describe("Kimi usage source usage windows", () => {
   });
 });
 
-it("identify uses the configured kimi account key", async () => {
+it("identify returns a key when fetch finds kimi credentials", async () => {
   const previous = process.env["KIMI_TOKEN"];
   try {
     process.env["KIMI_TOKEN"] = "fixture-token";
+    let requested = false;
+    await fetchUsage({}, async () => {
+      requested = true;
+      return new Response(null, { status: 401 });
+    });
+    expect(requested).toBe(true);
     expect(await identify()).toEqual({ key: "default" });
   } finally {
     if (previous === undefined) delete process.env["KIMI_TOKEN"];

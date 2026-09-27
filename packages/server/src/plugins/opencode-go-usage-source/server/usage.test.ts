@@ -28,6 +28,7 @@ test("discovers and fetches the default key from read-only auth.json", async () 
       return Response.json(upstreamResponse);
     };
     const report = await fetchUsage({}, fetchApi as typeof fetch, path);
+    expect((await identify({}, path))?.key).toMatch(/^[a-f0-9]{64}$/);
     expect(requests).toEqual([
       { url: "https://opencode.ai/zen/go/v1/usage", authorization: "Bearer fixture-key" },
     ]);
@@ -75,7 +76,13 @@ test.each([401, 403])("maps HTTP %i to unavailable", async (status) => {
   expect(report.windows).toEqual([]);
 });
 
-test("identifies OpenCode Go key without a usage request", async () => {
+test("identify returns a key when fetch finds OpenCode Go credentials", async () => {
+  let requested = false;
+  await fetchUsage({ apiKey: "fixture-secret" }, async () => {
+    requested = true;
+    return new Response(null, { status: 401 });
+  });
+  expect(requested).toBe(true);
   const identity = await identify({ apiKey: "fixture-secret" });
   expect(identity?.key).toMatch(/^[a-f0-9]{64}$/);
   expect(identity?.key).not.toBe("fixture-secret");

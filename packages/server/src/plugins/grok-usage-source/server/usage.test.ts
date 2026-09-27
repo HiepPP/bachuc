@@ -267,10 +267,16 @@ describe("grok usage source", () => {
   });
 });
 
-it("identify uses the configured grok account key", async () => {
+it("identify returns a key when fetch finds grok credentials", async () => {
   const previous = process.env["GROK_TOKEN"];
   try {
     process.env["GROK_TOKEN"] = "fixture-token";
+    let requested = false;
+    await fetchUsage({}, async () => {
+      requested = true;
+      return new Response(null, { status: 401 });
+    });
+    expect(requested).toBe(true);
     expect(await identify()).toEqual({ key: "default" });
   } finally {
     if (previous === undefined) delete process.env["GROK_TOKEN"];

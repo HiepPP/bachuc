@@ -64,7 +64,7 @@ test("explicit codexHome reads only that auth file", async () => {
   }
 });
 
-test("explicit access token needs no auth file", async () => {
+test("identify returns a key when fetch finds Codex token credentials", async () => {
   await fetchUsage(
     { accessToken: "fixture-supplied", accountId: "account-supplied" },
     (_url, init) => response(init?.headers ?? {}, "account-supplied"),
@@ -141,4 +141,23 @@ test("token-only account claim survives token rotation", async () => {
   expect(await identify({ accessToken: token("first") })).toEqual({ key: "work-id" });
   expect(await identify({ accessToken: token("second") })).toEqual({ key: "work-id" });
   expect(await identify({ accessToken: "opaque-token" })).toBeNull();
+});
+
+test("identify reads an email label from auth id_token when access token has no profile", async () => {
+  const home = await mkdtemp(join(tmpdir(), "usage-codex-label-"));
+  try {
+    const idToken = `header.${Buffer.from(JSON.stringify({ email: "id-owner@example.test" })).toString("base64url")}.signature`;
+    await writeFile(
+      join(home, "auth.json"),
+      JSON.stringify({
+        tokens: { account_id: "account-id", access_token: "opaque-token", id_token: idToken },
+      }),
+    );
+    expect(await identify({ codexHome: home })).toEqual({
+      key: "account-id",
+      label: "id-owner@example.test",
+    });
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
