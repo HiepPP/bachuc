@@ -73,7 +73,10 @@ function fakeApi(
     agents: {
       list: async () => {
         lists += 1;
-        return { entries: rows.map((agent) => ({ agent })), pageInfo: { hasMore: false } };
+        return {
+          entries: rows.filter((agent) => !archived.includes(agent.id)).map((agent) => ({ agent })),
+          pageInfo: { hasMore: false },
+        };
       },
       ref: (id: string) => ({
         refresh: async () => ({
@@ -96,7 +99,7 @@ const ready =
   async () => ({
     status: "ready" as const,
     revision: "r1",
-    values: { enabled, idleHours: 24 },
+    values: { enabled, idleHours: 24, keepRecent: 0 },
   });
 
 test("one failed archive does not stop the sweep and logs never contain titles", async () => {
@@ -107,7 +110,7 @@ test("one failed archive does not stop the sweep and logs never contain titles",
   const lines: string[] = [];
   const result = await sweep(
     api,
-    { enabled: true, idleHours: 24 },
+    { enabled: true, idleHours: 24, keepRecent: 0 },
     {
       now: () => new Date(NOW),
       log: (line) => lines.push(line),
@@ -134,7 +137,7 @@ test("fresh snapshot that became active is skipped", async () => {
   );
   const result = await sweep(
     api,
-    { enabled: true, idleHours: 24 },
+    { enabled: true, idleHours: 24, keepRecent: 0 },
     { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal },
   );
   assert.deepEqual(archived, []);
@@ -167,12 +170,12 @@ test("timer waits for a hook API, then sweeps are throttled to one per 10 minute
   assert.equal(janitor.fromHook(api, "created"), undefined);
   clock += 1;
   await janitor.fromTimer();
-  // Each sweep lists agents twice: once for agents, once to find live workspaces.
-  assert.equal(lists(), 4);
+  // Two lists per sweep plus one fresh list before the first archive.
+  assert.equal(lists(), 5);
   janitor.stop();
   clock += SWEEP_THROTTLE_MS;
   assert.equal(janitor.fromTimer(), undefined);
-  assert.equal(lists(), 4);
+  assert.equal(lists(), 5);
 });
 
 test("disabled setting stops all archiving", async () => {
@@ -207,10 +210,42 @@ test("idle workspaces without live agents or terminals are archived", async () =
   );
   const result = await sweep(
     api,
-    { enabled: true, idleHours: 24 },
+    { enabled: true, idleHours: 24, keepRecent: 0 },
     { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal },
   );
   assert.deepEqual(archivedWorkspaces, ["old"]);
   assert.equal(result.workspacesStale, 2);
   assert.equal(result.workspacesArchived, 1);
+});
+
+test("retained threads also protect their workspaces across repeated sweeps", async () => {
+  const rows = Array.from({ length: 10 }, (_, i) => ({
+    ...row(String(i), 30 + i),
+    workspaceId: `w${i}`,
+  }));
+  const { api, archived, archivedWorkspaces } = fakeApi(
+    rows,
+    [],
+    undefined,
+    rows.map((_, i) => workspace(`w${i}`, 40)),
+  );
+  const settings = { enabled: true, idleHours: 24, keepRecent: 7 };
+  const options = { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal };
+  await sweep(api, settings, options);
+  assert.deepEqual(archived, ["7", "8", "9"]);
+  assert.deepEqual(archivedWorkspaces, ["w7", "w8", "w9"]);
+  await sweep(api, settings, options);
+  assert.deepEqual(archived, ["7", "8", "9"]);
+});
+
+test("fresh activity can move a stale candidate into the retained threads", async () => {
+  const { api, archived } = fakeApi([row("recent", 30), row("older", 40)], [], (agent) =>
+    agent ? { ...agent, updatedAt: new Date(NOW - 25 * HOUR_MS).toISOString() } : agent,
+  );
+  await sweep(
+    api,
+    { enabled: true, idleHours: 24, keepRecent: 1 },
+    { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal },
+  );
+  assert.deepEqual(archived, []);
 });

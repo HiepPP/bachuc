@@ -77,8 +77,13 @@ export async function sweep(
     try {
       const ref = paseo.agents.ref(agent.id);
       // Archive cancels a live turn, so re-check a fresh snapshot just before archiving.
+      const current = await listUnarchived(paseo);
       const fresh = await ref.refresh();
-      if (!fresh || selectStale([fresh.agent], options.now(), settings).length === 0) continue;
+      if (!fresh) continue;
+      const candidates = current.map((entry) => (entry.id === agent.id ? fresh.agent : entry));
+      if (!selectStale(candidates, options.now(), settings).some((entry) => entry.id === agent.id))
+        continue;
+      if (options.signal.aborted) break;
       await ref.archive();
       result.archived += 1;
       options.log(`archived ${agent.id} titleLength=${agent.title?.length ?? 0}`);
@@ -156,7 +161,7 @@ export function createJanitor(options: {
         `sweep (${reason}): archived ${result.archived} of ${result.stale} stale, ` +
           `checked ${result.checked}, failed ${result.failed}; ` +
           `archived ${result.workspacesArchived} of ${result.workspacesStale} stale workspaces, ` +
-          `failed ${result.workspacesFailed}; idleHours ${state.values.idleHours}`,
+          `failed ${result.workspacesFailed}; idleHours ${state.values.idleHours}; keepRecent ${state.values.keepRecent}`,
       );
     })()
       .catch((error: unknown) => options.log(`sweep failed (${reason}): ${describe(error)}`))

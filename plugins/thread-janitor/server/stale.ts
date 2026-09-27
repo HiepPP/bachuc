@@ -28,10 +28,23 @@ export function selectStale<T extends JanitorAgent>(
   settings: JanitorSettings,
 ): T[] {
   if (!settings.enabled) return [];
+  const retained = new Set(
+    agents
+      .filter((agent) => !agent.archivedAt)
+      .sort((a, b) => {
+        // Unknown activity is protected rather than treated as old.
+        const timeA = Number.isFinite(lastActivityAt(a)) ? lastActivityAt(a) : Infinity;
+        const timeB = Number.isFinite(lastActivityAt(b)) ? lastActivityAt(b) : Infinity;
+        return timeB - timeA || a.id.localeCompare(b.id);
+      })
+      .slice(0, settings.keepRecent)
+      .map((agent) => agent.id),
+  );
   const cutoff = now.getTime() - settings.idleHours * HOUR_MS;
   return agents.filter(
     (agent) =>
       !agent.archivedAt &&
+      !retained.has(agent.id) &&
       agent.status !== "running" &&
       agent.pendingPermissions.length === 0 &&
       lastActivityAt(agent) < cutoff,

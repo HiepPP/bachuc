@@ -11,7 +11,7 @@ import {
 
 const HOUR_MS = 60 * 60 * 1000;
 const now = new Date("2026-09-23T12:00:00.000Z");
-const defaults = janitorSettings.schema.parse({});
+const defaults = janitorSettings.schema.parse({ keepRecent: 0 });
 
 function agent(id: string, idleMs: number, overrides: Partial<JanitorAgent> = {}): JanitorAgent {
   return {
@@ -29,7 +29,14 @@ function agent(id: string, idleMs: number, overrides: Partial<JanitorAgent> = {}
 const ids = (agents: JanitorAgent[]) => agents.map((row) => row.id);
 
 test("defaults are enabled with a 24 hour idle threshold and a 1 hour minimum", () => {
-  assert.deepEqual(defaults, { enabled: true, idleHours: 24 });
+  assert.deepEqual(janitorSettings.schema.parse({}), {
+    enabled: true,
+    idleHours: 24,
+    keepRecent: 7,
+  });
+  for (const keepRecent of [-1, 1.5]) {
+    assert.throws(() => janitorSettings.schema.parse({ keepRecent }));
+  }
   assert.throws(() => janitorSettings.schema.parse({ idleHours: 0.5 }));
 });
 
@@ -44,7 +51,7 @@ test("idle boundary: only agents idle longer than idleHours are stale", () => {
     agent("bad-date", 48 * HOUR_MS, { updatedAt: "not a date" }),
   ];
   assert.deepEqual(ids(selectStale(agents, now, defaults)), ["older"]);
-  assert.deepEqual(ids(selectStale(agents, now, { enabled: true, idleHours: 2 })), [
+  assert.deepEqual(ids(selectStale(agents, now, { ...defaults, idleHours: 2 })), [
     "exact",
     "older",
   ]);
@@ -69,7 +76,7 @@ test("already archived agent is not selected again", () => {
 test("disabled setting selects nothing", () => {
   const agents = [agent("old", 72 * HOUR_MS), agent("closed", 72 * HOUR_MS, { status: "closed" })];
   assert.deepEqual(ids(selectStale(agents, now, defaults)), ["old", "closed"]);
-  assert.deepEqual(selectStale(agents, now, { enabled: false, idleHours: 24 }), []);
+  assert.deepEqual(selectStale(agents, now, { ...defaults, enabled: false }), []);
 });
 
 function workspace(
@@ -114,4 +121,29 @@ test("workspaces: only idle, unpinned, non-worktree rows without live agents are
     ["old"],
   );
   assert.deepEqual(selectStaleWorkspaces(rows, live, now, { ...defaults, enabled: false }), []);
+});
+
+test("keeps the latest seven unarchived threads even when all are stale", () => {
+  const rows = Array.from({ length: 10 }, (_, i) => agent(String(i), (30 + i) * HOUR_MS));
+  const settings = janitorSettings.schema.parse({});
+  assert.deepEqual(ids(selectStale(rows.reverse(), now, settings)).sort(), ["7", "8", "9"]);
+  assert.deepEqual(selectStale(rows.slice(0, 7), now, settings), []);
+});
+
+test("retention uses last message activity and excludes already archived threads", () => {
+  const rows = [
+    agent("archived", HOUR_MS, { archivedAt: now.toISOString() }),
+    agent("message", 80 * HOUR_MS, {
+      lastUserMessageAt: new Date(now.getTime() - 25 * HOUR_MS).toISOString(),
+    }),
+    agent("older", 30 * HOUR_MS),
+  ];
+  assert.deepEqual(ids(selectStale(rows, now, { ...defaults, keepRecent: 1 })), ["older"]);
+});
+
+test("equal activity uses stable id ordering across snapshots", () => {
+  const rows = [agent("b", 30 * HOUR_MS), agent("a", 30 * HOUR_MS)];
+  const settings = { ...defaults, keepRecent: 1 };
+  assert.deepEqual(ids(selectStale(rows, now, settings)), ["b"]);
+  assert.deepEqual(ids(selectStale(rows.reverse(), now, settings)), ["b"]);
 });

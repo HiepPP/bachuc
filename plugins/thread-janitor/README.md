@@ -1,7 +1,8 @@
 # Thread Janitor
 
 Server-only Paseo plugin that archives idle threads automatically, with no confirmation
-dialog. By default a thread idle for more than 24 hours is archived.
+dialog. By default a thread idle for more than 24 hours is archived, except for the
+seven most recently active unarchived threads on that host.
 
 Archive is reversible. The janitor never deletes agents, files, or worktrees.
 
@@ -10,12 +11,15 @@ Archive is reversible. The janitor never deletes agents, files, or worktrees.
 An agent is archived when all of these are true:
 
 - It is not already archived.
+- It is outside the host-wide `keepRecent` most recently active threads, across all workspaces.
+  The same last-activity timestamp below determines this order; ties use agent ID.
+  Threads with unknown activity remain protected.
 - Its last activity is older than `idleHours`. Last activity is the later of the agent's
   `updatedAt` (the daemon's stored last-activity time) and `lastUserMessageAt`.
 - Its status is not `running`.
 - It has no pending permission request.
 
-Right before archiving, the janitor fetches a fresh snapshot of the agent and re-checks these
+Right before archiving, the janitor refreshes the unarchived list and the agent, then re-checks these
 rules, because archiving a live agent cancels its turn. One failed archive does not stop the
 rest of the sweep.
 
@@ -43,17 +47,22 @@ The janitor re-fetches the workspace right before archiving and checks the rules
 
 Settings id `janitor`, host scope, version 1:
 
-| Setting     | Default | Rule          |
-| ----------- | ------- | ------------- |
-| `enabled`   | `true`  | boolean       |
-| `idleHours` | `24`    | number, min 1 |
+| Setting      | Default | Rule           |
+| ------------ | ------- | -------------- |
+| `enabled`    | `true`  | boolean        |
+| `idleHours`  | `24`    | number, min 1  |
+| `keepRecent` | `7`     | integer, min 0 |
 
 Setting `enabled` to `false` stops all archiving. There is no settings screen. Values are stored
 in `~/.paseo/plugin-settings/thread-janitor/janitor.json`:
 
 ```json
-{ "version": 1, "values": { "enabled": false, "idleHours": 24 } }
+{ "version": 1, "values": { "enabled": false, "idleHours": 24, "keepRecent": 7 } }
 ```
+
+`keepRecent` is configured independently on each host. Set it to `0` to disable retention.
+If fewer than `keepRecent` threads remain, all remain protected. Retained threads also protect
+their workspaces. This setting does not restore threads that were already archived.
 
 Settings are read at the start of every sweep, so edits apply to the next sweep without a
 reload. An invalid file skips the sweep and logs the error.
