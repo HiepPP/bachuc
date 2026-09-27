@@ -21,6 +21,7 @@ import { createService } from "./server/service";
 import { AgentModes } from "./server/modes";
 import { Store } from "./server/store";
 import { withBridgeCavemanEnv } from "./server/session-env";
+import { markChild, unmarkChild } from "./server/child-markers";
 
 export default function contribute(server: PluginServerContext) {
   const home = process.env.PASEO_HOME || path.join(homedir(), ".paseo");
@@ -56,8 +57,12 @@ export default function contribute(server: PluginServerContext) {
   const sessionOpen = server.before("agent.session_open", ({ request }) =>
     withBridgeCavemanEnv(request, dataDir),
   );
+  const created = server.on("agent.created", ({ agent }) => markChild(dataDir, agent));
+  const archived = server.on("agent.archived", ({ agent }) => unmarkChild(dataDir, agent));
   return () => {
     sessionOpen();
+    created();
+    archived();
     store.close();
   };
 }
