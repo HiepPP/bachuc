@@ -3,6 +3,11 @@ import { gotoAppShell } from "../support/helpers/app";
 import { getServerId } from "../support/helpers/server-id";
 import { installUsageReportsFixture } from "../support/helpers/usage-reports";
 
+// Two hours reads "2h ago" for an hour, so the assertion cannot race the clock.
+function twoHoursAgo(): string {
+  return new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+}
+
 test.describe("usage screen", () => {
   test("opens from the sidebar and groups reports under their host", async ({ page }) => {
     test.setTimeout(120_000);
@@ -13,7 +18,7 @@ test.describe("usage screen", () => {
           {
             id: "alpha:a",
             account: {},
-            fetchedAt: "2026-01-01T00:00:00.000Z",
+            fetchedAt: twoHoursAgo(),
             sourceId: "alpha",
             sourceLabel: "Alpha plan",
             report: {
@@ -43,6 +48,10 @@ test.describe("usage screen", () => {
     await expect(group.getByText("31%")).toBeVisible();
     await expect(group.getByText("Beta plan", { exact: true })).toBeVisible();
     await expect(group.getByText("Unavailable", { exact: true })).toBeVisible();
+
+    await group.getByTestId("usage-card-header").first().hover();
+    await expect(page.getByTestId("usage-freshness-tooltip")).toHaveText("Updated 2h ago");
+    await expect(group.getByTestId("usage-freshness")).toHaveCount(0);
   });
 
   test("shows the host once it connects after a cold load on a phone", async ({ page }) => {
@@ -54,7 +63,7 @@ test.describe("usage screen", () => {
           {
             id: "alpha:a",
             account: {},
-            fetchedAt: "2026-01-01T00:00:00.000Z",
+            fetchedAt: twoHoursAgo(),
             sourceId: "alpha",
             sourceLabel: "Alpha plan",
             report: { status: "available", windows: [] },
@@ -67,9 +76,9 @@ test.describe("usage screen", () => {
     await page.goto("/usage");
     await usage.waitForListRequests(1);
 
-    await expect(
-      page.getByTestId(`usage-host-${serverId}`).getByText("Alpha plan", { exact: true }),
-    ).toBeVisible({ timeout: 10_000 });
+    const group = page.getByTestId(`usage-host-${serverId}`);
+    await expect(group.getByText("Alpha plan", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(group.getByTestId("usage-freshness")).toHaveText("Updated 2h ago");
   });
 
   test("tells the user to update a host without usage sources", async ({ page }) => {

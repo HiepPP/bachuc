@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatUsageFreshness,
   groupUsageByHost,
   headlineWindow,
   resolveUsagePill,
@@ -168,5 +169,13 @@ describe("groupUsageByHost", () => {
       ["New", { kind: "ready", reports: [], isRefreshing: false }],
       ["Old", { kind: "unavailable", message: "Update the host to see usage" }],
     ]);
+  });
+});
+
+describe("formatUsageFreshness", () => {
+  it("says when the report was fetched", () => {
+    expect(formatUsageFreshness("now")).toBe("Updated just now");
+    expect(formatUsageFreshness("3m")).toBe("Updated 3m ago");
+    expect(formatUsageFreshness("Jan 15")).toBe("Updated Jan 15");
   });
 });
