@@ -12,6 +12,7 @@ export type JanitorAgent = Pick<
   | "lastUserMessageAt"
   | "pendingPermissions"
   | "archivedAt"
+  | "labels"
 >;
 
 // The agent snapshot has no `lastActivityAt`; the daemon stores lastActivityAt as the agent's
@@ -40,6 +41,13 @@ export function selectStale<T extends JanitorAgent>(
       .slice(0, settings.keepRecent)
       .map((agent) => agent.id),
   );
+  // Archiving any ancestor can cascade into a retained descendant. Protect the
+  // entire chain conservatively, without depending on workspace or open-tab state.
+  const byId = new Map(agents.map((agent) => [agent.id, agent]));
+  for (const id of retained) {
+    const parentId = byId.get(id)?.labels?.["paseo.parent-agent-id"];
+    if (parentId && byId.has(parentId)) retained.add(parentId);
+  }
   const cutoff = now.getTime() - settings.idleHours * HOUR_MS;
   return agents.filter(
     (agent) =>

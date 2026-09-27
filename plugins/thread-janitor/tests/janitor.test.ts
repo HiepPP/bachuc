@@ -19,7 +19,11 @@ function row(id: string, idleHours: number) {
   };
 }
 
-type Row = ReturnType<typeof row> & { workspaceId?: string; cwd?: string };
+type Row = ReturnType<typeof row> & {
+  workspaceId?: string;
+  cwd?: string;
+  labels?: Record<string, string>;
+};
 
 function workspace(id: string, idleHours: number, overrides: Record<string, unknown> = {}) {
   return {
@@ -48,6 +52,14 @@ function fakeApi(
   const archived: string[] = [];
   const archivedWorkspaces: string[] = [];
   let lists = 0;
+  // Model daemon cascading for closed child tabs in the same workspace.
+  const archiveTree = (id: string) => {
+    if (archived.includes(id)) return;
+    archived.push(id);
+    for (const child of rows) {
+      if (child.labels?.["paseo.parent-agent-id"] === id) archiveTree(child.id);
+    }
+  };
   const api = {
     workspaces: {
       list: async () => ({ entries: workspaces, pageInfo: { hasMore: false } }),
@@ -85,7 +97,7 @@ function fakeApi(
         }),
         archive: async () => {
           if (failIds.includes(id)) throw new Error("daemon refused");
-          archived.push(id);
+          archiveTree(id);
           return { archivedAt: new Date(NOW).toISOString() };
         },
       }),
@@ -248,4 +260,38 @@ test("fresh activity can move a stale candidate into the retained threads", asyn
     { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal },
   );
   assert.deepEqual(archived, []);
+});
+
+test("retention protects ancestors from cascading into the newest seven threads", async () => {
+  const recent = Array.from({ length: 7 }, (_, i) => ({
+    ...row(`recent-${i}`, 30 + i),
+    workspaceId: "retained",
+    ...(i === 0 ? { labels: { "paseo.parent-agent-id": "parent" } } : {}),
+  }));
+  const rows: Row[] = [
+    ...recent,
+    { ...row("grandparent", 80), workspaceId: "retained" },
+    {
+      ...row("parent", 70),
+      workspaceId: "retained",
+      labels: { "paseo.parent-agent-id": "grandparent" },
+    },
+    { ...row("old-parent", 90), workspaceId: "old" },
+    {
+      ...row("old-child", 85),
+      workspaceId: "old",
+      labels: { "paseo.parent-agent-id": "old-parent" },
+    },
+  ];
+  const { api, archived, archivedWorkspaces } = fakeApi(rows, [], undefined, [
+    workspace("retained", 100),
+    workspace("old", 100),
+  ]);
+  const settings = { enabled: true, idleHours: 24, keepRecent: 7 };
+  const options = { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal };
+  await sweep(api, settings, options);
+  await sweep(api, settings, options);
+  assert.deepEqual(archived, ["old-parent", "old-child"]);
+  assert.ok(recent.every((agent) => !archived.includes(agent.id)));
+  assert.ok(!archivedWorkspaces.includes("retained"));
 });

@@ -21,6 +21,7 @@ function agent(id: string, idleMs: number, overrides: Partial<JanitorAgent> = {}
     updatedAt: new Date(now.getTime() - idleMs).toISOString(),
     lastUserMessageAt: null,
     pendingPermissions: [],
+    labels: {},
     archivedAt: null,
     ...overrides,
   };
@@ -146,4 +147,18 @@ test("equal activity uses stable id ordering across snapshots", () => {
   const settings = { ...defaults, keepRecent: 1 };
   assert.deepEqual(ids(selectStale(rows, now, settings)), ["b"]);
   assert.deepEqual(ids(selectStale(rows.reverse(), now, settings)), ["b"]);
+});
+
+test("retained ancestor traversal terminates on cycles and missing parents", () => {
+  const rows = [
+    agent("child", 30 * HOUR_MS, { labels: { "paseo.parent-agent-id": "parent" } }),
+    agent("parent", 40 * HOUR_MS, { labels: { "paseo.parent-agent-id": "child" } }),
+    agent("unrelated", 50 * HOUR_MS),
+  ];
+  assert.deepEqual(ids(selectStale(rows, now, { ...defaults, keepRecent: 1 })), ["unrelated"]);
+  const orphan = agent("orphan", 25 * HOUR_MS, { labels: { "paseo.parent-agent-id": "missing" } });
+  assert.deepEqual(ids(selectStale([orphan, rows[2]], now, { ...defaults, keepRecent: 1 })), [
+    "unrelated",
+  ]);
+  assert.deepEqual(ids(selectStale(rows, now, defaults)), ["child", "parent", "unrelated"]);
 });

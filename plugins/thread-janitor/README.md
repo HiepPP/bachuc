@@ -14,6 +14,9 @@ An agent is archived when all of these are true:
 - It is outside the host-wide `keepRecent` most recently active threads, across all workspaces.
   The same last-activity timestamp below determines this order; ties use agent ID.
   Threads with unknown activity remain protected.
+- It is not an ancestor of a retained thread. Parent links use the
+  `paseo.parent-agent-id` label. All ancestors remain protected because archiving a parent
+  can cascade to its descendants; this may leave more than `keepRecent` threads.
 - Its last activity is older than `idleHours`. Last activity is the later of the agent's
   `updatedAt` (the daemon's stored last-activity time) and `lastUserMessageAt`.
 - Its status is not `running`.
