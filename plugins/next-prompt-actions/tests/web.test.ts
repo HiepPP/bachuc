@@ -736,6 +736,62 @@ test("one structured suggestion uses direct Edit and Send without a selection st
   }
 });
 
+test("a folded selection panel keeps the user's choice across later scans", async () => {
+  const block = JSON.stringify({
+    version: 1,
+    prompts: [
+      { id: "implement", prompt: "Implement the layout." },
+      { id: "review", prompt: "Review only." },
+    ],
+    exclusiveGroups: [["implement", "review"]],
+    allowedCombinations: [],
+  });
+  const message = `## What Next\nPick one.\n\`\`\`next-prompts\n${block}\n\`\`\``;
+  const selection = { blockKey: "keep", exclusiveGroups: [["implement", "review"]], allowedCombinations: [] };
+  const candidates = ["implement", "review"].map((id, index) => ({
+    ...snapshot.candidates[0],
+    key: id,
+    block,
+    source: message,
+    text: index ? "Review only." : "Implement the layout.",
+    selection: { ...selection, id },
+  }));
+  const { document, window } = parseHTML(
+    '<html><head></head><body><div id="other"></div><div data-testid="assistant-message"><div data-paseo-markdown-tag="h2">What Next</div><div data-paseo-markdown-tag="p">Pick one.</div><div data-paseo-markdown-tag="pre"><span data-paseo-markdown-tag="code"></span></div></div></body></html>',
+  );
+  document.querySelector('[data-paseo-markdown-tag="code"]')!.textContent = block;
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "MutationObserver");
+  Object.defineProperty(globalThis, "MutationObserver", {
+    value: window.MutationObserver,
+    configurable: true,
+  });
+  const cleanup = install(
+    {
+      inspect: async () => ({ ...snapshot, candidates }),
+      send: async () => ({ sent: true }),
+    },
+    document as unknown as Parameters<typeof install>[1],
+    () => ({ ...context, message }),
+  );
+  try {
+    await pause();
+    const panel = document.querySelector("[data-next-prompt-actions]")!;
+    const radio = document.querySelectorAll('input[type="radio"]')[1];
+    radio.checked = true;
+    radio.dispatchEvent(new window.Event("change"));
+    // Any host DOM change schedules another scan.
+    document.querySelector("#other")!.textContent = "streaming";
+    await pause();
+    assert.equal(document.querySelector("[data-next-prompt-actions]"), panel, "panel not rebuilt");
+    assert.equal(document.querySelectorAll('input[type="radio"]')[1].checked, true);
+    assert.equal(document.querySelector(".npa-selection-send")!.textContent, "Send selected (1)");
+  } finally {
+    cleanup();
+    if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
+    else Reflect.deleteProperty(globalThis, "MutationObserver");
+  }
+});
+
 test("Recap, What Next, and intro fold into one prompt panel and restore exactly", async () => {
   const block = JSON.stringify({
     version: 1,

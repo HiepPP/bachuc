@@ -224,7 +224,10 @@ export function foldPanel(
 ): { undo(): void; intact(): boolean } {
   const parts = messageParts(message);
   const tops = parts.flatMap(topLevel);
-  const contents = new Map(tops.map((node) => [node, node.textContent]));
+  // The panel sits inside the prompt block and its text changes with every selection; only host
+  // text marks a re-render.
+  const text = (node: Node) => (node.contains?.(panel) ? ownText(node, panel) : node.textContent);
+  const contents = new Map(tops.map((node) => [node, text(node)]));
   let index = tops.indexOf(block) - 1;
   const intro: Node[] = [];
   while (index >= 0 && tops[index].getAttribute(TAG) === "p") intro.unshift(tops[index--]);
@@ -341,6 +344,15 @@ export function foldPanel(
       messageParts(message).every((part) => parts.includes(part)) &&
       messageParts(message)
         .flatMap(topLevel)
-        .every((node) => contents.has(node) && contents.get(node) === node.textContent),
+        .every((node) => contents.has(node) && contents.get(node) === text(node)),
   };
+}
+
+function ownText(node: Node, skip: Node): string {
+  if (node === skip) return "";
+  if (node.nodeType === 3) return node.nodeValue ?? "";
+  if (node.nodeType !== 1) return "";
+  return Array.from(node.childNodes ?? [])
+    .map((child) => ownText(child, skip))
+    .join("");
 }
