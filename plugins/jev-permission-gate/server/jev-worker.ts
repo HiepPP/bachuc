@@ -1,15 +1,18 @@
 // Runs in a standalone Node process: the AI SDK fails inside the bundled plugin subprocess.
-import { createGateway } from "@ai-sdk/gateway";
+import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
 import { experimental_evaluate as evaluate } from "ai";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { POLICY, QUESTIONS, type GateState, type Verdict } from "./policy";
 
 async function run(state: GateState, configFile: string): Promise<Verdict> {
-  const config = JSON.parse(await readFile(configFile, "utf8"));
-  const key = config?.agents?.providers?.["vercel-gateway"]?.env?.OPENAI_API_KEY;
-  if (typeof key !== "string" || !key) throw new Error("Jev Gateway credential unavailable.");
+  const config = JSON.parse(
+    await readFile(path.join(path.dirname(configFile), "typesafe-ai.json"), "utf8"),
+  );
+  const key = config?.apiKey;
+  if (typeof key !== "string" || !key) throw new Error("Jev Typesafe credential unavailable.");
   const result = await evaluate({
-    model: createGateway({ apiKey: key }).evaluationModel("typesafe-ai/jev"),
+    model: createTypeSafeAi({ apiKey: key }).evaluationModel("jev-latest"),
     state: {
       policy: POLICY,
       command: state.command,
@@ -46,9 +49,7 @@ for await (const chunk of process.stdin) {
 try {
   const { state, configFile } = JSON.parse(input);
   process.stdout.write(JSON.stringify(await run(state, configFile)));
-} catch (error) {
-  process.stdout.write(
-    JSON.stringify({ error: error instanceof Error ? error.message : "Jev unavailable" }),
-  );
+} catch {
+  process.stdout.write(JSON.stringify({ error: "Jev Typesafe evaluation failed" }));
   process.exitCode = 1;
 }

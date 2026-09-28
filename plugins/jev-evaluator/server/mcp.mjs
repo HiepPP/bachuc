@@ -3,7 +3,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { createGateway } from "@ai-sdk/gateway";
+import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -73,10 +73,10 @@ server.registerTool(
   },
   async (input, extra) => {
     try {
-      const apiKey = await readGatewayApiKey();
-      const gateway = createGateway({ apiKey });
+      const apiKey = await readTypesafeApiKey();
+      const provider = createTypeSafeAi({ apiKey });
       const result = await evaluateJev(input, {
-        model: gateway.evaluationModel(JEV_MODEL),
+        model: provider.evaluationModel(JEV_MODEL),
         signal: extra.signal,
       });
       return {
@@ -109,7 +109,7 @@ server.registerTool(
   },
 );
 
-async function readGatewayApiKey() {
+async function readTypesafeApiKey() {
   const configPath = process.env.PASEO_JEV_CONFIG_PATH;
   if (!configPath || !path.isAbsolute(configPath)) {
     throw new SafeEvaluationError(
@@ -121,24 +121,22 @@ async function readGatewayApiKey() {
 
   let config;
   try {
-    config = JSON.parse(await readFile(configPath, "utf8"));
+    config = JSON.parse(
+      await readFile(path.join(path.dirname(configPath), "typesafe-ai.json"), "utf8"),
+    );
   } catch {
     throw new SafeEvaluationError(
       "CONFIG_ERROR",
       500,
-      "Unable to read Paseo configuration for the Jev evaluator.",
+      "Unable to read Typesafe credentials for the Jev evaluator.",
     );
   }
-  const configuredKey = config?.agents?.providers?.["vercel-gateway"]?.env?.OPENAI_API_KEY;
-  const apiKey =
-    typeof configuredKey === "string" && configuredKey.length > 0
-      ? configuredKey
-      : process.env.AI_GATEWAY_API_KEY;
+  const apiKey = config?.apiKey;
   if (typeof apiKey !== "string" || apiKey.length === 0) {
     throw new SafeEvaluationError(
       "AUTH_CONFIGURATION_ERROR",
       500,
-      "Add OPENAI_API_KEY to agents.providers.vercel-gateway.env in Paseo config.",
+      "Add apiKey to typesafe-ai.json in the Paseo home directory.",
     );
   }
   return apiKey;

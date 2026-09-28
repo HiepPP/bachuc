@@ -1,3 +1,4 @@
+import { EvaluationError } from "../server/evaluation-error";
 import { spawn } from "node:child_process";
 import { createBridge } from "../server/bridge";
 import type { Engine } from "../server/engine";
@@ -365,6 +366,95 @@ test("self is rejected without verified Astra/low and if runtime changes during 
     try {
       await f.intent();
       await assert.rejects(f.prepare());
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+
+test("preflight exposes safe stage/code through bridge and status without retrying", async () => {
+  let calls = 0;
+  const secret = "private-task-token-path";
+  const f = await fixture(async () => {
+    calls++;
+    throw new EvaluationError("JEV_GATEWAY_HTTP", { httpStatus: 429, processExitCode: 1 });
+  });
+  const bridge = createBridge(
+    {} as Engine,
+    async () => ({ cwd: f.root }),
+    (action, parent, cwd, input) => f.tickets.handle(action, parent, cwd, input),
+  );
+  const token = bridge.issue(f.root);
+  bridge.bind(token, "parent", f.root);
+  try {
+    await f.intent();
+    const response = await fetch(await bridge.ready, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "native_prepare", input: f.input }),
+    });
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as any;
+    assert.equal(body.failureStage, "evaluation");
+    assert.equal(body.failureCode, "NATIVE_EVALUATION_FAILED");
+    assert.deepEqual(body.evaluationError, {
+      workerCode: "JEV_GATEWAY_HTTP",
+      httpStatus: 429,
+      processExitCode: 1,
+    });
+    assert.doesNotMatch(JSON.stringify(body), new RegExp(secret));
+    const status = (await f.tickets.handle("native_status", "parent", f.root, {})) as any;
+    assert.equal(status.records[0].state, "failed");
+    assert.equal(status.records[0].failureStage, body.failureStage);
+    assert.equal(status.records[0].failureCode, body.failureCode);
+    assert.deepEqual(status.records[0].evaluationError, body.evaluationError);
+    assert.doesNotMatch(JSON.stringify(status), new RegExp(secret));
+    await assert.rejects(f.prepare());
+    await assert.rejects(f.consume(status.records[0]));
+    assert.equal(calls, 1);
+  } finally {
+    bridge.close();
+    await f.cleanup();
+  }
+});
+
+test("runtime, invalid decision and role-write failures have distinct stages", async () => {
+  for (const scenario of ["runtime", "decision", "write"] as const) {
+    let root = "";
+    const f = await fixture(
+      async (...args) => {
+        if (scenario === "decision")
+          return { profileId: "invalid", discovery: false, risk: "low", category: "lookup" };
+        if (scenario === "write") {
+          const dir = path.join(root, ".codex/agents");
+          const role = (await readdir(dir)).find(
+            (name) => name.startsWith("jev-native-ticket-") && name.endsWith("-0.toml"),
+          )!;
+          await writeFile(path.join(dir, role + ".pending"), "private-content");
+        }
+        return choose(...args);
+      },
+      Date.now,
+      scenario === "runtime"
+        ? async () => {
+            throw new Error("private-runtime");
+          }
+        : undefined,
+    );
+    root = f.root;
+    try {
+      await f.intent();
+      await assert.rejects(f.prepare());
+      const status = (await f.tickets.handle("native_status", "parent", f.root, {})) as any;
+      const expected = {
+        runtime: ["parent_runtime", "NATIVE_PARENT_RUNTIME_FAILED"],
+        decision: ["decision_validation", "NATIVE_DECISION_INVALID"],
+        write: ["ticket_write", "NATIVE_TICKET_WRITE_FAILED"],
+      }[scenario];
+      assert.equal(status.records[0].failureStage, expected[0]);
+      assert.equal(status.records[0].failureCode, expected[1]);
+      assert.equal(status.records[0].state, "failed");
+      assert.doesNotMatch(JSON.stringify(status), /private-/);
     } finally {
       await f.cleanup();
     }

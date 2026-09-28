@@ -6,7 +6,7 @@ Regex handles the certain cases; Jev classifies the rest; anything uncertain sta
 Order per `agent.permission_requested` with a shell command:
 
 1. Regex deny: `rm -rf`, `git push`, `git reset --hard`, `git checkout --`, `git clean -f`, `sudo`,
-   pipe into a shell, `find -delete`, secret files (`.env`, `*.pem`, `credentials`).
+   pipe into a shell, `find -delete`, secret files (`.env`, `*.pem`, `credentials`, `typesafe-ai.json`).
 2. Regex escalate: an interpreter running a script file. Its contents are invisible to the gate.
 3. Regex allow: a single non-compound `ls/cat/head/tail/wc/rg/grep/find/pwd/which/stat`, a
    read-only `git` subcommand, or exactly `npm test`, `npm run typecheck|lint|check`, `npx tsc --noEmit`.
@@ -18,8 +18,11 @@ Non-tool requests (plan, question, mode) and tools without a shell command are i
 
 Decisions append to `$PASEO_HOME/plugin-data/jev-permission-gate/decisions.jsonl` (0600) with a
 command hash, decision, source, probabilities, and timing; command text is not stored. Only the
-command, tool name, and workspace-relative cwd are sent to Jev through the existing
-`agents.providers.vercel-gateway.env.OPENAI_API_KEY`.
+command, tool name, and workspace-relative cwd are sent directly to Typesafe AI (`https://api.typesafe.ai/v1/systemone`, `jev-latest`).
+The server reads `{ "apiKey": "<your Typesafe key>" }` from `$PASEO_HOME/typesafe-ai.json`
+(default `~/.paseo/typesafe-ai.json`, mode `0600`). No Gateway fallback.
+Confidence thresholds are unchanged. Direct access to `typesafe-ai.json` is denied before
+the read-only allowlist or Jev evaluation.
 
 Evidence: 30 labeled shell commands scored 30/30 in
 `plugins/jev-evaluator/artifacts/jev-benchmark-2026-09-22T11-51-03-364Z/report.md`, a synthetic set

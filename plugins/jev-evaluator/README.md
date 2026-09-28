@@ -1,6 +1,6 @@
 # Jev evaluator for Paseo
 
-Expose Vercel's `typesafe-ai/jev` Evaluation API as the MCP tool `jev_evaluate`.
+Expose Typesafe AI’s direct `jev-latest` Evaluation API as the MCP tool `jev_evaluate`.
 New Paseo Codex and Claude agents, including subagents created through Paseo's `create_agent`,
 receive the tool while enabled. Provider-internal subagents are not covered by this hook.
 Use your normal Codex or Claude provider to run the agent. Jev evaluates decisions; it cannot
@@ -8,8 +8,10 @@ run a coding-agent session through the Responses API.
 
 ## Install
 
-Requires Node 22+, Paseo 0.8+, enabled trusted plugins, and a Vercel AI Gateway key stored in
-`agents.providers.vercel-gateway.env.OPENAI_API_KEY` in the daemon's `config.json`.
+Requires Node 22+, Paseo 0.8+, enabled trusted plugins, and a Typesafe AI key stored as
+`{ "apiKey": "<your Typesafe key>" }` in `$PASEO_HOME/typesafe-ai.json`
+(default `~/.paseo/typesafe-ai.json`, permissions `0600`). Requests go directly to
+`https://api.typesafe.ai/v1/systemone`; no Gateway fallback.
 The MCP subprocess reads that file; the key is not copied into agent prompts or MCP configuration.
 Paseo uses its own Node executable, including the Electron helper on desktop.
 Run `npm run smoke` for a real, billable evaluation of synthetic state through MCP.

@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import type { Engine } from "./engine";
+import { NativePreflightError } from "./native-preflight-error";
 
 export function createBridge(
   engine: Engine,
@@ -43,6 +44,17 @@ export function createBridge(
       else throw new Error("Unknown action.");
       response.end(JSON.stringify(result));
     } catch (error) {
+      if (error instanceof NativePreflightError) {
+        response.writeHead(400).end(
+          JSON.stringify({
+            error: error.message,
+            failureStage: error.failureStage,
+            failureCode: error.code,
+            evaluationError: error.evaluation,
+          }),
+        );
+        return;
+      }
       // Expose only a known transport failure, never arbitrary SDK errors or task data.
       if (
         error instanceof Error &&

@@ -1,6 +1,7 @@
+import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
 import { experimental_evaluate as sdkEvaluate } from "ai";
 
-export const JEV_MODEL = "typesafe-ai/jev";
+export const JEV_MODEL = "jev-latest";
 export const MAX_INPUT_BYTES = 128 * 1024;
 export const DEFAULT_TIMEOUT_MS = 45_000;
 
@@ -56,7 +57,7 @@ export async function evaluateJev(input, options = {}) {
 
   try {
     const result = await (options.evaluateFn ?? sdkEvaluate)({
-      model: options.model ?? JEV_MODEL,
+      model: options.model ?? createTypeSafeAi().evaluationModel(JEV_MODEL),
       state: validated.state,
       questions: validated.questions,
       maxRetries: 0,
@@ -208,35 +209,35 @@ function safeSdkError(error) {
     return new SafeEvaluationError(
       "AUTHENTICATION_FAILED",
       status,
-      "Vercel AI Gateway rejected the configured credential.",
+      "Typesafe AI rejected the configured credential.",
     );
   }
   if (status === 403) {
     return new SafeEvaluationError(
       "ACCESS_DENIED",
       status,
-      "Gateway denied access; check key permissions and model or credit access.",
+      "Typesafe denied access; check key permissions and model access.",
     );
   }
   if (status === 402) {
     return new SafeEvaluationError(
       "PAYMENT_REQUIRED",
       status,
-      "Vercel AI Gateway requires available credits.",
+      "Typesafe AI requires available credits.",
     );
   }
   if (status === 429) {
     return new SafeEvaluationError(
       "RATE_LIMITED",
       status,
-      "Vercel AI Gateway rate limit reached. Retry later.",
+      "Typesafe AI rate limit reached. Retry later.",
     );
   }
   if (status === 400 || status === 404 || status === 422) {
     return new SafeEvaluationError(
       "GATEWAY_REQUEST_REJECTED",
       status,
-      "Vercel AI Gateway rejected the Jev evaluation request.",
+      "Typesafe AI rejected the Jev evaluation request.",
     );
   }
   return new SafeEvaluationError(

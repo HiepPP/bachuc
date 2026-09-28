@@ -10,7 +10,7 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "@ai-sdk/gateway": "4.0.86",
+    "@ai-sdk/typesafe-ai": "3.0.8",
     "ai": "7.0.106"
   },
   "devDependencies": {

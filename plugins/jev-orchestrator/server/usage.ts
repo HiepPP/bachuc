@@ -32,7 +32,7 @@ export function evaluationUsage(raw: { inputTokens?: number; outputTokens?: numb
     outputTokens = tokenCount(raw.outputTokens);
   const complete = inputTokens !== null && outputTokens !== null;
   return {
-    source: "ai-sdk-evaluate-response",
+    source: "typesafe-evaluate-response",
     complete,
     inputTokens,
     outputTokens,
@@ -42,8 +42,8 @@ export function evaluationUsage(raw: { inputTokens?: number; outputTokens?: numb
     reasoningTokens: null,
     requests: 1,
     notes: complete
-      ? ["Gateway evaluation API does not expose cache/reasoning breakdown."]
-      : ["Gateway evaluation response omitted token counts; do not substitute zero."],
+      ? ["Typesafe evaluation API does not expose cache/reasoning breakdown."]
+      : ["Typesafe evaluation response omitted token counts; do not substitute zero."],
   };
 }
 export function summarizeUsage(components: { id: string; role: string; usage: TokenUsage }[]) {

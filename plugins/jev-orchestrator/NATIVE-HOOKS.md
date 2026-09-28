@@ -99,8 +99,8 @@ manifest in `PASEO_JEV_NATIVE_POLICY` and provider in `PASEO_JEV_NATIVE_RUNTIME`
 Merge this command into the runtime's existing `PreToolUse` configuration with matcher
 `^(spawn_agent|Agent|collaborationspawn_agent|mcp__jev_orchestrator__prepare_native_delegate)$` for Codex or `^(Agent|Task)$` for Claude, and a 30-second timeout. Preserve
 existing hooks. The command reads the hook event from stdin and writes only hook JSON to stdout.
-The command reads the existing Gateway credential from `$PASEO_HOME/config.json`, defaulting to
-`~/.paseo/config.json`. Do not put credentials in hook configuration. Task text is sent to Jev;
+The command reads the Typesafe credential from `$PASEO_HOME/typesafe-ai.json`, defaulting to
+`~/.paseo/typesafe-ai.json` (`apiKey`, file mode `0600`). Do not put credentials in hook configuration. Task text is sent to Jev;
 the adapter does not save it. Evaluation uses the existing worker timeout and no retries.
 
 ## Activation and limits

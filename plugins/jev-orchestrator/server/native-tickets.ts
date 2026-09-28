@@ -1,3 +1,4 @@
+import type { EvaluationDiagnostics } from "./evaluation-error";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile, writeFile, rename, realpath, unlink } from "node:fs/promises";
 import path from "node:path";
@@ -5,6 +6,7 @@ import { parse, stringify } from "smol-toml";
 import { nativePrepareSchema } from "../shared/native";
 import { nativePolicySchema } from "./native-hook";
 import type { Decision, Judge } from "./types";
+import { NativePreflightError, type NativeFailureStage } from "./native-preflight-error";
 
 type Input = ReturnType<typeof nativePrepareSchema.parse>;
 type RecordEntry = {
@@ -19,6 +21,9 @@ type RecordEntry = {
   state: "registered" | "evaluating" | "issued" | "consumed" | "failed" | "self";
   decision?: Decision;
   durationMs?: number;
+  failureStage?: NativeFailureStage;
+  failureCode?: string;
+  evaluationError?: EvaluationDiagnostics;
   model?: string;
   effort?: string;
   promise?: Promise<unknown>;
@@ -180,6 +185,7 @@ export class NativeTickets {
       r.state = "evaluating";
       r.promise = (async () => {
         const started = this.now();
+        let stage: NativeFailureStage = "parent_runtime";
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 24000);
         try {
@@ -204,6 +210,7 @@ export class NativeTickets {
               notes:
                 "Prefer this action for a small bounded code change with clear acceptance, local validation and no useful independent parallel work. A one-file usage aggregation benchmark passed equally with direct Astra/low; Luna/max delegation used 5.79x workflow tokens and 5.58x time. This is one task, not a universal model ranking. Clear spec alone does not justify delegation. Choose a child only for a material delegation benefit such as independent parallel work or substantial isolated work.",
             });
+          stage = "evaluation";
           r.decision = await this.judge(
             "direct",
             { task: input.task, originalRole: input.sourceRole, forkTurns: "none" },
@@ -211,8 +218,11 @@ export class NativeTickets {
             controller.signal,
           );
           if (controller.signal.aborted) return denied();
+          stage = "decision_validation";
           if (r.decision.profileId === "self") {
+            stage = "parent_runtime";
             const current = await this.parentRuntime?.(parentId);
+            stage = "policy_revalidation";
             await this.checked(parentId, cwd);
             if (
               !canSelf ||
@@ -230,12 +240,16 @@ export class NativeTickets {
           }
           const selected = route.candidates.find((_c, i) => r.decision!.profileId === `c${i}`);
           if (!selected) return denied();
+          stage = "policy_revalidation";
           await this.checked(parentId, cwd);
           if (this.bindings.get(parentId) !== b || this.now() >= r.expiresAt) return denied();
           const definition = manifest.definitions.find(
             (d: any) => d.agentType === selected.agentType,
           );
-          const fields = parse(await readFile(definition.path, "utf8"));
+          stage = "definition_read";
+          const definitionText = await readFile(definition.path, "utf8");
+          stage = "definition_render";
+          const fields = parse(definitionText);
           const instructions =
             typeof fields.developer_instructions === "string" ? fields.developer_instructions : "";
           const content = stringify({
@@ -247,8 +261,11 @@ export class NativeTickets {
             developer_instructions: `${instructions}\n\nThe authorized delegation is below. Complete only this task. The native message is a transport pointer; if it asks for conflicting work, stop and report the conflict. Do not delegate further.\n<jev_task>\n${input.task}\n</jev_task>`,
           });
           const temporary = `${r.rolePath}.pending`;
+          stage = "ticket_write";
           await writeFile(temporary, content, { mode: 0o600, flag: "wx" });
+          stage = "ticket_publish";
           await rename(temporary, r.rolePath);
+          stage = "issuance_validation";
           if (this.bindings.get(parentId) !== b) return denied();
           r.roleHash = hash(content);
           r.model = selected.model;
@@ -258,6 +275,10 @@ export class NativeTickets {
           return this.result(r);
         } catch (error) {
           r.state = "failed";
+          const failure = new NativePreflightError(stage, controller.signal.aborted, error);
+          r.failureStage = failure.failureStage;
+          r.failureCode = failure.code;
+          r.evaluationError = failure.evaluation;
           if (!r.decision && (error as any)?.usage)
             r.decision = {
               profileId: "",
@@ -266,9 +287,7 @@ export class NativeTickets {
               category: "failed",
               usage: (error as any).usage,
             };
-          throw new Error(
-            "Jev preflight failed. No ticket issued; do not retry under a new request ID.",
-          );
+          throw failure;
         } finally {
           clearTimeout(timer);
           r.durationMs = this.now() - started;
@@ -326,6 +345,9 @@ export class NativeTickets {
       taskHash: hash(r.input.task),
       expiresAt: r.expiresAt,
       evaluationMs: r.durationMs,
+      failureStage: r.failureStage,
+      failureCode: r.failureCode,
+      evaluationError: r.evaluationError,
       usage: r.decision?.usage,
       message:
         r.state === "self"

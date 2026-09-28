@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, realpath, rmdir, unlink, writeFile } from "node:fs/prom
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import { runNativeHookCommand } from "../server/native-hook-command";
 import type { Judge } from "../server/types";
 
@@ -62,6 +63,33 @@ test("native command binds reviewed definitions and workspace before evaluating"
   try {
     await writeFile(definitionPath, definition);
     await writeFile(manifestPath, JSON.stringify(manifest));
+    const cli = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        path.resolve("node_modules/tsx/dist/loader.mjs"),
+        path.resolve("server/native-hook-command.ts"),
+      ],
+      {
+        input: JSON.stringify({ ...event, tool_name: "collaborationspawn_agent" }),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PASEO_JEV_NATIVE_POLICY: manifestPath,
+          PASEO_JEV_NATIVE_RUNTIME: "codex",
+          PASEO_ORCH_URL: "",
+          PASEO_ORCH_TOKEN: "",
+        },
+        timeout: 5000,
+      },
+    );
+    assert.equal(cli.status, 0, cli.stderr);
+    const denied = JSON.parse(cli.stdout).hookSpecificOutput;
+    assert.equal(denied.permissionDecision, "deny");
+    assert.match(
+      denied.permissionDecisionReason,
+      /missing bridge binding \(PASEO_ORCH_URL, PASEO_ORCH_TOKEN\)/,
+    );
     const allowed = await runNativeHookCommand(event, manifestPath, judge);
     assert.equal(allowed.hookSpecificOutput?.permissionDecision, "allow");
     assert.equal(calls, 1);

@@ -430,3 +430,46 @@ failed against the old generic message, then passed. `npm run format`, `npm run 
 `action:self`, `state:self`, `gpt-6-astra/low`, one Jev request, 840 evaluator tokens and 1,359 ms.
 This verifies post-reload preflight, not post-reload child spawning. The smoke parent was archived.
 Existing parents retain stale bindings after reload and require fresh sessions.
+
+## Direct Typesafe migration — 2026-09-28
+
+All three installed Jev plugins now use `@ai-sdk/typesafe-ai` 3.0.8 with
+`jev-latest` at `https://api.typesafe.ai/v1/systemone`. The server reads the key
+from `$PASEO_HOME/typesafe-ai.json` (0600); no key is copied into agent settings
+or Git. Gateway remains an unrelated configured chat provider, not a Jev fallback.
+
+Validation on the uncommitted migration diff:
+
+- Each plugin: `npm run format`, `npm run typecheck`, `npm run lint`, `npm test`.
+- Orchestrator: 87 tests; evaluator: 5 tests plus 3 benchmark scorer tests;
+  permission gate: 5 tests. All 100 passed. Gate lint retains one pre-existing
+  no-useless-escape warning in `tests/policy.test.ts:63`; no lint errors.
+- `tests/typesafe-worker.test.ts` executes the real worker with mocked HTTP,
+  checking the direct URL, authorization, model, successful choice/usage,
+  401/429 diagnostics, malformed answers, missing key, and no retry/fallback.
+- Evaluator `npm run smoke`: one live MCP request returned boolean, choice and
+  score; usage 379 input + 64 output = 443 tokens.
+- Permission worker: one synthetic classification, 738 ms including worker startup;
+  readOnly probability 0.88 and allow probability 0.91. The unchanged 0.9 threshold
+  would escalate this verdict. No classified shell command was executed.
+- All three plugin reloads returned running; orchestrator ready at
+  2026-09-28T07:49:16.385Z. No daemon restart.
+- Credential scan found no exact key in tracked/untracked nonignored repository files.
+
+Fresh native acceptance parent: `5c88bdd1-efeb-4f83-ae18-caee0fe5f1e6`;
+request `typesafe_native_acceptance_20260928_once`. The actual parent transcript records
+one issued then consumed ticket, selecting `gpt-6-luna / max`, 859 ms evaluation,
+1,075 input + 41 output = 1,116 tokens. Child `01a0e6fe-951a-7151-969e-e0f143d85fe7`
+has matching model/effort in its own `turn_context` and parent linkage to native session
+`01a0e6fd-aa01-7721-ab9f-faa42a63ae1b`. Both transcripts now contain `task_complete`;
+the child final confirms the credential guard and reports no remaining actionable
+findings in the scoped integration. Review compared source and baseline; it did not
+rerun tests. Exactly one preflight and one native spawn were used. The acceptance
+parent was archived after reading its final result.
+
+Follow-up credential regression: `tier0('cat ~/.paseo/typesafe-ai.json')` initially
+returned allow. A new test failed before adding the exact credential filename to
+the deny rules and Jev policy. Permission-gate checks now pass 6/6; formatting,
+typecheck, lint (same existing escape warning), and plugin reload completed.
+This adds one credential protection; probability thresholds remain unchanged.
+No secret content was read by the regression probe.

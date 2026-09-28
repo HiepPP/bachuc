@@ -50,6 +50,21 @@ test("tier0 allows plain read-only commands", () => {
     assert.equal(tier0(c)?.decision, "allow", c);
 });
 
+test("Typesafe credential access is denied before read-only approval or Jev", async () => {
+  const never: Judge = async () => assert.fail("Credential access must not reach Jev");
+  for (const command of [
+    "cat ~/.paseo/typesafe-ai.json",
+    "head -n 1 '/custom/paseo/typesafe-ai.json'",
+    "cp typesafe-ai.json /tmp/copy",
+    "rg apiKey /custom/paseo/typesafe-ai.json",
+  ]) {
+    const result = await gate({ command, tool: "Bash", cwdRelative: "." }, never, signal);
+    assert.equal(result.decision, "deny", command);
+    assert.equal(result.source, "regex", command);
+  }
+  assert.equal(tier0("cat typesafe-ai.json.example")?.decision, "allow");
+});
+
 test("tier0 forces escalate for script files and defers compound or unknown commands", () => {
   assert.equal(tier0("node scripts/migrate.mjs")?.decision, "escalate");
   assert.equal(tier0("python3 tools/run.py")?.decision, "escalate");

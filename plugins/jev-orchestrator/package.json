@@ -13,7 +13,7 @@
     "test:direct": "tsx tests/direct-live.ts"
   },
   "dependencies": {
-    "@ai-sdk/gateway": "4.0.86",
+    "@ai-sdk/typesafe-ai": "3.0.8",
     "@modelcontextprotocol/sdk": "1.30.0",
     "ai": "7.0.106",
     "smol-toml": "1.8.0",

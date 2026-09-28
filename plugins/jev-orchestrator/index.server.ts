@@ -5,6 +5,7 @@ import { realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { createBridge } from "./server/bridge";
+import { requireNativeBinding } from "./server/native-binding";
 import { createDriver } from "./server/paseo";
 import { createJudge } from "./server/jev";
 import { Store } from "./server/store";
@@ -152,9 +153,16 @@ export default function contribute(server: PluginServerContext) {
     delete env.PASEO_JEV_NATIVE_RUNTIME;
     if (
       request.purpose === "interactive" &&
+      request.env?.PASEO_ORCH_CHILD !== "1" &&
       (request.provider === "codex" || request.provider === "claude")
     ) {
       const provider = request.provider;
+      try {
+        await requireNativeBinding(env, bridge, request.agentId, await realpath(request.cwd));
+      } catch (error) {
+        native.revoke(request.agentId);
+        throw error;
+      }
       const nativeEnv = await cleanup.launch(request.agentId, () =>
         prepareNativeLaunch(home, homedir(), request.cwd, provider),
       );

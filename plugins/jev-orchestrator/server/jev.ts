@@ -2,9 +2,11 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Decision, Judge } from "./types";
-import type { TokenUsage } from "./usage";
-
-type UsageError = Error & { usage?: TokenUsage };
+import {
+  EvaluationError,
+  safeEvaluationDiagnostics,
+  type EvaluationCode,
+} from "./evaluation-error";
 
 export function createJudge(configFile: string, root: string, spacingMs = 26000): Judge {
   let queue = Promise.resolve(),
@@ -17,8 +19,12 @@ export function createJudge(configFile: string, root: string, spacingMs = 26000)
     });
     try {
       await previous;
-      if (signal.aborted) throw new Error("Evaluation cancelled.");
-      await delay(Math.max(0, next - Date.now()), undefined, { signal });
+      if (signal.aborted) throw new EvaluationError("JEV_CANCELLED");
+      try {
+        await delay(Math.max(0, next - Date.now()), undefined, { signal });
+      } catch {
+        throw new EvaluationError("JEV_CANCELLED");
+      }
       next = Date.now() + spacingMs;
       return await new Promise<Decision>((resolve, reject) => {
         const child = spawn(
@@ -32,12 +38,22 @@ export function createJudge(configFile: string, root: string, spacingMs = 26000)
         );
         let output = "",
           settled = false;
-        const kill = () => child.kill("SIGKILL");
-        const timer = setTimeout(kill, 23000);
+        let termination: EvaluationCode | undefined;
+        const kill = () => {
+          termination ??= "JEV_CANCELLED";
+          child.kill("SIGKILL");
+        };
+        const timer = setTimeout(() => {
+          termination = "JEV_TIMEOUT";
+          kill();
+        }, 23000);
         signal.addEventListener("abort", kill, { once: true });
         child.stdout.on("data", (data) => {
           output += data.toString();
-          if (output.length > 64000) kill();
+          if (output.length > 64000) {
+            termination = "JEV_WORKER_OUTPUT_LIMIT";
+            kill();
+          }
         });
         child.stderr.resume();
         const finish = (code: number | null) => {
@@ -46,22 +62,45 @@ export function createJudge(configFile: string, root: string, spacingMs = 26000)
           clearTimeout(timer);
           signal.removeEventListener("abort", kill);
           try {
-            const value = JSON.parse(output);
-            if (code !== 0 || value.error) {
-              const error: UsageError = new Error(
-                typeof value.error === "string" ? value.error : "Jev worker failed.",
+            if (termination) throw new EvaluationError(termination, { processExitCode: code });
+            let value;
+            try {
+              value = JSON.parse(output);
+            } catch {
+              throw new EvaluationError(
+                code !== 0 ? "JEV_WORKER_EXIT_FAILED" : "JEV_WORKER_OUTPUT_INVALID",
+                { processExitCode: code },
               );
+            }
+            if (!value || typeof value !== "object")
+              throw new EvaluationError("JEV_WORKER_OUTPUT_INVALID", { processExitCode: code });
+            if (code !== 0 || value.error) {
+              const details = safeEvaluationDiagnostics(value.diagnostics);
+              const error = new EvaluationError(details?.workerCode ?? "JEV_WORKER_EXIT_FAILED", {
+                httpStatus: details?.httpStatus,
+                processExitCode: code,
+              });
               error.usage = value.usage;
               throw error;
             }
-            if (!profiles.some((p) => p.id === value.profileId))
-              throw Object.assign(new Error("Invalid Jev profile."), { usage: value.usage });
+            if (!profiles.some((p) => p.id === value.profileId)) {
+              const error = new EvaluationError("JEV_RESPONSE_INVALID", { processExitCode: code });
+              error.usage = value.usage;
+              throw error;
+            }
             resolve(value);
           } catch (error) {
-            reject(error instanceof Error ? error : new Error("Jev worker unavailable."));
+            reject(
+              error instanceof EvaluationError
+                ? error
+                : new EvaluationError("JEV_WORKER_OUTPUT_INVALID", { processExitCode: code }),
+            );
           }
         };
-        child.on("error", () => finish(null));
+        child.on("error", () => {
+          termination = "JEV_WORKER_SPAWN_FAILED";
+          finish(null);
+        });
         child.on("close", finish);
         child.stdin.on("error", () => {});
         child.stdin.end(JSON.stringify({ phase, state, profiles, configFile }));

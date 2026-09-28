@@ -82,7 +82,9 @@ paseo plugin install "$PWD" --id jev-orchestrator
 paseo plugin ls jev-orchestrator --json
 ```
 
-Uses the existing Gateway key at `agents.providers.vercel-gateway.env.OPENAI_API_KEY`.
+Uses Typesafe AI directly at `https://api.typesafe.ai/v1/systemone`, model `jev-latest`.
+Store `{ "apiKey": "<your Typesafe key>" }` in `$PASEO_HOME/typesafe-ai.json`
+(default `~/.paseo/typesafe-ai.json`) with permissions `0600`. No Gateway fallback.
 The key is read only in the server; it never enters agent MCP settings or client code.
 Plugins must already be enabled. This is trusted unsandboxed code.
 
@@ -95,7 +97,7 @@ Call `delegate_task` with a `tasks` array. Every task needs:
 - `files`: exact workspace-relative ownership paths, not globs. `.` owns the workspace.
 - `allowedProfileIds`: the profiles the caller permits. Optional `profileId` fixes implementation selection.
 - `checks`: explicit `{argv, timeoutMs}` commands. They run without a shell in the creating workspace.
-- `shareWithJev: true`: explicit consent to send this task and bounded child/check evidence to Gateway.
+- `shareWithJev: true`: explicit consent to send this task and bounded child/check evidence to Typesafe AI.
 
 Optional `resources` name shared fixtures, ports, or databases. `dependsOn` names other tasks
 under the same parent. Submit a whole dependency graph in one call; cycles and unknown IDs fail.
@@ -148,6 +150,27 @@ before submitting a new ID. Cancellation archives only known children. A plugin 
 unfinished work `interrupted`; it does not replay or relaunch it. Inspect children on ambiguous launch
 failure. Existing MCP processes have stale bindings after reload; create fresh agents.
 
+Interactive root sessions require a ready bridge with a valid token, URL and workspace lease before
+native policy generation. Missing bindings identify the missing environment variable names without
+printing values. Stale or rejected bindings stop session opening with fresh-agent guidance; they do
+not silently disable routing. Managed children skip parent-only native policy generation.
+
+Native preflight failures include `failureStage` and `failureCode` in both the failed status record
+and the HTTP 400 response. Stages identify parent runtime lookup, evaluation, decision validation,
+policy revalidation, definition read/render, ticket write/publish, or final issuance validation.
+Codes are fixed `NATIVE_*` identifiers, with `NATIVE_PREFLIGHT_TIMEOUT` for an aborted preflight.
+Raw exceptions, paths, task contents and credentials are not returned. Missing-intent/scope denials
+remain generic; failed tickets remain unusable and cannot be retried under a new request ID.
+These fields diagnose future failures; errors discarded by older builds cannot be recovered.
+
+Evaluation failures additionally expose `evaluationError` with an allowlisted `workerCode`, optional
+integer `httpStatus` (100–599), and `processExitCode` from the actual worker process (0–255, or null
+when no exit code exists). Missing fields mean unknown, not success. Worker codes distinguish config,
+credential, input, Typesafe HTTP/non-HTTP, invalid response, spawn, exit, invalid output, output limit,
+timeout and cancellation. Worker-reported exit codes are ignored. Raw stderr, response bodies,
+exception messages and credentials stay redacted; no automatic retries or fallback are added.
+Offline tests use a fake worker subprocess and mocked preflight judge, never the live evaluator.
+
 The session-scoped MCP bridge binds random tokens to a parent ID and canonical workspace. It listens
 only on loopback, rejects browser Origin headers and oversized requests, and revokes archived parents.
 Managed children do not receive the orchestrator MCP. Ordinary plugin RPCs use Paseo's trusted host
@@ -192,3 +215,10 @@ its test agents afterward. Live sample results measure those cases only, not pro
 An Astra/low parent should handle small bounded changes with explicit acceptance and local checks directly, without preflight or a child, unless independent parallel work materially helps. A clear spec alone is not a reason to delegate. This follows the narrow single-task evidence in `NATIVE-BENCHMARK.md`, not a universal model ranking.
 
 If preflight is called, Jev may choose `action: self` only when Paseo reports the current parent runtime as Astra/low. This returns no spawn ticket; the parent executes the submitted task. Runtime is checked again after evaluation. Other parents retain delegation-only choices. Existing model–effort allowlists are unchanged, including Luna/max only. A self preflight still uses one evaluation and one of the three reserved request slots; obvious small tasks should skip preflight. New sessions receive the updated tool description after plugin reload.
+
+### Direct Typesafe access
+
+`JEV_TYPESAFE_HTTP` includes the sanitized HTTP status from Typesafe; `JEV_TYPESAFE_FAILED`
+means a non-HTTP provider failure. No response body or credential is returned. Historical Gateway
+codes remain readable for older records. Direct access uses a Typesafe key, independently of
+Gateway credits. Neither routing allowlists nor permission thresholds change with this provider.

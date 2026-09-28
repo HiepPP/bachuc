@@ -1,11 +1,12 @@
-import { createGateway } from "@ai-sdk/gateway";
+import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
 import { experimental_evaluate as evaluate, type Experimental_EvaluationQuestion } from "ai";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Decision, Judge } from "./types";
 import { evaluationUsage, type TokenUsage } from "./usage";
 
-type UsageError = Error & { usage?: TokenUsage };
+import { EvaluationError, typesafeEvaluationError } from "./evaluation-error";
 
 export function createJudge(configFile: string, spacingMs = 26000): Judge {
   let queue = Promise.resolve();
@@ -18,11 +19,18 @@ export function createJudge(configFile: string, spacingMs = 26000): Judge {
     });
     try {
       await previous;
-      if (signal.aborted) throw new Error("Evaluation cancelled.");
+      if (signal.aborted) throw new EvaluationError("JEV_CANCELLED");
       await delay(Math.max(0, next - Date.now()), undefined, { signal });
-      const config = JSON.parse(await readFile(configFile, "utf8"));
-      const key = config?.agents?.providers?.["vercel-gateway"]?.env?.OPENAI_API_KEY;
-      if (typeof key !== "string" || !key) throw new Error("Jev Gateway credential unavailable.");
+      let config;
+      try {
+        config = JSON.parse(
+          await readFile(path.join(path.dirname(configFile), "typesafe-ai.json"), "utf8"),
+        );
+      } catch {
+        throw new EvaluationError("JEV_CONFIG_INVALID");
+      }
+      const key = config?.apiKey;
+      if (typeof key !== "string" || !key) throw new EvaluationError("JEV_CREDENTIAL_MISSING");
       const questions: Record<string, Experimental_EvaluationQuestion> = {
         profile: {
           type: "choice",
@@ -98,24 +106,26 @@ export function createJudge(configFile: string, spacingMs = 26000): Judge {
             : { profiles: profiles.map(({ featureValues: _features, ...p }) => p) }),
         })
           .replace(/(?:Bearer\s+)[A-Za-z0-9._~+/-]+/gi, "Bearer [redacted]")
-          .replace(/\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]{12,}/g, "[redacted]"),
+          .replace(/\b(?:apikey_|sk-|ghp_|github_pat_)[A-Za-z0-9_-]{12,}/g, "[redacted]"),
       );
       if (Buffer.byteLength(JSON.stringify({ state: sanitized, questions })) > 100000)
-        throw new Error("Evaluation input too large; reduce evidence.");
+        throw new EvaluationError("JEV_INPUT_INVALID");
       const local = new AbortController();
       const abort = () => local.abort();
       signal.addEventListener("abort", abort, { once: true });
       const timer = setTimeout(abort, 20000);
       let usage: TokenUsage | undefined;
+      let responded = false;
       try {
         next = Date.now() + spacingMs;
         const result = await evaluate({
-          model: createGateway({ apiKey: key }).evaluationModel("typesafe-ai/jev"),
+          model: createTypeSafeAi({ apiKey: key }).evaluationModel("jev-latest"),
           state: sanitized,
           questions,
           maxRetries: 0,
           abortSignal: local.signal,
         });
+        responded = true;
         usage = evaluationUsage(result.usage);
         const choice = (id: string) => {
           const a = result.answers[id];
@@ -144,13 +154,11 @@ export function createJudge(configFile: string, spacingMs = 26000): Judge {
           usage,
         };
       } catch (error) {
-        const status =
-          error && typeof error === "object" && "statusCode" in error
-            ? error.statusCode
-            : undefined;
-        const wrapped: UsageError = new Error(
-          `Jev evaluation unavailable${typeof status === "number" ? ` (HTTP ${status})` : ""}; no automatic fallback or retry.`,
-        );
+        const wrapped = local.signal.aborted
+          ? new EvaluationError(signal.aborted ? "JEV_CANCELLED" : "JEV_TIMEOUT")
+          : responded
+            ? new EvaluationError("JEV_RESPONSE_INVALID")
+            : typesafeEvaluationError(error);
         wrapped.usage = usage;
         throw wrapped;
       } finally {
@@ -180,7 +188,14 @@ try {
 } catch (error) {
   const usage = error && typeof error === "object" && "usage" in error ? error.usage : undefined;
   process.stdout.write(
-    JSON.stringify({ error: error instanceof Error ? error.message : "Jev unavailable", usage }),
+    JSON.stringify({
+      error: "Jev evaluation failed.",
+      diagnostics: (error instanceof EvaluationError
+        ? error
+        : new EvaluationError("JEV_INPUT_INVALID")
+      ).diagnostics,
+      usage,
+    }),
   );
   process.exitCode = 1;
 }

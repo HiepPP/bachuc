@@ -69,7 +69,7 @@ if (resumeDirectory) {
         startedAt,
         datasetSha256,
         runtimeHashes,
-        model: "typesafe-ai/jev",
+        model: "jev-latest",
         transport: "MCP stdio jev_evaluate",
         questionCount: dataset.batches.reduce(
           /** @param {number} total @param {{questions: Record<string, unknown>}} batch */

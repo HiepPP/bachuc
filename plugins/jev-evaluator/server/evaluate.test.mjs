@@ -181,14 +181,9 @@ test("aborts evaluation at the configured timeout", async () => {
 test("serves one Jev tool over real stdio without network access", async () => {
   const tempDirectory = await mkdtemp(path.join(os.tmpdir(), "paseo-jev-test-"));
   const configPath = path.join(tempDirectory, "config.json");
-  await writeFile(
-    configPath,
-    JSON.stringify({
-      agents: {
-        providers: { "vercel-gateway": { env: { OPENAI_API_KEY: "fake-test-key" } } },
-      },
-    }),
-  );
+  const credentialPath = path.join(tempDirectory, "typesafe-ai.json");
+  await writeFile(configPath, "{}");
+  await writeFile(credentialPath, JSON.stringify({ apiKey: "fake-test-key" }));
   const client = new Client({ name: "jev-evaluator-test", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -215,6 +210,7 @@ test("serves one Jev tool over real stdio without network access", async () => {
   } finally {
     await client.close();
     await unlink(configPath);
+    await unlink(credentialPath);
     await rmdir(tempDirectory);
   }
 });

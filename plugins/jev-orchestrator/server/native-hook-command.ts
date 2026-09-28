@@ -7,6 +7,7 @@ import { z } from "zod";
 import { createJudge } from "./jev";
 import { nativePolicySchema, routeNativeHook } from "./native-hook";
 import type { Judge } from "./types";
+import { nativeBindingError } from "./native-binding";
 
 const manifestSchema = z.strictObject({
   cwd: z.string().refine(path.isAbsolute),
@@ -116,6 +117,11 @@ async function main() {
       (event.tool_name === "collaborationspawn_agent" ||
         event.tool_name === "mcp__jev_orchestrator__prepare_native_delegate")
     ) {
+      const bindingError = nativeBindingError(process.env);
+      if (bindingError) {
+        failureReason = bindingError;
+        throw new Error("Missing or invalid ticket binding.");
+      }
       // Native children inherit environment/MCP entries. Only the root transcript
       // may prepare or consume tickets for this Paseo parent.
       if (typeof event.transcript_path !== "string" || typeof event.session_id !== "string")

@@ -150,7 +150,7 @@ through Paseo receive the MCP entry; existing agents do not gain it retroactivel
 Provider-internal subagents are not covered by this hook. Existing `mcpServers.jev` is preserved.
 Install this plugin under its required ID `jev-evaluator`.
 
-The MCP reads the gateway key from the daemon configuration at invocation time. Keep the key
+The MCP reads the Typesafe key from `$PASEO_HOME/typesafe-ai.json` (`apiKey`, mode `0600`) at invocation time. Keep the key
 out of prompts, Git, tool output, and agent MCP environment entries. See the plugin README for
 the exact config field and evaluation contract.
 
