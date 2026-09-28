@@ -100,6 +100,7 @@ test("Board RPC restores idle cards, hides archived cards, and persists refreshe
   const file = path.join(home, "plugin-data/board/runs.json");
   t.after(async () => {
     await unlink(file);
+    await unlink(path.join(path.dirname(file), "bridge.json"));
     await rmdir(path.dirname(file));
     await rmdir(path.dirname(path.dirname(file)));
     await rmdir(home);
@@ -121,6 +122,9 @@ test("Board RPC restores idle cards, hides archived cards, and persists refreshe
   const server = {
     registerSettings() {},
     on() {
+      return () => {};
+    },
+    before() {
       return () => {};
     },
     handle(contract: { name: string }, handler: Handler) {

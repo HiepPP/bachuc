@@ -1,5 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { boardSize } from "./shared/board-size";
@@ -7,6 +7,7 @@ import { orbSettings } from "./shared/orb";
 import { projectColors } from "./shared/project-colors";
 import { createRunStore } from "./server/store";
 import { createRunPersistence } from "./server/persistence";
+import { createBridge, withBoardMcp } from "./server/bridge";
 import { listBoardAgents } from "./server/snapshot";
 import { boardHostRpc, boardRpc, removeRunRpc, starRunRpc } from "./shared/board";
 import { createRecapStore, parseRecap, recapEntry } from "./server/recaps";
@@ -51,6 +52,45 @@ export default function contribute(server: PluginServerContext) {
     store.start(agent, turnId);
     await persistence.save(store.exportState());
   });
+  const bridge = createBridge(
+    async (callerId, agentId) => {
+      await ready;
+      ensureActive();
+      const outcome = store.removeByAgent(callerId, agentId);
+      if (outcome.result === "removed" || outcome.result === "scheduled")
+        await persistence.save(store.exportState());
+      return outcome;
+    },
+    path.join(home, "plugin-data/board/bridge.json"),
+  );
+  void bridge.ready.catch((error: unknown) =>
+    console.error(`[board] board_remove bridge unavailable: ${String(error)}`),
+  );
+  // The MCP entry runs from the installed directory; without it Board works but skips the tool.
+  let root: string | undefined;
+  try {
+    const dir = JSON.parse(readFileSync(path.join(home, "config.json"), "utf8")).plugins?.board
+      ?.path;
+    if (typeof dir === "string" && existsSync(path.join(dir, "server/mcp.ts"))) root = dir;
+  } catch {}
+  const removeCreate = server.before("agent.create", async ({ request }) => {
+    if (!root) return request;
+    const url = await bridge.ready.catch(() => undefined);
+    if (!url) return request;
+    try {
+      return withBoardMcp(request, root, url, bridge.issue);
+    } catch (error) {
+      // A full lease table must not block agent creation.
+      console.error(`[board] board_remove not injected: ${String(error)}`);
+      return request;
+    }
+  });
+  const removeOpen = server.before("agent.session_open", ({ request }) => {
+    const token = request.env?.PASEO_BOARD_TOKEN;
+    if (token) bridge.bind(token, request.agentId);
+    return request;
+  });
+  const removeArchived = server.on("agent.archived", ({ agent }) => bridge.revoke(agent.id));
   const recaps = createRecapStore(path.join(home, "plugin-data/board/recaps.jsonl"));
   const removeEnd = server.on(
     "agent.turn_ended",
@@ -219,6 +259,10 @@ export default function contribute(server: PluginServerContext) {
     controller.abort();
     removeStart();
     removeEnd();
+    removeCreate();
+    removeOpen();
+    removeArchived();
+    bridge.close();
     await ready.catch(() => undefined);
     await persistence.flush();
     store.clear();

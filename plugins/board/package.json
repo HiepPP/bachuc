@@ -10,6 +10,7 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "thinking-orbs": "^0.3.2"
   },
   "devDependencies": {

@@ -9,6 +9,8 @@ const persistedRunSchema = runSchema.extend({
   providerTurnId: z.string().nullable(),
   snapshotTurnId: z.string().nullable(),
   dismissed: z.boolean().optional(),
+  // Set by board_remove on a running thread; honoured only when that turn completes.
+  removeOnFinish: z.boolean().optional(),
   projectResolved: z.boolean(),
   // Goal from the first prompt when the host title is a Caveman command; null when unavailable.
   promptTitle: z.string().nullable().optional(),
@@ -78,6 +80,7 @@ export function createRunStore(now = () => new Date().toISOString()) {
     return run.promptTitle && isCommandTitle(run.title) ? run.promptTitle : run.title;
   }
   function finish(run: Run, status: BoardRun["status"]) {
+    delete run.removeOnFinish;
     run.status = status;
     run.needsInput = false;
     run.endedAt = now();
@@ -85,6 +88,26 @@ export function createRunStore(now = () => new Date().toISOString()) {
     finished.unshift(run);
     finished.splice(50);
   }
+  // Retain bounded metadata so repeated terminal events cannot restore a removed card.
+  // Finished subagents leave with their parent; a running subagent keeps its own subtree.
+  function dismiss(run: Run) {
+    run.dismissed = true;
+    const visible = finished.filter((item) => !item.dismissed);
+    const queue = [run.agentId];
+    const seen = new Set(queue);
+    while (queue.length) {
+      const parentId = queue.shift()!;
+      for (const child of visible) {
+        if (child.parentAgentId !== parentId || seen.has(child.agentId)) continue;
+        seen.add(child.agentId);
+        child.dismissed = true;
+        queue.push(child.agentId);
+      }
+    }
+    return seen.size;
+  }
+  const find = (agentId: string) =>
+    active.get(agentId) ?? finished.find((item) => item.agentId === agentId);
   return {
     get revision() {
       return revision;
@@ -181,7 +204,9 @@ export function createRunStore(now = () => new Date().toISOString()) {
       run.parentAgentId = agent.parentAgentId;
       run.providerTurnId = turnId;
       run.title = agent.title || run.title;
+      const remove = run.removeOnFinish && outcome.kind === "completed";
       finish(run, outcome.kind === "canceled" ? "cancelled" : outcome.kind);
+      if (remove) dismiss(run);
     },
     reconcile(
       agents: ActiveAgent[],
@@ -255,22 +280,23 @@ export function createRunStore(now = () => new Date().toISOString()) {
       if (scope !== observingSince) return false;
       const run = finished.find((item) => item.id === id);
       if (!run || run.endedAt !== endedAt) return false;
-      // Retain bounded metadata so repeated terminal events cannot restore a removed card.
-      run.dismissed = true;
-      // Finished subagents leave with their parent; a running subagent keeps its own subtree.
-      const visible = finished.filter((item) => !item.dismissed);
-      const queue = [run.agentId];
-      const seen = new Set(queue);
-      while (queue.length) {
-        const parentId = queue.shift()!;
-        for (const child of visible) {
-          if (child.parentAgentId !== parentId || seen.has(child.agentId)) continue;
-          seen.add(child.agentId);
-          child.dismissed = true;
-          queue.push(child.agentId);
-        }
-      }
+      dismiss(run);
       return true;
+    },
+    /** Agent-requested removal, limited to the caller and its descendants. */
+    removeByAgent(callerId: string, agentId: string) {
+      const run = find(agentId);
+      if (!run || run.dismissed) return { result: "not_found" as const };
+      const seen = new Set<string>();
+      let current: Run | undefined = run;
+      while (current && current.agentId !== callerId && !seen.has(current.agentId)) {
+        seen.add(current.agentId);
+        current = current.parentAgentId ? find(current.parentAgentId) : undefined;
+      }
+      if (current?.agentId !== callerId) return { result: "forbidden" as const };
+      if (run.status !== "running") return { result: "removed" as const, count: dismiss(run) };
+      run.removeOnFinish = true;
+      return { result: "scheduled" as const };
     },
     snapshot() {
       const runs = [...active.values(), ...finished]
@@ -280,6 +306,7 @@ export function createRunStore(now = () => new Date().toISOString()) {
             providerTurnId: _p,
             snapshotTurnId: _s,
             dismissed: _d,
+            removeOnFinish: _f,
             projectResolved: _r,
             promptTitle: _t,
             ...run
