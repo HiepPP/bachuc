@@ -1,6 +1,6 @@
 npmRebuild: false
-appId: sh.paseo.desktop
-productName: Paseo
+appId: sh.paseo.desktop.dev
+productName: Paseo Dev
 executableName: Paseo
 protocols:
   - name: Paseo agent link

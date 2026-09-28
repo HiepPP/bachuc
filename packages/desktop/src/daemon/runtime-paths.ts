@@ -80,18 +80,21 @@ export function resolveNodeExecPath(): string {
     const markerIndex = process.execPath.indexOf(marker);
     if (markerIndex !== -1) {
       const bundleRoot = process.execPath.substring(0, markerIndex + ".app".length);
-      const name = path.basename(process.execPath);
-      const helperPath = path.posix.join(
-        bundleRoot,
-        "Contents",
-        "Frameworks",
-        `${name} Helper.app`,
-        "Contents",
-        "MacOS",
-        `${name} Helper`,
-      );
-      if (existsSync(helperPath)) {
-        return helperPath;
+      // Helpers are named after productName, which can differ from the executable
+      // name (Paseo Dev ships executable "Paseo" with "Paseo Dev Helper.app").
+      for (const name of new Set([path.basename(process.execPath), app.name])) {
+        const helperPath = path.posix.join(
+          bundleRoot,
+          "Contents",
+          "Frameworks",
+          `${name} Helper.app`,
+          "Contents",
+          "MacOS",
+          `${name} Helper`,
+        );
+        if (existsSync(helperPath)) {
+          return helperPath;
+        }
       }
     }
   }

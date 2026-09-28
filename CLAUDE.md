@@ -102,7 +102,9 @@ npm run format                       # Auto-format with Biome
 npm run format:check                 # Check formatting without writing
 ```
 
-Repo dev commands use checkout-local state by default. In this checkout, `PASEO_HOME` resolves to `.dev/paseo-home`, and `npm run cli -- ...` targets that same dev home automatically. The packaged desktop app and production-style daemon keep using `~/.paseo` on port `6767`.
+Repo dev commands use checkout-local state by default. In this checkout, `PASEO_HOME` resolves to `.dev/paseo-home`, and `npm run cli -- ...` targets that same dev home automatically. The installed stable Paseo app and production-style daemon keep using `~/.paseo` on port `6767`.
+
+The packaged **Paseo Dev** app built from this repo (`packages/desktop/release/mac-arm64/Paseo Dev.app`, bundle ID `sh.paseo.desktop.dev`) runs its own daemon: home `~/.paseo-dev`, listen `127.0.0.1:6770`, log `~/.paseo-dev/daemon.log`, desktop log `~/Library/Logs/Paseo Dev/main.log`. It never adopts the stable `6767` daemon. Target it with `PASEO_HOME=~/.paseo-dev paseo ...`.
 
 See [docs/development.md](docs/development.md) for full setup, build sync requirements, and debugging.
 

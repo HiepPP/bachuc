@@ -21,7 +21,14 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)
 RESOURCES_DIR=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
 
 MACOS_DIR="${RESOURCES_DIR}/../MacOS"
+# The helper is named after productName ("Paseo", or "Paseo Dev" for this fork).
 MACOS_HELPER_EXECUTABLE="${RESOURCES_DIR}/../Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper"
+for HELPER_APP in "${RESOURCES_DIR}/../Frameworks/"*" Helper.app"; do
+  HELPER_NAME=$(basename "${HELPER_APP}" .app)
+  if [ -x "${HELPER_APP}/Contents/MacOS/${HELPER_NAME}" ]; then
+    MACOS_HELPER_EXECUTABLE="${HELPER_APP}/Contents/MacOS/${HELPER_NAME}"
+  fi
+done
 
 # macOS CLI invocations must enter Electron through the agent Helper. Launching
 # the main APPL executable here makes later daemon supervision inherit app UI

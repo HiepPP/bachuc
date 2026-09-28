@@ -6,9 +6,10 @@ log.initialize({ spyRendererConsole: true });
 
 import { inheritLoginShellEnv } from "./login-shell-env.js";
 
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import {
   app,
@@ -26,6 +27,7 @@ import {
   shell,
   webContents,
 } from "electron";
+import { resolvePaseoHome } from "@getpaseo/server/daemon-control";
 import { registerDaemonManager } from "./daemon/daemon-manager.js";
 import { parsePassthroughCliArgsFromArgv, runPassthroughCli } from "./daemon/cli/passthrough.js";
 import { closeAllTransportSessions } from "./daemon/local-transport.js";
@@ -111,7 +113,32 @@ const DEV_SERVER_URL = process.env.EXPO_DEV_URL ?? "http://localhost:8081";
 const APP_SCHEME = "paseo";
 const PASEO_DEBUG = process.env.PASEO_DEBUG === "1";
 const DISABLE_SINGLE_INSTANCE_LOCK = process.env.PASEO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
-const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || "Paseo";
+const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || "Paseo Dev";
+const PASEO_DEV_HOME = path.join(os.homedir(), ".paseo-dev");
+const PASEO_DEV_LISTEN = "127.0.0.1:6770";
+// The packaged Paseo Dev app must never adopt the stable app's daemon (~/.paseo on
+// 6767): a version mismatch would restart it. An inherited stable home counts as
+// unset; an explicit other home (e.g. packaged smoke) wins. Managed launches strip
+// PASEO_LISTEN, so the port lives in the dev home's config.json.
+if (app.isPackaged && resolvePaseoHome(process.env) === resolvePaseoHome({})) {
+  process.env.PASEO_HOME = PASEO_DEV_HOME;
+  seedPaseoDevListen();
+}
+
+function seedPaseoDevListen(): void {
+  const configPath = path.join(PASEO_DEV_HOME, "config.json");
+  let config: { version?: number; daemon?: { listen?: unknown } } = { version: 1 };
+  try {
+    config = JSON.parse(readFileSync(configPath, "utf-8"));
+  } catch {
+    // First launch: the daemon fills in the remaining defaults.
+  }
+  const listen = config.daemon?.listen;
+  if (typeof listen === "string" && !listen.endsWith(":6767")) return;
+  config.daemon = { ...config.daemon, listen: PASEO_DEV_LISTEN };
+  mkdirSync(PASEO_DEV_HOME, { recursive: true });
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+}
 const DESKTOP_WINDOW_CHROME_MODE = resolveDesktopWindowChromeMode({
   platform: process.platform,
   override: process.env.PASEO_DESKTOP_WINDOW_CONTROLS,
