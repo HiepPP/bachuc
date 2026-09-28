@@ -168,7 +168,7 @@ const styles = `
 [${OWNER}] .npa-branch {font-family:var(--npa-mono);font-size:12px;font-weight:400;color:var(--npa-ink,inherit);--npa-icon:${iconMask(icons.branch)};}
 [${OWNER}] .npa-commit {--npa-icon:${iconMask(icons.commit)};}
 [${OWNER}] .npa-commit.npa-ok {--npa-icon:${iconMask(icons.done)};}
-[${OWNER}] .npa-commit-value {display:inline-block;}
+[${OWNER}] .npa-branch-value, [${OWNER}] .npa-commit-value {display:inline-block;}
 [${OWNER}] .npa-commit-value::first-letter {text-transform:uppercase;}
 [${OWNER}] .npa-did {margin:0;max-width:72ch;font-size:14px;line-height:1.6;color:var(--npa-soft);overflow-wrap:anywhere;text-wrap:pretty;}
 [${OWNER}] .npa-did::first-letter {text-transform:uppercase;}

@@ -255,6 +255,15 @@ export function foldPanel(
   const added: Node[] = [];
   const hidden = [title, ...intro];
   const parsed = precedingRecap(tops, index);
+  // Host layout classes (flex, width, pre-wrap) squeeze chip text into one word per line.
+  const chip = (field: Node, name: string) => {
+    const into = value(field, element("span", name));
+    for (const inner of Array.from(into.querySelectorAll("*"))) {
+      inner.removeAttribute("class");
+      inner.removeAttribute("style");
+    }
+    return into;
+  };
   if (parsed) {
     const { title: recapTitle, paragraphs, fields } = parsed;
     hidden.unshift(recapTitle, ...paragraphs);
@@ -268,8 +277,10 @@ export function foldPanel(
     kicker.appendChild(element("span", "", recapTitle.textContent?.trim() || "Recap"));
     head.appendChild(kicker);
     const meta = element("span", "npa-meta");
-    meta.appendChild(value(branch, element("span", "npa-chip npa-branch")));
-    const shown = value(commit, element("span", "npa-commit-value"));
+    const branchChip = element("span", "npa-chip npa-branch");
+    branchChip.appendChild(chip(branch, "npa-branch-value"));
+    meta.appendChild(branchChip);
+    const shown = chip(commit, "npa-commit-value");
     const said = shown.textContent?.trim() ?? "";
     const status = element(
       "span",

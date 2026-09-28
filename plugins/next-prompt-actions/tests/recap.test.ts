@@ -104,6 +104,44 @@ for (const split of [false, true]) {
   });
 }
 
+test("Recap chips wrap values in one span without host layout classes or styles", () => {
+  const hosted = (value: string) =>
+    `<div data-paseo-markdown-tag="li"><span data-paseo-markdown-ignore="true" data-paseo-markdown-list-marker="true">•</span><div class="css-view r-flex" style="flex:1 1 0%"><span class="css-text" style="white-space:pre-wrap">${value}</span></div></div>`;
+  const list = [
+    'Branch: <span data-paseo-markdown-tag="code" class="css-code">main</span> — ahead 1',
+    "Did: Commit.",
+    'Commit/push: committed <span data-paseo-markdown-tag="code">cc0ad67</span>; no push.',
+  ]
+    .map(hosted)
+    .join("");
+  const { document } = parseHTML(
+    `<div id="message"><div data-paseo-markdown-tag="h2">Recap</div><div data-paseo-markdown-tag="ul">${list}</div><div data-paseo-markdown-tag="h2">What Next</div><div data-paseo-markdown-tag="pre">prompt: Verify.</div></div><div id="panel"><div id="section"></div></div>`,
+  );
+  const message = document.querySelector("#message")!;
+  const before = message.innerHTML;
+  const panel = document.querySelector("#panel")!;
+  const folded = foldPanel(
+    document as unknown as Parameters<typeof foldPanel>[0],
+    message as unknown as Node,
+    message.querySelector('[data-paseo-markdown-tag="pre"]') as unknown as Node,
+    panel as unknown as Node,
+    document.querySelector("#section") as unknown as Node,
+  );
+  const branch = panel.querySelector(".npa-branch")!;
+  assert.equal(branch.children.length, 1);
+  assert.equal(branch.firstElementChild!.className, "npa-branch-value");
+  assert.equal(branch.textContent!.trim(), "main — ahead 1");
+  assert.equal(branch.querySelector("[data-npa-code]")!.textContent, "main");
+  for (const value of panel.querySelectorAll(".npa-branch-value, .npa-commit-value"))
+    assert.doesNotMatch(value.innerHTML, /\s(?:class|style)="[^"]/);
+  assert.equal(
+    panel.querySelector(".npa-commit")!.textContent!.trim(),
+    "committed cc0ad67; no push.",
+  );
+  folded.undo();
+  assert.equal(message.innerHTML, before);
+});
+
 test("plain Recap rejects extra lines, empty, reordered and unknown fields", () => {
   for (const text of [
     "Branch: main\nDid: done\nCommit/push: none\nTests: pending",
