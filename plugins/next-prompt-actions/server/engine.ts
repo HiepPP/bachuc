@@ -16,6 +16,8 @@ export type Current = { busy: boolean; epoch: string; rows: Row[]; complete: boo
 export type Driver = {
   read(scope: Scope): Promise<Current>;
   send(scope: Scope, text: string, id: string, canSend: () => boolean): Promise<void>;
+  /** Creates a separate conversation with the source conversation's settings. */
+  start(scope: Scope, text: string, id: string): Promise<void>;
 };
 export type Judge = (
   state: { goal: string; context: string[]; response: string; prompt: string },
@@ -52,7 +54,7 @@ export class Engine {
     // Only the last assistant response can offer a continuation, never tool output.
     const row = current.rows.findLast((r, i) => i > user && r.type === "assistant_message");
     if (!row?.text) return [];
-    return parsePrompts(row.text).flatMap(({ block, prompts, whys, declaration }, b) =>
+    return parsePrompts(row.text).flatMap(({ block, prompts, whys, threads, declaration }, b) =>
       prompts.map((text, p) => {
         const identity = [scope.agentId, current.epoch, row.id, b, p, text];
         if (declaration) identity.push(block);
@@ -64,7 +66,10 @@ export class Engine {
           why: whys[p] || undefined,
           source: row.text!,
           timestamp: row.timestamp,
+          after: current.rows[user].timestamp,
           state: this.store.get(scope.agentId).handled[key] ?? "ready",
+          ...(threads[p] ? { thread: "new" as const } : {}),
+          ...(declaration?.goal ? { goal: declaration.goal } : {}),
           ...(declaration
             ? {
                 selection: {
@@ -158,6 +163,8 @@ export class Engine {
         picked.length !== keys.length
       )
         throw new Error("Prompt is stale, busy, or already submitted.");
+      if (picked.some((c) => c.thread))
+        throw new Error("Unrelated suggestions start in a new thread.");
       let text = joinPrompts(picked.map((c) => c.text));
       const actions = picked.map((candidate) => gitAction(candidate.text));
       if (actions.some(Boolean)) {
@@ -216,6 +223,40 @@ export class Engine {
     }
   }
 
+  /** Starts an unrelated suggestion as a new conversation; this conversation stays unchanged. */
+  async start(scope: Scope, key: string): Promise<boolean> {
+    if (this.stopped || this.locks.has(scope.agentId)) throw new Error("Send already in progress.");
+    this.locks.add(scope.agentId);
+    try {
+      const current = await this.driver.read(scope);
+      const candidate = this.candidates(scope, current).find(
+        (c) => c.key === key && c.thread && c.state === "ready",
+      );
+      if (!candidate) throw new Error("Prompt is stale or already started.");
+      const entry = this.store.get(scope.agentId);
+      // Persist reservation before dispatch. An uncertain acknowledgement is never retried.
+      entry.handled[key] = "sending";
+      this.store.save();
+      try {
+        await this.driver.start(scope, candidate.text, `next-prompt-${key}`);
+        entry.handled[key] = "sent";
+        this.note(scope.agentId, "Started in a new thread.");
+        return true;
+      } catch {
+        entry.handled[key] = "unknown";
+        this.note(
+          scope.agentId,
+          "New thread status unknown. Check the thread list; no automatic retry.",
+        );
+        return false;
+      } finally {
+        this.store.save();
+      }
+    } finally {
+      this.locks.delete(scope.agentId);
+    }
+  }
+
   async ended(scope: Scope, completed: boolean) {
     if (!completed) {
       this.interrupted(scope.agentId);
@@ -245,7 +286,10 @@ export class Engine {
         entry.remaining = 3;
         entry.scope = lastUser.text;
       }
-      const candidates = this.candidates(scope, current).filter((c) => c.state === "ready");
+      // Unrelated suggestions never continue this conversation automatically.
+      const candidates = this.candidates(scope, current).filter(
+        (c) => c.state === "ready" && !c.thread,
+      );
       if (candidates.length !== 1 || entry.remaining === 0 || !entry.scope) {
         this.note(
           scope.agentId,

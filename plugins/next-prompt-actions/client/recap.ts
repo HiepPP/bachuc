@@ -221,6 +221,7 @@ export function foldPanel(
   block: Node,
   panel: Node,
   section: Node,
+  done = false,
 ): { undo(): void; intact(): boolean } {
   const parts = messageParts(message);
   const tops = parts.flatMap(topLevel);
@@ -254,6 +255,12 @@ export function foldPanel(
     stripLabel(clone);
     for (const child of Array.from(clone.childNodes ?? [])) into.appendChild(child);
     return into;
+  };
+  // The reply declared its goal done; everything suggested after it only closes or leaves the task.
+  const goal = () => {
+    const node = element("span", "npa-chip npa-goal", "Task done");
+    node.setAttribute("aria-label", "Task done");
+    return node;
   };
   const added: Node[] = [];
   const hidden = [title, ...intro];
@@ -293,6 +300,7 @@ export function foldPanel(
     // State reads from the icon and wording, not an extra hue (TASTE.md).
     status.appendChild(/^none\.?$/i.test(said) ? element("span", "", "No commit") : shown);
     meta.appendChild(status);
+    if (done) meta.appendChild(goal());
     head.appendChild(meta);
     recap.appendChild(head);
     const bullets = did.querySelector(`[${TAG}="ul"], [${TAG}="ol"]`);
@@ -307,6 +315,7 @@ export function foldPanel(
   name.setAttribute("role", "heading");
   name.setAttribute("aria-level", "2");
   head.appendChild(name);
+  if (done && !parsed) name.appendChild(goal());
   if (intro.length) {
     const text = element("div", "npa-next-intro");
     for (const paragraph of intro) text.appendChild(copy(paragraph));

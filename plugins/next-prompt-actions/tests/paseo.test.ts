@@ -24,13 +24,23 @@ function fixture() {
     gap: false,
     error: null as string | null,
   };
+  const created: unknown[] = [];
   const api = {
     agents: {
+      create: async (options: unknown) => {
+        created.push(options);
+      },
       ref: () => ({
         refresh: async () => {},
         workspaceId: "workspace",
+        cwd: "/repo",
         archivedAt: null,
-        current: () => ({}),
+        current: () => ({
+          provider: "claude",
+          model: "opus",
+          currentModeId: "bypassPermissions",
+          thinkingOptionId: null,
+        }),
         status: "idle",
         timeline: { refetch: async () => page },
       }),
@@ -38,6 +48,8 @@ function fixture() {
   } as unknown as PaseoApi;
   return {
     page,
+    created,
+    driver: createDriver(() => api, "host"),
     engine: new Engine(
       new Store(),
       createDriver(() => api, "host"),
@@ -61,3 +73,15 @@ for (const flag of ["gap", "hasNewer", "error"] as const)
     else page[flag] = true;
     await assert.rejects(engine.inspect(scope), /Timeline is incomplete/);
   });
+test("new-thread start copies directory, provider, model and mode into one create call", async () => {
+  const { driver, created } = fixture();
+  await driver.start(scope, "Audit the logs.", "next-prompt-key");
+  assert.deepEqual(created, [
+    {
+      cwd: "/repo",
+      config: { provider: "claude/opus", modeId: "bypassPermissions" },
+      prompt: "Audit the logs.",
+      idempotencyKey: "next-prompt-key",
+    },
+  ]);
+});

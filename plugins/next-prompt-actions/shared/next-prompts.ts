@@ -34,24 +34,32 @@ const declarationSchema = z
             id,
             prompt: nonempty(16000),
             why: nonempty(2000).optional(),
+            // Unrelated to the current goal: offered only as a separate new thread.
+            thread: z.literal("new").optional(),
           })
           .strict(),
       )
       .min(1)
       .max(20),
+    goal: z.literal("done").optional(),
     exclusiveGroups: relations.exclusiveGroups.default([]),
     allowedCombinations: relations.allowedCombinations.default([]),
   })
   .strict()
   .superRefine((value, ctx) => {
     const known = new Set(value.prompts.map((p) => p.id));
+    const separate = new Set(value.prompts.filter((p) => p.thread).map((p) => p.id));
     const grouped = new Set<string>();
     const combinations = new Set<string>();
     const invalid = () =>
       ctx.addIssue({ code: "custom", message: "Invalid prompt relationships." });
     if (known.size !== value.prompts.length) invalid();
     for (const list of [...value.exclusiveGroups, ...value.allowedCombinations])
-      if (new Set(list).size !== list.length || list.some((key) => !known.has(key))) invalid();
+      if (
+        new Set(list).size !== list.length ||
+        list.some((key) => !known.has(key) || separate.has(key))
+      )
+        invalid();
     // Disjoint groups map directly to native radio groups, including keyboard navigation.
     for (const group of value.exclusiveGroups)
       for (const key of group) {

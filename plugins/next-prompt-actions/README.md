@@ -13,6 +13,7 @@ to preserve unrelated work. Existing leading `/commit` or `$commit` commands are
 All actions share Send's busy, stale, and duplicate guards. Git actions require individual manual
 clicks; their blocks keep individual controls, and Jev does not auto-run them.
 An optional `why:` line under a prompt shows as its reason and is never sent.
+An optional `thread: new` line under a prompt marks it as unrelated to the current task (see [Goal and new-thread suggestions](#goal-and-new-thread-suggestions)).
 Send preserves the composer draft. Edit replaces it with the selected prompt text for manual review.
 
 ## Recap and next-step layout
@@ -53,7 +54,8 @@ Use one JSON fence with the language `next-prompts`. The first suggestion is the
 ```
 ````
 
-- `version` must be `1`. Each prompt has a unique lowercase ID, exact `prompt` text, and an optional `why`.
+- `version` must be `1`. Each prompt has a unique lowercase ID, exact `prompt` text, an optional `why`, and an optional
+  `"thread": "new"`. The block may set `"goal": "done"`.
 - `exclusiveGroups` declare disjoint radio groups. Each group permits at most one selection, not a required selection.
 - Other suggestions use checkboxes. Nothing is selected automatically. Clear selection resets all controls.
 - `allowedCombinations` lists exact permitted sets of IDs. Subsets, supersets, and transitive combinations are not inferred.
@@ -74,6 +76,20 @@ Limits: 64 KiB per JSON block, 1–20 prompts, 16,000 characters per prompt, 2,0
 64 characters per ID (`[a-z][a-z0-9-]*`), 20 exclusive groups, and 64 allowed combinations.
 Each group or combination contains 2–20 distinct IDs. Legacy blocks retain their existing parser limits.
 
+## Goal and new-thread suggestions
+
+- `"goal": "done"` at the top of a `next-prompts` block says the reply finished its task. The panel shows a
+  Task done chip in the Recap header, or next to the What Next title when no Recap is folded.
+- `"thread": "new"` on a prompt, or a `thread: new` line in a legacy fence, marks work unrelated to the current task.
+  These prompts appear in a separate Other work section with one Start in new thread button and no Edit or Send.
+- Start in new thread creates a separate conversation with the source conversation's directory, provider, model,
+  mode, and thinking option; the prompt is its first message. It works while this conversation is busy.
+  The source conversation, its composer draft, and Board events are unchanged.
+- A start is reserved before dispatch and uses the suggestion key as the idempotency key; an uncertain result shows
+  Check threads and is never retried.
+- New-thread prompts cannot appear in `exclusiveGroups` or `allowedCombinations`; such a block is rejected.
+  Send rejects them server-side, and Jev auto-run ignores them.
+
 ## Compatibility
 
 Desktop only; the installed runtime used for this change is Paseo 0.9.1.
@@ -81,6 +97,8 @@ The manifest also permits 0.8.x and 0.9.0-beta.2; this change was not runtime-te
 The user approved this private DOM adapter; it does not edit Paseo source.
 It reads native Markdown markers and React ancestor props for host, workspace, message, and agent identity.
 Unknown shapes, partial streams, incomplete latest turns, stale messages, and wrong hosts fail closed.
+A reply gets actions only when its rendered timestamp is later than the latest user message. Exact row timestamps
+are not compared, because a reply watched while streaming keeps its last live chunk time.
 Browser and native mobile clients receive no DOM contribution.
 
 ## Back to Board after send

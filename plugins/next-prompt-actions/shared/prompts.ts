@@ -1,10 +1,12 @@
 import { parseNextPrompts, type NextPromptsV1 } from "./next-prompts";
 
 // `whys[i]` is the optional reason shown under `prompts[i]`; it is never sent.
+// `threads[i]` marks a suggestion unrelated to the current goal, started only in a new thread.
 export type PromptBlock = {
   block: string;
   prompts: string[];
   whys: string[];
+  threads: boolean[];
   declaration?: NextPromptsV1;
 };
 
@@ -142,6 +144,7 @@ export function parsePrompts(markdown: string): PromptBlock[] {
                 block,
                 prompts: declaration.prompts.map((p) => p.prompt),
                 whys: declaration.prompts.map((p) => p.why ?? ""),
+                threads: declaration.prompts.map((p) => p.thread === "new"),
                 declaration,
               });
             fence = null;
@@ -149,6 +152,7 @@ export function parsePrompts(markdown: string): PromptBlock[] {
           }
           const prompts: string[] = [];
           const whys: string[] = [];
+          const threads: boolean[] = [];
           let current: string[] | null = null;
           let valid = true;
           for (const bodyLine of block.split("\n")) {
@@ -156,14 +160,21 @@ export function parsePrompts(markdown: string): PromptBlock[] {
               if (current) prompts.push(current.join("\n").replace(/\n+$/, ""));
               current = [bodyLine.replace(/^prompt:[ \t]?/i, "")];
               whys.push("");
+              threads.push(false);
             } else if (current && /^why:/i.test(bodyLine) && !whys[whys.length - 1])
               whys[whys.length - 1] = bodyLine.replace(/^why:/i, "").trim();
+            else if (
+              current &&
+              /^thread:\s*new\s*$/i.test(bodyLine) &&
+              !threads[threads.length - 1]
+            )
+              threads[threads.length - 1] = true;
             else if (current) current.push(bodyLine);
             else if (bodyLine.trim()) valid = false;
           }
           if (current) prompts.push(current.join("\n").replace(/\n+$/, ""));
           if (valid && prompts.length && prompts.every((p) => p.trim() && p.length <= 16000))
-            result.push({ block, prompts, whys });
+            result.push({ block, prompts, whys, threads });
         }
         fence = null;
         continue;

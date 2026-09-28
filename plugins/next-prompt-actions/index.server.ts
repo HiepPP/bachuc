@@ -3,7 +3,7 @@ import type { PaseoApi } from "@getpaseo/client";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { hostRpc, inspectRpc, sendRpc, toggleRpc } from "./shared/contracts";
+import { hostRpc, inspectRpc, sendRpc, startRpc, toggleRpc } from "./shared/contracts";
 import { Engine } from "./server/engine";
 import { Store } from "./server/store";
 import { createDriver } from "./server/paseo";
@@ -41,6 +41,10 @@ export default function contribute(server: PluginServerContext) {
   server.handle(sendRpc, async (input, context) => {
     api = context.paseo;
     return { sent: await engine.send(input, input.key) };
+  });
+  server.handle(startRpc, async (input, context) => {
+    api = context.paseo;
+    return { started: await engine.start(input, input.key) };
   });
   const started = server.on("agent.turn_started", ({ agent }, context) => {
     api = context.paseo;

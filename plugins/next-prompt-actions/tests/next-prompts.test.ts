@@ -39,6 +39,7 @@ function fixture(text = markdown(declaration())) {
     new Store(),
     {
       read: async () => structuredClone(current),
+      start: async () => {},
       send: async (_scope, text) => {
         sent.push(text);
       },
@@ -106,6 +107,24 @@ test("v1 rejects invalid versions, references, contradictory declarations and ov
   for (const value of invalid)
     assert.deepEqual(parsePrompts(markdown(value)), [], JSON.stringify(value).slice(0, 150));
   assert.deepEqual(parsePrompts("## What Next\n```next-prompts\n{broken}\n```"), []);
+});
+
+test("v1 goal and thread fields parse, and new-thread prompts never join relationships", () => {
+  const value = {
+    ...declaration(),
+    goal: "done",
+    prompts: [...declaration().prompts, { id: "audit", prompt: "Audit logs.", thread: "new" }],
+  };
+  const [parsed] = parsePrompts(markdown(value));
+  assert.equal(parsed.declaration?.goal, "done");
+  assert.deepEqual(parsed.threads, [false, false, false, true]);
+  for (const invalid of [
+    { ...value, goal: "open" },
+    { ...value, prompts: [{ id: "x", prompt: "Test.", thread: "old" }] },
+    { ...value, exclusiveGroups: [["implement", "audit"]] },
+    { ...value, allowedCombinations: [["risks", "audit"]] },
+  ])
+    assert.deepEqual(parsePrompts(markdown(invalid)), [], JSON.stringify(invalid).slice(0, 150));
 });
 
 test("v1 backend enforces exclusions, exact combinations, authored order and deduplication", async () => {

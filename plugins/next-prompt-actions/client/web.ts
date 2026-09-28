@@ -95,6 +95,11 @@ export function binding(node: Node): Binding | null {
     ? { ...scope, message, timestamp }
     : null;
 }
+// Only the reply after the latest user message can offer actions. Its rendered timestamp is not
+// compared exactly: a streamed reply keeps its last live chunk time, unlike the stored row.
+function answers(candidate: Candidate, timestamp: number) {
+  return candidate.after !== undefined && timestamp > candidate.after;
+}
 export function desktopSupported() {
   return (
     typeof document !== "undefined" &&
@@ -106,6 +111,8 @@ export function desktopSupported() {
 type Controller = {
   inspect(scope: Scope): Promise<Snapshot>;
   send(scope: Scope, key: string | string[]): Promise<{ sent: boolean }>;
+  /** Starts an unrelated suggestion in a new conversation. Without it, those rows stay read-only. */
+  start?(scope: Scope, key: string): Promise<{ started: boolean }>;
   /** Runs on click with the pending outcome, so navigation need not wait for the send. */
   sending?(outcome: Promise<boolean>, scope: Scope): void;
 };
@@ -133,6 +140,8 @@ const icons = {
   done: '<path d="M173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z"/>', // check-circle
   edit: '<path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z"/>', // pencil-simple
   send: '<path d="M205.66,117.66a8,8,0,0,1-11.32,0L136,59.31V216a8,8,0,0,1-16,0V59.31L61.66,117.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0l72,72A8,8,0,0,1,205.66,117.66Z"/>', // arrow-up
+  thread:
+    '<path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"/>', // plus
   push: '<path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0ZM93.66,77.66,120,51.31V144a8,8,0,0,0,16,0V51.31l26.34,26.35a8,8,0,0,0,11.32-11.32l-40-40a8,8,0,0,0-11.32,0l-40,40A8,8,0,0,0,93.66,77.66Z"/>', // upload-simple
 };
 function iconMask(shape: string) {
@@ -194,11 +203,16 @@ const styles = `
 [${OWNER}] .npa-send {--npa-icon:${iconMask(icons.send)};min-width:80px;background:var(--npa-ink,#18181b);color:var(--npa-paper,#fff);border-color:var(--npa-ink,#18181b);}
 [${OWNER}] .npa-send.npa-commit {--npa-icon:${iconMask(icons.commit)};}
 [${OWNER}] .npa-send.npa-push {--npa-icon:${iconMask(icons.push)};}
+[${OWNER}] .npa-start {--npa-icon:${iconMask(icons.thread)};}
+[${OWNER}] .npa-goal {--npa-icon:${iconMask(icons.done)};}
+[${OWNER}] .npa-other-head {display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-bottom:12px;}
+[${OWNER}] .npa-other-title {font-size:13px;font-weight:600;line-height:20px;}
+[${OWNER}] .npa-other-hint {font-size:12.5px;line-height:20px;color:var(--npa-muted);}
 [${OWNER}] .npa-selection-clear {border-color:transparent;background:transparent;color:var(--npa-muted);padding:0 8px;}
 [${OWNER}] .npa-selection-clear::before {display:none;}
 @media (hover:hover) {
   [${OWNER}] .npa-row:hover {border-color:var(--npa-line-strong);}
-  [${OWNER}] .npa-edit:not(:disabled):hover {background:var(--npa-hover);}
+  [${OWNER}] .npa-edit:not(:disabled):hover, [${OWNER}] .npa-start:not(:disabled):hover {background:var(--npa-hover);}
   [${OWNER}] .npa-send:not(:disabled):hover {background:color-mix(in srgb,var(--npa-ink,#18181b) 86%,var(--npa-paper,#fff));}
   [${OWNER}] .npa-selection-clear:not(:disabled):hover {color:var(--npa-ink,inherit);}
   [${OWNER}] .npa-choice:not(:has(input:disabled)):hover {background:var(--npa-hover);}
@@ -334,7 +348,7 @@ export function install(controller: Controller, doc: Document = document, identi
       now.workspaceId === expected.workspaceId &&
       now.message === expected.message &&
       now.timestamp === expected.timestamp &&
-      candidate.timestamp === now.timestamp
+      answers(candidate, now.timestamp)
     );
   }
   // Earlier replies are no longer sendable; keep their panel for reading, without actions.
@@ -347,6 +361,8 @@ export function install(controller: Controller, doc: Document = document, identi
       block: code,
       text,
       why: parsed.whys[index] || undefined,
+      ...(parsed.threads[index] ? { thread: "new" as const } : {}),
+      ...(parsed.declaration?.goal ? { goal: parsed.declaration.goal } : {}),
       source: context.message,
       timestamp: context.timestamp,
       state: "sent",
@@ -415,12 +431,17 @@ export function install(controller: Controller, doc: Document = document, identi
     ui.appendChild(section);
     const edits: Node[] = [];
     const sends: Node[] = [];
-    const gitActions = candidates.map((candidate) => gitAction(candidate.text));
+    const starts: Node[] = [];
+    // Unrelated suggestions get their own section and can only start a new thread.
+    const local = candidates.filter((c) => !c.thread);
+    const others = candidates.filter((c) => c.thread);
+    const gitActions = local.map((candidate) => gitAction(candidate.text));
     function mount(update: Owned["update"]) {
       section.appendChild(note);
       block.appendChild(ui);
       const message = block.closest('[data-testid="assistant-message"]');
-      const fold = message ? foldPanel(doc, message, block, ui, section) : null;
+      const done = candidates.some((c) => c.goal === "done");
+      const fold = message ? foldPanel(doc, message, block, ui, section, done) : null;
       const prior = block.getAttribute("data-npa-block");
       block.setAttribute("data-npa-block", candidates.length === 1 ? "single" : "multiple");
       owned.set(block, {
@@ -437,24 +458,86 @@ export function install(controller: Controller, doc: Document = document, identi
         },
       });
     }
-    function update(next: Candidate[], latest: Snapshot) {
+    function updateStarts(next: Candidate[]) {
+      next
+        .filter((c) => c.thread)
+        .forEach((candidate, index) => {
+          if (!starts[index]) return;
+          starts[index].textContent =
+            candidate.state === "sent"
+              ? "Started"
+              : candidate.state === "unknown"
+                ? "Check threads"
+                : candidate.state === "sending"
+                  ? "Starting..."
+                  : "Start in new thread";
+          // A new thread never waits for this conversation to become idle.
+          starts[index].disabled = candidate.state !== "ready";
+        });
+    }
+    function renderOthers() {
+      if (!others.length) return;
+      const other = doc.createElement("div");
+      other.setAttribute("class", "npa-section npa-other");
+      other.setAttribute("role", "group");
+      other.setAttribute("aria-label", "Other work");
+      const head = doc.createElement("div");
+      head.setAttribute("class", "npa-other-head");
+      const title = doc.createElement("span");
+      title.setAttribute("class", "npa-other-title");
+      title.textContent = "Other work";
+      const hint = doc.createElement("span");
+      hint.setAttribute("class", "npa-other-hint");
+      hint.textContent = "Not part of this task. Starts a separate thread.";
+      head.appendChild(title);
+      head.appendChild(hint);
+      other.appendChild(head);
+      for (const candidate of others) {
+        const row = doc.createElement("div");
+        row.setAttribute("class", "npa-row");
+        row.appendChild(promptLabel(candidate));
+        if (!readonly && controller.start) {
+          const actions = doc.createElement("div");
+          actions.setAttribute("class", "npa-actions");
+          const start = doc.createElement("button");
+          start.setAttribute("type", "button");
+          start.setAttribute("class", "npa-start");
+          start.setAttribute("aria-label", `Start in new thread: ${candidate.text}`);
+          start.textContent = "Start in new thread";
+          start.addEventListener("click", () => {
+            if (start.disabled || !valid(block, context, candidate)) return;
+            start.textContent = "Starting...";
+            void action(() => controller.start!(context, candidate.key), "Starting new thread...");
+          });
+          starts.push(start);
+          actions.appendChild(start);
+          row.appendChild(actions);
+        }
+        other.appendChild(row);
+      }
+      ui.appendChild(other);
+    }
+    function update(all: Candidate[], latest: Snapshot) {
       note.textContent = [latest.note, latest.warning].filter(Boolean).join(" ");
-      next.forEach((candidate, index) => {
-        edits[index].disabled = false;
-        sends[index].textContent =
-          candidate.state === "sent"
-            ? "Sent"
-            : candidate.state === "unknown"
-              ? "Check chat"
-              : candidate.state === "sending"
-                ? "Sending..."
-                : (gitActions[index]?.label ?? "Send");
-        sends[index].disabled =
-          latest.busy || candidate.state !== "ready" || latest.note === "Jev reviewing...";
-      });
+      updateStarts(all);
+      all
+        .filter((c) => !c.thread)
+        .forEach((candidate, index) => {
+          edits[index].disabled = false;
+          sends[index].textContent =
+            candidate.state === "sent"
+              ? "Sent"
+              : candidate.state === "unknown"
+                ? "Check chat"
+                : candidate.state === "sending"
+                  ? "Sending..."
+                  : (gitActions[index]?.label ?? "Send");
+          sends[index].disabled =
+            latest.busy || candidate.state !== "ready" || latest.note === "Jev reviewing...";
+        });
     }
     async function action(run: () => Promise<unknown>, label: string) {
-      [...edits, ...sends].forEach((button) => {
+      [...edits, ...sends, ...starts].forEach((button) => {
         button.disabled = true;
       });
       note.textContent = label;
@@ -471,21 +554,18 @@ export function install(controller: Controller, doc: Document = document, identi
     }
     if (readonly) {
       ui.setAttribute("data-npa-readonly", "true");
-      for (const candidate of candidates) {
+      for (const candidate of local) {
         const row = doc.createElement("div");
         row.setAttribute("class", "npa-row");
         row.appendChild(promptLabel(candidate));
         section.appendChild(row);
       }
+      renderOthers();
       mount(() => {});
       return;
     }
-    if (
-      candidates.length > 1 &&
-      candidates.every((c) => c.selection) &&
-      !gitActions.some(Boolean)
-    ) {
-      const update = renderSelection(doc, section, ui, candidates, snapshot, {
+    if (local.length > 1 && local.every((c) => c.selection) && !gitActions.some(Boolean)) {
+      const update = renderSelection(doc, section, ui, local, snapshot, {
         edit(picked) {
           if (!picked.every((c) => valid(block, context, c))) return;
           note.textContent = fillComposer(joinPrompts(picked.map((c) => c.text)), doc, block);
@@ -503,13 +583,19 @@ export function install(controller: Controller, doc: Document = document, identi
           }, "Sending...");
         },
       });
+      renderOthers();
+      updateStarts(candidates);
       mount((next, latest) => {
         note.textContent = [latest.note, latest.warning].filter(Boolean).join(" ");
-        update(next, latest);
+        updateStarts(next);
+        update(
+          next.filter((c) => !c.thread),
+          latest,
+        );
       });
       return;
     }
-    for (const [index, candidate] of candidates.entries()) {
+    for (const [index, candidate] of local.entries()) {
       const git = gitActions[index];
       const row = doc.createElement("div");
       row.setAttribute("class", "npa-row");
@@ -554,6 +640,7 @@ export function install(controller: Controller, doc: Document = document, identi
       row.appendChild(actions);
       section.appendChild(row);
     }
+    renderOthers();
     update(candidates, snapshot);
     mount(update);
   }
@@ -684,7 +771,7 @@ export function install(controller: Controller, doc: Document = document, identi
           const candidates = snapshot.candidates.filter(
             (c) =>
               c.block === code &&
-              c.timestamp === context.timestamp &&
+              answers(c, context.timestamp) &&
               c.source.includes(context.message),
           );
           if (candidates.length) {

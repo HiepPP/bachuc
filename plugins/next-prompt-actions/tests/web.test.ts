@@ -32,6 +32,7 @@ test("v1 radio groups and checkboxes enforce selection, preview exact prompts, s
     new Store(),
     {
       read: async () => structuredClone(current),
+      start: async () => {},
       send: async (_scope, text) => {
         sent.push(text);
       },
@@ -128,6 +129,7 @@ const snapshot: Snapshot = {
       text: "Test UI.",
       source: context.message,
       timestamp: 100,
+      after: 1,
       state: "ready",
     },
   ],
@@ -294,6 +296,7 @@ test("Commit replaces Send and immediately sends the skill once without changing
     new Store(),
     {
       read: async () => structuredClone(current),
+      start: async () => {},
       async send(scope, text) {
         assert.equal(scope.agentId, context.agentId);
         sent.push(text);
@@ -513,6 +516,7 @@ test("a new turn's unsent block renders no note from the previous send", async (
     async send() {
       engine.started(scope.agentId);
     },
+    async start() {},
   };
   engine = new Engine(new Store(), driver, async () => true);
   const key = (await engine.inspect(scope)).candidates[0].key;
@@ -747,7 +751,11 @@ test("a folded selection panel keeps the user's choice across later scans", asyn
     allowedCombinations: [],
   });
   const message = `## What Next\nPick one.\n\`\`\`next-prompts\n${block}\n\`\`\``;
-  const selection = { blockKey: "keep", exclusiveGroups: [["implement", "review"]], allowedCombinations: [] };
+  const selection = {
+    blockKey: "keep",
+    exclusiveGroups: [["implement", "review"]],
+    allowedCombinations: [],
+  };
   const candidates = ["implement", "review"].map((id, index) => ({
     ...snapshot.candidates[0],
     key: id,
@@ -861,6 +869,147 @@ test("Recap, What Next, and intro fold into one prompt panel and restore exactly
     assert.equal(assistant.innerHTML, before);
     if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
     else Reflect.deleteProperty(globalThis, "MutationObserver");
+  }
+});
+
+test("goal done shows Task done, and unrelated work starts only in a new thread", async () => {
+  const block = JSON.stringify({
+    version: 1,
+    goal: "done",
+    prompts: [
+      { id: "ship", prompt: "Commit and push the fix." },
+      { id: "audit", prompt: "Audit the logs.", why: "Separate issue.", thread: "new" },
+    ],
+  });
+  const message = `## Recap\n- Branch: \`main\`\n- Did: Fixed it.\n- Commit/push: none\n\n## What Next\n\`\`\`next-prompts\n${block}\n\`\`\``;
+  const item = (value: string) =>
+    `<div data-paseo-markdown-tag="li"><span data-paseo-markdown-ignore="true" data-paseo-markdown-list-marker="true">•</span><div><span>${value}</span></div></div>`;
+  const current: Current = {
+    epoch: "goal",
+    complete: true,
+    busy: false,
+    rows: [
+      { type: "user_message", id: "0", text: "Fix it.", timestamp: 1 },
+      { type: "assistant_message", id: "1", text: message, timestamp: 100 },
+    ],
+  };
+  const sent: string[] = [];
+  const started: string[] = [];
+  const engine = new Engine(
+    new Store(),
+    {
+      read: async () => structuredClone(current),
+      send: async (_scope, text) => {
+        sent.push(text);
+      },
+      start: async (_scope, text) => {
+        started.push(text);
+      },
+    },
+    async () => false,
+  );
+  const { document, window } = parseHTML(
+    `<html><head></head><body><textarea data-composer-input="">draft</textarea><div data-testid="assistant-message"><div data-paseo-markdown-tag="h2"><span>Recap</span></div><div data-paseo-markdown-tag="ul">${item('Branch: <span data-paseo-markdown-tag="code">main</span>')}${item("Did: Fixed it.")}${item("Commit/push: none")}</div><div data-paseo-markdown-tag="h2"><span>What Next</span></div><div data-paseo-markdown-tag="pre"><span data-paseo-markdown-tag="code"></span></div></div></body></html>`,
+  );
+  document.querySelector(
+    '[data-paseo-markdown-tag="pre"] [data-paseo-markdown-tag="code"]',
+  )!.textContent = block;
+  const assistant = document.querySelector('[data-testid="assistant-message"]')!;
+  const before = assistant.innerHTML;
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "MutationObserver");
+  Object.defineProperty(globalThis, "MutationObserver", {
+    value: window.MutationObserver,
+    configurable: true,
+  });
+  const cleanup = install(
+    {
+      inspect: (scope) => engine.inspect(scope),
+      send: async (scope, key) => ({ sent: await engine.send(scope, key) }),
+      start: async (scope, key) => ({ started: await engine.start(scope, key) }),
+    },
+    document as unknown as Parameters<typeof install>[1],
+    () => ({ ...context, message }),
+  );
+  try {
+    await pause();
+    const panel = document.querySelector("[data-next-prompt-actions]")!;
+    assert.equal(panel.querySelector(".npa-recap .npa-goal")!.textContent, "Task done");
+    const other = panel.querySelector(".npa-other")!;
+    assert.equal(other.querySelector(".npa-other-title")!.textContent, "Other work");
+    assert.match(
+      other.querySelector(".npa-label")!.textContent!,
+      /^Audit the logs\.Separate issue\.$/,
+    );
+    assert.equal(other.querySelectorAll(".npa-edit, .npa-send").length, 0);
+    assert.equal(panel.querySelectorAll(".npa-send").length, 1, "only the in-task suggestion");
+    assert.equal(panel.querySelector(".npa-send")!.textContent, "Commit & Push");
+    assert.equal(panel.querySelectorAll("input").length, 0);
+    const start = other.querySelector(".npa-start")!;
+    assert.equal(start.textContent, "Start in new thread");
+    start.dispatchEvent(new window.Event("click"));
+    await pause();
+    assert.deepEqual([sent, started], [[], ["Audit the logs."]]);
+    assert.equal(panel.querySelector(".npa-start")!.textContent, "Started");
+    assert.equal(panel.querySelector(".npa-start")!.disabled, true);
+    assert.equal(document.querySelector("textarea")!.value, "draft");
+  } finally {
+    cleanup();
+    assert.equal(assistant.innerHTML, before);
+    if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
+    else Reflect.deleteProperty(globalThis, "MutationObserver");
+  }
+});
+
+test("a reply watched while streaming keeps actions despite its live chunk timestamp", async () => {
+  const message = "## Next Steps\n```\nprompt: Test UI.\n```";
+  const current: Current = {
+    epoch: "live",
+    complete: true,
+    busy: false,
+    rows: [
+      { type: "user_message", id: "0", text: "Check it.", timestamp: 50 },
+      // The stored row keeps its first chunk time; the live view keeps its last chunk time.
+      { type: "assistant_message", id: "1", text: message, timestamp: 100 },
+    ],
+  };
+  const engine = new Engine(
+    new Store(),
+    { read: async () => structuredClone(current), send: async () => {}, start: async () => {} },
+    async () => false,
+  );
+  for (const [rendered, interactive] of [
+    [137, true],
+    [40, false],
+  ] as const) {
+    const { document, window } = parseHTML(
+      '<html><head></head><body><div data-testid="assistant-message"><div data-paseo-markdown-tag="h2">Next Steps</div><div data-paseo-markdown-tag="pre"><span data-paseo-markdown-tag="code">prompt: Test UI.</span></div></div></body></html>',
+    );
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "MutationObserver");
+    Object.defineProperty(globalThis, "MutationObserver", {
+      value: window.MutationObserver,
+      configurable: true,
+    });
+    const cleanup = install(
+      {
+        inspect: (scope) => engine.inspect(scope),
+        send: async (scope, key) => ({ sent: await engine.send(scope, key) }),
+      },
+      document as unknown as Parameters<typeof install>[1],
+      () => ({ ...context, message, timestamp: rendered }),
+    );
+    try {
+      await pause();
+      assert.ok(document.querySelector("[data-next-prompt-actions]"), `panel at ${rendered}`);
+      assert.equal(
+        document.querySelectorAll(".npa-send").length,
+        interactive ? 1 : 0,
+        `actions at ${rendered}`,
+      );
+    } finally {
+      cleanup();
+      if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
+      else Reflect.deleteProperty(globalThis, "MutationObserver");
+    }
   }
 });
 

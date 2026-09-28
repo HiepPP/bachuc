@@ -49,6 +49,7 @@ function fixture(
     ],
   };
   const sent: { text: string; id: string }[] = [];
+  const started: { text: string; id: string }[] = [];
   let rejectSend = false;
   let duringSend: (() => void) | undefined;
   const store = new Store();
@@ -61,12 +62,17 @@ function fixture(
       duringSend?.();
       if (rejectSend) throw new Error("connection lost");
     },
+    async start(_scope: unknown, text: string, id: string) {
+      started.push({ text, id });
+      if (rejectSend) throw new Error("connection lost");
+    },
   };
   const engine = new Engine(store, driver, judge, dependencies);
   return {
     engine,
     store,
     sent,
+    started,
     driver,
     get current() {
       return current;
@@ -200,6 +206,49 @@ test("review constraints across commas never inject the commit skill, manually o
         f.engine.close();
       }
     }
+});
+test("new-thread suggestions start once in a new thread and never send here", async () => {
+  const f = fixture();
+  f.current.rows[1].text =
+    "## Next Steps\n```\nprompt: Report results.\nprompt: Audit the logs.\nthread: new\n```";
+  const [here, other] = (await f.engine.inspect(scope)).candidates;
+  assert.equal(here.thread, undefined);
+  assert.equal(other.thread, "new");
+  await assert.rejects(f.engine.send(scope, other.key), /new thread/);
+  await assert.rejects(f.engine.start(scope, here.key), /stale/);
+  // A busy conversation does not block an independent thread.
+  f.current.busy = true;
+  assert.equal(await f.engine.start(scope, other.key), true);
+  await assert.rejects(f.engine.start(scope, other.key));
+  assert.deepEqual(f.started, [{ text: "Audit the logs.", id: `next-prompt-${other.key}` }]);
+  assert.deepEqual(f.sent, []);
+  const inspected = await f.engine.inspect(scope);
+  assert.equal(inspected.candidates[1].state, "sent");
+  assert.equal(inspected.note, "Started in a new thread.");
+});
+test("an uncertain new-thread start is never retried", async () => {
+  const f = fixture();
+  f.current.rows[1].text = "## Next Steps\n```\nprompt: Audit the logs.\nthread: new\n```";
+  f.failSend();
+  const { key } = (await f.engine.inspect(scope)).candidates[0];
+  assert.equal(await f.engine.start(scope, key), false);
+  assert.equal(f.store.get("agent").handled[key], "unknown");
+  await assert.rejects(f.engine.start(scope, key));
+  assert.equal(f.started.length, 1);
+});
+test("Jev auto-run ignores new-thread suggestions", async () => {
+  let evaluations = 0;
+  const f = fixture(async () => {
+    evaluations++;
+    return true;
+  });
+  f.current.rows[1].text = "## Next Steps\n```\nprompt: Audit the logs.\nthread: new\n```";
+  await f.engine.toggle(scope, true);
+  f.engine.started(scope.agentId);
+  await f.engine.ended(scope, true);
+  assert.equal(evaluations, 0);
+  assert.deepEqual([f.sent, f.started], [[], []]);
+  assert.match((await f.engine.inspect(scope)).note, /Manual review/);
 });
 test("Git actions require a manual click without consuming a Jev evaluation", async () => {
   let evaluations = 0;

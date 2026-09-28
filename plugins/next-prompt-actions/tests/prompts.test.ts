@@ -202,6 +202,7 @@ test("headings, multiline Vietnamese, multiple suggestions, and marker removal",
         block: "prompt: Kiểm tra UI.\nGiữ nguyên WIP.\nprompt: Báo kết quả.",
         prompts: ["Kiểm tra UI.\nGiữ nguyên WIP.", "Báo kết quả."],
         whys: ["", ""],
+        threads: [false, false],
       },
     ],
   );
@@ -214,6 +215,14 @@ test("a why: line under a prompt is its reason, not prompt text", () => {
   assert.deepEqual(parsed.prompts, ["Commit.", "Push."]);
   assert.deepEqual(parsed.whys, ["Locks in the fix.", ""]);
   assert.deepEqual(parsePrompts("## What Next\n```\nwhy: Orphan.\nprompt: Test.\n```"), []);
+});
+test("a thread: new line marks only its own prompt as unrelated work", () => {
+  const [parsed] = parsePrompts(
+    "## What Next\n```\nprompt: Commit and push the fix.\nprompt: Audit the logs.\nwhy: Separate issue.\nthread: new\n```",
+  );
+  assert.deepEqual(parsed.prompts, ["Commit and push the fix.", "Audit the logs."]);
+  assert.deepEqual(parsed.whys, ["", "Separate issue."]);
+  assert.deepEqual(parsed.threads, [false, true]);
 });
 test("ignore incomplete streams, ordinary code, quotes, empty entries, and other sections", () => {
   for (const text of [

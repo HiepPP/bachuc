@@ -48,5 +48,21 @@ export function createDriver(getApi: () => PaseoApi, serverId: string): Driver {
       if (!canSend()) throw new Error("Send cancelled.");
       await handle.send(text, { messageId });
     },
+    async start(scope, text, id) {
+      const handle = await agent(scope);
+      const source = handle.current()!;
+      if (!handle.cwd) throw new Error("Conversation directory unavailable.");
+      await getApi().agents.create({
+        cwd: handle.cwd,
+        config: {
+          provider: source.model ? `${source.provider}/${source.model}` : source.provider,
+          ...(source.currentModeId ? { modeId: source.currentModeId } : {}),
+          ...(source.thinkingOptionId ? { thinkingOptionId: source.thinkingOptionId } : {}),
+        },
+        prompt: text,
+        // A repeated click or reconnect must not create a second conversation.
+        idempotencyKey: id,
+      });
+    },
   };
 }
