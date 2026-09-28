@@ -4,6 +4,12 @@
 
 <h1 align="center">Paseo</h1>
 
+> **About this repository:** [HiepPP/paseo](https://github.com/HiepPP/paseo) is an independently maintained fork of [getpaseo/paseo](https://github.com/getpaseo/paseo).
+> Paseo was created by Mohamed Boudra and developed with its contributors.
+> This fork is not an official Paseo release and does not imply upstream endorsement.
+> The upstream [Apache-2.0 license and copyright notice](LICENSE) are preserved; third-party components retain their respective licenses.
+> HiepPP modified this README to add this attribution notice.
+
 <p align="center">
   <a href="README.md">English</a> ·
   <a href="README.zh-CN.md">简体中文</a> ·
