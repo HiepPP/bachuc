@@ -52,20 +52,20 @@ in the installed host. Declare the supported range in `paseo-plugin.json` under
 These are contributions that can be combined, not mutually exclusive plugin types.
 Verify exact signatures and version availability before implementation.
 
-| Capability | Main API or mechanism | Example |
-| --- | --- | --- |
-| Agent lifecycle automation | `server.on`, `server.before` | Inject MCP or environment, react to turn completion |
-| Backend operations | `defineRpc`, `server.handle`, client `useRpc` | Call an external API without exposing credentials to UI |
-| App pages and navigation | `addSurface`, `addSidebarItem` | Service dashboard |
-| Workspace panels | `addWorkspacePanel` | Workspace-specific inspector |
-| Quick actions | `addCommandCenterItem`, `addSlashCommand` | User-triggered workflow |
-| Header and composer controls | Header buttons, `addComposerPill` | Contextual action beside the prompt |
-| Timeline presentation | `addTimelineTransformer`, `addTimelineRenderer` | Render structured tool output |
-| Timeline additions | `paseo.agents.ref(id).timeline.append` | Plugin-owned status or result row |
-| Attachments | `addAttachmentSource` with backend RPC | Attach an issue or document to a prompt |
-| Themes | `addTheme` | App color palette |
-| Settings | Settings screens and persisted values | Plugin preferences |
-| Agent providers | `server.registerProvider`, direct or ACP adapter | Integrate another agent runtime |
+| Capability                   | Main API or mechanism                            | Example                                                 |
+| ---------------------------- | ------------------------------------------------ | ------------------------------------------------------- |
+| Agent lifecycle automation   | `server.on`, `server.before`                     | Inject MCP or environment, react to turn completion     |
+| Backend operations           | `defineRpc`, `server.handle`, client `useRpc`    | Call an external API without exposing credentials to UI |
+| App pages and navigation     | `addSurface`, `addSidebarItem`                   | Service dashboard                                       |
+| Workspace panels             | `addWorkspacePanel`                              | Workspace-specific inspector                            |
+| Quick actions                | `addCommandCenterItem`, `addSlashCommand`        | User-triggered workflow                                 |
+| Header and composer controls | Header buttons, `addComposerPill`                | Contextual action beside the prompt                     |
+| Timeline presentation        | `addTimelineTransformer`, `addTimelineRenderer`  | Render structured tool output                           |
+| Timeline additions           | `paseo.agents.ref(id).timeline.append`           | Plugin-owned status or result row                       |
+| Attachments                  | `addAttachmentSource` with backend RPC           | Attach an issue or document to a prompt                 |
+| Themes                       | `addTheme`                                       | App color palette                                       |
+| Settings                     | Settings screens and persisted values            | Plugin preferences                                      |
+| Agent providers              | `server.registerProvider`, direct or ACP adapter | Integrate another agent runtime                         |
 
 Use the Paseo SDK for supported workspace and agent operations. A plugin is not a
 supported way to replace arbitrary application internals.
