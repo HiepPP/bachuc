@@ -20,7 +20,7 @@ Send preserves the composer draft. Edit replaces it with the selected prompt tex
 A suggestion block under What Next becomes one panel ([design](../../docs/designs/recap-next-panel-2026-09-25/panel-v3.html), [rules](../../docs/designs/recap-next-panel-2026-09-25/TASTE.md)).
 The panel shows a directly preceding Recap (branch, commit status, and work summary), the What Next title and intro, and the suggestions.
 A Recap with exactly the Branch, Did, and Commit/push fields joins the panel, or shows as a compact strip when no panel follows.
-Other Recap shapes keep their original rendering.
+Recap parsing follows the global answer rules: Branch, Did, and Commit/push, followed by What Next or Next Steps. Fields may span separate history rows; late or changed blocks trigger a fresh fold. Plain Recap fields also join the following panel, either as three paragraphs or three lines separated by Markdown line breaks. Inline code and links are preserved. Other Recap shapes keep their original rendering.
 Native Markdown is hidden in place, not removed, and returns when the plugin is disabled.
 
 - Current reply: the panel has controls. One suggestion gets direct Edit and Send. Several suggestions separate exclusive

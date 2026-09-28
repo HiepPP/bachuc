@@ -144,6 +144,63 @@ function stripLabel(node: Node): boolean {
   return false;
 }
 
+// Split cloned inline trees at Markdown line breaks; React-owned nodes stay untouched.
+function lines(node: Node): Node[] {
+  if (node.nodeType === 3) {
+    return (node.nodeValue ?? "").split(/\r?\n/).map((text) => {
+      const clone = node.cloneNode!(false);
+      clone.nodeValue = text;
+      return clone;
+    });
+  }
+  const result = [node.cloneNode!(false)];
+  for (const child of Array.from(node.childNodes ?? [])) {
+    const parts = lines(child);
+    parts.forEach((part, index) => {
+      if (index) result.push(node.cloneNode!(false));
+      result[result.length - 1].appendChild(part);
+    });
+  }
+  return result;
+}
+
+function precedingRecap(tops: Node[], end: number) {
+  let start = end;
+  while (start > 0 && !heading.test(tops[start - 1].getAttribute(TAG) ?? "")) start--;
+  const title = tops[start - 1];
+  if (
+    !title ||
+    !heading.test(title.getAttribute(TAG) ?? "") ||
+    !/^recap$/i.test(title.textContent?.trim() ?? "") ||
+    title.closest(`[${TAG}="blockquote"]`)
+  )
+    return null;
+  const paragraphs = tops.slice(start, end);
+  const list =
+    paragraphs.length === 1 && paragraphs[0].getAttribute(TAG) === "ul" ? paragraphs[0] : null;
+  if (!list && !paragraphs.every((node) => node.getAttribute(TAG) === "p")) return null;
+  const fields = list ? items(list) : paragraphs.flatMap(lines);
+  if (
+    list &&
+    Array.from(list.querySelectorAll(`[${TAG}="ul"], [${TAG}="ol"]`)).some(
+      (node) => !fields[1]?.contains?.(node),
+    )
+  )
+    return null;
+  const labels = ["Branch", "Did", "Commit/push"];
+  if (
+    fields.length !== 3 ||
+    !fields.every((field, index) => {
+      const match = /^(Branch|Did|Commit\/push):\s*(\S[\s\S]*)$/i.exec(
+        (field.textContent ?? "").replace(/^\s*[•*-]?\s*/, "").trim(),
+      );
+      return match?.[1].toLowerCase() === labels[index].toLowerCase();
+    })
+  )
+    return null;
+  return { title, paragraphs, fields };
+}
+
 /** True when the nearest heading before `block` in the same reply is What Next or Next Steps. */
 export function underNextHeading(message: Node, block: Node): boolean {
   const tops = messageParts(message).flatMap(topLevel);
@@ -167,6 +224,7 @@ export function foldPanel(
 ): { undo(): void; intact(): boolean } {
   const parts = messageParts(message);
   const tops = parts.flatMap(topLevel);
+  const contents = new Map(tops.map((node) => [node, node.textContent]));
   let index = tops.indexOf(block) - 1;
   const intro: Node[] = [];
   while (index >= 0 && tops[index].getAttribute(TAG) === "p") intro.unshift(tops[index--]);
@@ -196,14 +254,11 @@ export function foldPanel(
   };
   const added: Node[] = [];
   const hidden = [title, ...intro];
-  const list = tops[index - 1];
-  const recapTitle = tops[index - 2];
-  if (
-    list?.getAttribute("data-npa-recap") === "true" &&
-    recapTitle?.getAttribute("data-npa-recap-heading") === "true"
-  ) {
-    hidden.unshift(recapTitle, list);
-    const [branch, did, commit] = items(list);
+  const parsed = precedingRecap(tops, index);
+  if (parsed) {
+    const { title: recapTitle, paragraphs, fields } = parsed;
+    hidden.unshift(recapTitle, ...paragraphs);
+    const [branch, did, commit] = fields;
     const recap = element("div", "npa-section npa-recap");
     recap.setAttribute("role", "group");
     recap.setAttribute("aria-label", "Recap");
@@ -222,7 +277,7 @@ export function foldPanel(
     );
     status.setAttribute("aria-label", `Commit/push: ${said}`);
     // State reads from the icon and wording, not an extra hue (TASTE.md).
-    status.appendChild(/^none$/i.test(said) ? element("span", "", "No commit") : shown);
+    status.appendChild(/^none\.?$/i.test(said) ? element("span", "", "No commit") : shown);
     meta.appendChild(status);
     head.appendChild(meta);
     recap.appendChild(head);
@@ -271,6 +326,10 @@ export function foldPanel(
         node.isConnected
           ? node.getAttribute("data-npa-folded") === "true"
           : !owners[position].isConnected,
-      ) && messageParts(message).every((part) => parts.includes(part)),
+      ) &&
+      messageParts(message).every((part) => parts.includes(part)) &&
+      messageParts(message)
+        .flatMap(topLevel)
+        .every((node) => contents.has(node) && contents.get(node) === node.textContent),
   };
 }
