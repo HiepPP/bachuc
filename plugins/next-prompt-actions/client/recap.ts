@@ -8,9 +8,11 @@ const next = /^what(?:['’]s)? next$|^next steps$/i;
 export const recapStyles = `
 [data-npa-recap-heading] {font-size:22px!important;line-height:1.3!important;margin-top:20px!important;margin-bottom:12px!important;padding-bottom:0!important;border-bottom-width:0!important;}
 [data-npa-recap-heading] * {font-size:inherit!important;line-height:inherit!important;}
-[data-npa-recap] {display:grid!important;grid-template-columns:auto minmax(0,max-content) auto;justify-content:start;align-items:baseline;gap:0!important;margin:0!important;padding:0 0 20px!important;border-bottom:1px solid color-mix(in srgb,currentColor 14%,transparent);}
+[data-npa-recap] {display:grid!important;grid-template-columns:fit-content(32ch) minmax(0,max-content) fit-content(32ch);justify-content:start;align-items:baseline;gap:0!important;margin:0!important;padding:0 0 20px!important;border-bottom:1px solid color-mix(in srgb,currentColor 14%,transparent);}
 [data-npa-recap-field] {display:block!important;min-width:0!important;margin:0!important;padding:0 24px!important;border-left:1px solid color-mix(in srgb,currentColor 16%,transparent);font:14px/1.6 system-ui!important;overflow-wrap:anywhere;text-wrap:pretty;}
 [data-npa-recap-field="did"] {max-width:68ch;}
+[data-npa-recap-stacked] {grid-template-columns:minmax(0,max-content) minmax(0,max-content);row-gap:10px!important;}
+[data-npa-recap-stacked] > [data-npa-recap-field="did"] {grid-area:2/1/3/-1;padding:0!important;border-left:0;}
 [data-npa-recap-field]:first-child {padding-left:0!important;border-left:0;}
 [data-npa-recap-field]:last-child {padding-right:0!important;}
 [data-npa-recap-field] * {font-size:inherit!important;line-height:inherit!important;}
@@ -69,6 +71,8 @@ export function decorateRecap(message: Node): (() => void) | null {
   };
   mark(nodes[start], "data-npa-recap-heading", "true");
   mark(list, "data-npa-recap", "true");
+  // Bullets in a middle column wrap to a few words per line; give Did its own row.
+  if (nested.length) mark(list, "data-npa-recap-stacked", "true");
   fields.forEach((field, index) => mark(field, "data-npa-recap-field", labels[index]));
   return () => {
     for (const { node, name, before } of changed) {

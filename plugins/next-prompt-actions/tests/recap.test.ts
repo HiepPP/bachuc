@@ -21,6 +21,7 @@ test("compact Recap preserves native content, links, code, and restores exact ma
   assert.equal(link!.getAttribute("href"), "/report");
   assert.equal(message.querySelector('[data-paseo-markdown-tag="code"]')!.textContent, "main");
   assert.equal(message.querySelectorAll("[data-paseo-markdown-list-marker]").length, 3);
+  assert.equal(message.querySelector("[data-npa-recap-stacked]"), null);
   cleanup();
   assert.equal(message.innerHTML, before);
 });
@@ -53,6 +54,8 @@ test("Did may hold a nested list; other fields may not", () => {
     ),
     ["branch", "did", "commit/push"],
   );
+  // Bullets get their own row instead of a narrow middle column.
+  assert.ok(message.querySelector("[data-npa-recap][data-npa-recap-stacked]"));
   cleanup();
   assert.equal(message.innerHTML, before);
 
