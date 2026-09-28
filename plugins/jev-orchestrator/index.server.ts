@@ -82,8 +82,11 @@ export default function contribute(server: PluginServerContext) {
       console.warn(`Jev native: cleanup failed: ${(error as Error).message}`),
     );
   };
-  const bridge = createBridge(engine, scope, (action, parentId, cwd, input) =>
-    native.handle(action, parentId, cwd, input),
+  const bridge = createBridge(
+    engine,
+    scope,
+    (action, parentId, cwd, input) => native.handle(action, parentId, cwd, input),
+    path.join(home, "plugin-data/jev-orchestrator/bridge.json"),
   );
   server.handle(directProfilesRpc, async ({ workspaceId }, context) => {
     api = context.paseo;
@@ -157,8 +160,21 @@ export default function contribute(server: PluginServerContext) {
       (request.provider === "codex" || request.provider === "claude")
     ) {
       const provider = request.provider;
+      const cwd = await realpath(request.cwd);
+      // Resumed sessions do not carry the create-time env, and a daemon restart may move the
+      // bridge. Restore this agent's own lease instead of locking the thread.
+      const url = await bridge.ready.catch(() => undefined);
+      if (
+        url &&
+        (env.PASEO_ORCH_URL !== url ||
+          !env.PASEO_ORCH_TOKEN ||
+          !bridge.bind(env.PASEO_ORCH_TOKEN, request.agentId, cwd))
+      ) {
+        env.PASEO_ORCH_TOKEN = bridge.leaseFor(request.agentId, cwd) ?? bridge.issue(cwd);
+        env.PASEO_ORCH_URL = url;
+      }
       try {
-        await requireNativeBinding(env, bridge, request.agentId, await realpath(request.cwd));
+        await requireNativeBinding(env, bridge, request.agentId, cwd);
       } catch (error) {
         native.revoke(request.agentId);
         throw error;

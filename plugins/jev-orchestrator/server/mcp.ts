@@ -1,8 +1,21 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { nativePrepareSchema } from "../shared/native";
 import { submitSchema } from "../shared/contracts";
+
+function currentBridgeUrl() {
+  try {
+    const home = process.env.PASEO_HOME || path.join(homedir(), ".paseo");
+    const { port } = JSON.parse(
+      readFileSync(path.join(home, "plugin-data/jev-orchestrator/bridge.json"), "utf8"),
+    );
+    if (Number.isInteger(port) && port > 0) return `http://127.0.0.1:${port}/mcp`;
+  } catch {}
+}
 
 const server = new McpServer({ name: "jev-orchestrator", version: "0.1.0" });
 async function call(action: string, input?: unknown, id?: string) {
@@ -13,13 +26,23 @@ async function call(action: string, input?: unknown, id?: string) {
     const token = process.env.PASEO_ORCH_TOKEN;
     if (!url || !token || !/^http:\/\/127\.0\.0\.1:\d+\/mcp$/.test(url))
       throw new Error("Missing launch binding");
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ action, input, id }),
-      signal: controller.signal,
-      redirect: "error",
-    });
+    const post = (target: string) =>
+      fetch(target, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action, input, id }),
+        signal: controller.signal,
+        redirect: "error",
+      });
+    let response;
+    try {
+      response = await post(url);
+    } catch (error) {
+      // A daemon restart can move the bridge; the persisted config still names the old port.
+      const current = currentBridgeUrl();
+      if (!current || current === url || controller.signal.aborted) throw error;
+      response = await post(current);
+    }
     const data = (await response.json()) as Record<string, unknown>;
     return {
       content: [{ type: "text" as const, text: JSON.stringify(data) }],
