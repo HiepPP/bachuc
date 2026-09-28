@@ -38,6 +38,8 @@ const DENY: [RegExp, string][] = [
 
 // Tokens that make a command compound; the read-only allowlist refuses them.
 const COMPOUND = /[|;&><`]|\$\(/;
+// Raw command text cannot resolve quoting, escapes, or expansions into filesystem targets.
+const SHELL_ARGUMENT_SYNTAX = /['"`\\*?[\]{}$()\r\n]/;
 const READ_ONLY_HEADS = new Set([
   "ls",
   "cat",
@@ -74,6 +76,11 @@ export function tier0(command: string): { decision: Decision; reason: string } |
   // Strip the local `rtk` output-compaction wrapper so the allowlist sees the real head.
   const text = command.trim().replace(/^rtk\s+/, "");
   for (const [pattern, reason] of DENY) if (pattern.test(text)) return { decision: "deny", reason };
+  if (SHELL_ARGUMENT_SYNTAX.test(text))
+    return {
+      decision: "escalate",
+      reason: "Shell quoting or expansion requires human review of the actual command targets.",
+    };
   if (INTERPRETER.test(text))
     return { decision: "escalate", reason: "Script file contents are not visible to the gate." };
   if (COMPOUND.test(text)) return null;

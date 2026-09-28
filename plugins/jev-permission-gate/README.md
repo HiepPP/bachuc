@@ -7,7 +7,10 @@ Order per `agent.permission_requested` with a shell command:
 
 1. Regex deny: `rm -rf`, `git push`, `git reset --hard`, `git checkout --`, `git clean -f`, `sudo`,
    pipe into a shell, `find -delete`, secret files (`.env`, `*.pem`, `credentials`, `typesafe-ai.json`).
-2. Regex escalate: an interpreter running a script file. Its contents are invisible to the gate.
+2. Regex escalate: quotes, escapes, wildcards, expansions, or embedded newlines require human
+   review; raw command text cannot establish their filesystem targets. This also applies to
+   benign quoted arguments. These commands never reach Jev for automatic approval.
+   An interpreter running a script file also escalates: its contents are invisible to the gate.
 3. Regex allow: a single non-compound `ls/cat/head/tail/wc/rg/grep/find/pwd/which/stat`, a
    read-only `git` subcommand, or exactly `npm test`, `npm run typecheck|lint|check`, `npx tsc --noEmit`.
 4. Jev: boolean `readOnly` plus choice `allow | deny | escalate`. Allow needs both at

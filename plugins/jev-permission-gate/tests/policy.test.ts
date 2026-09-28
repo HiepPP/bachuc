@@ -45,7 +45,7 @@ test("tier0 allows plain read-only commands", () => {
     "ls -la plugins/",
     "cat package.json",
     "head -n 50 server/mcp.mjs",
-    "find . -name '*.test.ts'",
+    "find . -name package.json",
   ])
     assert.equal(tier0(c)?.decision, "allow", c);
 });
@@ -65,18 +65,48 @@ test("Typesafe credential access is denied before read-only approval or Jev", as
   assert.equal(tier0("cat typesafe-ai.json.example")?.decision, "allow");
 });
 
+test("shell argument expansion and quoting require human review without calling Jev", async () => {
+  let calls = 0;
+  const permissive: Judge = async () => {
+    calls++;
+    return verdict("allow", 1, true, 1);
+  };
+  for (const command of [
+    "cat ~/.paseo/typesafe-*.json",
+    "head ~/.paseo/typesafe-ai.jso?",
+    "cat ~/.paseo/typesafe-ai.[j]son",
+    "cat ~/.paseo/{typesafe-ai,other}.json",
+    "cat ~/.paseo/typesafe-ai.jso'n'",
+    'cat ~/.paseo/typesafe-ai.jso"n"',
+    String.raw`cat ~/.paseo/typesafe-ai.jso\n`,
+    "rtk cat ~/.paseo/typesafe-*.json",
+    "c'at' ~/.paseo/typesafe-*.json",
+    'cat "$KEY_FILE"',
+    "cat $KEY_FILE",
+    "cat $(printf secret-path)",
+    "cat `printf secret-path`",
+    "cat package.json\ncat $KEY_FILE",
+    "find . -name '*.test.ts'",
+    "sed -n '1,40p' README.md",
+    "git p''ush origin main",
+    "wc -l $(git ls-files)",
+    String.raw`find . -name x -exec rm {} \;`,
+  ]) {
+    const result = await gate({ command, tool: "Bash", cwdRelative: "." }, permissive, signal);
+    assert.equal(result.decision, "escalate", command);
+    assert.equal(result.source, "regex", command);
+  }
+  assert.equal(calls, 0);
+});
+
 test("tier0 forces escalate for script files and defers compound or unknown commands", () => {
   assert.equal(tier0("node scripts/migrate.mjs")?.decision, "escalate");
   assert.equal(tier0("python3 tools/run.py")?.decision, "escalate");
   for (const c of [
-    "wc -l $(git ls-files)",
     "echo x > config.json",
     "npm run build",
     "npm test -- --watch",
-    "sed -n '1,40p' README.md",
     "git branch -D feature",
-    "find . -name x -exec rm {} \;",
-    "git p''ush origin main",
   ])
     assert.equal(tier0(c), null, c);
 });
