@@ -102,9 +102,18 @@ npm run format                       # Auto-format with Biome
 npm run format:check                 # Check formatting without writing
 ```
 
-Repo dev commands use checkout-local state by default. In this checkout, `PASEO_HOME` resolves to `.dev/paseo-home`, and `npm run cli -- ...` targets that same dev home automatically. The installed stable Paseo app and production-style daemon keep using `~/.paseo` on port `6767`.
+Three Paseo instances can run side by side on this machine. Each has its own daemon, state, and Electron profile:
 
-The packaged **Paseo Dev** app built from this repo (`packages/desktop/release/mac-arm64/Paseo Dev.app`, bundle ID `sh.paseo.desktop.dev`) runs its own daemon: home `~/.paseo-dev`, listen `127.0.0.1:6770`, log `~/.paseo-dev/daemon.log`, desktop log `~/Library/Logs/Paseo Dev/main.log`. It never adopts the stable `6767` daemon. Target it with `PASEO_HOME=~/.paseo-dev paseo ...`.
+| Instance                                        | Daemon listen    | `PASEO_HOME` (daemon state) | Electron userData                         | Logs                                                           |
+| ----------------------------------------------- | ---------------- | --------------------------- | ----------------------------------------- | -------------------------------------------------------------- |
+| Stable app (`/Applications/Paseo.app`)          | `127.0.0.1:6767` | `~/.paseo`                  | `~/Library/Application Support/Paseo`     | `~/.paseo/daemon.log`, `~/Library/Logs/Paseo/`                 |
+| Paseo Dev (packaged from this repo)             | `127.0.0.1:6770` | `~/.paseo-dev`              | `~/Library/Application Support/Paseo Dev` | `~/.paseo-dev/daemon.log`, `~/Library/Logs/Paseo Dev/main.log` |
+| Repo dev (`npm run dev`, `npm run dev:desktop`) | `127.0.0.1:6768` | `.dev/paseo-home`           | `.dev/user-data`                          | `.dev/paseo-home/daemon.log`                                   |
+
+- Never restart or stop the stable `6767` daemon from a dev task. `npm run cli -- ...` targets the repo dev home. Target Paseo Dev with `PASEO_HOME=~/.paseo-dev paseo ...`.
+- Paseo Dev builds to `packages/desktop/release/mac-arm64/Paseo Dev.app` (bundle ID `sh.paseo.desktop.dev`). `packages/desktop/src/main.ts` switches a packaged build off the stable home and seeds `daemon.listen` 6770 in `~/.paseo-dev/config.json`, so it never adopts the `6767` daemon.
+- Daemon state inside a home: `config.json` (settings, profiles, plugin sources), `agents/`, `projects/`, `schedules/`, `plugin-data/`, `plugin-settings/`, `desktop-attachments/`, `models/`, plus identity files `server-id` and `daemon-keypair.json`.
+- `~/.paseo-dev` was cloned from `~/.paseo` on 2026-09-28, keeping its own `server-id` and keypair. Prod server IDs in `projects/`, `plugin-settings/`, and `plugin-data/` were rewritten to the dev ID. The previous dev home is at `~/.paseo-dev.bak-20260928-145243`. Electron Local Storage was not cloned, because its host registry points at `6767`.
 
 See [docs/development.md](docs/development.md) for full setup, build sync requirements, and debugging.
 
@@ -194,3 +203,49 @@ The app runs on iOS, Android, web (browser), and web (Electron desktop). Code is
 ## Debugging
 
 Find the complete daemon logs and traces in the $PASEO_HOME/daemon.log
+
+<!-- gitnexus:start -->
+
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **paseo** (125700 symbols, 460986 relationships, 1270 execution flows).
+
+> Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
+
+## Always Do
+
+- **MUST run impact before editing.** Use `impact({target: "symbolName", direction: "upstream"})` or `node .gitnexus/run.cjs impact "symbolName" --direction upstream --repo .`; report callers, processes, and risk. Never substitute grep for graph analysis.
+- **MUST analyze graph changes before committing.** Use `detect_changes({scope: "all"})` (MCP) or `node .gitnexus/run.cjs detect-changes --scope all --repo .` (CLI fallback). `partial: true` or `truncated: true` is not a clean check — a zero means unseen, not unaffected; re-run it. For regression review: `detect_changes({scope: "compare", base_ref: "main"})` or `node .gitnexus/run.cjs detect-changes --scope compare --base-ref "main" --repo .`.
+- MUST warn on HIGH/CRITICAL `risk` pre-edit; never use `riskSharedAxes` to waive a HIGH/CRITICAL `risk` warning. Compare File/symbol: MCP File omits axes; Graph-RAG expands File.
+- **MUST treat `risk: UNKNOWN` as unresolved, not as low.** An empty caller set is not evidence the symbol is unused — it can also mean the callers are not resolvable by the index (plain-object property access, dynamic dispatch, cross-language calls). `impact` pairs `UNKNOWN` with a `riskNote` saying so. Confirm with a text search before treating the symbol as safe to change or delete; do not proceed on the strength of a zero.
+- **MUST use `query({search_query: "concept"})` for concepts/flows, `context({name: "symbolName"})` for a named symbol, or `impact` for blast radius, on read-only callers, dependencies, imports, or execution flow.** Graph first; text search only for empty/`UNKNOWN`/literals.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
+
+## Never Do
+
+- NEVER edit a function, class, or method before MCP/CLI impact analysis.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis, and never read `UNKNOWN` as an all-clear — it means the walk could not answer, which is the one verdict that requires confirming by other means.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit before MCP/CLI graph change analysis.
+
+## Resources
+
+| Resource                               | Use for                                  |
+| -------------------------------------- | ---------------------------------------- |
+| `gitnexus://repo/paseo/context`        | Codebase overview, check index freshness |
+| `gitnexus://repo/paseo/clusters`       | All functional areas                     |
+| `gitnexus://repo/paseo/processes`      | All execution flows                      |
+| `gitnexus://repo/paseo/process/{name}` | Step-by-step execution trace             |
+
+## CLI
+
+| Task                                         | Read this skill file                               |
+| -------------------------------------------- | -------------------------------------------------- |
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus-exploring/SKILL.md`       |
+| Blast radius / "What breaks if I change X?"  | `.claude/skills/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?"             | `.claude/skills/gitnexus-debugging/SKILL.md`       |
+| Rename / extract / split / refactor          | `.claude/skills/gitnexus-refactoring/SKILL.md`     |
+| Tools, resources, schema reference           | `.claude/skills/gitnexus-guide/SKILL.md`           |
+| Index, status, clean, wiki CLI commands      | `.claude/skills/gitnexus-cli/SKILL.md`             |
+
+<!-- gitnexus:end -->
