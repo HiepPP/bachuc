@@ -11,7 +11,7 @@ import { SkillPins } from "../server/state";
 import { catalog } from "../shared/catalog";
 
 const require = createRequire(import.meta.url);
-const { run, skillIds } = require("../server/skill-pins-hook.cjs");
+const { run, skillIds, reinvokeIds } = require("../server/skill-pins-hook.cjs");
 const hookFile = fileURLToPath(new URL("../server/skill-pins-hook.cjs", import.meta.url));
 const A = "00000000-0000-4000-8000-000000000001";
 
@@ -35,6 +35,50 @@ test("hook skill IDs match the shared catalog", () => {
     skillIds,
     catalog.map((skill) => skill.id),
   );
+  assert.deepEqual(
+    reinvokeIds,
+    catalog.filter((skill) => "reinvoke" in skill && skill.reinvoke).map((skill) => skill.id),
+  );
+});
+
+test("a reinvoke skill gets its own block that overrides already loaded", async () => {
+  const { env, pins } = await fixture();
+  await pins.set(A, ["watchtower", "chase-goal-claude"]);
+  const text = contextOf(run({ prompt: "hi" }, env, "claude"));
+  const once = text.indexOf("Skip a skill only if it is already loaded");
+  const every = text.indexOf("even if you already invoked them earlier");
+  assert.ok(once >= 0 && every > once, "both blocks appear, the reinvoke block last");
+  // Each skill sits under its own header.
+  assert.match(text.slice(once, every), /^- watchtower$/m);
+  assert.doesNotMatch(text.slice(once, every), /chase-goal-claude/);
+  assert.match(text.slice(every), /^- chase-goal-claude$/m);
+});
+
+test("only reinvoke skills drops the already loaded block", async () => {
+  const { env, pins } = await fixture();
+  await pins.set(A, ["chase-goal-claude"]);
+  const text = contextOf(run({ prompt: "hi" }, env, "claude"));
+  assert.doesNotMatch(text, /Skip a skill only if it is already loaded/);
+  assert.match(text, /even if you already invoked them earlier/);
+});
+
+test("only normal skills drops the reinvoke block", async () => {
+  const { env, pins } = await fixture();
+  await pins.set(A, ["sequential-thinking"]);
+  const text = contextOf(run({ prompt: "hi" }, env, "claude"));
+  assert.match(text, /Skip a skill only if it is already loaded/);
+  assert.doesNotMatch(text, /even if you already invoked/);
+});
+
+test("Codex splits the same two blocks by absolute path", async () => {
+  const { env, pins } = await fixture();
+  await pins.set(A, ["watchtower", "chase-goal-claude"]);
+  const text = contextOf(run({ prompt: "hi" }, env, "codex"));
+  const every = text.indexOf("Read and follow these files again on this turn");
+  assert.ok(every > 0);
+  assert.match(text.slice(0, every), /^- \/skills\/watchtower\/SKILL\.md$/m);
+  assert.match(text.slice(every), /^- \/skills\/chase-goal-claude\/SKILL\.md$/m);
+  assert.doesNotMatch(text, /Skill tool/);
 });
 
 test("no Paseo agent ID returns an empty result", async () => {

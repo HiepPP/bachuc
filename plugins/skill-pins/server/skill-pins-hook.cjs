@@ -7,6 +7,9 @@ const crypto = require("node:crypto");
 const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 // Must match shared/catalog.ts; tests/hook.test.ts checks both lists stay equal.
 const skillIds = ["watchtower", "chase-goal-claude", "sequential-thinking"];
+// Entries with `reinvoke: true` in shared/catalog.ts. They run work, so loading them once is not
+// enough; the context asks for them again on every turn.
+const reinvokeIds = ["chase-goal-claude"];
 const DAY = 86400000;
 // Must match INITIAL_ENV in shared/settings.ts.
 const INITIAL_ENV = "SKILL_PINS_INITIAL";
@@ -52,24 +55,41 @@ function readSelection(dir, hash, env) {
   }
 }
 
+const HEADERS = {
+  codex: {
+    once: "The user pinned these skills for this conversation. Before you respond, read each file and follow it unless you already read it in this conversation:",
+    every:
+      "Read and follow these files again on this turn, even if you already read them earlier in this conversation:",
+  },
+  claude: {
+    once: "The user pinned these skills for this conversation. Before you respond, invoke every one of them with the Skill tool. Skip a skill only if it is already loaded in this conversation:",
+    every:
+      "Invoke these skills with the Skill tool on this turn, even if you already invoked them earlier in this conversation:",
+  },
+};
+
 function context(skills, provider, root) {
-  const header =
-    provider === "codex"
-      ? "The user pinned these skills for this conversation. Before you respond, read each file and follow it unless you already read it in this conversation:"
-      : "The user pinned these skills for this conversation. Before you respond, invoke every one of them with the Skill tool. Skip a skill only if it is already loaded in this conversation:";
-  let lines;
+  const headers = HEADERS[provider === "codex" ? "codex" : "claude"];
+  let entry;
   if (provider === "codex") {
     const { skillPaths } = JSON.parse(
       fs.readFileSync(path.join(root, "hook-runtime.json"), "utf8"),
     );
-    lines = skills.map((id) => {
+    entry = (id) => {
       if (typeof skillPaths?.[id] !== "string") throw new Error(`No SKILL.md path for ${id}`);
       return `- ${skillPaths[id]}`;
-    });
-  } else lines = skills.map((id) => `- ${id}`);
+    };
+  } else entry = (id) => `- ${id}`;
+  const block = (group, header) => (group.length ? [header, ...group.map(entry)] : []);
   return [
-    header,
-    ...lines,
+    ...block(
+      skills.filter((id) => !reinvokeIds.includes(id)),
+      headers.once,
+    ),
+    ...block(
+      skills.filter((id) => reinvokeIds.includes(id)),
+      headers.every,
+    ),
     "Only the skills listed above are pinned now. Stop following any skill that was pinned earlier in this conversation but is missing from this list.",
     "User instructions in the current prompt take priority over pinned skills.",
   ].join("\n");
@@ -105,7 +125,7 @@ function run(data, env = process.env, provider = "claude") {
   return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext } };
 }
 
-module.exports = { run, digest, skillIds };
+module.exports = { run, digest, skillIds, reinvokeIds };
 if (require.main === module) {
   const provider = process.argv.includes("--codex") ? "codex" : "claude";
   let input = "";

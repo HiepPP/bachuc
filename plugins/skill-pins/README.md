@@ -166,12 +166,17 @@ Output shape (same as the Caveman bridge):
 }
 ```
 
+Pinned skills split into two blocks. A catalog entry with `reinvoke: true` goes in the second
+block. Each block is dropped when it holds no skill.
+
 Context text for Claude, one line per pinned skill:
 
 ```text
 The user pinned these skills for this conversation. Before you respond, invoke every one of them with the Skill tool. Skip a skill only if it is already loaded in this conversation:
 - watchtower
 - sequential-thinking
+Invoke these skills with the Skill tool on this turn, even if you already invoked them earlier in this conversation:
+- chase-goal-claude
 Only the skills listed above are pinned now. Stop following any skill that was pinned earlier in this conversation but is missing from this list.
 User instructions in the current prompt take priority over pinned skills.
 ```
@@ -181,6 +186,8 @@ Context text for Codex:
 ```text
 The user pinned these skills for this conversation. Before you respond, read each file and follow it unless you already read it in this conversation:
 - /Users/<you>/.claude/skills/watchtower/SKILL.md
+Read and follow these files again on this turn, even if you already read them earlier in this conversation:
+- /Users/<you>/.claude/skills/chase-goal-claude/SKILL.md
 Only the skills listed above are pinned now. Stop following any skill that was pinned earlier in this conversation but is missing from this list.
 User instructions in the current prompt take priority over pinned skills.
 ```
@@ -189,6 +196,23 @@ User instructions in the current prompt take priority over pinned skills.
 reason to skip a pinned skill: an earlier "still applies" clause let the model skip
 `brainstorming` in a live test. The model still decides whether a skill is in context, so
 compliance is probabilistic.
+
+A `reinvoke` skill does not get that escape. It performs work rather than setting a method, so
+loading it once is not the same as running it. `chase-goal-claude` is the only such entry today.
+The hook keeps its own `reinvokeIds` list; a test checks it against the catalog.
+
+Live check on 2026-09-29, agent `20f8fe57` (Claude Opus 5.5) pinned to `chase-goal-claude` only.
+Two read-only goals were sent in a row. Both turns received the same 356-byte context and both
+called `Skill(chase-goal-claude)`. On the second call the harness answered:
+
+```text
+Skill /chase-goal-claude is already loaded above; instructions unchanged.
+```
+
+So `reinvoke` makes the model enter the skill's workflow again on each turn. It does not reload
+the `SKILL.md` text, because Claude Code deduplicates a skill it already loaded. That also means
+`reinvoke` is no defence against compaction: if compaction drops the skill body, the re-invocation
+still returns "instructions unchanged".
 
 The "only the skills listed above" line handles unpinning. A skill loaded on an earlier turn
 stays in the conversation, so dropping it from the pin set would otherwise leave the model
@@ -231,7 +255,39 @@ not unregister native hooks.
 - Paseo `^0.8.0 || >=0.9.0-beta.2` desktop, through the same private DOM adapter as
   `prompt-translate`. Host DOM changes can break the pill.
 - Sends from outside the composer (CLI, MCP `send_agent_prompt`) use `skills.json`.
-- Provider-internal subagents run their own hooks without the parent's selection.
+
+### A normal skill is invoked once per conversation
+
+The hook injects its context on every turn, but the "already loaded" clause lets the model skip a
+skill it invoked earlier. So a normal pinned skill produces one `Skill` call per conversation, not
+one per turn.
+
+Measured on 2026-09-29 by reading `~/.claude/projects/*/<session>.jsonl` and counting turns whose
+`hook_additional_context` attachment holds the pinned block:
+
+| Session                          | Turns with context | Turns that called the skill |
+| -------------------------------- | ------------------ | --------------------------- |
+| `695e0c7c`                       | 11                 | 1                           |
+| `29dc558c`                       | 5                  | 1                           |
+| `41846f9e` (controlled, 2 turns) | 2                  | 1                           |
+
+In the controlled run the agent was pinned to `sequential-thinking`. Turn 1 called the skill. Turn
+2 received the same 423-byte context, did not call it, and still answered with the skill's visible
+`Thought N/M` markers. The method survives because the skill text stays in the conversation.
+
+This is fine for a skill that sets a method. It is wrong for a skill that performs work, which is
+why `reinvoke` exists.
+
+### Subagents never receive the context
+
+The hook runs on `UserPromptSubmit`. A provider-internal subagent receives its task from its parent
+agent, not from a user prompt, so that event never fires for it.
+
+Measured on 2026-09-29: a subagent was asked to report whether its own context held the line
+`The user pinned these skills for this conversation`. It answered no. A scan of the 40 most recent
+transcripts found 0 sidechain records carrying the pinned block, against 41 on main turns.
+
+A subagent still runs its own provider hooks, but never with the parent's selection.
 
 ## Open questions
 

@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 // `claude` is the Skill tool name. Every entry lives in ~/.claude/skills/<id>/SKILL.md.
+// `reinvoke` marks a skill that performs work instead of setting a method. Loading it once is
+// not the same as running it, so the hook asks for it again on every turn.
 export const catalog = [
   {
     id: "watchtower",
@@ -16,6 +18,7 @@ export const catalog = [
     description: "Plan and run a goal with subagents",
     warn: "Starts goal work on every turn",
     claude: "chase-goal-claude",
+    reinvoke: true,
   },
   {
     id: "sequential-thinking",
