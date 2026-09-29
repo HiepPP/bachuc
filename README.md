@@ -3,7 +3,7 @@
 See what your agents are doing. Keep projects organized. Bring task context and
 workspace checks into Paseo without leaving your conversation.
 
-Eleven independent local plugins. Install only what you need; each owns its
+Fourteen independent local plugins. Install only what you need; each owns its
 dependencies, checks, and configuration.
 
 Gallery refreshed September 22, 2026 from Paseo desktop **0.9.0-beta.2**.
@@ -154,6 +154,7 @@ status alone does not prove every plugin action works.
 | [vscode-warm-light](plugins/vscode-warm-light/README.md) | Apply the warm, customized VS Code Light+ palette through Paseo's theme API. |
 | [next-prompt-actions](plugins/next-prompt-actions/README.md) | Send next-step prompts inside their blocks on desktop, with optional bounded Jev auto-run. |
 | [prompt-translate](plugins/prompt-translate/README.md) | Show English translations under Vietnamese prompts, and enhance drafts into English prompts with Cmd/Ctrl+Enter, on desktop. |
+| [skill-pins](plugins/skill-pins/README.md) | Pin skills such as watchtower in the desktop composer; each turn tells Claude or Codex to load them. |
 | [thread-branch](plugins/thread-branch/README.md) | Show the current branch beside the composer and open its PR through a separate pill. |
 | [jev-orchestrator](plugins/jev-orchestrator/README.md) | Direct Jev model/effort routing to one agent, plus optional scoped delegation with discovery, escalation, review, and ownership locks. |
 | [Board](plugins/board/README.md) | Group conversations by project with pastel colors, avatars, parent/subagent clusters, stars, and UI scaling. |
