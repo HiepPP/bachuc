@@ -41,11 +41,11 @@ test("hook skill IDs match the shared catalog", () => {
   );
 });
 
-test("a reinvoke skill gets its own block that overrides already loaded", async () => {
+test("a reinvoke skill gets its own block that overrides the visible-context escape", async () => {
   const { env, pins } = await fixture();
   await pins.set(A, ["watchtower", "chase-goal-claude"]);
   const text = contextOf(run({ prompt: "hi" }, env, "claude"));
-  const once = text.indexOf("Skip a skill only if it is already loaded");
+  const once = text.indexOf("Skip a skill only if its full text is still visible");
   const every = text.indexOf("even if you already invoked them earlier");
   assert.ok(once >= 0 && every > once, "both blocks appear, the reinvoke block last");
   // Each skill sits under its own header.
@@ -54,11 +54,11 @@ test("a reinvoke skill gets its own block that overrides already loaded", async 
   assert.match(text.slice(every), /^- chase-goal-claude$/m);
 });
 
-test("only reinvoke skills drops the already loaded block", async () => {
+test("only reinvoke skills drops the visible-context block", async () => {
   const { env, pins } = await fixture();
   await pins.set(A, ["chase-goal-claude"]);
   const text = contextOf(run({ prompt: "hi" }, env, "claude"));
-  assert.doesNotMatch(text, /Skip a skill only if it is already loaded/);
+  assert.doesNotMatch(text, /Skip a skill only if its full text is still visible/);
   assert.match(text, /even if you already invoked them earlier/);
 });
 
@@ -66,7 +66,7 @@ test("only normal skills drops the reinvoke block", async () => {
   const { env, pins } = await fixture();
   await pins.set(A, ["sequential-thinking"]);
   const text = contextOf(run({ prompt: "hi" }, env, "claude"));
-  assert.match(text, /Skip a skill only if it is already loaded/);
+  assert.match(text, /Skip a skill only if its full text is still visible/);
   assert.doesNotMatch(text, /even if you already invoked/);
 });
 
@@ -101,8 +101,11 @@ test("Claude context names each pinned skill for the Skill tool", async () => {
   assert.equal(output.hookSpecificOutput.hookEventName, "UserPromptSubmit");
   const text = contextOf(output);
   assert.match(text, /invoke every one of them with the Skill tool/);
-  assert.match(text, /Skip a skill only if it is already loaded in this conversation:/);
+  assert.match(text, /Skip a skill only if its full text is still visible in your current context/);
+  assert.match(text, /summarised away does not count:/);
   assert.doesNotMatch(text, /still applies/);
+  // O1: a load that compaction dropped must not count as loaded.
+  assert.doesNotMatch(text, /already loaded in this conversation/);
   assert.match(text, /^- watchtower$/m);
   assert.match(text, /^- sequential-thinking$/m);
   assert.doesNotMatch(text, /chase-goal-claude/);

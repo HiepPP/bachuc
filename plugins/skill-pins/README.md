@@ -172,7 +172,7 @@ block. Each block is dropped when it holds no skill.
 Context text for Claude, one line per pinned skill:
 
 ```text
-The user pinned these skills for this conversation. Before you respond, invoke every one of them with the Skill tool. Skip a skill only if it is already loaded in this conversation:
+The user pinned these skills for this conversation. Before you respond, invoke every one of them with the Skill tool. Skip a skill only if its full text is still visible in your current context; an earlier load that has since been summarised away does not count:
 - watchtower
 - sequential-thinking
 Invoke these skills with the Skill tool on this turn, even if you already invoked them earlier in this conversation:
@@ -184,7 +184,7 @@ User instructions in the current prompt take priority over pinned skills.
 Context text for Codex:
 
 ```text
-The user pinned these skills for this conversation. Before you respond, read each file and follow it unless you already read it in this conversation:
+The user pinned these skills for this conversation. Before you respond, read each file and follow it. Skip a file only if its full text is still visible in your current context; an earlier read that has since been summarised away does not count:
 - /Users/<you>/.claude/skills/watchtower/SKILL.md
 Read and follow these files again on this turn, even if you already read them earlier in this conversation:
 - /Users/<you>/.claude/skills/chase-goal-claude/SKILL.md
@@ -192,10 +192,14 @@ Only the skills listed above are pinned now. Stop following any skill that was p
 User instructions in the current prompt take priority over pinned skills.
 ```
 
-"Already loaded" avoids loading the same skill on every turn. The Claude text gives no other
-reason to skip a pinned skill: an earlier "still applies" clause let the model skip
-`brainstorming` in a live test. The model still decides whether a skill is in context, so
-compliance is probabilistic.
+The "still visible in your current context" escape avoids loading the same skill on every turn. It
+gives no other reason to skip a pinned skill: an earlier "still applies" clause let the model skip
+`brainstorming` in a live test.
+
+The wording used to say "already loaded in this conversation". That let a skill dropped by
+compaction still count as loaded, so nothing reloaded it. The current wording ties the escape to
+what the model can actually see. This is option O1 of Q3. The model still judges its own context,
+so compliance stays probabilistic.
 
 A `reinvoke` skill does not get that escape. It performs work rather than setting a method, so
 loading it once is not the same as running it. `chase-goal-claude` is the only such entry today.
@@ -210,9 +214,10 @@ Skill /chase-goal-claude is already loaded above; instructions unchanged.
 ```
 
 So `reinvoke` makes the model enter the skill's workflow again on each turn. It does not reload
-the `SKILL.md` text, because Claude Code deduplicates a skill it already loaded. That also means
-`reinvoke` is no defence against compaction: if compaction drops the skill body, the re-invocation
-still returns "instructions unchanged".
+the `SKILL.md` text while that text is still in context, because Claude Code deduplicates a skill
+it already loaded.
+
+That dedupe is scoped to the current context, not to the whole session. See Q3 for the evidence.
 
 The "only the skills listed above" line handles unpinning. A skill loaded on an earlier turn
 stays in the conversation, so dropping it from the pin set would otherwise leave the model
@@ -292,6 +297,107 @@ A subagent still runs its own provider hooks, but never with the parent's select
 ## Open questions
 
 - Q2: Should the Codex path instruction switch to `$<id>` once Codex has these skills installed?
+
+### Q3: what happens to a pinned skill after compaction?
+
+Compaction drops old messages from the model's context. The session transcript keeps everything, so
+a boundary is visible as a `type: system`, `subtype: compact_boundary` record whose `compactMetadata`
+holds `trigger`, `preTokens`, `postTokens`, and the preserved message UUIDs.
+
+Measured on 2026-09-29 in session `7a192f3a` (auto trigger, 972,699 tokens down to 29,747):
+
+| Line  | Event                                  |
+| ----- | -------------------------------------- |
+| 11782 | `Skill(taste-skill)` invoked           |
+| 11786 | Body injected, 86,881 characters       |
+| 11812 | `compact_boundary`                     |
+| 13471 | `Skill(taste-skill)` invoked again     |
+| 13476 | Body injected again, 86,877 characters |
+
+The second call re-injected the full body. It did not return "already loaded". **Claude Code scopes
+its skill dedupe to the current context, not to the session.** A re-invocation after compaction does
+reload the text.
+
+So the gap is not in `reinvoke`. It is in the normal block. Its wording says "already loaded in this
+conversation", and a compaction summary can still mention the skill, so the model may believe a
+dropped skill is loaded and never invoke it again. Nothing reloads it.
+
+Options, none implemented:
+
+| ID  | Option                                                                                                                                    | Token cost                | Trade-off                                                                                                                                                      |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| O1  | Change the normal block to "already loaded and still visible in your context"                                                             | 0                         | Free, but it only nudges. The model still judges its own context.                                                                                              |
+| O2  | A `PostCompact` hook writes a flag. The next `UserPromptSubmit` puts every pinned skill in the reinvoke block once, then clears the flag. | One reload per compaction | Reloads only when needed. Needs a new hook event and a flag file.                                                                                              |
+| O3  | Inline the `SKILL.md` body into `additionalContext` every turn                                                                            | Every turn, forever       | `sequential-thinking` is about 950 tokens, `watchtower` about 2,870, `chase-goal-claude` about 4,523. Too expensive, and the text goes stale against the file. |
+| O4  | Inline the body only after N turns                                                                                                        | Same as O3 past turn N    | Adds a counter and still pays O3's price later.                                                                                                                |
+
+O1 and O2 combine well and are the suggested pair. O1 costs nothing; O2 handles the case O1 only
+nudges. Claude Code 2.1.284 exposes both `PreCompact` and `PostCompact`, so O2 is buildable.
+`PostCompact` is the right one: the flag must be set after the drop, not before.
+
+### Q4: should the subagent gap use `SubagentStart`?
+
+Yes, and the path is confirmed by a live probe. Static reading first, from the Claude Code 2.1.284
+binary at `/Users/hiep/.local/share/claude/versions/2.1.284` with `rg -a`, then a live run on
+2026-09-29.
+
+The event accepts `additionalContext` and delivers it to the subagent:
+
+```text
+hookEventName:R("SubagentStart"),additionalContext:o().optional()
+...!D?.isolatedContext&&!Xs){let w=on({type:"hook_additional_context",content:wo,hookName:"SubagentStart"
+```
+
+That is the same `hook_additional_context` record this plugin already produces on
+`UserPromptSubmit`.
+
+Live probe: a temporary `SubagentStart` hook was added to `~/.claude/settings.json`, beside the
+existing entry. It logged its stdin and returned `additionalContext: "PIN-TEST"`. A subagent was
+then asked whether that string was in its context. It answered yes and quoted:
+
+```text
+SubagentStart hook additional context: PIN-TEST
+```
+
+The hook was removed afterwards and `settings.json` was restored from a backup; both files hash
+to `06cbde99…`.
+
+The logged payload was:
+
+```json
+{
+  "session_id": "d55beead-…",
+  "transcript_path": "…/d55beead-….jsonl",
+  "cwd": "…/plugins/skill-pins",
+  "prompt_id": "015a16de-…",
+  "agent_id": "a2922bd9460d481a6",
+  "agent_type": "jev-native-2cbb2f41b6db77d5c09609a0",
+  "hook_event_name": "SubagentStart"
+}
+```
+
+What that settles:
+
+- **Delivery works.** `additionalContext` reaches the subagent verbatim. Delivery is skipped when
+  `isolatedContext` is set, or when an internal flag `Xs` is set. What `Xs` means is still
+  unverified; it did not block this run.
+- **The payload has no parent field**, and no `prompt` field either, so the hook cannot dedupe
+  against a task that already names the skill. Note the live payload also lacked `scratchpad_dir`,
+  `permission_mode`, and `effort`, which appear in the binary's shared-field builder.
+- **The parent is reachable through the environment.** The hook process had
+  `PASEO_AGENT_ID=4a9c5411-…`, which is this agent's own Paseo record (`~/.paseo/agents/…json`,
+  title `/caveman ultra`, holding this `session_id`). So the same lookup the `UserPromptSubmit`
+  hook already does would work here: read `agents/$PASEO_AGENT_ID/skills.json` and emit the pinned
+  set. `PASEO_HOME` was present too.
+- **The matcher runs on `agent_type`**, and that value is not always the requested type. This run
+  asked for `general-purpose` and got `jev-native-2cbb2f41b6db77d5c09609a0`, because the
+  `jev-orchestrator` plugin reroutes subagent types. A matcher on a fixed type name would miss.
+
+`SubagentStop` is a separate schema with `stop_hook_active`, `agent_transcript_path`, and
+`last_assistant_message`. No `additionalContext` output schema was found for it.
+
+Open design choice, not implemented: a subagent inherits the parent's pins, which may be wrong for
+a narrow task. A `reinvoke` skill in particular would make every subagent start goal work.
 
 ## Verify (after implementation)
 

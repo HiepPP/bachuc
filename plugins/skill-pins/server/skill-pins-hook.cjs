@@ -57,12 +57,12 @@ function readSelection(dir, hash, env) {
 
 const HEADERS = {
   codex: {
-    once: "The user pinned these skills for this conversation. Before you respond, read each file and follow it unless you already read it in this conversation:",
+    once: "The user pinned these skills for this conversation. Before you respond, read each file and follow it. Skip a file only if its full text is still visible in your current context; an earlier read that has since been summarised away does not count:",
     every:
       "Read and follow these files again on this turn, even if you already read them earlier in this conversation:",
   },
   claude: {
-    once: "The user pinned these skills for this conversation. Before you respond, invoke every one of them with the Skill tool. Skip a skill only if it is already loaded in this conversation:",
+    once: "The user pinned these skills for this conversation. Before you respond, invoke every one of them with the Skill tool. Skip a skill only if its full text is still visible in your current context; an earlier load that has since been summarised away does not count:",
     every:
       "Invoke these skills with the Skill tool on this turn, even if you already invoked them earlier in this conversation:",
   },
