@@ -70,13 +70,24 @@ test("v1 parses exact prompts and reasons only in completed next-step fences", (
     assert.deepEqual(parsePrompts(text), []);
 });
 
+test("v1 ignores unknown fields instead of rejecting the block", () => {
+  const value = {
+    ...declaration(),
+    extra: true,
+    prompts: [{ id: "commit", prompt: "Commit the fix.", parallel: false }],
+    exclusiveGroups: [],
+    allowedCombinations: [],
+  };
+  const [parsed] = parsePrompts(markdown(value));
+  assert.ok(parsed);
+  assert.deepEqual(parsed.prompts, ["Commit the fix."]);
+});
+
 test("v1 rejects invalid versions, references, contradictory declarations and oversized data", () => {
   const invalid: unknown[] = [
     { ...declaration(), version: 2 },
-    { ...declaration(), extra: true },
     { ...declaration(), prompts: [] },
     { ...declaration(), prompts: [{ id: "x", prompt: " " }] },
-    { ...declaration(), prompts: [{ id: "x", prompt: "Test.", extra: true }] },
     {
       ...declaration(),
       prompts: [

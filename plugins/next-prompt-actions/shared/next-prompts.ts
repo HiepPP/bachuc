@@ -29,15 +29,13 @@ const declarationSchema = z
     version: z.literal(1),
     prompts: z
       .array(
-        z
-          .object({
-            id,
-            prompt: nonempty(16000),
-            why: nonempty(2000).optional(),
-            // Unrelated to the current goal: offered only as a separate new thread.
-            thread: z.literal("new").optional(),
-          })
-          .strict(),
+        z.object({
+          id,
+          prompt: nonempty(16000),
+          why: nonempty(2000).optional(),
+          // Unrelated to the current goal: offered only as a separate new thread.
+          thread: z.literal("new").optional(),
+        }),
       )
       .min(1)
       .max(20),
@@ -45,7 +43,7 @@ const declarationSchema = z
     exclusiveGroups: relations.exclusiveGroups.default([]),
     allowedCombinations: relations.allowedCombinations.default([]),
   })
-  .strict()
+  // Unknown fields are stripped, not rejected: one stray key must not hide every suggestion.
   .superRefine((value, ctx) => {
     const known = new Set(value.prompts.map((p) => p.id));
     const separate = new Set(value.prompts.filter((p) => p.thread).map((p) => p.id));
