@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: BLOCKED
+Status: DONE
 
 Changed:
 - [plugins/skill-pins/shared/contracts.ts](plugins/skill-pins/shared/contracts.ts): `draftReadRpc` (`skill-pins.draft-read`) and `draftWriteRpc` (`skill-pins.draft-write`).
@@ -43,5 +43,24 @@ Second verify run (2026-09-29T08:25Z), after the user reported a new thread on h
 - Another agent also edited [plugins/skill-pins/server/skill-pins-hook.cjs](plugins/skill-pins/server/skill-pins-hook.cjs) at 08:24Z. It added the line "Only the skills listed above are pinned now...", plus README and test changes. This verify run left those edits untouched.
 - Result: the desktop check is still UNVERIFIED. No agent created from a new-thread composer exists on this host after the TASK-006 reload.
 
-Blocked:
-- The desktop check needs a human: pin a skill in a real new-thread composer, send, and confirm the first turn and an unchanged bubble. The live check above wrote the draft file directly, not through the UI.
+Resolved blocker:
+- The desktop check is done. It ran through the real new-thread composer, not by writing the draft file directly.
+
+Third verify run (2026-09-29T08:31Z), desktop check through the real UI:
+- Opened a new-thread composer for `hiep-paseo-plugin` on `hieps-MacBook-Air.local` and drove it with computer use.
+- The pill is enabled without an agent ID. The menu opened and showed the header, the three skills, and the clear row.
+- Picking Sequential thinking set the pill to `Seq` with the active tint and wrote `plugin-data/skill-pins/draft.json` at 08:29:22Z, mode `0600`, 60 bytes, content `{"skills":["sequential-thinking"],"createdAt":1790670562739}`.
+- Sent the prompt "A cron job runs twice on some days...". Agent `9e39747e-2e7e-4703-967c-36e419a1ff62` was created with `skills.json` `["sequential-thinking"]`, and its composer pill showed `Seq`.
+- `draft.json` was gone right after the create.
+- First turn: `get_agent_activity` shows `[Skill] sequential-thinking` as the first activity after the user row. The hook fired at 08:30:03Z with `source: "agent"` and `contextBytes: 423`.
+- Bubble: the only text beside the typed prompt is the `/caveman ultra` line, which `prompt-translate` adds because its pill was set to Ultra. `skill-pins` added nothing.
+- The reply used the visible `Thought 1/4` to `Thought 4/4 [FINAL]` markers, so the reworked `sequential-thinking` SKILL.md takes effect in a fresh conversation.
+- The agent was archived. Its state folder was removed by the `agent.archived` cleanup.
+
+Verify checks (2026-09-29T08:32Z):
+- `npm run typecheck` exit 0. `S=lint; npm run $S` 0 warnings and 0 errors. `npm test` 47 pass and 0 fail.
+- Draft expiry test: `tests/state.test.ts:135` writes a draft older than `DRAFT_TTL`, then `readDraft` returns `null` and the directory is empty.
+- Take-once test: the second `takeDraft` after one write returns `null`, so only the first create consumes a draft.
+- `paseo plugin ls skill-pins --json` -> `running`, `error: null`. `paseo plugin logs skill-pins` has no error or warning line.
+- `ls $PASEO_HOME/plugin-data/skill-pins/` -> `agents`, `hook-runtime.json`. No `draft.json`.
+- Result: all checks PASS. The desktop check is now verified on this host.

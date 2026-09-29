@@ -4,7 +4,7 @@
 
 - Title: Skill pins plugin
 - Slug: 20260929-skill-pins-plugin
-- Status: ACTIVE
+- Status: ARCHIVED
 - Updated: 2026-09-29
 
 ## Tracker
@@ -18,7 +18,7 @@ One row per TASK. Group ties together items that ship as one transaction.
 | 3 | TASK-003 Composer skills pill | C | DONE | [watchtower/tasks/TASK-003-composer-skills-pill.md](watchtower/tasks/TASK-003-composer-skills-pill.md) | TASK-001 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Run after TASK-002; both edit package.json scripts. |
 | 4 | TASK-004 Install and live verify | D | DONE | [watchtower/tasks/TASK-004-install-live-verify.md](watchtower/tasks/TASK-004-install-live-verify.md) | TASK-002, TASK-003 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | User verified Escape and D2. User skipped dark theme, queued prompt, Caveman, and Codex checks. |
 | 5 | TASK-005 Default skill set for new agents | E | DONE | [watchtower/tasks/TASK-005-default-skill-set.md](watchtower/tasks/TASK-005-default-skill-set.md) | TASK-004 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Q2. Adds the agent.create env path that TASK-006 reuses. |
-| 6 | TASK-006 Pins in new-thread composers | E | BLOCKED | [watchtower/tasks/TASK-006-new-thread-pins.md](watchtower/tasks/TASK-006-new-thread-pins.md) | TASK-005 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Q1. Code and server path verified live. Needs a human desktop check of the new-thread pill. |
+| 6 | TASK-006 Pins in new-thread composers | E | DONE | [watchtower/tasks/TASK-006-new-thread-pins.md](watchtower/tasks/TASK-006-new-thread-pins.md) | TASK-005 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Q1. Desktop check done through the real composer on 2026-09-29. |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
@@ -32,10 +32,11 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: in Paseo desktop, pin Sequential thinking in a new-thread composer and send. Confirm the first turn calls it and the bubble has no added text. Then run `/watchtower verify` for TASK-006.
+- Next action: all six TASKs are DONE. Run `/watchtower archive` to close the plan, then commit the verify records.
 
 ## Archive
 
+- Archived: 2026-09-29 -> watchtower/archive/20260929-skill-pins-plugin/
 - [watchtower/archive/20260927-board-archive-visibility/](watchtower/archive/20260927-board-archive-visibility/)
 - [watchtower/archive/20260925-next-prompts-v1/](watchtower/archive/20260925-next-prompts-v1/)
 - [watchtower/archive/20260924-snapshot-size-cap-ci-log-pending/](watchtower/archive/20260924-snapshot-size-cap-ci-log-pending/)
