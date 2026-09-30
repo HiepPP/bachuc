@@ -15,10 +15,11 @@ clicks; their blocks keep individual controls, and Jev does not auto-run them.
 An optional `why:` line under a prompt shows as its reason and is never sent.
 An optional `thread: new` line under a prompt marks it as unrelated to the current task (see [Goal and new-thread suggestions](#goal-and-new-thread-suggestions)).
 Send preserves the composer draft. Edit replaces it with the selected prompt text for manual review.
-Hold Cmd while the pointer is over an enabled Send button to turn it into Start in new thread.
-Cmd-click then starts that prompt in a new thread instead of sending it here (see below). Git actions keep their normal behavior.
-The reverse also works: Cmd over Start in new thread turns it into Send, and Cmd-click sends that prompt here.
+Hold Cmd while the pointer is over an enabled Send button to turn it into New thread.
+The click then starts that prompt in a new thread instead of sending it here (see below). Git actions keep their normal behavior.
+The reverse also works: Cmd over Start in new thread turns it into Send, and the click sends that prompt here.
 This needs an idle conversation and no Jev review in progress.
+The swap changes no button size, and the click always does what the button shows.
 
 ## Recap and next-step layout
 

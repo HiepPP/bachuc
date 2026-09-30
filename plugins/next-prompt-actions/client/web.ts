@@ -14,9 +14,7 @@ export interface Node {
   style: {
     cssText: string;
     setProperty(key: string, value: string): void;
-    removeProperty?(key: string): void;
   };
-  getBoundingClientRect?(): { width: number };
   querySelector(selector: string): Node | null;
   querySelectorAll(selector: string): ArrayLike<Node>;
   closest(selector: string): Node | null;
@@ -48,6 +46,8 @@ export interface Document extends Node {
   defaultView?: {
     Event: new (type: string, init?: { bubbles?: boolean }) => object;
     CustomEvent?: new (type: string, init: { detail: { serverId: string } }) => object;
+    addEventListener?(name: string, handler: () => void): void;
+    removeEventListener?(name: string, handler: () => void): void;
   } | null;
 }
 interface Fiber {
@@ -209,11 +209,22 @@ const styles = `
 [${OWNER}] button {display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--npa-line-strong);background:var(--npa-paper,transparent);color:var(--npa-ink,inherit);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;user-select:none;transition:background-color .15s ease,border-color .15s ease,transform .1s ease;}
 [${OWNER}] button::before {content:"";width:14px;height:14px;flex-shrink:0;background:currentColor;mask:var(--npa-icon) center / contain no-repeat;}
 [${OWNER}] .npa-edit {--npa-icon:${iconMask(icons.edit)};}
-[${OWNER}] .npa-send, [${OWNER}] .npa-start[data-npa-here] {--npa-icon:${iconMask(icons.send)};min-width:80px;background:var(--npa-ink,#18181b);color:var(--npa-paper,#fff);border-color:var(--npa-ink,#18181b);}
+[${OWNER}] .npa-send, [${OWNER}] .npa-start {min-width:80px;}
+[${OWNER}] .npa-send, [${OWNER}] .npa-start[data-npa-here] {--npa-icon:${iconMask(icons.send)};background:var(--npa-ink,#18181b);color:var(--npa-paper,#fff);border-color:var(--npa-ink,#18181b);}
 [${OWNER}] .npa-send.npa-commit {--npa-icon:${iconMask(icons.commit)};}
 [${OWNER}] .npa-send.npa-push {--npa-icon:${iconMask(icons.push)};}
 [${OWNER}] .npa-start, [${OWNER}] .npa-send[data-npa-thread] {--npa-icon:${iconMask(icons.thread)};}
-[${OWNER}] [data-npa-thread], [${OWNER}] [data-npa-here] {position:relative;z-index:1;}
+[${OWNER}] .npa-send[data-npa-thread] {background:var(--npa-paper,transparent);color:var(--npa-ink,inherit);border-color:var(--npa-line-strong);}
+/* Both labels share one grid cell, so the button is as wide as the longer one and a swap moves nothing. */
+[${OWNER}] .npa-faces {display:inline-grid;justify-items:center;}
+/* Each face carries its own icon, so icon and label centre together inside the reserved width. */
+[${OWNER}] button:has(.npa-faces)::before {display:none;}
+[${OWNER}] [data-npa-face] {grid-area:1/1;display:inline-flex;align-items:center;justify-content:center;gap:6px;}
+[${OWNER}] [data-npa-face]::before {content:"";width:14px;height:14px;flex-shrink:0;background:currentColor;mask:var(--npa-icon) center / contain no-repeat;}
+[${OWNER}] .npa-send [data-npa-face="main"], [${OWNER}] .npa-start [data-npa-face="alt"] {--npa-icon:${iconMask(icons.send)};}
+[${OWNER}] .npa-send [data-npa-face="alt"], [${OWNER}] .npa-start [data-npa-face="main"] {--npa-icon:${iconMask(icons.thread)};}
+[${OWNER}] [data-npa-face="alt"], [${OWNER}] [data-npa-thread] [data-npa-face="main"], [${OWNER}] [data-npa-here] [data-npa-face="main"] {visibility:hidden;}
+[${OWNER}] [data-npa-thread] [data-npa-face="alt"], [${OWNER}] [data-npa-here] [data-npa-face="alt"] {visibility:visible;}
 [${OWNER}] .npa-goal {--npa-icon:${iconMask(icons.done)};}
 [${OWNER}] .npa-other-head {display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-bottom:12px;}
 [${OWNER}] .npa-other-title {font-size:13px;font-weight:600;line-height:20px;}
@@ -222,7 +233,7 @@ const styles = `
 [${OWNER}] .npa-selection-clear::before {display:none;}
 @media (hover:hover) {
   [${OWNER}] .npa-row:hover {border-color:var(--npa-line-strong);}
-  [${OWNER}] .npa-edit:not(:disabled):hover, [${OWNER}] .npa-start:not(:disabled):hover {background:var(--npa-hover);}
+  [${OWNER}] .npa-edit:not(:disabled):hover, [${OWNER}] .npa-start:not(:disabled):hover, [${OWNER}] .npa-send[data-npa-thread]:not(:disabled):hover {background:var(--npa-hover);}
   [${OWNER}] .npa-send:not(:disabled):hover, [${OWNER}] .npa-start[data-npa-here]:not(:disabled):hover {background:color-mix(in srgb,var(--npa-ink,#18181b) 86%,var(--npa-paper,#fff));}
   [${OWNER}] .npa-selection-clear:not(:disabled):hover {color:var(--npa-ink,inherit);}
   [${OWNER}] .npa-choice:not(:has(input:disabled)):hover {background:var(--npa-hover);}
@@ -303,6 +314,11 @@ export function fillComposer(text: string, doc: Document, block?: Node): string 
     : "The composer did not accept the text; copy the prompt text above.";
 }
 
+// A button with an alternate action holds its label in the main face; others in textContent.
+function setLabel(button: Node, text: string) {
+  (button.querySelector('[data-npa-face="main"]') ?? button).textContent = text;
+}
+
 export function install(controller: Controller, doc: Document = document, identify = binding) {
   let stopped = false,
     scheduled = false,
@@ -334,8 +350,12 @@ export function install(controller: Controller, doc: Document = document, identi
   const onKey = (event: { key?: string; metaKey?: boolean }) => {
     if (event.key === "Meta") hovered?.(!!event.metaKey);
   };
+  // Cmd released outside the window sends no keyup; the pointer resyncs on its next move.
+  const onBlur = () => hovered?.(false);
+  const view = doc.defaultView;
   doc.addEventListener("keydown", onKey);
   doc.addEventListener("keyup", onKey);
+  view?.addEventListener?.("blur", onBlur);
   function setColors(ui: Node, block: Node) {
     if (typeof getComputedStyle !== "function") return;
     const ink = getComputedStyle(block).color;
@@ -478,32 +498,36 @@ export function install(controller: Controller, doc: Document = document, identi
     }
     // Cmd flips a Send and a Start button to the other action, which then needs its own guards.
     let blocked = snapshot.busy || snapshot.note === "Jev reviewing...";
-    // Any layout shift from the swapped label moves the button out from under the pointer, which
-    // leaves, swaps back and enters again. The button keeps its entry width as a floor, and any
-    // extra width spills left over its neighbours through a negative margin, so nothing reflows.
+    const threads: ((on: boolean) => void)[] = [];
+    const heres: ((on: boolean) => void)[] = [];
+    function faces(button: Node, main: string, alt?: string) {
+      if (alt === undefined) {
+        button.textContent = main;
+        return;
+      }
+      const wrap = doc.createElement("span");
+      wrap.setAttribute("class", "npa-faces");
+      for (const [face, text] of [
+        ["main", main],
+        ["alt", alt],
+      ]) {
+        const span = doc.createElement("span");
+        span.setAttribute("data-npa-face", face);
+        span.textContent = text;
+        wrap.appendChild(span);
+      }
+      button.appendChild(wrap);
+    }
     function flipOnCmd(button: Node, flip: (on: boolean) => void) {
-      let entry = 0;
-      const apply = (on: boolean) => {
-        flip(on);
-        const extra = (button.getBoundingClientRect?.().width ?? 0) - entry;
-        if (entry && extra > 0) button.style.setProperty("margin-left", `${-extra}px`);
-        else button.style.removeProperty?.("margin-left");
-      };
       const hover = (event: { metaKey?: boolean }) => {
-        hovered = apply;
-        apply(!!event.metaKey);
+        hovered = flip;
+        flip(!!event.metaKey);
       };
-      button.addEventListener("mouseenter", (event) => {
-        entry = button.getBoundingClientRect?.().width ?? 0;
-        if (entry) button.style.setProperty("min-width", `${entry}px`);
-        hover(event);
-      });
+      button.addEventListener("mouseenter", hover);
       button.addEventListener("mousemove", hover);
       button.addEventListener("mouseleave", () => {
-        if (hovered === apply) hovered = null;
-        apply(false);
-        entry = 0;
-        button.style.removeProperty?.("min-width");
+        if (hovered === flip) hovered = null;
+        flip(false);
       });
     }
     function sendHere(key: string | string[]) {
@@ -522,18 +546,19 @@ export function install(controller: Controller, doc: Document = document, identi
         .filter((c) => c.thread)
         .forEach((candidate, index) => {
           if (!starts[index]) return;
-          starts[index].textContent =
+          setLabel(
+            starts[index],
             candidate.state === "sent"
               ? "Started"
               : candidate.state === "unknown"
                 ? "Check threads"
                 : candidate.state === "sending"
                   ? "Starting..."
-                  : starts[index].getAttribute("data-npa-here") !== null && !blocked
-                    ? "Send"
-                    : "Start in new thread";
+                  : "Start in new thread",
+          );
           // A new thread never waits for this conversation to become idle.
           starts[index].disabled = candidate.state !== "ready";
+          if (starts[index].disabled || blocked) heres[index](false);
         });
     }
     function renderOthers() {
@@ -564,10 +589,11 @@ export function install(controller: Controller, doc: Document = document, identi
           start.setAttribute("type", "button");
           start.setAttribute("class", "npa-start");
           start.setAttribute("aria-label", `Start in new thread: ${candidate.text}`);
-          start.textContent = "Start in new thread";
-          const sendable = () => !blocked && !gitAction(candidate.text);
+          // Git actions need this conversation's work, so they can never be sent from here.
+          const swappable = !gitAction(candidate.text);
+          faces(start, "Start in new thread", swappable ? "Send" : undefined);
           const hereMode = (on: boolean) => {
-            on &&= sendable() && !start.disabled;
+            on &&= swappable && !blocked && !start.disabled;
             if (on === (start.getAttribute("data-npa-here") !== null)) return;
             if (on) start.setAttribute("data-npa-here", "true");
             else start.removeAttribute("data-npa-here");
@@ -575,20 +601,21 @@ export function install(controller: Controller, doc: Document = document, identi
               "aria-label",
               `${on ? "Send suggested prompt" : "Start in new thread"}: ${candidate.text}`,
             );
-            if (!start.disabled) start.textContent = on ? "Send" : "Start in new thread";
           };
-          flipOnCmd(start, hereMode);
-          start.addEventListener("click", (event) => {
+          if (swappable) flipOnCmd(start, hereMode);
+          // The click does what the button shows, so it reads the swap, never the modifier key.
+          start.addEventListener("click", () => {
             if (start.disabled || !valid(block, context, candidate)) return;
-            if (event.metaKey && sendable()) {
+            if (start.getAttribute("data-npa-here") !== null) {
               hereMode(false);
-              start.textContent = "Sending...";
+              setLabel(start, "Sending...");
               void sendHere(candidate.key);
               return;
             }
-            start.textContent = "Starting...";
+            setLabel(start, "Starting...");
             void action(() => controller.start!(context, candidate.key), "Starting new thread...");
           });
+          heres[starts.length] = hereMode;
           starts.push(start);
           actions.appendChild(start);
           row.appendChild(actions);
@@ -606,22 +633,24 @@ export function install(controller: Controller, doc: Document = document, identi
           edits[index].disabled = false;
           sends[index].disabled =
             latest.busy || candidate.state !== "ready" || latest.note === "Jev reviewing...";
-          sends[index].textContent =
+          setLabel(
+            sends[index],
             candidate.state === "sent"
               ? "Sent"
               : candidate.state === "unknown"
                 ? "Check chat"
                 : candidate.state === "sending"
                   ? "Sending..."
-                  : sends[index].getAttribute("data-npa-thread") !== null && !sends[index].disabled
-                    ? "Start in new thread"
-                    : (gitActions[index]?.label ?? "Send");
+                  : (gitActions[index]?.label ?? "Send"),
+          );
+          if (sends[index].disabled) threads[index](false);
         });
     }
     async function action(run: () => Promise<unknown>, label: string) {
       [...edits, ...sends, ...starts].forEach((button) => {
         button.disabled = true;
       });
+      [...threads, ...heres].forEach((flip) => flip(false));
       note.textContent = label;
       try {
         await run();
@@ -698,26 +727,28 @@ export function install(controller: Controller, doc: Document = document, identi
       send.setAttribute("aria-label", label);
       // Git actions need this conversation's work, so they never start a new thread.
       const threadable = !git && !!controller.start;
+      faces(send, git?.label ?? "Send", threadable ? "New thread" : undefined);
       const threadMode = (on: boolean) => {
         on &&= threadable && !send.disabled;
         if (on === (send.getAttribute("data-npa-thread") !== null)) return;
         if (on) send.setAttribute("data-npa-thread", "true");
         else send.removeAttribute("data-npa-thread");
         send.setAttribute("aria-label", on ? `Start in new thread: ${candidate.text}` : label);
-        if (!send.disabled) send.textContent = on ? "Start in new thread" : "Send";
       };
       if (threadable) flipOnCmd(send, threadMode);
-      send.addEventListener("click", (event) => {
+      // The click does what the button shows, so it reads the swap, never the modifier key.
+      send.addEventListener("click", () => {
         if (send.disabled || !valid(block, context, candidate)) return;
-        if (threadable && event.metaKey) {
+        if (send.getAttribute("data-npa-thread") !== null) {
           threadMode(false);
-          send.textContent = "Starting...";
+          setLabel(send, "Starting...");
           void action(() => controller.start!(context, candidate.key), "Starting new thread...");
           return;
         }
-        send.textContent = "Sending...";
+        setLabel(send, "Sending...");
         void sendHere(candidate.key);
       });
+      threads[sends.length] = threadMode;
       sends.push(send);
       actions.appendChild(send);
       row.appendChild(actions);
@@ -945,6 +976,7 @@ export function install(controller: Controller, doc: Document = document, identi
     observer.disconnect();
     doc.removeEventListener?.("keydown", onKey);
     doc.removeEventListener?.("keyup", onKey);
+    view?.removeEventListener?.("blur", onBlur);
     clearInterval(timer);
     clearTimeout(scanTimer);
     for (const block of owned.keys()) clear(block);

@@ -135,6 +135,14 @@ const snapshot: Snapshot = {
   ],
 };
 const pause = () => new Promise((r) => setTimeout(r, 170));
+// Mirrors the CSS: a swapped button shows its alternate face; a button without faces has one label.
+const shown = (button: Node) => {
+  const swapped =
+    button.getAttribute("data-npa-thread") !== null ||
+    button.getAttribute("data-npa-here") !== null;
+  const face = button.querySelector(`[data-npa-face="${swapped ? "alt" : "main"}"]`);
+  return (face ?? button).textContent;
+};
 
 test("DOM button preserves code/copy/draft; sends once and cleans up on disable", async () => {
   const { document, window } = parseHTML(
@@ -186,7 +194,7 @@ test("DOM button preserves code/copy/draft; sends once and cleans up on disable"
     else Reflect.deleteProperty(globalThis, "MutationObserver");
   }
 });
-test("Cmd over Send switches it to Start in new thread; Cmd-click starts it", async () => {
+test("Cmd over Send swaps its face to New thread without moving anything; the click does what is shown", async () => {
   const { document, window } = parseHTML(
     '<html><head></head><body><div data-testid="assistant-message"><div data-paseo-markdown-tag="pre"><span data-paseo-markdown-tag="code">prompt: Test UI.</span></div></div></body></html>',
   );
@@ -210,36 +218,54 @@ test("Cmd over Send switches it to Start in new thread; Cmd-click starts it", as
   try {
     await pause();
     const send = document.querySelector(".npa-send")!;
-    // Width follows the label, like a real button.
-    Object.assign(send, {
-      getBoundingClientRect: () => ({ width: 40 + 5 * send.textContent!.length }),
-    });
+    const face = (name: string) => send.querySelector(`[data-npa-face="${name}"]`)!.textContent;
+    assert.equal(face("main"), "Send");
+    assert.equal(
+      face("alt"),
+      "New thread",
+      "both labels stay in the button, so its width is fixed",
+    );
+    const label = send.getAttribute("aria-label");
     fire(send, "mouseenter");
-    assert.equal(send.textContent, "Send");
-    assert.equal(send.style.minWidth, "60px", "entry width holds while hovered");
+    assert.equal(shown(send), "Send");
     fire(document, "keydown", { key: "Meta", metaKey: true });
-    assert.equal(send.textContent, "Start in new thread");
+    assert.equal(shown(send), "New thread");
     assert.equal(send.getAttribute("data-npa-thread"), "true");
-    assert.equal(send.style.marginLeft, "-75px", "the wider label spills left without reflow");
+    assert.equal(send.getAttribute("aria-label"), "Start in new thread: Test UI.");
     fire(document, "keyup", { key: "Meta", metaKey: false });
-    assert.equal(send.textContent, "Send");
-    assert.equal(send.style.marginLeft, "");
+    assert.equal(shown(send), "Send");
+    assert.equal(send.getAttribute("aria-label"), label);
     fire(send, "mousemove", { metaKey: true });
-    assert.equal(send.textContent, "Start in new thread");
+    assert.equal(shown(send), "New thread");
     fire(send, "mouseleave");
-    assert.equal(send.textContent, "Send");
+    assert.equal(shown(send), "Send");
     assert.equal(send.getAttribute("data-npa-thread"), null);
+    fire(send, "mouseenter", { metaKey: true });
+    assert.equal(shown(send), "New thread", "Cmd already held on entry");
+    window.dispatchEvent(new window.Event("blur"));
+    assert.equal(shown(send), "Send", "window blur drops the swap");
+    fire(send, "mousemove", { metaKey: true });
+    assert.equal(shown(send), "New thread", "the next move resyncs from the modifier");
     assert.equal(send.style.minWidth, "");
-    fire(send, "click", { metaKey: true });
+    assert.equal(send.style.marginLeft, "");
+    assert.equal(face("main"), "Send", "a swap changes no text");
+    fire(send, "click");
+    assert.equal(shown(send), "Starting...");
+    assert.equal(send.getAttribute("data-npa-thread"), null);
     await pause();
     assert.deepEqual(calls, ["start:key"]);
+    assert.equal(shown(send), "Send");
+    fire(send, "mouseleave");
+    fire(send, "click", { metaKey: true });
+    await pause();
+    assert.deepEqual(calls, ["start:key", "send:key"], "Cmd-click without a swap sends here");
   } finally {
     cleanup();
     if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
     else Reflect.deleteProperty(globalThis, "MutationObserver");
   }
 });
-test("Cmd over Start in new thread switches it to Send; Cmd-click sends here unless busy", async () => {
+test("Cmd over Start in new thread swaps its face to Send unless blocked; the click does what is shown", async () => {
   const { document, window } = parseHTML(
     '<html><head></head><body><div data-testid="assistant-message"><div data-paseo-markdown-tag="pre"><span data-paseo-markdown-tag="code">prompt: Test UI.\nthread: new</span></div></div></body></html>',
   );
@@ -272,24 +298,96 @@ test("Cmd over Start in new thread switches it to Send; Cmd-click sends here unl
   );
   const fire = (target: { dispatchEvent(event: object): void }, type: string, init = {}) =>
     target.dispatchEvent(Object.assign(new window.Event(type, { bubbles: true }), init));
+  const settle = (busy: boolean) => {
+    current = { ...current, busy };
+    return new Promise((r) => setTimeout(r, 2700));
+  };
   try {
     await pause();
     let start = document.querySelector(".npa-start")!;
+    const face = (name: string) => start.querySelector(`[data-npa-face="${name}"]`)!.textContent;
+    assert.equal(face("main"), "Start in new thread");
+    assert.equal(face("alt"), "Send");
     fire(start, "mouseenter", { metaKey: true });
-    assert.equal(start.textContent, "Start in new thread", "a busy conversation cannot send here");
+    assert.equal(shown(start), "Start in new thread", "a busy conversation cannot send here");
+    assert.equal(start.getAttribute("data-npa-here"), null);
+    fire(start, "click", { metaKey: true });
+    await pause();
+    assert.deepEqual(calls, ["start:key"], "Cmd-click without a swap starts the thread");
     fire(start, "mouseleave");
-    current = { ...current, busy: false };
-    await new Promise((r) => setTimeout(r, 2700));
+    await settle(false);
     start = document.querySelector(".npa-start")!;
     fire(start, "mouseenter");
     fire(document, "keydown", { key: "Meta", metaKey: true });
-    assert.equal(start.textContent, "Send");
+    assert.equal(shown(start), "Send");
     assert.equal(start.getAttribute("data-npa-here"), "true");
+    assert.equal(face("main"), "Start in new thread", "a swap changes no text");
+    assert.equal(start.style.minWidth, "");
+    assert.equal(start.style.marginLeft, "");
     fire(document, "keyup", { key: "Meta", metaKey: false });
-    assert.equal(start.textContent, "Start in new thread");
-    fire(start, "click", { metaKey: true });
+    assert.equal(shown(start), "Start in new thread");
+    fire(document, "keydown", { key: "Meta", metaKey: true });
+    assert.equal(shown(start), "Send");
+    await settle(true);
+    assert.equal(shown(start), "Start in new thread", "the swap drops once sending is blocked");
+    fire(document, "keydown", { key: "Meta", metaKey: true });
+    assert.equal(start.getAttribute("data-npa-here"), null);
+    await settle(false);
+    fire(start, "mousemove", { metaKey: true });
+    assert.equal(shown(start), "Send");
+    fire(start, "click");
+    assert.equal(shown(start), "Sending...");
     await pause();
-    assert.deepEqual(calls, ["send:key"]);
+    assert.deepEqual(calls, ["start:key", "send:key"]);
+  } finally {
+    cleanup();
+    if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
+    else Reflect.deleteProperty(globalThis, "MutationObserver");
+  }
+});
+test("a Git action beside a swappable Send neither swaps nor breaks the swap", async () => {
+  const block = "prompt: Commit the fix.\nprompt: Test UI.";
+  const current: Snapshot = {
+    ...snapshot,
+    candidates: ["Commit the fix.", "Test UI."].map((text, i) => ({
+      ...snapshot.candidates[0],
+      key: `key${i}`,
+      block,
+      text,
+    })),
+  };
+  const { document, window } = parseHTML(
+    `<html><head></head><body><div data-testid="assistant-message"><div data-paseo-markdown-tag="pre"><span data-paseo-markdown-tag="code">${block}</span></div></div></body></html>`,
+  );
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "MutationObserver");
+  Object.defineProperty(globalThis, "MutationObserver", {
+    value: window.MutationObserver,
+    configurable: true,
+  });
+  const calls: string[] = [];
+  const cleanup = install(
+    {
+      inspect: async () => current,
+      send: async (_scope, key) => (calls.push(`send:${key}`), { sent: true }),
+      start: async (_scope, key) => (calls.push(`start:${key}`), { started: true }),
+    },
+    document as unknown as Parameters<typeof install>[1],
+    () => context,
+  );
+  const fire = (target: { dispatchEvent(event: object): void }, type: string, init = {}) =>
+    target.dispatchEvent(Object.assign(new window.Event(type, { bubbles: true }), init));
+  try {
+    await pause();
+    const [commit, plain] = Array.from<Node>(document.querySelectorAll(".npa-send"));
+    assert.equal(commit.querySelector("[data-npa-face]"), null, "a Git action has one label");
+    fire(commit, "mouseenter", { metaKey: true });
+    assert.equal(shown(commit), "Commit");
+    fire(commit, "mouseleave");
+    fire(plain, "mouseenter", { metaKey: true });
+    assert.equal(shown(plain), "New thread");
+    fire(plain, "click");
+    await pause();
+    assert.deepEqual(calls, ["start:key1"]);
   } finally {
     cleanup();
     if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
@@ -532,7 +630,16 @@ test("Git cards show one matching primary action while mentions keep Send", asyn
     assert.equal(document.querySelectorAll(".npa-send.npa-commit").length, 2);
     assert.equal(document.querySelectorAll(".npa-send.npa-push").length, 1);
     assert.equal(document.querySelector(".npa-all"), null);
-    rows[1].querySelector(".npa-send")!.dispatchEvent(new window.Event("click"));
+    // Cmd has no alternate for a Git action, so a Cmd-click still runs the primary action.
+    const commitPush = rows[1].querySelector(".npa-send")!;
+    commitPush.dispatchEvent(
+      Object.assign(new window.Event("mouseenter", { bubbles: true }), { metaKey: true }),
+    );
+    assert.equal(commitPush.getAttribute("data-npa-thread"), null);
+    assert.equal(commitPush.querySelector("[data-npa-face]"), null);
+    commitPush.dispatchEvent(
+      Object.assign(new window.Event("click", { bubbles: true }), { metaKey: true }),
+    );
     await pause();
     rows[2].querySelector(".npa-send")!.dispatchEvent(new window.Event("click"));
     await pause();
@@ -1053,13 +1160,19 @@ test("goal done shows Task done, and unrelated work starts only in a new thread"
     assert.equal(other.querySelectorAll(".npa-edit, .npa-send").length, 0);
     assert.equal(panel.querySelectorAll(".npa-send").length, 1, "only the in-task suggestion");
     assert.equal(panel.querySelector(".npa-send")!.textContent, "Commit & Push");
+    const gitSend = panel.querySelector(".npa-send")!;
+    gitSend.dispatchEvent(
+      Object.assign(new window.Event("mouseenter", { bubbles: true }), { metaKey: true }),
+    );
+    assert.equal(gitSend.getAttribute("data-npa-thread"), null, "a Git action never swaps");
+    assert.equal(gitSend.querySelector("[data-npa-face]"), null);
     assert.equal(panel.querySelectorAll("input").length, 0);
     const start = other.querySelector(".npa-start")!;
-    assert.equal(start.textContent, "Start in new thread");
+    assert.equal(shown(start), "Start in new thread");
     start.dispatchEvent(new window.Event("click"));
     await pause();
     assert.deepEqual([sent, started], [[], ["Audit the logs."]]);
-    assert.equal(panel.querySelector(".npa-start")!.textContent, "Started");
+    assert.equal(shown(panel.querySelector(".npa-start")!), "Started");
     assert.equal(panel.querySelector(".npa-start")!.disabled, true);
     assert.equal(document.querySelector("textarea")!.value, "draft");
   } finally {
