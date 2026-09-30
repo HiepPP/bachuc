@@ -2230,6 +2230,7 @@ export const zhCN: TranslationResources = {
         toggleSettings: "切换设置",
         toggleFocusMode: "切换专注模式",
         cycleTheme: "循环切换主题",
+        cycleActiveHost: "切换到下一个主机",
         focusMessageInput: "聚焦消息输入框",
         cycleAgentMode: "循环切换代理模式",
         toggleVoiceMode: "切换语音模式",

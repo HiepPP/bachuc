@@ -4,9 +4,9 @@ import { useStoreWithEqualityFn } from "zustand/traditional";
 import {
   getHostRuntimeStore,
   isHostRuntimeDirectoryLoading,
-  useHosts,
   type HostRuntimeSnapshot,
 } from "@/runtime/host-runtime";
+import { type HostScope, useScopedHosts } from "@/hosts/use-visible-hosts";
 import {
   useSessionStore,
   type ProjectDescriptor,
@@ -52,6 +52,8 @@ export interface UseProjectsResult {
 
 export interface UseProjectsOptions {
   enabled?: boolean;
+  /** "visible" follows the active host; the default reads every host. */
+  hostScope?: HostScope;
 }
 
 const EMPTY_PROJECT_HOST_REPLICAS: ProjectHostReplica[] = [];
@@ -162,7 +164,7 @@ function useProjectHostRuntimeStates(
 
 export function useProjects(options: UseProjectsOptions = {}): UseProjectsResult {
   const enabled = options.enabled ?? true;
-  const hosts = useHosts();
+  const hosts = useScopedHosts(options.hostScope);
   const runtime = getHostRuntimeStore();
   const serverIds = useMemo(
     () => (enabled ? hosts.map((host) => host.serverId) : []),

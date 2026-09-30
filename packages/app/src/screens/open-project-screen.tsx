@@ -1,4 +1,5 @@
-import { useHosts, useHostRuntimeLastError } from "@/runtime/host-runtime";
+import { useHostRuntimeLastError } from "@/runtime/host-runtime";
+import { useVisibleHosts } from "@/hosts/use-visible-hosts";
 import { useCallback, useEffect, useState, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { View, Text, Pressable } from "react-native";
@@ -25,7 +26,7 @@ import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
 
 export function OpenProjectScreen() {
   const { t } = useTranslation();
-  const hosts = useHosts();
+  const hosts = useVisibleHosts();
   const router = useRouter();
   const openDesktopAgentList = usePanelStore((s) => s.openDesktopAgentList);
   const openProjectPicker = useOpenAddProject();

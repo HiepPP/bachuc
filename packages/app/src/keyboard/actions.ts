@@ -55,6 +55,7 @@ export type KeyboardActionId =
   | "workspace.pin"
   | "view.toggle.focus"
   | "theme.cycle"
+  | "host.cycle"
   | "message-input.action";
 
 export type KeyboardShortcutPayload =

@@ -38,6 +38,7 @@ import {
 import { HostStatusDot } from "@/components/host-status-dot";
 import { isWeb } from "@/constants/platform";
 import { useHosts } from "@/runtime/host-runtime";
+import { useActiveServerId } from "@/hosts/use-visible-hosts";
 import { useSidebarModel } from "@/components/sidebar/sidebar-model";
 import { ProjectIconView } from "@/components/project-icon-view";
 import { useProjectIcons } from "@/projects/icons";
@@ -165,6 +166,7 @@ export function SidebarDisplayPreferencesMenu(): ReactElement {
   const { t } = useTranslation();
   const preferences = useSidebarDisplayPreferences();
   const hosts = useHosts();
+  const activeServerId = useActiveServerId();
   // `allProjects`, never `projects`: the model's `projects` is already filtered, so a picker fed
   // from it would lose the row that undoes the filter as soon as the filter narrowed to one.
   const { allProjects, resolvedProjectFilters } = useSidebarModel();
@@ -181,7 +183,8 @@ export function SidebarDisplayPreferencesMenu(): ReactElement {
     [],
   );
 
-  const showHostFilter = hosts.length > 1;
+  // An active host already pins every list to one host; a second host filter would only argue.
+  const showHostFilter = hosts.length > 1 && activeServerId === null;
   // One project is the whole sidebar, so filtering to it is a no-op with a menu row attached.
   const showProjectFilter = allProjects.length > 1;
   // Nothing to filter by means no row at all. The active-filter half is not redundant: the merged

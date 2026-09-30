@@ -160,6 +160,7 @@ export const SHORTCUT_HELP_ROW_ORDER: Record<ShortcutSectionId, readonly string[
     "show-shortcuts",
     "toggle-settings",
     "cycle-theme",
+    "cycle-active-host",
   ],
   workspaces: [
     "new-agent",
@@ -242,6 +243,7 @@ const SHORTCUT_HELP_LABEL_KEYS: Record<string, string> = {
   "toggle-settings": "settings.shortcuts.help.toggleSettings",
   "toggle-focus": "settings.shortcuts.help.toggleFocusMode",
   "cycle-theme": "settings.shortcuts.help.cycleTheme",
+  "cycle-active-host": "settings.shortcuts.help.cycleActiveHost",
   "focus-message-input": "settings.shortcuts.help.focusMessageInput",
   "cycle-agent-mode": "settings.shortcuts.help.cycleAgentMode",
   "voice-toggle": "settings.shortcuts.help.toggleVoiceMode",
@@ -1045,6 +1047,20 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       id: "cycle-theme",
       section: "general",
       label: "Cycle theme",
+    },
+  },
+
+  // --- Active host cycling ---
+  // Mac only: Ctrl+` already toggles the Explorer sidebar everywhere.
+  {
+    id: "host-cycle-cmd-backquote-mac",
+    action: "host.cycle",
+    combo: "Cmd+`",
+    when: { mac: true, commandCenter: false },
+    help: {
+      id: "cycle-active-host",
+      section: "general",
+      label: "Switch to next host",
     },
   },
 

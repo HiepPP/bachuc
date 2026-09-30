@@ -4,7 +4,8 @@ import { useShallow } from "zustand/shallow";
 import { useSessionStore } from "@/stores/session-store";
 import type { AgentDirectoryEntry } from "@/types/agent-directory";
 import type { Agent } from "@/stores/session-store";
-import { getHostRuntimeStore, useHosts } from "@/runtime/host-runtime";
+import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import { type HostScope, useScopedHosts } from "@/hosts/use-visible-hosts";
 
 export interface AggregatedAgent extends AgentDirectoryEntry {
   serverId: string;
@@ -22,8 +23,10 @@ export interface AggregatedAgentsResult {
 export function useAggregatedAgents(options?: {
   includeArchived?: boolean;
   demand?: boolean;
+  /** "visible" follows the active host; the default reads every host. */
+  hostScope?: HostScope;
 }): AggregatedAgentsResult {
-  const daemons = useHosts();
+  const daemons = useScopedHosts(options?.hostScope);
   const runtime = getHostRuntimeStore();
   const includeArchived = options?.includeArchived ?? false;
   const demand = options?.demand ?? true;

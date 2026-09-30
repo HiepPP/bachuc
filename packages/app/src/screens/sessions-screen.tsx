@@ -17,6 +17,7 @@ import { type AgentHistoryHostError, useAgentHistory } from "@/hooks/use-agent-h
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useImportSession } from "@/hooks/use-import-session";
 import { useHosts } from "@/runtime/host-runtime";
+import { useActiveServerId } from "@/hosts/use-visible-hosts";
 import { buildOpenProjectRoute } from "@/utils/host-routes";
 
 /** Long enough that a typed word is one request, short enough to feel live. */
@@ -70,15 +71,39 @@ export function SessionsScreen() {
   return <SessionsScreenContent />;
 }
 
+/** An active host pins History to it; the local host filter only narrows "All hosts". */
+function useHistoryHost() {
+  const hosts = useHosts();
+  const activeServerId = useActiveServerId();
+  const [selectedHost, setSelectedHost] = useState(ALL_HOSTS_OPTION_ID);
+
+  useEffect(() => {
+    if (
+      selectedHost !== ALL_HOSTS_OPTION_ID &&
+      !hosts.some((host) => host.serverId === selectedHost)
+    ) {
+      setSelectedHost(ALL_HOSTS_OPTION_ID);
+    }
+  }, [hosts, selectedHost]);
+
+  const localServerId = selectedHost === ALL_HOSTS_OPTION_ID ? null : selectedHost;
+  return {
+    hosts,
+    selectedHost,
+    setSelectedHost,
+    historyServerId: activeServerId ?? localServerId,
+    showHostFilter: activeServerId === null && hosts.length > 1,
+  };
+}
+
 function SessionsScreenContent() {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const importSession = useImportSession();
-  const hosts = useHosts();
-  const [selectedHost, setSelectedHost] = useState(ALL_HOSTS_OPTION_ID);
+  const { hosts, selectedHost, setSelectedHost, historyServerId, showHostFilter } =
+    useHistoryHost();
   const [searchInput, setSearchInput] = useState("");
   const search = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS).trim();
-  const historyServerId = selectedHost === ALL_HOSTS_OPTION_ID ? null : selectedHost;
   const {
     agents,
     hasMore,
@@ -96,15 +121,6 @@ function SessionsScreenContent() {
   });
   const isSearching = isSearchSupported && search.length > 0;
 
-  useEffect(() => {
-    if (
-      selectedHost !== ALL_HOSTS_OPTION_ID &&
-      !hosts.some((host) => host.serverId === selectedHost)
-    ) {
-      setSelectedHost(ALL_HOSTS_OPTION_ID);
-    }
-  }, [hosts, selectedHost]);
-
   const [isManualRefresh, setIsManualRefresh] = useState(false);
 
   const handleRefresh = useCallback(() => {
@@ -116,9 +132,8 @@ function SessionsScreenContent() {
   const emptyText = resolveEmptyText({
     t,
     isSearching,
-    isAllHosts: selectedHost === ALL_HOSTS_OPTION_ID,
+    isAllHosts: historyServerId === null,
   });
-  const showHostFilter = hosts.length > 1;
   const showFilterRow = showHostFilter || isSearchSupported;
   const showLoadError = isError && agents.length === 0;
 

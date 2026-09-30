@@ -345,6 +345,18 @@ describe("keyboard-shortcuts", () => {
     // Option+[ -> "“", Option+Shift+W -> "„", etc.). Every Alt-bound
     // letter / bracket shortcut must still resolve.
     {
+      name: "matches Cmd+` to switch to the next host on macOS",
+      event: { key: "`", code: "Backquote", metaKey: true },
+      context: { isMac: true },
+      action: "host.cycle",
+    },
+    {
+      name: "keeps Ctrl+` on the Explorer sidebar on non-mac",
+      event: { key: "`", code: "Backquote", ctrlKey: true },
+      context: { isMac: false },
+      action: "sidebar.toggle.right",
+    },
+    {
       name: "matches Cmd+Alt+T to cycle theme on macOS when Option substitutes event.key",
       event: { key: "\u2020", code: "KeyT", metaKey: true, altKey: true },
       context: { isMac: true },

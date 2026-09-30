@@ -40,7 +40,7 @@ import {
   useGlobalWebOverlayLayer,
   useWebOverlayRegistration,
 } from "@/lib/overlay-root";
-import { useHosts } from "@/runtime/host-runtime";
+import { useVisibleHosts } from "@/hosts/use-visible-hosts";
 import {
   useKeyboardShortcutsStore,
   type CommandCenterScope,
@@ -135,9 +135,9 @@ function useBuiltInRows(open: boolean): {
   agents: CommandCenterAgentResult[];
 } {
   const { t } = useTranslation();
-  const { agents } = useAggregatedAgents({ demand: open });
-  const { projects } = useProjects({ enabled: open });
-  const showHost = useHosts().length > 1;
+  const { agents } = useAggregatedAgents({ demand: open, hostScope: "visible" });
+  const { projects } = useProjects({ enabled: open, hostScope: "visible" });
+  const showHost = useVisibleHosts().length > 1;
 
   return useMemo(() => {
     if (!open) return { workspaces: [], agents: [] };
