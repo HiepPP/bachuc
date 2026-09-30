@@ -13,6 +13,8 @@ export type JanitorAgent = Pick<
   | "pendingPermissions"
   | "archivedAt"
   | "labels"
+  | "workspaceId"
+  | "cwd"
 >;
 
 // The agent snapshot has no `lastActivityAt`; the daemon stores lastActivityAt as the agent's
@@ -29,9 +31,18 @@ export function selectStale<T extends JanitorAgent>(
   settings: JanitorSettings,
 ): T[] {
   if (!settings.enabled) return [];
-  const retained = new Set(
-    agents
-      .filter((agent) => !agent.archivedAt)
+  // Keep the newest `keepRecent` threads in each workspace, keyed like liveWorkspaces().
+  const byWorkspace = new Map<string, T[]>();
+  for (const agent of agents) {
+    if (agent.archivedAt) continue;
+    const key = agent.workspaceId ? `id:${agent.workspaceId}` : `cwd:${agent.cwd}`;
+    const group = byWorkspace.get(key);
+    if (group) group.push(agent);
+    else byWorkspace.set(key, [agent]);
+  }
+  const retained = new Set<string>();
+  for (const group of byWorkspace.values()) {
+    group
       .sort((a, b) => {
         // Unknown activity is protected rather than treated as old.
         const timeA = Number.isFinite(lastActivityAt(a)) ? lastActivityAt(a) : Infinity;
@@ -39,8 +50,8 @@ export function selectStale<T extends JanitorAgent>(
         return timeB - timeA || a.id.localeCompare(b.id);
       })
       .slice(0, settings.keepRecent)
-      .map((agent) => agent.id),
-  );
+      .forEach((agent) => retained.add(agent.id));
+  }
   // Archiving any ancestor can cascade into a retained descendant. Protect the
   // entire chain conservatively, without depending on workspace or open-tab state.
   const byId = new Map(agents.map((agent) => [agent.id, agent]));

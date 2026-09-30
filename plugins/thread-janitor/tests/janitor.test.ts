@@ -230,24 +230,26 @@ test("idle workspaces without live agents or terminals are archived", async () =
   assert.equal(result.workspacesArchived, 1);
 });
 
-test("retained threads also protect their workspaces across repeated sweeps", async () => {
-  const rows = Array.from({ length: 10 }, (_, i) => ({
-    ...row(String(i), 30 + i),
-    workspaceId: `w${i}`,
+test("retention is per workspace and retained threads protect their workspaces", async () => {
+  const busy = Array.from({ length: 10 }, (_, i) => ({
+    ...row(`busy-${i}`, 30 + i),
+    workspaceId: "busy",
   }));
-  const { api, archived, archivedWorkspaces } = fakeApi(
-    rows,
-    [],
-    undefined,
-    rows.map((_, i) => workspace(`w${i}`, 40)),
-  );
+  const quiet = Array.from({ length: 2 }, (_, i) => ({
+    ...row(`quiet-${i}`, 60 + i),
+    workspaceId: "quiet",
+  }));
+  const { api, archived, archivedWorkspaces } = fakeApi([...busy, ...quiet], [], undefined, [
+    workspace("busy", 40),
+    workspace("quiet", 70),
+  ]);
   const settings = { enabled: true, idleHours: 24, keepRecent: 7 };
   const options = { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal };
   await sweep(api, settings, options);
-  assert.deepEqual(archived, ["7", "8", "9"]);
-  assert.deepEqual(archivedWorkspaces, ["w7", "w8", "w9"]);
+  assert.deepEqual(archived, ["busy-7", "busy-8", "busy-9"]);
+  assert.deepEqual(archivedWorkspaces, []);
   await sweep(api, settings, options);
-  assert.deepEqual(archived, ["7", "8", "9"]);
+  assert.deepEqual(archived, ["busy-7", "busy-8", "busy-9"]);
 });
 
 test("fresh activity can move a stale candidate into the retained threads", async () => {
@@ -276,10 +278,10 @@ test("retention protects ancestors from cascading into the newest seven threads"
       workspaceId: "retained",
       labels: { "paseo.parent-agent-id": "grandparent" },
     },
-    { ...row("old-parent", 90), workspaceId: "old" },
+    { ...row("old-parent", 90), workspaceId: "retained" },
     {
       ...row("old-child", 85),
-      workspaceId: "old",
+      workspaceId: "retained",
       labels: { "paseo.parent-agent-id": "old-parent" },
     },
   ];

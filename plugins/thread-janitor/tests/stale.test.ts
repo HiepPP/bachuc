@@ -23,6 +23,8 @@ function agent(id: string, idleMs: number, overrides: Partial<JanitorAgent> = {}
     pendingPermissions: [],
     labels: {},
     archivedAt: null,
+    workspaceId: "w",
+    cwd: "/repo/w",
     ...overrides,
   };
 }
@@ -129,6 +131,22 @@ test("keeps the latest seven unarchived threads even when all are stale", () => 
   const settings = janitorSettings.schema.parse({});
   assert.deepEqual(ids(selectStale(rows.reverse(), now, settings)).sort(), ["7", "8", "9"]);
   assert.deepEqual(selectStale(rows.slice(0, 7), now, settings), []);
+});
+
+test("keeps the latest threads per workspace, falling back to cwd without a workspace id", () => {
+  const rows = [
+    ...Array.from({ length: 3 }, (_, i) =>
+      agent(`a${i}`, (30 + i) * HOUR_MS, { workspaceId: "a" }),
+    ),
+    ...Array.from({ length: 3 }, (_, i) =>
+      agent(`b${i}`, (40 + i) * HOUR_MS, { workspaceId: "b" }),
+    ),
+    ...Array.from({ length: 3 }, (_, i) =>
+      agent(`c${i}`, (50 + i) * HOUR_MS, { workspaceId: undefined, cwd: "/repo/c" }),
+    ),
+  ];
+  const settings = { ...defaults, keepRecent: 2 };
+  assert.deepEqual(ids(selectStale(rows, now, settings)), ["a2", "b2", "c2"]);
 });
 
 test("retention uses last message activity and excludes already archived threads", () => {

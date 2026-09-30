@@ -2,7 +2,7 @@
 
 Server-only Paseo plugin that archives idle threads automatically, with no confirmation
 dialog. By default a thread idle for more than 24 hours is archived, except for the
-seven most recently active unarchived threads on that host.
+seven most recently active unarchived threads in each workspace.
 
 Archive is reversible. The janitor never deletes agents, files, or worktrees.
 
@@ -11,8 +11,9 @@ Archive is reversible. The janitor never deletes agents, files, or worktrees.
 An agent is archived when all of these are true:
 
 - It is not already archived.
-- It is outside the host-wide `keepRecent` most recently active threads, across all workspaces.
-  The same last-activity timestamp below determines this order; ties use agent ID.
+- It is outside the `keepRecent` most recently active threads of its workspace. Threads are
+  grouped by workspace id, or by directory when the id is missing. The same last-activity
+  timestamp below determines this order; ties use agent ID.
   Threads with unknown activity remain protected.
 - It is not an ancestor of a retained thread. Parent links use the
   `paseo.parent-agent-id` label. All ancestors remain protected because archiving a parent
@@ -63,8 +64,9 @@ in `~/.paseo/plugin-settings/thread-janitor/janitor.json`:
 { "version": 1, "values": { "enabled": false, "idleHours": 24, "keepRecent": 7 } }
 ```
 
-`keepRecent` is configured independently on each host. Set it to `0` to disable retention.
-If fewer than `keepRecent` threads remain, all remain protected. Retained threads also protect
+`keepRecent` applies to each workspace and is configured independently on each host. Set it
+to `0` to disable retention. If a workspace has fewer than `keepRecent` threads, all of them
+remain protected. Retained threads also protect
 their workspaces. This setting does not restore threads that were already archived.
 
 Settings are read at the start of every sweep, so edits apply to the next sweep without a
