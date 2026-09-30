@@ -13,7 +13,10 @@ export const CSS =
   '[data-testid="assistant-message"] *' +
   ":not([data-pmono]):not([data-pmono] *)" +
   ':not([data-paseo-markdown-tag^="h"]):not([data-paseo-markdown-tag^="h"] *)' +
-  "{line-height:1.5 !important;}";
+  "{line-height:1.5 !important;}" +
+  // Paseo's desktop header title uses weight 300, which reads as a different face beside the
+  // 400-weight tabs; Claude desktop's title is regular weight.
+  '[data-testid="workspace-header-title"]{font-weight:400 !important;}';
 
 // Every connected host evaluates its own bundle in the same document; each owns its own
 // style element so one host unloading does not strip the rule from the others.
