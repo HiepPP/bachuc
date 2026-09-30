@@ -1,0 +1,11 @@
+[
+  { "id": "short", "text": "Sửa lỗi nút Lưu không phản hồi trên trang cài đặt." },
+  {
+    "id": "medium",
+    "text": "Trong plugin board, khi tôi bấm Send thì giao diện bị giật khoảng một giây. Hãy tìm nguyên nhân, đo lại số lần render và đề xuất cách sửa nhỏ nhất. Không đổi API public."
+  },
+  {
+    "id": "long",
+    "text": "Tôi muốn thêm tính năng xuất báo cáo CSV cho trang đơn hàng.\n\nBối cảnh: dữ liệu lấy từ `src/orders/query.ts`, bảng hiển thị ở `src/orders/table.tsx`. Hiện tại người dùng phải copy tay từng dòng.\n\nYêu cầu:\n- Nút \"Xuất CSV\" ở góc phải thanh công cụ.\n- Chỉ xuất các dòng đang được lọc, giữ đúng thứ tự cột.\n- Ngày theo định dạng ISO, số tiền không có dấu phân cách hàng nghìn.\n\n```ts\nexport type Order = { id: string; total: number; createdAt: Date };\n```\n\nKhông thêm thư viện mới. Viết test cho hàm chuyển đổi và kiểm tra với 10.000 dòng vẫn dưới 1 giây."
+  }
+]

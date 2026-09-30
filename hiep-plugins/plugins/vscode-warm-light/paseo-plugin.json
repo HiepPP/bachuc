@@ -1,0 +1,6 @@
+{
+  "id": "vscode-warm-light",
+  "requirements": {
+    "paseo": ">=0.8.0"
+  }
+}

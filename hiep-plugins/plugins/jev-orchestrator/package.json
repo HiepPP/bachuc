@@ -1,0 +1,38 @@
+{
+  "name": "jev-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "format": "oxfmt index.server.ts index.client.tsx server client shared tests README.md package.json tsconfig.json paseo-plugin.json",
+    "lint": "oxlint index.server.ts index.client.tsx server client shared tests",
+    "test": "tsx --test tests/*.test.ts",
+    "native:install": "tsx server/native-install.ts",
+    "test:live": "tsx tests/live.ts",
+    "test:direct": "tsx tests/direct-live.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/typesafe-ai": "3.0.8",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "ai": "7.0.106",
+    "smol-toml": "1.8.0",
+    "yaml": "2.9.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@getpaseo/client": "0.8.0",
+    "@getpaseo/plugin": "0.8.0",
+    "@getpaseo/protocol": "0.8.0",
+    "@tanstack/react-query": "^5.90.11",
+    "@types/node": "^22.0.0",
+    "@types/react": "~19.2.0",
+    "oxfmt": "0.46.0",
+    "oxlint": "1.61.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  }
+}

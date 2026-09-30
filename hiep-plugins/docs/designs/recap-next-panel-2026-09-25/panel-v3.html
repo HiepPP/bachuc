@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recap and What Next panel, v3 premium</title>
+<!-- Taste rules: TASTE.md. Icons: Phosphor Icons regular 2.1.1, MIT license. -->
+<style>
+:root {
+  --page: #fafafa; --canvas: #ffffff;
+  --ink: #27272a; --strong: #18181b; --soft: #52525b; --muted: #71717a;
+  --line: #e4e4e7; --line-strong: #d4d4d8;
+  --accent: #0f7b5f;
+  --shadow: 0 1px 2px rgb(24 24 27 / .04), 0 10px 28px -16px rgb(24 24 27 / .14);
+  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+}
+.dark {
+  --canvas: #18181b;
+  --ink: #e4e4e7; --strong: #fafafa; --soft: #b4b4bb; --muted: #8b8b93;
+  --line: #2e2e33; --line-strong: #3f3f46;
+  --accent: #3ccf9e;
+  --shadow: 0 1px 2px rgb(0 0 0 / .3), 0 12px 32px -18px rgb(0 0 0 / .6);
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.6 -apple-system, "SF Pro Text", system-ui, sans-serif; color: var(--ink); background: var(--page); -webkit-font-smoothing: antialiased; }
+.stage { max-width: 800px; margin: 0 auto; padding: 48px 24px 80px; display: grid; gap: 40px; }
+.caption { margin: 0 0 10px; font-size: 13px; font-weight: 500; color: #a1a1aa; }
+.chat { background: var(--canvas); color: var(--ink); border: 1px solid #e4e4e7; border-radius: 12px; padding: 28px 32px 32px; }
+.chat.dark { border-color: #27272a; }
+.chat > p { margin: 0 0 20px; max-width: 68ch; }
+.ic { width: 15px; height: 15px; flex: none; fill: currentColor; }
+
+/* Panel: 12px container, 8px surfaces and controls, 6px chips */
+.np {
+  --surface: color-mix(in srgb, var(--ink) 2.5%, var(--canvas));
+  --hover: color-mix(in srgb, var(--ink) 4%, transparent);
+  --chip: color-mix(in srgb, var(--ink) 6%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 9%, transparent);
+  border: 1px solid var(--line); border-radius: 12px; background: var(--canvas); box-shadow: var(--shadow); overflow: hidden;
+}
+.np h3 { margin: 0; }
+
+/* Recap: recessed and neutral; it reports finished work */
+.np-recap { padding: 14px 20px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.np-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.np-label { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; letter-spacing: -.005em; color: var(--strong); }
+.np-label .ic { width: 16px; height: 16px; color: var(--muted); }
+.np-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 6px; background: var(--chip); color: var(--soft); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.chip .ic { width: 13px; height: 13px; color: var(--muted); }
+.chip.mono { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--strong); }
+.np-did { margin: 0; font-size: 14px; line-height: 1.6; color: var(--soft); max-width: 72ch; text-wrap: pretty; }
+.np code { font-family: var(--mono); font-size: .88em; padding: 1px 5px; border-radius: 6px; background: var(--chip); color: var(--strong); }
+
+/* What next: the forward action area; the only place the accent appears */
+.np-next { padding: 18px 20px 20px; }
+.np-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; letter-spacing: -.005em; color: var(--strong); }
+.np-title .accent { width: 16px; height: 16px; color: var(--accent); }
+.np-intro { margin: 4px 0 16px 24px; color: var(--soft); max-width: 68ch; text-wrap: pretty; }
+
+/* Single suggestion: a raised card, because it is the one actionable object */
+.pick { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px 24px; align-items: end; padding: 16px 16px 16px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--canvas); transition: border-color .15s ease; }
+.pick:hover { border-color: var(--line-strong); }
+.pick-text { margin: 0; font-weight: 400; color: var(--strong); text-wrap: pretty; overflow-wrap: anywhere; }
+.why { display: block; margin-top: 4px; font-size: 13px; line-height: 1.5; font-weight: 400; color: var(--muted); }
+.why b { font-weight: 600; color: var(--soft); }
+.actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--canvas); color: var(--strong); font: inherit; font-size: 13px; font-weight: 500; line-height: 1; cursor: pointer; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease, transform .1s ease; }
+.btn .ic { width: 14px; height: 14px; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--strong); color: var(--canvas); border-color: var(--strong); }
+.btn.primary:hover { background: color-mix(in srgb, var(--strong) 86%, var(--canvas)); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); padding: 0 8px; }
+.btn.quiet:hover { color: var(--strong); }
+.btn:active { transform: scale(.98); }
+.btn:focus-visible, .opt input:focus-visible + .mark { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn:disabled { opacity: .4; cursor: default; transform: none; }
+
+/* Selection */
+.group + .group { margin-top: 16px; }
+.group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.group-name { font-size: 13px; font-weight: 600; color: var(--strong); }
+.group-hint { font-size: 12.5px; color: var(--muted); }
+.opts { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.opt { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 12px; padding: 12px 14px; cursor: pointer; transition: background-color .15s ease; }
+.opt + .opt { border-top: 1px solid var(--line); }
+.opt:hover { background: var(--hover); }
+.opt:has(input:checked) { background: var(--accent-soft); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.mark { display: grid; place-items: center; width: 18px; height: 18px; margin-top: 3px; border: 1.5px solid var(--line-strong); border-radius: 50%; background: var(--canvas); transition: border-color .15s ease, background-color .15s ease; }
+.opt input[type=checkbox] + .mark { border-radius: 6px; }
+.opt input:checked + .mark { border-color: var(--accent); }
+.opt input[type=radio]:checked + .mark::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.opt input[type=checkbox]:checked + .mark { background: var(--accent); }
+.opt input[type=checkbox]:checked + .mark::after { content: ""; width: 9px; height: 5px; border: 2px solid var(--canvas); border-top: 0; border-right: 0; transform: translateY(-1px) rotate(-45deg); }
+.opt-text { font-weight: 400; color: var(--strong); overflow-wrap: anywhere; }
+
+/* Footer */
+.np-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--surface); }
+.count { display: flex; flex-direction: column; font-size: 13px; font-weight: 600; color: var(--strong); font-variant-numeric: tabular-nums; }
+.count .detail { font-size: 12.5px; font-weight: 400; color: var(--muted); }
+
+@media (max-width: 560px) {
+  .chat { padding: 20px 16px; }
+  .np-recap, .np-next { padding-left: 16px; padding-right: 16px; }
+  .np-foot { padding: 12px 16px; }
+  .np-intro { margin-left: 0; }
+  .pick { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { .btn, .opt, .mark, .pick { transition: none; } }
+
+</style>
+</head>
+<body>
+<main class="stage">
+<section>
+  <p class="caption">Single suggestion</p>
+  <div class="chat">
+    <p>Nothing to grant in System Settings. The approval is a per-app prompt that cua_repl shows the first time an agent opens an app.</p>
+    <article class="np">
+      <section class="np-recap" aria-label="Recap">
+        <div class="np-head">
+          <h3 class="np-label"><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M136,80v43.47l36.12,21.67a8,8,0,0,1-8.24,13.72l-40-24A8,8,0,0,1,120,128V80a8,8,0,0,1,16,0Zm-8-48A95.44,95.44,0,0,0,60.08,60.15C52.81,67.51,46.35,74.59,40,82V64a8,8,0,0,0-16,0v40a8,8,0,0,0,8,8H72a8,8,0,0,0,0-16H49c7.15-8.42,14.27-16.35,22.39-24.57a80,80,0,1,1,1.66,114.75,8,8,0,1,0-11,11.64A96,96,0,1,0,128,32Z"/></svg>Recap</h3>
+          <div class="np-meta">
+            <span class="chip mono"><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H96a23.84,23.84,0,0,0-8,1.38V95a32,32,0,1,0-16,0v66a32,32,0,1,0,16,0V144a8,8,0,0,1,8-8h88a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,232,64ZM64,64A16,16,0,1,1,80,80,16,16,0,0,1,64,64ZM96,192a16,16,0,1,1-16-16A16,16,0,0,1,96,192ZM200,80a16,16,0,1,1,16-16A16,16,0,0,1,200,80Z"/></svg>main</span>
+            <span class="chip"><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M248,120H183.42a56,56,0,0,0-110.84,0H8a8,8,0,0,0,0,16H72.58a56,56,0,0,0,110.84,0H248a8,8,0,0,0,0-16ZM128,168a40,40,0,1,1,40-40A40,40,0,0,1,128,168Z"/></svg>No commit</span>
+          </div>
+        </div>
+        <p class="np-did">Found how the approval works in the <code>cua_repl</code> source. Ran <code>cua.getApp("Paseo")</code> from this session; it was refused with no prompt shown. No files changed.</p>
+      </section>
+      <section class="np-next">
+        <h3 class="np-title"><svg class="ic accent" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,157.66l-48,48a8,8,0,0,1-11.32-11.32L204.69,160H128A104.11,104.11,0,0,1,24,56a8,8,0,0,1,16,0,88.1,88.1,0,0,0,88,88h76.69l-34.35-34.34a8,8,0,0,1,11.32-11.32l48,48A8,8,0,0,1,229.66,157.66Z"/></svg>What next</h3>
+        <p class="np-intro">Run the desktop check from a Codex task in the ChatGPT desktop app. That is the only place confirmed to show the approval prompt.</p>
+        <div class="pick">
+          <p class="pick-text">In /Users/hiep/Projects/hiep-paseo-plugin, open Paseo with Computer Use and approve Always. Verify on the desktop: compact Recap, exclusive choices, allowed combinations, Edit, Send.<span class="why">Pick this to <b>finish TASK-002</b>, because only Codex can show the approval prompt.</span></p>
+          <div class="actions">
+            <button class="btn" type="button"><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z"/></svg>Edit</button>
+            <button class="btn primary" type="button"><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M205.66,117.66a8,8,0,0,1-11.32,0L136,59.31V216a8,8,0,0,1-16,0V59.31L61.66,117.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0l72,72A8,8,0,0,1,205.66,117.66Z"/></svg>Send</button>
+          </div>
+        </div>
+      </section>
+    </article>
+  </div>
+</section>
+<section>
+  <p class="caption">Exclusive choice with additional suggestion</p>
+  <div class="chat" data-demo>
+    <p>The layout review is complete. Two approaches are possible from here.</p>
+    <article class="np">
+      <section class="np-recap" aria-label="Recap">
+        <div class="np-head">
+          <h3 class="np-label"><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M136,80v43.47l36.12,21.67a8,8,0,0,1-8.24,13.72l-40-24A8,8,0,0,1,120,128V80a8,8,0,0,1,16,0Zm-8-48A95.44,95.44,0,0,0,60.08,60.15C52.81,67.51,46.35,74.59,40,82V64a8,8,0,0,0-16,0v40a8,8,0,0,0,8,8H72a8,8,0,0,0,0-16H49c7.15-8.42,14.27-16.35,22.39-24.57a80,80,0,1,1,1.66,114.75,8,8,0,1,0-11,11.64A96,96,0,1,0,128,32Z"/></svg>Recap</h3>
+          <div class="np-meta">
+            <span class="chip mono"><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H96a23.84,23.84,0,0,0-8,1.38V95a32,32,0,1,0-16,0v66a32,32,0,1,0,16,0V144a8,8,0,0,1,8-8h88a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,232,64ZM64,64A16,16,0,1,1,80,80,16,16,0,0,1,64,64ZM96,192a16,16,0,1,1-16-16A16,16,0,0,1,96,192ZM200,80a16,16,0,1,1,16-16A16,16,0,0,1,200,80Z"/></svg>main</span>
+            <span class="chip"><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z"/></svg>Pushed main</span>
+          </div>
+        </div>
+        <p class="np-did">Reviewed the settings layout against the selected design. No code changed.</p>
+      </section>
+      <section class="np-next">
+        <h3 class="np-title"><svg class="ic accent" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,157.66l-48,48a8,8,0,0,1-11.32-11.32L204.69,160H128A104.11,104.11,0,0,1,24,56a8,8,0,0,1,16,0,88.1,88.1,0,0,0,88,88h76.69l-34.35-34.34a8,8,0,0,1,11.32-11.32l48,48A8,8,0,0,1,229.66,157.66Z"/></svg>What next</h3>
+        <p class="np-intro">Choose one approach. Add the follow-up if useful.</p>
+        <div class="group">
+          <div class="group-head"><span class="group-name">Choose one</span><span class="group-hint">Cannot be combined</span></div>
+          <div class="opts">
+            <label class="opt"><input type="radio" name="a1" checked><span class="mark"></span><span class="opt-text">Implement the settings redesign.<span class="why">Apply the agreed layout changes.</span></span></label>
+            <label class="opt"><input type="radio" name="a1"><span class="mark"></span><span class="opt-text">Do not implement the redesign. Review it only.<span class="why">Identify issues without changing code.</span></span></label>
+          </div>
+        </div>
+        <div class="group">
+          <div class="group-head"><span class="group-name">Additional suggestions</span><span class="group-hint">Can be sent with a compatible choice</span></div>
+          <div class="opts">
+            <label class="opt"><input type="checkbox" name="a1x" checked><span class="mark"></span><span class="opt-text">List remaining questions and risks.<span class="why">Include this after the chosen approach.</span></span></label>
+          </div>
+        </div>
+      </section>
+      <footer class="np-foot">
+        <div class="count"><span data-count>2 selected</span><span class="detail" data-detail>Sent as one numbered message</span></div>
+        <div class="actions">
+          <button class="btn quiet" type="button" data-clear>Clear</button>
+          <button class="btn" type="button" data-edit><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z"/></svg>Edit selected</button>
+          <button class="btn primary" type="button" data-send><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M205.66,117.66a8,8,0,0,1-11.32,0L136,59.31V216a8,8,0,0,1-16,0V59.31L61.66,117.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0l72,72A8,8,0,0,1,205.66,117.66Z"/></svg><span>Send selected (2)</span></button>
+        </div>
+      </footer>
+    </article>
+  </div>
+</section>
+<section>
+  <p class="caption">Dark theme</p>
+  <div class="chat dark" data-demo>
+    <p>The layout review is complete. Two approaches are possible from here.</p>
+    <article class="np">
+      <section class="np-recap" aria-label="Recap">
+        <div class="np-head">
+          <h3 class="np-label"><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M136,80v43.47l36.12,21.67a8,8,0,0,1-8.24,13.72l-40-24A8,8,0,0,1,120,128V80a8,8,0,0,1,16,0Zm-8-48A95.44,95.44,0,0,0,60.08,60.15C52.81,67.51,46.35,74.59,40,82V64a8,8,0,0,0-16,0v40a8,8,0,0,0,8,8H72a8,8,0,0,0,0-16H49c7.15-8.42,14.27-16.35,22.39-24.57a80,80,0,1,1,1.66,114.75,8,8,0,1,0-11,11.64A96,96,0,1,0,128,32Z"/></svg>Recap</h3>
+          <div class="np-meta">
+            <span class="chip mono"><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M232,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H96a23.84,23.84,0,0,0-8,1.38V95a32,32,0,1,0-16,0v66a32,32,0,1,0,16,0V144a8,8,0,0,1,8-8h88a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,232,64ZM64,64A16,16,0,1,1,80,80,16,16,0,0,1,64,64ZM96,192a16,16,0,1,1-16-16A16,16,0,0,1,96,192ZM200,80a16,16,0,1,1,16-16A16,16,0,0,1,200,80Z"/></svg>main</span>
+            <span class="chip"><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M248,120H183.42a56,56,0,0,0-110.84,0H8a8,8,0,0,0,0,16H72.58a56,56,0,0,0,110.84,0H248a8,8,0,0,0,0-16ZM128,168a40,40,0,1,1,40-40A40,40,0,0,1,128,168Z"/></svg>No commit</span>
+          </div>
+        </div>
+        <p class="np-did">Reviewed the settings layout against the selected design. No code changed.</p>
+      </section>
+      <section class="np-next">
+        <h3 class="np-title"><svg class="ic accent" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,157.66l-48,48a8,8,0,0,1-11.32-11.32L204.69,160H128A104.11,104.11,0,0,1,24,56a8,8,0,0,1,16,0,88.1,88.1,0,0,0,88,88h76.69l-34.35-34.34a8,8,0,0,1,11.32-11.32l48,48A8,8,0,0,1,229.66,157.66Z"/></svg>What next</h3>
+        <p class="np-intro">Choose one approach. Add the follow-up if useful.</p>
+        <div class="group">
+          <div class="group-head"><span class="group-name">Choose one</span><span class="group-hint">Cannot be combined</span></div>
+          <div class="opts">
+            <label class="opt"><input type="radio" name="a2"><span class="mark"></span><span class="opt-text">Implement the settings redesign.<span class="why">Apply the agreed layout changes.</span></span></label>
+            <label class="opt"><input type="radio" name="a2" checked><span class="mark"></span><span class="opt-text">Do not implement the redesign. Review it only.<span class="why">Identify issues without changing code.</span></span></label>
+          </div>
+        </div>
+        <div class="group">
+          <div class="group-head"><span class="group-name">Additional suggestions</span><span class="group-hint">Can be sent with a compatible choice</span></div>
+          <div class="opts">
+            <label class="opt"><input type="checkbox" name="a2x"><span class="mark"></span><span class="opt-text">List remaining questions and risks.<span class="why">Include this after the chosen approach.</span></span></label>
+          </div>
+        </div>
+      </section>
+      <footer class="np-foot">
+        <div class="count"><span data-count>1 selected</span><span class="detail" data-detail>One prompt</span></div>
+        <div class="actions">
+          <button class="btn quiet" type="button" data-clear>Clear</button>
+          <button class="btn" type="button" data-edit><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM92.69,208H48V163.31l88-88L180.69,120ZM192,108.68,147.31,64l24-24L216,84.68Z"/></svg>Edit selected</button>
+          <button class="btn primary" type="button" data-send><svg class="ic" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M205.66,117.66a8,8,0,0,1-11.32,0L136,59.31V216a8,8,0,0,1-16,0V59.31L61.66,117.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0l72,72A8,8,0,0,1,205.66,117.66Z"/></svg><span>Send selected (1)</span></button>
+        </div>
+      </footer>
+    </article>
+  </div>
+</section>
+</main>
+<script>
+// Demo only: keeps the footer count and button labels in step with the inputs.
+for (const demo of document.querySelectorAll("[data-demo]")) {
+  const inputs = [...demo.querySelectorAll("input")];
+  const label = demo.querySelector("[data-send] span");
+  const refresh = () => {
+    const n = inputs.filter((i) => i.checked).length;
+    demo.querySelector("[data-count]").textContent = `${n} selected`;
+    demo.querySelector("[data-detail]").textContent =
+      n > 1 ? "Sent as one numbered message" : n ? "One prompt" : "Choose a suggestion to continue";
+    label.textContent = n ? `Send selected (${n})` : "Send selected";
+    demo.querySelector("[data-send]").disabled = demo.querySelector("[data-edit]").disabled = !n;
+    demo.querySelector("[data-clear]").disabled = !n;
+  };
+  inputs.forEach((i) => i.addEventListener("change", refresh));
+  demo.querySelector("[data-clear]").addEventListener("click", () => {
+    inputs.forEach((i) => (i.checked = false));
+    refresh();
+  });
+  refresh();
+}
+</script>
+</body>
+</html>

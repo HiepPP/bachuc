@@ -1,0 +1,30 @@
+{
+  "name": "paseo-jev-evaluator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint --config .oxlintrc.json index.server.ts server benchmark",
+    "format": "oxfmt index.server.ts server benchmark README.md package.json tsconfig.json paseo-plugin.json",
+    "test": "node --test server/evaluate.test.mjs",
+    "smoke": "node server/smoke.mjs",
+    "benchmark": "node benchmark/run.mjs",
+    "test:benchmark": "node --test benchmark/score.test.mjs"
+  },
+  "dependencies": {
+    "@ai-sdk/typesafe-ai": "3.0.8",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "ai": "7.0.106",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@getpaseo/client": "0.8.0",
+    "@getpaseo/plugin": "0.8.0",
+    "@getpaseo/protocol": "0.8.0",
+    "@types/node": "^22.0.0",
+    "oxfmt": "0.46.0",
+    "oxlint": "1.61.0",
+    "typescript": "5.9.3"
+  }
+}

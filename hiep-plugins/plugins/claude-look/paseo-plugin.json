@@ -1,0 +1,6 @@
+{
+  "id": "claude-look",
+  "requirements": {
+    "paseo": ">=0.10.1"
+  }
+}

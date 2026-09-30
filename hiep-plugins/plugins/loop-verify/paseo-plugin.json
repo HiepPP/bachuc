@@ -1,0 +1,6 @@
+{
+  "id": "loop-verify",
+  "requirements": {
+    "paseo": ">=0.9.0-beta.2"
+  }
+}
