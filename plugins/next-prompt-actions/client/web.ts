@@ -209,11 +209,11 @@ const styles = `
 [${OWNER}] button {display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--npa-line-strong);background:var(--npa-paper,transparent);color:var(--npa-ink,inherit);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;user-select:none;transition:background-color .15s ease,border-color .15s ease,transform .1s ease;}
 [${OWNER}] button::before {content:"";width:14px;height:14px;flex-shrink:0;background:currentColor;mask:var(--npa-icon) center / contain no-repeat;}
 [${OWNER}] .npa-edit {--npa-icon:${iconMask(icons.edit)};}
-[${OWNER}] .npa-send {--npa-icon:${iconMask(icons.send)};min-width:80px;background:var(--npa-ink,#18181b);color:var(--npa-paper,#fff);border-color:var(--npa-ink,#18181b);}
+[${OWNER}] .npa-send, [${OWNER}] .npa-start[data-npa-here] {--npa-icon:${iconMask(icons.send)};min-width:80px;background:var(--npa-ink,#18181b);color:var(--npa-paper,#fff);border-color:var(--npa-ink,#18181b);}
 [${OWNER}] .npa-send.npa-commit {--npa-icon:${iconMask(icons.commit)};}
 [${OWNER}] .npa-send.npa-push {--npa-icon:${iconMask(icons.push)};}
 [${OWNER}] .npa-start, [${OWNER}] .npa-send[data-npa-thread] {--npa-icon:${iconMask(icons.thread)};}
-[${OWNER}] .npa-start[data-npa-here] {--npa-icon:${iconMask(icons.send)};}
+[${OWNER}] [data-npa-thread], [${OWNER}] [data-npa-here] {position:relative;z-index:1;}
 [${OWNER}] .npa-goal {--npa-icon:${iconMask(icons.done)};}
 [${OWNER}] .npa-other-head {display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-bottom:12px;}
 [${OWNER}] .npa-other-title {font-size:13px;font-weight:600;line-height:20px;}
@@ -223,7 +223,7 @@ const styles = `
 @media (hover:hover) {
   [${OWNER}] .npa-row:hover {border-color:var(--npa-line-strong);}
   [${OWNER}] .npa-edit:not(:disabled):hover, [${OWNER}] .npa-start:not(:disabled):hover {background:var(--npa-hover);}
-  [${OWNER}] .npa-send:not(:disabled):hover {background:color-mix(in srgb,var(--npa-ink,#18181b) 86%,var(--npa-paper,#fff));}
+  [${OWNER}] .npa-send:not(:disabled):hover, [${OWNER}] .npa-start[data-npa-here]:not(:disabled):hover {background:color-mix(in srgb,var(--npa-ink,#18181b) 86%,var(--npa-paper,#fff));}
   [${OWNER}] .npa-selection-clear:not(:disabled):hover {color:var(--npa-ink,inherit);}
   [${OWNER}] .npa-choice:not(:has(input:disabled)):hover {background:var(--npa-hover);}
 }
@@ -478,22 +478,31 @@ export function install(controller: Controller, doc: Document = document, identi
     }
     // Cmd flips a Send and a Start button to the other action, which then needs its own guards.
     let blocked = snapshot.busy || snapshot.note === "Jev reviewing...";
+    // Any layout shift from the swapped label moves the button out from under the pointer, which
+    // leaves, swaps back and enters again. The button keeps its entry width as a floor, and any
+    // extra width spills left over its neighbours through a negative margin, so nothing reflows.
     function flipOnCmd(button: Node, flip: (on: boolean) => void) {
+      let entry = 0;
+      const apply = (on: boolean) => {
+        flip(on);
+        const extra = (button.getBoundingClientRect?.().width ?? 0) - entry;
+        if (entry && extra > 0) button.style.setProperty("margin-left", `${-extra}px`);
+        else button.style.removeProperty?.("margin-left");
+      };
       const hover = (event: { metaKey?: boolean }) => {
-        hovered = flip;
-        flip(!!event.metaKey);
+        hovered = apply;
+        apply(!!event.metaKey);
       };
       button.addEventListener("mouseenter", (event) => {
-        // A shorter label pulls the edge out from under the pointer, which leaves, flips back,
-        // grows and enters again. Hold the entry width until the pointer leaves.
-        const width = button.getBoundingClientRect?.().width;
-        if (width) button.style.setProperty("min-width", `${width}px`);
+        entry = button.getBoundingClientRect?.().width ?? 0;
+        if (entry) button.style.setProperty("min-width", `${entry}px`);
         hover(event);
       });
       button.addEventListener("mousemove", hover);
       button.addEventListener("mouseleave", () => {
-        if (hovered === flip) hovered = null;
-        flip(false);
+        if (hovered === apply) hovered = null;
+        apply(false);
+        entry = 0;
         button.style.removeProperty?.("min-width");
       });
     }

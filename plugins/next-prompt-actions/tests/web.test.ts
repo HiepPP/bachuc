@@ -210,15 +210,20 @@ test("Cmd over Send switches it to Start in new thread; Cmd-click starts it", as
   try {
     await pause();
     const send = document.querySelector(".npa-send")!;
-    Object.assign(send, { getBoundingClientRect: () => ({ width: 90 }) });
+    // Width follows the label, like a real button.
+    Object.assign(send, {
+      getBoundingClientRect: () => ({ width: 40 + 5 * send.textContent!.length }),
+    });
     fire(send, "mouseenter");
     assert.equal(send.textContent, "Send");
-    assert.equal(send.style.minWidth, "90px", "entry width holds while hovered");
+    assert.equal(send.style.minWidth, "60px", "entry width holds while hovered");
     fire(document, "keydown", { key: "Meta", metaKey: true });
     assert.equal(send.textContent, "Start in new thread");
     assert.equal(send.getAttribute("data-npa-thread"), "true");
+    assert.equal(send.style.marginLeft, "-75px", "the wider label spills left without reflow");
     fire(document, "keyup", { key: "Meta", metaKey: false });
     assert.equal(send.textContent, "Send");
+    assert.equal(send.style.marginLeft, "");
     fire(send, "mousemove", { metaKey: true });
     assert.equal(send.textContent, "Start in new thread");
     fire(send, "mouseleave");
