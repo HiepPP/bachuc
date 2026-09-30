@@ -5,6 +5,7 @@
 Status: IN PROGRESS
 
 Changed:
+
 - Implemented and installed `next-prompt-actions` on local Paseo 0.8.0.
 - The user approved the Send design and desktop DOM adapter; Paseo source is unchanged.
 - Prompt blocks retain native Markdown and copy controls, with an inline Send action.
@@ -12,12 +13,14 @@ Changed:
 - Added durable deduplication, stale/busy checks, cancellation, ambiguous-send protection, and a three-turn limit.
 
 Contract:
+
 - Only completed assistant suggestions under What Next or Next Steps are eligible.
 - Send uses the source conversation SDK and preserves the composer draft.
 - Jev may select a continuation within existing authority; missing evidence or an invalid decision falls back to manual.
 - Private desktop integration fails closed when host identity or Markdown structure cannot be verified.
 
 Verified:
+
 - Current source: typecheck, lint, all 17 tests, and `git diff --check` pass.
 - `paseo plugin ls next-prompt-actions --json`: enabled and running, with no load error.
 - Live fixture agent: `93518702-dcb7-49b4-b57a-8a68a7f61368`.
@@ -31,6 +34,7 @@ Verified:
 - Added a cropped synthetic UI screenshot to the root and plugin READMEs.
 
 Remaining:
+
 - Complete live narrow/dark layout, keyboard focus, safe retry, toggle-OFF, and disable cleanup acceptance.
 - Clean up the shared synthetic fixture after other active UI verification finishes; do not disrupt another session using it.
 - TASK-004 remains blocked on physical trackpad acceptance.

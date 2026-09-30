@@ -149,23 +149,23 @@ status alone does not prove every plugin action works.
 
 ## Pick your plugins
 
-| Plugin | Purpose |
-| --- | --- |
-| [vscode-warm-light](plugins/vscode-warm-light/README.md) | Apply the warm, customized VS Code Light+ palette through Paseo's theme API. |
-| [claude-look](plugins/claude-look/README.md) | Claude Light theme, Claude desktop's 768px chat column, and its 1.5 reply line-height. |
-| [next-prompt-actions](plugins/next-prompt-actions/README.md) | Send next-step prompts inside their blocks on desktop, with optional bounded Jev auto-run. |
-| [prompt-translate](plugins/prompt-translate/README.md) | Show English translations under Vietnamese prompts, and enhance drafts into English prompts with Cmd/Ctrl+Enter, on desktop. |
-| [skill-pins](plugins/skill-pins/README.md) | Pin skills such as watchtower in the desktop composer; each turn tells Claude or Codex to load them. |
-| [thread-branch](plugins/thread-branch/README.md) | Show the current branch beside the composer and open its PR through a separate pill. |
-| [jev-orchestrator](plugins/jev-orchestrator/README.md) | Direct Jev model/effort routing to one agent, plus optional scoped delegation with discovery, escalation, review, and ownership locks. |
-| [Board](plugins/board/README.md) | Group conversations by project with pastel colors, avatars, parent/subagent clusters, stars, and UI scaling. |
-| [jev-evaluator](plugins/jev-evaluator/README.md) | Expose Jev evaluations as an MCP tool for Codex and Claude agents. |
-| [watchtower-board](plugins/watchtower-board/README.md) | Browse read-only Watchtower tasks and attach task briefs in the composer. |
-| [workspace-preflight](plugins/workspace-preflight/README.md) | Discover workspace prerequisites, expose read-only MCP evidence, and optionally ask Jev for task relevance. |
-| [workspace-spaces](plugins/workspace-spaces/README.md) | Group projects with numbered Spaces in the desktop sidebar; standalone fallback on other clients. |
-| [thread-janitor](plugins/thread-janitor/README.md) | Archive idle threads automatically, with no confirmation dialog. |
-| [thread-context-attach](plugins/thread-context-attach/README.md) | Attach the last reply of another Paseo thread to your next message. |
-| [loop-verify](plugins/loop-verify/README.md) | Prototype: retry a labeled agent's goal in fresh child agents until a verify command passes, up to 5 rounds. |
+| Plugin                                                           | Purpose                                                                                                                                |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| [vscode-warm-light](plugins/vscode-warm-light/README.md)         | Apply the warm, customized VS Code Light+ palette through Paseo's theme API.                                                           |
+| [claude-look](plugins/claude-look/README.md)                     | Claude Light theme, Claude desktop's 768px chat column, and its 1.5 reply line-height.                                                 |
+| [next-prompt-actions](plugins/next-prompt-actions/README.md)     | Send next-step prompts inside their blocks on desktop, with optional bounded Jev auto-run.                                             |
+| [prompt-translate](plugins/prompt-translate/README.md)           | Show English translations under Vietnamese prompts, and enhance drafts into English prompts with Cmd/Ctrl+Enter, on desktop.           |
+| [skill-pins](plugins/skill-pins/README.md)                       | Pin skills such as watchtower in the desktop composer; each turn tells Claude or Codex to load them.                                   |
+| [thread-branch](plugins/thread-branch/README.md)                 | Show the current branch beside the composer and open its PR through a separate pill.                                                   |
+| [jev-orchestrator](plugins/jev-orchestrator/README.md)           | Direct Jev model/effort routing to one agent, plus optional scoped delegation with discovery, escalation, review, and ownership locks. |
+| [Board](plugins/board/README.md)                                 | Group conversations by project with pastel colors, avatars, parent/subagent clusters, stars, and UI scaling.                           |
+| [jev-evaluator](plugins/jev-evaluator/README.md)                 | Expose Jev evaluations as an MCP tool for Codex and Claude agents.                                                                     |
+| [watchtower-board](plugins/watchtower-board/README.md)           | Browse read-only Watchtower tasks and attach task briefs in the composer.                                                              |
+| [workspace-preflight](plugins/workspace-preflight/README.md)     | Discover workspace prerequisites, expose read-only MCP evidence, and optionally ask Jev for task relevance.                            |
+| [workspace-spaces](plugins/workspace-spaces/README.md)           | Group projects with numbered Spaces in the desktop sidebar; standalone fallback on other clients.                                      |
+| [thread-janitor](plugins/thread-janitor/README.md)               | Archive idle threads automatically, with no confirmation dialog.                                                                       |
+| [thread-context-attach](plugins/thread-context-attach/README.md) | Attach the last reply of another Paseo thread to your next message.                                                                    |
+| [loop-verify](plugins/loop-verify/README.md)                     | Prototype: retry a labeled agent's goal in fresh child agents until a verify command passes, up to 5 rounds.                           |
 
 ## Install a plugin
 

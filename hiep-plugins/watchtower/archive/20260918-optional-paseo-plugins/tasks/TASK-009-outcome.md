@@ -5,12 +5,14 @@
 Status: DONE
 
 Changed:
+
 - Added bounded Node/package-manager discovery, category overrides and provenance to the shared preflight engine.
 - Added workspace-bound read-only MCP injection for new built-in Codex/Claude agents; existing entries remain intact.
 - Added typed optional Jev handoff, offline fixtures, explicit synthetic live runner and integration documentation.
 - Fixed fresh Yarn Classic PnP detection found during independent review; added the failing fixture before the fix.
 
 Contract:
+
 - Discovery never executes scripts, version files, installs or repairs. Ambiguous layouts and coverage remain unknown.
 - MCP accepts only an empty object. Host-controlled canonical cwd binds the instance; arbitrary directory overrides fail.
 - Runtime probes retain daemon PATH semantics; the injected MCP captures that PATH. Workspace-owned executables are not probed.
@@ -18,6 +20,7 @@ Contract:
 - Jev never changes measurements, grants permission or runs repairs. Unavailable/error/invalid evaluation has no proceed fallback.
 
 Verified:
+
 - `npm run format && npm run typecheck && npm run lint && npm test` in the preflight directory passed; 16 offline tests, zero lint warnings.
 - Offline checks cover ranges/prereleases/conflicts, missing metadata, npm/pnpm/Yarn/PnP/monorepos, overrides, metadata limits, symlinks, nonexecution, MCP list/call/invalid input/unavailable workspace, hook coexistence and evaluator errors/timeouts.
 - Daemon, native app and SDK verified at 0.8.0. Public plugin reference and installed lifecycle declarations checked; host source binds selected workspace cwd before hooks.
@@ -33,6 +36,7 @@ Verified:
 - `git diff --check` passed. Source snapshot SHA-256: `bb541f22067e336c0d61d9e4ba01776c38ff068303f9b3d5e0695f8674943df1`; file inventory saved under ignored artifacts.
 
 Limits:
+
 - Live Jev scenarios are synthetic acceptance examples, not production task evaluation or model calibration.
 - Shell runtime/environment may differ from daemon PATH. Supported root layouts only; unsupported layouts require explicit categories.
 - Durable contracts are in plugin READMEs; no separate Watchtower memory file was needed. No commit or push.

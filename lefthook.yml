@@ -9,6 +9,9 @@ pre-commit:
       run: npm run format:check:files -- {staged_files}
     - name: lint
       glob: "*.{js,jsx,ts,tsx}"
+      # Mirrors .oxlintrc.json ignorePatterns; oxlint exits 1 when every path it receives is ignored.
+      exclude:
+        - "hiep-plugins/**"
       run: npm run lint -- {staged_files}
     - name: typecheck
       run: npm run typecheck

@@ -9,9 +9,9 @@
 
 ## Tracker
 
-| Order | TASK | Group | Status | Spec | Deps | Context | Notes |
-|---|---|---|---|---|---|---|---|
-| 1 | TASK-001 Next prompts v1 | plugin | DONE | [Spec](tasks/TASK-001-next-prompts-v1.md) | - | [Context](CONTEXT.md) | [Verification](tasks/TASK-001-outcome.md) passed before the global policy update. |
+| Order | TASK                     | Group  | Status | Spec                                      | Deps | Context               | Notes                                                                             |
+| ----- | ------------------------ | ------ | ------ | ----------------------------------------- | ---- | --------------------- | --------------------------------------------------------------------------------- |
+| 1     | TASK-001 Next prompts v1 | plugin | DONE   | [Spec](tasks/TASK-001-next-prompts-v1.md) | -    | [Context](CONTEXT.md) | [Verification](tasks/TASK-001-outcome.md) passed before the global policy update. |
 
 | 2 | TASK-002 Recap and What Next v2 | plugin | DONE | [Spec](tasks/TASK-002-recap-next-v2.md) | TASK-001 | [Context](CONTEXT.md) | [Verification](tasks/TASK-002-outcome.md) accepted by the user on desktop. |
 

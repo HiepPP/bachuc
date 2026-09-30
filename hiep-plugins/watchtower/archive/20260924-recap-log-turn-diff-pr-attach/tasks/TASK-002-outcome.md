@@ -27,6 +27,7 @@ Status: DONE (in-app check PENDING-USER)
 ## Verified
 
 Group-level rerun after the review fix (shared run for TASK-002 and TASK-003), in plugins/thread-branch:
+
 - `npm run typecheck` -> exit 0.
 - `npm test` -> 34 tests, 34 pass, 0 fail (includes the new timeout test; turn-diff.test.ts: edited, new untracked, deleted, binary, dirty-at-start, commit during turn, no change, no start snapshot, non-git folder, shared cwd, 20-file limit).
 - `S=lint; npm run $S` -> 0 warnings, 0 errors.
@@ -34,16 +35,19 @@ Group-level rerun after the review fix (shared run for TASK-002 and TASK-003), i
 - Manual in-app check (reload, edit one file -> one row; question-only turn -> no row): PENDING-USER. Plugin not reloaded, per run rules.
 
 In-app evidence 2026-09-24:
+
 - Test turns 12-14 of agent `9ad0b344` changed no files in `~/.claude` (file mtimes and recaps agree). No row is the expected result.
 - The positive case (a turn that edits a file) is not checked in the app yet.
 
 In-app positive check 2026-09-24:
+
 - Probe agent `ac4b5b5a` (Haiku 4.5) created `watchtower/turn-diff-probe.txt` with 3 lines. The raw timeline, read with `@getpaseo/client` `timeline.refetch`, holds the row `turn-diff:foreground-turn-1` of kind `thread-branch-turn-diff`: `fileCount 1, added 3, deleted 0`, the one file, no commits.
 - `shared: true` is right. The main session had a turn running in the same `cwd` when the probe started. Files that were already dirty before the turn were left out of the row.
 - `paseo agent logs` and the MCP activity summary do not show plugin rows. Read the raw timeline to check them.
 - Cleanup: probe file removed and probe agent archived.
 
 Follow-up 2026-09-24: click a file to open its turn diff
+
 - The user asked that a click on a file opens a diff of only that file. No plugin API or URL opens the built-in Changes view for one file: `?open=` takes only agent, terminal, draft, file, and setup. The user picked a plugin-owned panel that shows only the changes from that turn.
 - New: `snapshotTree` writes the work tree, including untracked files, as a tree object using a copy of the index. The row gets `source { workspaceId, root, from, to }`. The RPC `thread-branch.file-diff` runs `git diff from to -- path`. The agent panel `turn-diff` shows it, and the card file rows are links.
 - Checks: typecheck exit 0; tests 37/37 (3 new: a single-file diff that drops edits made before the turn, no source without a workspace, and `diffLines`); lint 0/0; oxfmt clean.
@@ -51,6 +55,7 @@ Follow-up 2026-09-24: click a file to open its turn diff
 - PENDING-USER: click the file in the probe thread and see the Turn diff panel.
 
 Follow-up 2026-09-24: Paseo-style panel and image preview
+
 - The panel now matches Paseo's diff view: a header with a status badge and `+A -D`, old and new line numbers, green and red row tints, a hunk bar, and sideways scroll. Colors and the gutter formula come from the app bundle. `parseUnifiedDiff` replaced `diffLines`.
 - Image files get a Before and After preview. The RPC `thread-branch.file-image` reads each side with `git cat-file blob <tree>:<path>`, at most 3 MB per side, as a `data:` URI.
 - Checks: typecheck exit 0; tests 39/39; lint 0/0; oxfmt clean; reload `running`.
@@ -58,6 +63,7 @@ Follow-up 2026-09-24: Paseo-style panel and image preview
 - PENDING-USER: see the image in the panel.
 
 Follow-up 2026-09-24: card redesign
+
 - Header: a FileDiff icon, the file count, and green `+A` and red `-D`. The commit count sits on the right. The shared-cwd warning and the commits sit in their own section, with icons.
 - File rows: a file-type icon, a muted folder with a bold file name (the folder is cut from the left), right-aligned colored counts, 5 GitHub-style diffstat blocks, and a chevron. Rows highlight on hover. The file open in the panel is marked with an accent bar. No underline.
 - More than 6 files start folded, with Show N more files and Show fewer files.
@@ -67,6 +73,7 @@ Follow-up 2026-09-24: card redesign
 - Found and fixed: the copied index got a new mtime, so git's racy-clean check missed same-size rewrites in the same second. The flaky test `flags a turn that overlapped another agent` failed 1 run in 5. Fix: `utimes` copies the real index times to the copy. After the fix, 0 of 15 runs failed. Tests 40/40.
 
 Follow-up 2026-09-24: persistent turn changes
+
 - Finding: the daemon saves an agent's history only as the provider session file (for Claude, `persistence.sessionId` points to `~/.claude/projects/.../<id>.jsonl`). Plugin rows are neither there nor anywhere under `~/.paseo`. A daemon restart is not tested, because AGENTS.md forbids restarting it.
 - Design: no re-append into the timeline, because restored cards would pile up at the bottom. Each card goes to `plugin-data/thread-branch/turn-diffs.jsonl` (mode 600, 30 days, 2,000 entries, no memory cache, pruned on the first add and then every 50 adds). The panel lists all turns from that file, with an All turns back button and Command Center -> Open turn changes. Refs `refs/thread-branch/turns/<key>/from|to` keep the trees until the entry expires. No worktree is created.
 - Checks: tests 44/44 (4 new: a new journal instance still reads everything, the 30-day prune with a torn line, the 2,000 limit, and refs keep trees through `git gc --prune=now` and release them after drop). Typecheck, lint, and oxfmt pass. Reload is `running`.

@@ -5,6 +5,7 @@
 Status: DONE
 
 Changed:
+
 - Added strict `next-prompts` v1 parsing and server validation of exact allowed selections.
 - Added radio groups, checkboxes, selection counts, and shared Edit/Send controls.
 - Removed unrestricted legacy bulk actions. Individual legacy and Git actions remain available.
@@ -13,6 +14,7 @@ Changed:
 - Preserved the Codex policy symlink and existing design artifacts. No commit or push occurred.
 
 Contract:
+
 - Exclusive groups permit at most one selection. Combinations require an exact declaration within one fence.
 - The server reads current candidates before sending. Metadata changes invalidate earlier keys.
 - Only prompt text is sent, in authored order. Reasons and relationship data stay out of messages.
@@ -20,6 +22,7 @@ Contract:
 - Declared relationships do not prove semantic compatibility or grant permission to run actions in parallel.
 
 Verified:
+
 - Baseline `npm test`: 58 passed. [Log](/tmp/next-prompts-v1-baseline.log).
 - Contract RED run: 5 failed, 1 passed. [Log](/tmp/next-prompts-v1-red.log).
 - UI RED run: 2 failed. [Log](/tmp/next-prompts-v1-ui-red.log).
@@ -36,6 +39,7 @@ Verified:
 - Both repository diffs passed `git diff --check`. The Codex symlink still targets the global Claude policy.
 
 Anti-goal:
+
 - Before implementation, 2026-09-25 16:58:38 +07:00: 58 tests passed; zero existing guard failures.
 - After integration, before browser validation: 47 focused tests passed, followed by 65 full tests; zero guard failures.
 - Final, 2026-09-25 17:18:44 +07:00: 65 tests passed; zero single-send, Git, stale, or deduplication failures.
@@ -43,6 +47,7 @@ Anti-goal:
 - Result: PASS against the zero-failure limit in the tested scope.
 
 Evidence scope:
+
 - Base revision: `cd3423f7c6e8569e5a9828dbf5ef5c4e15da052a`, with the local plugin changes.
 - Plugin source SHA-256: `e7364b93cb4c17a588060dc72889d7fbff9d7d37c10ea4316b4960a84673c298`.
 - The fingerprint covers sorted plugin source paths and bytes, separated by NUL characters.
@@ -51,5 +56,6 @@ Evidence scope:
 - The live native app was on another conversation; no messages or settings were changed there.
 
 Cleanup:
+
 - Closed the fixture tab, restored the viewport, and stopped the local server. Port 8767 has no listener.
 - Kept the ignored fixture source and bundle as reproducible local evidence. No daemon restart occurred.

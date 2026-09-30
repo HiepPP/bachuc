@@ -9,9 +9,9 @@ Updated: 2026-09-27
 
 ## Tracker
 
-| Order | TASK | Group | Status | Spec | Deps | Context | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | TASK-001 | board | DONE | [Spec](tasks/TASK-001-board-archive.md) | - | [Context](CONTEXT.md) | Tests and live RPC passed |
+| Order | TASK     | Group | Status | Spec                                    | Deps | Context               | Notes                     |
+| ----- | -------- | ----- | ------ | --------------------------------------- | ---- | --------------------- | ------------------------- |
+| 1     | TASK-001 | board | DONE   | [Spec](tasks/TASK-001-board-archive.md) | -    | [Context](CONTEXT.md) | Tests and live RPC passed |
 
 ## Handoff
 

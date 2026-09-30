@@ -5,6 +5,7 @@
 Status: DONE
 
 Changed:
+
 - Added a compact plan header, completion bar, status counts, and collapsible task groups.
 - Replaced large cards with compact rows and inline task details.
 - Added an Unknown group for invalid statuses instead of counting them as Todo.
@@ -12,12 +13,14 @@ Changed:
 - Fixed exact attachment search by including its key in scoped result metadata.
 
 Contract:
+
 - The plugin remains read-only. It does not edit plans or send agent prompts.
 - Task briefs, dependencies, blockers, errors, and native composer attachments remain available.
 - Attachment IDs and text snapshots remain stable. Unscoped result subtitles remain unchanged.
 - No unrelated plugin proposal was implemented. No commit or push was made.
 
 Verified:
+
 - Ran `npm run format && npm run typecheck && npm run lint && npm test` in the plugin directory.
 - All 10 tests passed. Lint reported zero warnings and errors. Typecheck passed.
 - Tests covered zero completion, mixed groups, unknown statuses, read-only fixtures, errors, and attachment keys.
@@ -39,10 +42,12 @@ Verified:
 - `git diff --check` passed.
 
 Source evidence:
+
 - Client SHA-256: `81c3e9f7e47ee0bdb716828a53b54840847963153faacd572603324a57797f3c`.
 - Summary helper SHA-256: `d182404a50c29d125fe43dfcbc928fe3a0ee8f57420038c0b82f9773fada6b31`.
 - Attachment handler SHA-256: `d72f5a08feb0f1a7e64c488bbad6e1328d8d3a17368f3ddf72c75bb13a3fd3d0`.
 
 Limitations:
+
 - The reference hierarchy is adapted to Paseo; VS Code controls and exact colors were not copied.
 - Narrow desktop UI was tested. No physical iOS or Android device was tested.

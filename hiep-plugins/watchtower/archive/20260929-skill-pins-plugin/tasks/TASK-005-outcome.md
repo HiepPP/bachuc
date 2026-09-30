@@ -5,6 +5,7 @@
 Status: DONE
 
 Changed:
+
 - Added [plugins/skill-pins/shared/settings.ts](plugins/skill-pins/shared/settings.ts) with host settings `defaults` and the `SKILL_PINS_INITIAL` env name. The spec listed `shared/contracts.ts`; a separate file follows the `prompt-translate` settings pattern.
 - Added the settings screen [plugins/skill-pins/client/settings.tsx](plugins/skill-pins/client/settings.tsx), registered in [plugins/skill-pins/index.client.tsx](plugins/skill-pins/index.client.tsx). It appears under Settings > Plugins > skill-pins actions > Skill pins.
 - [plugins/skill-pins/index.server.ts](plugins/skill-pins/index.server.ts): `before("agent.create")` adds `SKILL_PINS_INITIAL` for Claude and Codex. `before("agent.session_open")` with reason `create` seeds `skills.json`. The spec named `agent.created`, but that event has no env; `session_open` carries `agentId` and `env` and runs before the first turn.
@@ -13,10 +14,12 @@ Changed:
 - README: added the Default pins section and removed Q3.
 
 Contract:
+
 - An existing `skills.json` always wins over the env value, even with `[]`.
 - Existing agents are never backfilled.
 
 Verified:
+
 - Spike 2026-09-29: this Paseo Claude agent's process env holds `PASEO_ORCH_TOKEN`, `PASEO_BOARD_TOKEN`, and `PASEO_JEV_NATIVE_POLICY`, all added by other plugins through `before("agent.create")` `request.env`. Native hooks are child processes of the provider, so they inherit it. The live check below confirms the path end to end.
 - `npm run format`, `npm run typecheck`, `S=lint; npm run $S` (0 warnings, 0 errors), `npm test` -> 45 pass, 0 fail. New tests: env fallback and `[]` override in `tests/hook.test.ts`, seed-only-when-missing in `tests/state.test.ts`.
 - `paseo plugin reload skill-pins` -> `running`, logs show `Plugin ready`.
@@ -26,6 +29,7 @@ Verified:
 - Both test agents were archived.
 
 Anti-goal:
+
 - Before: 2 existing `skills.json` files hashed into `/tmp/skill-pins-before.txt`; 2026-09-29T08:14:11Z.
 - Final: same 2 hashes, `diff` empty; 2026-09-29T08:16:44Z.
 - Result: PASS against the limit that existing selections do not change.

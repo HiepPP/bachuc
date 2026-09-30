@@ -93,4 +93,3 @@ Second and third rows are collapsed. Their headers show the EXACT full B and C p
 Make the list compact enough for many suggestions. Use chevrons as clear controls, lightweight row dividers, about 76px high collapsed rows and about 220px expanded row. Calm product typography and no extra icons. This design should visibly reduce action clutter, preserve orientation, and allow deliberate reading before sending. No bulk-send action in this concept.
 
 ```
-

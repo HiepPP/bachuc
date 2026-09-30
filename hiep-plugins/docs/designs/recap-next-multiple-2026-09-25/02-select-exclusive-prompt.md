@@ -39,4 +39,3 @@ Right: outlined "Edit selected" and primary charcoal "Send selected (2)"
 Make the send payload scope unmistakable. Do not show Send all. Do not show two selected radios. Do not claim live compatibility checks or present implementation as completed. All exact text must be readable, no clipped labels.
 Keep 64px horizontal margins, 22-24px headings, 17-18px prompt text, 15-16px secondary text, 40-44px controls. Keep the entire component comfortably above the fold. Use layout and typography rather than excessive nested cards. This is a revised visual proposal, not working UI.
 ```
-

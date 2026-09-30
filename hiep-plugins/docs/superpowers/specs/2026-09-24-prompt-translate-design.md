@@ -22,14 +22,14 @@ Both features can be switched off in settings. Latency is the top priority.
 
 ## Decisions
 
-| Topic | Decision | Reason |
-| --- | --- | --- |
-| Render | Private DOM adapter on desktop | Keeps native bubble images, attachments, rewind, and copy. `addTimelineTransformer` would replace the whole bubble. |
-| Shortcut | Cmd/Ctrl+Enter always runs enhance, including while the agent runs | User choice. This removes the host keyboard Queue action (`packages/app/src/composer/input/input.tsx:417`). Queue remains on the button. |
-| Enhance output | Replaces composer text, then sends it with a synthetic plain Enter | User changed this on 2026-09-24: send immediately, no review step. |
-| Scope | Only new prompts that contain Vietnamese diacritics | Avoids spending quota on history and English prompts. |
-| Provider | OpenAI-compatible OpenRouter (default) or Vercel AI Gateway | User choice after the 2026-09-24 benchmark. The Vercel free tier blocked 5 candidates (403) and rate-limited bursts (429). |
-| Models | Separate models for translate and enhance | Translate needs the lowest latency. Enhance needs slightly better quality. |
+| Topic          | Decision                                                           | Reason                                                                                                                                   |
+| -------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Render         | Private DOM adapter on desktop                                     | Keeps native bubble images, attachments, rewind, and copy. `addTimelineTransformer` would replace the whole bubble.                      |
+| Shortcut       | Cmd/Ctrl+Enter always runs enhance, including while the agent runs | User choice. This removes the host keyboard Queue action (`packages/app/src/composer/input/input.tsx:417`). Queue remains on the button. |
+| Enhance output | Replaces composer text, then sends it with a synthetic plain Enter | User changed this on 2026-09-24: send immediately, no review step.                                                                       |
+| Scope          | Only new prompts that contain Vietnamese diacritics                | Avoids spending quota on history and English prompts.                                                                                    |
+| Provider       | OpenAI-compatible OpenRouter (default) or Vercel AI Gateway        | User choice after the 2026-09-24 benchmark. The Vercel free tier blocked 5 candidates (403) and rate-limited bursts (429).               |
+| Models         | Separate models for translate and enhance                          | Translate needs the lowest latency. Enhance needs slightly better quality.                                                               |
 
 ## Host facts (Paseo 0.9.1 source at `~/Projects/paseo`)
 
@@ -82,14 +82,20 @@ Inputs are capped at 20,000 characters, and longer inputs are rejected.
 
 ```ts
 {
-  translate: boolean;          // default true
-  enhanceShortcut: boolean;    // default true
+  translate: boolean; // default true
+  enhanceShortcut: boolean; // default true
   matchReplyLanguage: boolean; // default true; conditional preference for Vietnamese drafts
-  cavemanMode: "follow-agent" | "lite" | "full" | "ultra" | "wenyan-lite" | "wenyan-full" | "wenyan-ultra"; // default "follow-agent"
+  cavemanMode: "follow-agent" |
+    "lite" |
+    "full" |
+    "ultra" |
+    "wenyan-lite" |
+    "wenyan-full" |
+    "wenyan-ultra"; // default "follow-agent"
   chineseScript: "skill-default" | "simplified"; // default "skill-default"; selected Wenyan modes only
   provider: "vercel" | "openrouter"; // default "openrouter"
-  translateModel: string;      // default chosen from benchmark
-  enhanceModel: string;        // default chosen from benchmark
+  translateModel: string; // default chosen from benchmark
+  enhanceModel: string; // default chosen from benchmark
 }
 ```
 

@@ -5,18 +5,21 @@
 Status: DONE
 
 Changed:
+
 - Created the Board task and generated a UI concept with the built-in imagegen tool.
 - Implemented and installed the separate Board plugin with a native sidebar item and two-column page.
 - Added lifecycle tracking, active-run reconciliation, bounded history, and explicit missing-outcome states.
 - Added offline/stale feedback after independent review reproduced paused queries falsely showing Live.
 
 Contract:
+
 - Each card now represents one Paseo conversation. Idle status never proves completion.
 - The latest 50 observed finished conversations stay in memory until reload or disable. Earlier finished history is unavailable.
 - The UI polls every two seconds. It uses host theme colors and standard plugin APIs, without private sidebar changes.
 - Paseo source, existing plugins, agents, and Space membership are preserved.
 
 Verified:
+
 - The concept places Board immediately below Schedules and shows Running and Just finished columns.
 - The image uses synthetic example runs. It does not prove runtime integration.
 - The user approved the UI and confirmed that each task represents a Paseo agent run on 2026-09-20.
@@ -32,11 +35,13 @@ Verified:
 - Final enable loaded the current source. The active run returned, history reset, and the final full-height layout rendered correctly.
 
 Limitations:
+
 - Native mobile and compact layout were not exercised on a device. Desktop checks used the installed macOS app.
 - Loading/error/offline classification has automated coverage; no real host outage was induced.
 - Failure and cancellation transitions have automated coverage; the live smoke covered successful completion.
 
 Cleanup:
+
 - Archived the smoke agent after completion. Final enable cleared its temporary in-memory card.
 - Restored System theme and Space 1. No temporary server, credential, or worktree was created.
 - Board remains enabled for use. No commit or push was made.

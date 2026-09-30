@@ -70,10 +70,12 @@ Per-task checks and the heavy checks ran once as a group-level run (group A has 
 Status: DONE
 
 Changed:
+
 - The user still saw old rows in the sidebar. Cause: the sidebar lists workspaces, and 95 unarchived `local_checkout` workspaces held only archived agents.
 - The sweep now also archives idle workspaces with no unarchived agent, no open terminal, no pin, and not a Paseo-owned worktree.
 
 Verified:
+
 - `npm run typecheck`, oxlint, and `npm test` -> 12/12 pass.
 - `paseo plugin logs thread-janitor` -> `archived 95 of 95 stale workspaces, failed 0`.
 - `~/.paseo/projects/workspaces.json` -> 40 unarchived workspaces. None of them lacks a live agent. No archived workspace held a live agent.

@@ -37,38 +37,40 @@ settings, `node:test` via `tsx`, `linkedom` for DOM tests, `oxlint`, and `oxfmt`
 
 ## File map
 
-| File | Responsibility |
-| --- | --- |
+| File                                                 | Responsibility                                                             |
+| ---------------------------------------------------- | -------------------------------------------------------------------------- |
 | `paseo-plugin.json`, `package.json`, `tsconfig.json` | Manifest, scripts, and dev dependencies, the same as `next-prompt-actions` |
-| `shared/vietnamese.ts` | `hasVietnamese(text)` |
-| `shared/contracts.ts` | Zod RPC contracts |
-| `shared/settings.ts` | `translateSettings` definition and defaults |
-| `server/credentials.ts` | Provider to `{ baseUrl, apiKey }` |
-| `server/prompts.ts` | System prompts, message building, token and timeout limits |
-| `server/llm.ts` | `createCompleter`: one chat completion |
-| `server/store.ts` | Cache, in-flight dedupe, enhance pairs, and persistence |
-| `server/service.ts` | RPC behavior on top of the store, completer, and settings |
-| `index.server.ts` | Wiring |
-| `client/dom.ts` | Minimal DOM types, fiber props reader, and desktop check |
-| `client/bubble.ts` | User bubble adapter |
-| `client/composer.ts` | Cmd/Ctrl+Enter adapter |
-| `client/state.ts` | Client settings cache and `activeSince` |
-| `client/settings.tsx` | Settings screen |
-| `index.client.tsx` | Wiring |
-| `benchmark/run.ts`, `benchmark/samples.json` | Manual latency benchmark |
-| `tests/*.test.ts` | Unit tests |
-| `README.md`, root `README.md` | Documentation and catalog row |
+| `shared/vietnamese.ts`                               | `hasVietnamese(text)`                                                      |
+| `shared/contracts.ts`                                | Zod RPC contracts                                                          |
+| `shared/settings.ts`                                 | `translateSettings` definition and defaults                                |
+| `server/credentials.ts`                              | Provider to `{ baseUrl, apiKey }`                                          |
+| `server/prompts.ts`                                  | System prompts, message building, token and timeout limits                 |
+| `server/llm.ts`                                      | `createCompleter`: one chat completion                                     |
+| `server/store.ts`                                    | Cache, in-flight dedupe, enhance pairs, and persistence                    |
+| `server/service.ts`                                  | RPC behavior on top of the store, completer, and settings                  |
+| `index.server.ts`                                    | Wiring                                                                     |
+| `client/dom.ts`                                      | Minimal DOM types, fiber props reader, and desktop check                   |
+| `client/bubble.ts`                                   | User bubble adapter                                                        |
+| `client/composer.ts`                                 | Cmd/Ctrl+Enter adapter                                                     |
+| `client/state.ts`                                    | Client settings cache and `activeSince`                                    |
+| `client/settings.tsx`                                | Settings screen                                                            |
+| `index.client.tsx`                                   | Wiring                                                                     |
+| `benchmark/run.ts`, `benchmark/samples.json`         | Manual latency benchmark                                                   |
+| `tests/*.test.ts`                                    | Unit tests                                                                 |
+| `README.md`, root `README.md`                        | Documentation and catalog row                                              |
 
 ---
 
 ### Task 1: Scaffold and shared contracts
 
 **Files:**
+
 - Create: `plugins/prompt-translate/paseo-plugin.json`, `package.json`, `tsconfig.json`
 - Create: `plugins/prompt-translate/shared/vietnamese.ts`, `shared/contracts.ts`, `shared/settings.ts`
 - Test: `plugins/prompt-translate/tests/shared.test.ts`
 
 **Interfaces:**
+
 - Produces: `hasVietnamese(text: string): boolean`; `translateRpc`, `enhanceRpc`, `originalRpc`;
   `translateSettings`, `type TranslateSettings`, `type Provider = "vercel" | "openrouter"`,
   `DEFAULT_TRANSLATE_MODEL`, `DEFAULT_ENHANCE_MODEL`, `MAX_TEXT = 20_000`.
@@ -176,8 +178,7 @@ Expected: FAIL, because the modules cannot be found.
 ```ts
 // Any Vietnamese diacritic counts. Words like "là" share letters with French, but requiring
 // Vietnamese-only letters would miss short prompts such as "cái này là gì".
-const VIETNAMESE =
-  /[àáảãạăằắẳẵặâầấẩẫậđèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]/iu;
+const VIETNAMESE = /[àáảãạăằắẳẵặâầấẩẫậđèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]/iu;
 
 export function hasVietnamese(text: string): boolean {
   return VIETNAMESE.test(text);
@@ -250,10 +251,12 @@ Expected: 3 tests pass, and typecheck exits 0.
 ### Task 2: Credentials, prompts, and one LLM call
 
 **Files:**
+
 - Create: `server/credentials.ts`, `server/prompts.ts`, `server/llm.ts`
 - Test: `tests/llm.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Provider` from `shared/settings.ts`.
 - Produces:
   - `type Endpoint = { baseUrl: string; apiKey: string }`
@@ -319,7 +322,9 @@ test("messages wrap the text so the model translates instead of answering", () =
 });
 
 test("completer posts one non-streamed request and returns trimmed content", async () => {
-  let seen: { url: string; headers: Record<string, string>; body: Record<string, unknown> } | undefined;
+  let seen:
+    | { url: string; headers: Record<string, string>; body: Record<string, unknown> }
+    | undefined;
   const fetchImpl: FetchLike = async (url, init) => {
     seen = { url, headers: init.headers, body: JSON.parse(init.body) };
     return {
@@ -328,8 +333,16 @@ test("completer posts one non-streamed request and returns trimmed content", asy
       json: async () => ({ choices: [{ message: { content: "  <message>Hello</message> " } }] }),
     };
   };
-  const complete = createCompleter(async () => ({ baseUrl: "https://g/v1", apiKey: "k" }), fetchImpl);
-  const out = await complete({ mode: "translate", provider: "vercel", model: "m", text: "xin chào" });
+  const complete = createCompleter(
+    async () => ({ baseUrl: "https://g/v1", apiKey: "k" }),
+    fetchImpl,
+  );
+  const out = await complete({
+    mode: "translate",
+    provider: "vercel",
+    model: "m",
+    text: "xin chào",
+  });
   assert.equal(out, "Hello");
   assert.equal(seen?.url, "https://g/v1/chat/completions");
   assert.equal(seen?.headers.authorization, "Bearer k");
@@ -344,14 +357,25 @@ test("completer errors carry status and provider message, never the key", async 
     status: 401,
     json: async () => ({ error: { message: "bad key" } }),
   });
-  const complete = createCompleter(async () => ({ baseUrl: "https://g", apiKey: "secret" }), failing);
+  const complete = createCompleter(
+    async () => ({ baseUrl: "https://g", apiKey: "secret" }),
+    failing,
+  );
   await assert.rejects(
     complete({ mode: "enhance", provider: "vercel", model: "m", text: "x" }),
-    (error: Error) => error.message === "Model request failed (401): bad key" && !error.message.includes("secret"),
+    (error: Error) =>
+      error.message === "Model request failed (401): bad key" && !error.message.includes("secret"),
   );
-  const empty: FetchLike = async () => ({ ok: true, status: 200, json: async () => ({ choices: [] }) });
+  const empty: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ choices: [] }),
+  });
   await assert.rejects(
-    createCompleter(async () => ({ baseUrl: "https://g", apiKey: "k" }), empty)({
+    createCompleter(
+      async () => ({ baseUrl: "https://g", apiKey: "k" }),
+      empty,
+    )({
       mode: "translate",
       provider: "vercel",
       model: "m",
@@ -434,7 +458,10 @@ export function buildMessages(mode: Mode, text: string) {
 
 // Generous caps: an exhausted budget truncates output, which is worse than a slower reply.
 export function maxTokens(mode: Mode, text: string): number {
-  return Math.min(8192, mode === "translate" ? Math.ceil(text.length / 2) + 256 : text.length + 1024);
+  return Math.min(
+    8192,
+    mode === "translate" ? Math.ceil(text.length / 2) + 256 : text.length + 1024,
+  );
 }
 
 export const TIMEOUT_MS: Record<Mode, number> = { translate: 15_000, enhance: 30_000 };
@@ -512,10 +539,12 @@ Expected: all tests pass, and typecheck exits 0.
 ### Task 3: Store with cache, dedupe, and enhance pairs
 
 **Files:**
+
 - Create: `server/store.ts`
 - Test: `tests/store.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `hash(...parts: string[]): string` (sha256 hex)
   - `class Store(file: string, limits?: { cache: number; pairs: number }, delay?: number)` with:
@@ -558,7 +587,10 @@ test("concurrent runs for one key share a single task", async () => {
 
 test("a failed task is not cached and can run again", async () => {
   const store = new Store(await file(), undefined, 5);
-  await assert.rejects(store.run("k", async () => Promise.reject(new Error("boom"))), { message: "boom" });
+  await assert.rejects(
+    store.run("k", async () => Promise.reject(new Error("boom"))),
+    { message: "boom" },
+  );
   assert.equal(await store.run("k", async () => "ok"), "ok");
   store.close();
 });
@@ -715,10 +747,12 @@ Expected: all tests pass, and typecheck exits 0.
 ### Task 4: Service and server entry
 
 **Files:**
+
 - Create: `server/service.ts`, `index.server.ts`
 - Test: `tests/service.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Store`, `hash` (Task 3); `Complete`, `createCompleter`, `resolveEndpoint` (Task 2);
   `translateSettings`, `TranslateSettings`, `hasVietnamese`, and the RPC contracts (Task 1).
 - Produces: `createService(deps: { store: Store; complete: Complete; settings: () => Promise<TranslateSettings> })`,
@@ -757,7 +791,9 @@ async function setup(overrides: Partial<TranslateSettings> = {}) {
 
 test("cacheOnly never calls the model, and a real translate fills the cache", async () => {
   const { service, requests, store } = await setup();
-  assert.deepEqual(await service.translate({ text: "xin chào", cacheOnly: true }), { translation: null });
+  assert.deepEqual(await service.translate({ text: "xin chào", cacheOnly: true }), {
+    translation: null,
+  });
   assert.deepEqual(await service.translate({ text: "xin chào", cacheOnly: false }), {
     translation: "EN:xin chào",
   });
@@ -790,7 +826,9 @@ test("enhance uses the enhance model and records the original", async () => {
   assert.deepEqual(await service.original({ text: "PROMPT:sửa lỗi" }), { original: "sửa lỗi" });
   assert.deepEqual(await service.original({ text: "sửa lỗi" }), { original: null });
   const off = await setup({ enhanceShortcut: false });
-  await assert.rejects(off.service.enhance({ text: "sửa lỗi" }), { message: "Enhance shortcut is off" });
+  await assert.rejects(off.service.enhance({ text: "sửa lỗi" }), {
+    message: "Enhance shortcut is off",
+  });
   store.close();
   off.store.close();
 });
@@ -895,16 +933,18 @@ This task consumes API quota. Confirm with the user before Step 3. The default r
 330 calls: 11 models × 2 modes × 3 samples × 5 runs.
 
 **Files:**
+
 - Create: `benchmark/run.ts`, `benchmark/samples.json`
 - Modify: `shared/settings.ts` (the two default model constants), `tests/shared.test.ts` and
   `tests/service.test.ts` (expected default IDs)
 
 **Interfaces:**
+
 - Consumes: `resolveEndpoint` and `buildMessages`, `maxTokens`, `Mode` from Task 2.
 
 - [ ] **Step 1: Create `benchmark/samples.json` (synthetic only)**
 
-```json
+````json
 [
   { "id": "short", "text": "Sửa lỗi nút Lưu không phản hồi trên trang cài đặt." },
   {
@@ -916,7 +956,7 @@ This task consumes API quota. Confirm with the user before Step 3. The default r
     "text": "Tôi muốn thêm tính năng xuất báo cáo CSV cho trang đơn hàng.\n\nBối cảnh: dữ liệu lấy từ `src/orders/query.ts`, bảng hiển thị ở `src/orders/table.tsx`. Hiện tại người dùng phải copy tay từng dòng.\n\nYêu cầu:\n- Nút \"Xuất CSV\" ở góc phải thanh công cụ.\n- Chỉ xuất các dòng đang được lọc, giữ đúng thứ tự cột.\n- Ngày theo định dạng ISO, số tiền không có dấu phân cách hàng nghìn.\n\n```ts\nexport type Order = { id: string; total: number; createdAt: Date };\n```\n\nKhông thêm thư viện mới. Viết test cho hàm chuyển đổi và kiểm tra với 10.000 dòng vẫn dưới 1 giây."
   }
 ]
-```
+````
 
 - [ ] **Step 2: Create `benchmark/run.ts`**
 
@@ -962,9 +1002,10 @@ const models = (args.get("models")?.split(",") ?? CANDIDATES).filter((model) => 
   console.log(`skip ${model}: not listed by ${provider}`);
   return false;
 });
-const samples = JSON.parse(
-  await readFile(new URL("./samples.json", import.meta.url), "utf8"),
-) as { id: string; text: string }[];
+const samples = JSON.parse(await readFile(new URL("./samples.json", import.meta.url), "utf8")) as {
+  id: string;
+  text: string;
+}[];
 
 type Result = { ttftMs?: number; totalMs?: number; output?: string; error?: string };
 type Row = Result & { model: string; mode: Mode; sample: string; run: number };
@@ -1006,7 +1047,9 @@ async function call(model: string, mode: Mode, text: string): Promise<Result> {
         output += delta;
       }
     }
-    return output ? { ttftMs, totalMs: performance.now() - start, output } : { error: "empty output" };
+    return output
+      ? { ttftMs, totalMs: performance.now() - start, output }
+      : { error: "empty output" };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
@@ -1043,7 +1086,12 @@ for (const model of models)
     );
   }
 
-const out = path.join(import.meta.dirname, "..", "artifacts", `benchmark-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+const out = path.join(
+  import.meta.dirname,
+  "..",
+  "artifacts",
+  `benchmark-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+);
 await mkdir(path.dirname(out), { recursive: true });
 await writeFile(out, JSON.stringify({ provider, runs, rows }, null, 2));
 console.log(`\nraw outputs: ${out}`);
@@ -1070,6 +1118,7 @@ calls stay in the results. Do not rerun them to improve scores.
 Read the raw outputs for quality. The translation must be faithful and must not answer the
 prompt. The enhance output must add no invented requirements and keep code and paths verbatim.
 Then pick:
+
 - translate: the lowest total p50 among models whose translate outputs are all acceptable;
 - enhance: the lowest total p50 among models whose enhance outputs are all acceptable.
 
@@ -1087,10 +1136,12 @@ Expected: all pass.
 ### Task 6: Bubble adapter
 
 **Files:**
+
 - Create: `client/dom.ts`, `client/bubble.ts`
 - Test: `tests/bubble.test.ts`
 
 **Interfaces:**
+
 - Consumes: `hasVietnamese` (Task 1).
 - Produces:
   - `client/dom.ts`: `interface El`, `interface Doc`, `type Key`, `type Observer`,
@@ -1189,7 +1240,10 @@ type Message = { text: string; timestamp?: number };
 function page(messages: Message[]) {
   const { document, window } = parseHTML(
     `<html><head></head><body>${messages
-      .map(() => '<div data-testid="user-message"><div><div data-message-text="true"></div></div></div>')
+      .map(
+        () =>
+          '<div data-testid="user-message"><div><div data-message-text="true"></div></div></div>',
+      )
       .join("")}</body></html>`,
   );
   const texts = Array.from(document.querySelectorAll('[data-message-text="true"]'));
@@ -1336,7 +1390,12 @@ const STYLE = `
 @keyframes pt-pulse {50% {opacity:.05;}}
 `;
 
-export function installBubbles(api: BubbleApi, options: BubbleOptions, doc: Doc, Observer?: Observer) {
+export function installBubbles(
+  api: BubbleApi,
+  options: BubbleOptions,
+  doc: Doc,
+  Observer?: Observer,
+) {
   let seen = new WeakMap<El, string>();
   let stopped = false;
   let scheduled = false;
@@ -1382,11 +1441,13 @@ export function installBubbles(api: BubbleApi, options: BubbleOptions, doc: Doc,
       if (!hasVietnamese(text)) return drop(textNode);
       const props = reactProps(
         textNode,
-        (candidate) => typeof candidate.message === "string" && typeof candidate.timestamp === "number",
+        (candidate) =>
+          typeof candidate.message === "string" && typeof candidate.timestamp === "number",
       );
       // Prompts older than activation, or without a readable timestamp, never spend quota.
       cacheOnly = !props || (props.timestamp as number) < options.activeSince();
-      if (!cacheOnly) box(textNode, element("span", "pt-label", "EN"), element("div", "pt-loading"));
+      if (!cacheOnly)
+        box(textNode, element("span", "pt-label", "EN"), element("div", "pt-loading"));
       const translation = await api.translate(text, cacheOnly);
       if (!current(textNode, text)) return;
       if (translation) show(textNode, "EN", translation);
@@ -1452,10 +1513,12 @@ adapter to use an API that works in both linkedom and Electron. Do not weaken th
 ### Task 7: Composer adapter
 
 **Files:**
+
 - Create: `client/composer.ts`
 - Test: `tests/composer.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Doc`, `El`, `Key` from `client/dom.ts` (Task 6).
 - Produces: `type ComposerApi = { enhance(text: string): Promise<string> }`,
   `installComposer(api: ComposerApi, options: { enabled(): boolean }, doc: Doc): { onKeydown(event: Key): void; stop(): void }`,
@@ -1505,7 +1568,9 @@ function deferred() {
   return { promise, resolve, reject };
 }
 const badge = (doc: Doc) =>
-  (doc as unknown as { querySelector(s: string): El | null }).querySelector("[data-prompt-translate-badge]");
+  (doc as unknown as { querySelector(s: string): El | null }).querySelector(
+    "[data-prompt-translate-badge]",
+  );
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 test("Cmd+Enter replaces the draft with the enhanced prompt and blocks the host send", async () => {
@@ -1560,7 +1625,11 @@ test("other keys, other targets, IME, and the disabled setting are untouched", (
 test("Ctrl+Enter works too, and an edited draft is never overwritten", async () => {
   const { doc, field } = page("bản nháp");
   const pending = deferred();
-  const composer = installComposer({ enhance: () => pending.promise }, { enabled: () => true }, doc);
+  const composer = installComposer(
+    { enhance: () => pending.promise },
+    { enabled: () => true },
+    doc,
+  );
   composer.onKeydown(key(field, { metaKey: false, ctrlKey: true }).event);
   field.value = "bản nháp đã sửa";
   pending.resolve("Draft.");
@@ -1710,10 +1779,12 @@ Expected: all pass.
 ### Task 8: Client entry, state, and settings screen
 
 **Files:**
+
 - Create: `client/state.ts`, `client/settings.tsx`, `index.client.tsx`
 - Test: `tests/state.test.ts`
 
 **Interfaces:**
+
 - Consumes: `installBubbles` (Task 6), `installComposer` (Task 7), `desktopSupported`, `Doc`,
   `Observer` (Task 6), the RPC contracts and `translateSettings` (Task 1).
 - Produces: `current: { values: TranslateSettings; activeSince: number; onChange?: () => void; apply(next: TranslateSettings): void }`.
@@ -1952,6 +2023,7 @@ them exactly.
 ### Task 9: Documentation, install, and live verification
 
 **Files:**
+
 - Create: `plugins/prompt-translate/README.md`
 - Modify: root `README.md` (catalog table near line 157)
 

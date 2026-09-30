@@ -5,11 +5,13 @@
 Status: DONE
 
 Changed:
+
 - Added the [Watchtower board plugin](../../../../plugins/watchtower-board/README.md) and its root catalog entry.
 - Added a read-only workspace panel, refresh action, task brief view, and native composer attachment source.
 - Installed and reloaded the plugin on the local Paseo 0.8.0 host, `srv_0SBGwwyUBqsT`.
 
 Contract:
+
 - Reads the exact workspace directory. No repository files, agents, or messages are changed by plugin operations.
 - The panel shows status, dependencies, recorded blockers, and file errors.
 - Attachments use the native composer picker. There is no public 0.8.0 API for direct panel insertion.
@@ -17,6 +19,7 @@ Contract:
 - Other proposed tasks remain unselected.
 
 Verified:
+
 - `npm run format`, `npm run typecheck`, `npm run lint`, and `npm test` in the plugin directory passed.
 - Seven fixture tests passed: parser, blockers, attachments, read-only behavior, errors, path bounds, and exact ID snapshots.
 - `paseo plugin reload watchtower-board` and `paseo plugin ls watchtower-board --json` reported `running`.
@@ -28,6 +31,7 @@ Verified:
 - Native-only client audit found no DOM APIs or HTML elements. `git diff --check` passed.
 
 Verified on 2026-09-19:
+
 - TASK-007 completed native UI acceptance on the installed host.
 - Wide desktop and a roughly 316px panel displayed task rows, details, and status groups correctly.
 - Task selection, group disclosure, refresh, and a missing-spec error worked.
@@ -38,7 +42,9 @@ Verified on 2026-09-19:
 - Formatter, typecheck, lint, and all 10 tests passed. Plugin reload reported running without a load error.
 
 Limitations:
+
 - Narrow desktop UI was tested. No physical iOS or Android device was tested.
 
 Handoff:
+
 - No commit or push was made. The updated plugin remains enabled.

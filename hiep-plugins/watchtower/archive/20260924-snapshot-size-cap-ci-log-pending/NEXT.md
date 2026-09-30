@@ -11,10 +11,10 @@
 
 One row per TASK. Group ties together items that write the same files.
 
-| Order | TASK | Group | Status | Spec | Deps | Context | Notes |
-|-------|------|-------|--------|------|------|---------|-------|
-| 1 | TASK-001 Skip large untracked files in turn snapshots | A | DONE | [watchtower/tasks/TASK-001-snapshot-untracked-size-cap.md](watchtower/tasks/TASK-001-snapshot-untracked-size-cap.md) | - | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Touches the real-index safety path. Class risky. |
-| 2 | TASK-002 Keep CI logs of running workflows as not ready | A | DONE | [watchtower/tasks/TASK-002-ci-log-not-ready.md](watchtower/tasks/TASK-002-ci-log-not-ready.md) | - | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares the thread-branch README with TASK-001. |
+| Order | TASK                                                    | Group | Status | Spec                                                                                                                 | Deps | Context                                        | Notes                                            |
+| ----- | ------------------------------------------------------- | ----- | ------ | -------------------------------------------------------------------------------------------------------------------- | ---- | ---------------------------------------------- | ------------------------------------------------ |
+| 1     | TASK-001 Skip large untracked files in turn snapshots   | A     | DONE   | [watchtower/tasks/TASK-001-snapshot-untracked-size-cap.md](watchtower/tasks/TASK-001-snapshot-untracked-size-cap.md) | -    | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Touches the real-index safety path. Class risky. |
+| 2     | TASK-002 Keep CI logs of running workflows as not ready | A     | DONE   | [watchtower/tasks/TASK-002-ci-log-not-ready.md](watchtower/tasks/TASK-002-ci-log-not-ready.md)                       | -    | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares the thread-branch README with TASK-001.   |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.

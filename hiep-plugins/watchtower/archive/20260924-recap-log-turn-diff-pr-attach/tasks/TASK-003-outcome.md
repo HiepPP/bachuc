@@ -27,6 +27,7 @@ Status: DONE (in-app check PENDING-USER)
 ## Verified
 
 Group-level rerun after the review fix (shared run for TASK-002 and TASK-003), in plugins/thread-branch:
+
 - `npm run typecheck` -> exit 0.
 - `npm test` -> 34 tests, 34 pass, 0 fail (includes the new timeout test; pr-search.test.ts: GitHub and non-GitHub remotes, duplicate repos, query matching, 20-item limit, body and log cuts, 5-minute cache, 3 concurrent gh calls, CI failure item after background fetch, gh missing).
 - `S=lint; npm run $S` -> 0 warnings, 0 errors.
@@ -34,6 +35,7 @@ Group-level rerun after the review fix (shared run for TASK-002 and TASK-003), i
 - Manual in-app check (`gh auth status` signed in, reload, composer + -> GitHub PR lists PRs, pick adds summary): PENDING-USER. Plugin not reloaded, per run rules.
 
 In-app evidence 2026-09-24:
+
 - The picker search ran at 10:38 local. It found PRs in `Expensify/App` and `getpaseo/paseo` and started background CI log fetches.
 - All 7 `gh run view --log-failed` calls failed outside the plugin. `getpaseo/paseo` run 35951176054 is still in progress, so gh prints "logs will be available when it is complete". `Expensify/App` returns `HTTP 404` on `actions/workflows/327409428`. So no "CI failure" item appeared.
 - Whether PR items show in the picker is not seen by the main session.

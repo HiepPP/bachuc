@@ -11,11 +11,11 @@
 
 One row per TASK. Group ties together items that write the same files.
 
-| Order | TASK | Group | Status | Spec | Deps | Context | Notes |
-|-------|------|-------|--------|------|------|---------|-------|
-| 1 | TASK-001 Export threads to markdown | A | DONE | [watchtower/tasks/TASK-001-export-threads-markdown.md](watchtower/tasks/TASK-001-export-threads-markdown.md) | - | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Hook `agent.turn_ended` plus a startup backfill. |
-| 2 | TASK-002 Keep a qmd index of exported threads | A | DONE | [watchtower/tasks/TASK-002-qmd-index.md](watchtower/tasks/TASK-002-qmd-index.md) | TASK-001 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares index.server.ts with TASK-001. |
-| 3 | TASK-003 Skill that tells agents to search threads | B | DONE | [watchtower/tasks/TASK-003-thread-search-skill.md](watchtower/tasks/TASK-003-thread-search-skill.md) | TASK-002 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Skill plus README. Links into Claude and Codex skill folders. |
+| Order | TASK                                               | Group | Status | Spec                                                                                                         | Deps     | Context                                        | Notes                                                         |
+| ----- | -------------------------------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------------------ | -------- | ---------------------------------------------- | ------------------------------------------------------------- |
+| 1     | TASK-001 Export threads to markdown                | A     | DONE   | [watchtower/tasks/TASK-001-export-threads-markdown.md](watchtower/tasks/TASK-001-export-threads-markdown.md) | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Hook `agent.turn_ended` plus a startup backfill.              |
+| 2     | TASK-002 Keep a qmd index of exported threads      | A     | DONE   | [watchtower/tasks/TASK-002-qmd-index.md](watchtower/tasks/TASK-002-qmd-index.md)                             | TASK-001 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares index.server.ts with TASK-001.                         |
+| 3     | TASK-003 Skill that tells agents to search threads | B     | DONE   | [watchtower/tasks/TASK-003-thread-search-skill.md](watchtower/tasks/TASK-003-thread-search-skill.md)         | TASK-002 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Skill plus README. Links into Claude and Codex skill folders. |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.

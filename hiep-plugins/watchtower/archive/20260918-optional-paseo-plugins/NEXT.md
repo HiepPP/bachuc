@@ -11,17 +11,17 @@
 
 These are proposals, not an approved implementation queue. Select tasks before implementation.
 
-| Order | TASK | Group | Status | Spec | Deps | Context | Notes |
-|-------|------|-------|--------|------|------|---------|-------|
-| 1 | TASK-001 workspace-preflight | A | DONE | [Spec](tasks/TASK-001-workspace-preflight.md) | - | [Context](CONTEXT.md) | Checks, plugin reload, slash action, and wide/narrow UI verified on 2026-09-20. |
-| 2 | TASK-002 evidence-ledger | A | TODO | [Spec](tasks/TASK-002-evidence-ledger.md) | - | [Context](CONTEXT.md) | Awaiting user selection. |
-| 3 | TASK-003 handoff-pack | A | TODO | [Spec](tasks/TASK-003-handoff-pack.md) | - | [Context](CONTEXT.md) | Awaiting user selection. |
-| 4 | TASK-004 preview-launcher | A | TODO | [Spec](tasks/TASK-004-preview-launcher.md) | - | [Context](CONTEXT.md) | Awaiting user selection. |
-| 5 | TASK-005 watchtower-board | A | DONE | [Spec](tasks/TASK-005-watchtower-board.md) | - | [Context](CONTEXT.md) | UI and exact attachment search verified on 2026-09-19. |
-| 6 | TASK-006 release-trace | A | TODO | [Spec](tasks/TASK-006-release-trace.md) | - | [Context](CONTEXT.md) | Awaiting user selection. |
-| 7 | TASK-007 dashboard-ui | A | DONE | [Spec](tasks/TASK-007-dashboard-ui.md) | - | [Context](CONTEXT.md) | Reference dashboard implemented; checks and native UI pass. |
-| 8 | TASK-008 project-explorer-tab | A | DONE | [Spec](tasks/TASK-008-project-explorer-tab.md) | - | [Context](CONTEXT.md) | Explorer placement and absence of obsolete center tab verified on 2026-09-20. |
-| 9 | TASK-009 preflight-jev-agent | A | DONE | [Spec](tasks/TASK-009-preflight-jev-agent.md) | TASK-001 | [Context](CONTEXT.md) | Discovery/MCP, 16 offline tests, 3 live Jev scenarios, reload and native UI verified. |
+| Order | TASK                          | Group | Status | Spec                                           | Deps     | Context               | Notes                                                                                 |
+| ----- | ----------------------------- | ----- | ------ | ---------------------------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------- |
+| 1     | TASK-001 workspace-preflight  | A     | DONE   | [Spec](tasks/TASK-001-workspace-preflight.md)  | -        | [Context](CONTEXT.md) | Checks, plugin reload, slash action, and wide/narrow UI verified on 2026-09-20.       |
+| 2     | TASK-002 evidence-ledger      | A     | TODO   | [Spec](tasks/TASK-002-evidence-ledger.md)      | -        | [Context](CONTEXT.md) | Awaiting user selection.                                                              |
+| 3     | TASK-003 handoff-pack         | A     | TODO   | [Spec](tasks/TASK-003-handoff-pack.md)         | -        | [Context](CONTEXT.md) | Awaiting user selection.                                                              |
+| 4     | TASK-004 preview-launcher     | A     | TODO   | [Spec](tasks/TASK-004-preview-launcher.md)     | -        | [Context](CONTEXT.md) | Awaiting user selection.                                                              |
+| 5     | TASK-005 watchtower-board     | A     | DONE   | [Spec](tasks/TASK-005-watchtower-board.md)     | -        | [Context](CONTEXT.md) | UI and exact attachment search verified on 2026-09-19.                                |
+| 6     | TASK-006 release-trace        | A     | TODO   | [Spec](tasks/TASK-006-release-trace.md)        | -        | [Context](CONTEXT.md) | Awaiting user selection.                                                              |
+| 7     | TASK-007 dashboard-ui         | A     | DONE   | [Spec](tasks/TASK-007-dashboard-ui.md)         | -        | [Context](CONTEXT.md) | Reference dashboard implemented; checks and native UI pass.                           |
+| 8     | TASK-008 project-explorer-tab | A     | DONE   | [Spec](tasks/TASK-008-project-explorer-tab.md) | -        | [Context](CONTEXT.md) | Explorer placement and absence of obsolete center tab verified on 2026-09-20.         |
+| 9     | TASK-009 preflight-jev-agent  | A     | DONE   | [Spec](tasks/TASK-009-preflight-jev-agent.md)  | TASK-001 | [Context](CONTEXT.md) | Discovery/MCP, 16 offline tests, 3 live Jev scenarios, reload and native UI verified. |
 
 ## Handoff
 

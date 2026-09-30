@@ -29,6 +29,7 @@ Status: DONE (code and offline checks). In-app checks: PENDING-USER.
 - PENDING-USER: `paseo plugin reload board`, one completed turn ending with `## Recap`, then `stat -f %Lp ~/.paseo/plugin-data/board/recaps.jsonl` -> 600 and one new line; Recaps view shows it under today and its project; row click opens the thread; Copy pastes the day's markdown; Runs view unchanged.
 
 In-app evidence 2026-09-24:
+
 - `recaps.jsonl` is mode 600 with 4 lines. Turns 12-14 of agent `9ad0b344` (10:35-10:37 local) each added one entry with the right day, project `.claude`, branch, did, and commit/push.
 - Recaps view, row click, and Copy: not seen by the main session. They need a user check.
 - PR #3 review fix 2026-09-24: recaps were dropped when a session reload restarted turn ids. It was reproduced live: turn 2 had id `foreground-turn-1` and its recap was lost. Dedupe now skips only a repeat of the latest entry for the agent with the same `turnId` and `raw`. Row keys use `endedAt`. Tests 74/74; the new test fails on the old code. Live recheck: both `turn one` and `turn two` recaps were saved.

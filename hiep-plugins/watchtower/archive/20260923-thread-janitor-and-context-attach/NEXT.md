@@ -11,11 +11,11 @@
 
 One row per TASK. Group ties together items that write the same files.
 
-| Order | TASK | Group | Status | Spec | Deps | Context | Notes |
-|-------|------|-------|--------|------|------|---------|-------|
-| 1 | TASK-001 Thread Janitor plugin | A | DONE | [watchtower/tasks/TASK-001-thread-janitor.md](watchtower/tasks/TASK-001-thread-janitor.md) | - | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Auto-archive idle threads after 1 day, no confirm. |
-| 2 | TASK-002 Thread Context Attach plugin | B | DONE | [watchtower/tasks/TASK-002-thread-context-attach.md](watchtower/tasks/TASK-002-thread-context-attach.md) | - | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Attach another thread's last reply. Picker cannot know the current thread, so it lists newest first only. |
-| 3 | TASK-003 Root README catalog entries | C | DONE | [watchtower/tasks/TASK-003-readme-catalog.md](watchtower/tasks/TASK-003-readme-catalog.md) | TASK-001, TASK-002 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Docs only. |
+| Order | TASK                                  | Group | Status | Spec                                                                                                     | Deps               | Context                                        | Notes                                                                                                     |
+| ----- | ------------------------------------- | ----- | ------ | -------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 1     | TASK-001 Thread Janitor plugin        | A     | DONE   | [watchtower/tasks/TASK-001-thread-janitor.md](watchtower/tasks/TASK-001-thread-janitor.md)               | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Auto-archive idle threads after 1 day, no confirm.                                                        |
+| 2     | TASK-002 Thread Context Attach plugin | B     | DONE   | [watchtower/tasks/TASK-002-thread-context-attach.md](watchtower/tasks/TASK-002-thread-context-attach.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Attach another thread's last reply. Picker cannot know the current thread, so it lists newest first only. |
+| 3     | TASK-003 Root README catalog entries  | C     | DONE   | [watchtower/tasks/TASK-003-readme-catalog.md](watchtower/tasks/TASK-003-readme-catalog.md)               | TASK-001, TASK-002 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Docs only.                                                                                                |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 

@@ -11,12 +11,12 @@
 
 One row per TASK. Group ties together items that write the same files.
 
-| Order | TASK | Group | Status | Spec | Deps | Context | Notes |
-|-------|------|-------|--------|------|------|---------|-------|
-| 1 | TASK-001 Recent replies and status in the snapshot | B | DONE | [watchtower/tasks/TASK-001-snapshot-replies-and-status.md](watchtower/tasks/TASK-001-snapshot-replies-and-status.md) | - | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Pure logic and tests. No Jev call. |
-| 2 | TASK-002 Opt-in setting and settings screen | A | DONE | [watchtower/tasks/TASK-002-opt-in-setting.md](watchtower/tasks/TASK-002-opt-in-setting.md) | - | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Default off. |
-| 3 | TASK-003 Jev worker and background enrichment | D | DONE | [watchtower/tasks/TASK-003-jev-enrichment.md](watchtower/tasks/TASK-003-jev-enrichment.md) | TASK-001, TASK-002 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Registers the TASK-002 settings on the server. |
-| 4 | TASK-004 README and live check | C | DONE | [watchtower/tasks/TASK-004-readme-and-live-check.md](watchtower/tasks/TASK-004-readme-and-live-check.md) | TASK-003 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Live Jev check is billable. |
+| Order | TASK                                               | Group | Status | Spec                                                                                                                 | Deps               | Context                                        | Notes                                          |
+| ----- | -------------------------------------------------- | ----- | ------ | -------------------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------- | ---------------------------------------------- |
+| 1     | TASK-001 Recent replies and status in the snapshot | B     | DONE   | [watchtower/tasks/TASK-001-snapshot-replies-and-status.md](watchtower/tasks/TASK-001-snapshot-replies-and-status.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Pure logic and tests. No Jev call.             |
+| 2     | TASK-002 Opt-in setting and settings screen        | A     | DONE   | [watchtower/tasks/TASK-002-opt-in-setting.md](watchtower/tasks/TASK-002-opt-in-setting.md)                           | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Default off.                                   |
+| 3     | TASK-003 Jev worker and background enrichment      | D     | DONE   | [watchtower/tasks/TASK-003-jev-enrichment.md](watchtower/tasks/TASK-003-jev-enrichment.md)                           | TASK-001, TASK-002 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Registers the TASK-002 settings on the server. |
+| 4     | TASK-004 README and live check                     | C     | DONE   | [watchtower/tasks/TASK-004-readme-and-live-check.md](watchtower/tasks/TASK-004-readme-and-live-check.md)             | TASK-003           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Live Jev check is billable.                    |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.

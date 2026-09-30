@@ -31,6 +31,7 @@ These checks were run once at the group level (group B has only this task), from
 - Note: `index.client.tsx`, `package.json`, `client/`, and `shared/settings.ts` changed in the same checkout because of other groups, not this task.
 
 Follow-up (2026-09-23):
+
 - The live test showed Jev splits depth across 2 and 3, for example 0.23 / 0.48 / 0.29, so the old rule always gave depth 1.
 - `readJevAnswers` now walks back when P(2) + P(3) > 0.5 and picks the likelier of 2 or 3. Ties pick 2.
 - `npm test` -> 16/16 pass, with new depth cases in the Jev answers test.

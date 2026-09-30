@@ -219,7 +219,10 @@ test("Claude sessions outside Paseo run native Caveman hooks against their own c
   // Codex registration and Paseo agents never touch the shared Claude config.
   assert.equal(call([], prompt, {}), "{}");
   await writeFile(path.join(claudeDir, "mode.json"), "{}");
-  assert.equal(call(["--claude"], { hook_event_name: "SessionStart" }, { PASEO_AGENT_ID: A }), "{}");
+  assert.equal(
+    call(["--claude"], { hook_event_name: "SessionStart" }, { PASEO_AGENT_ID: A }),
+    "{}",
+  );
   assert.match(call(["--claude"], prompt, { PASEO_AGENT_ID: A }), /Use Caveman lite/);
   assert.equal(await readFile(path.join(claudeDir, "mode.json"), "utf8"), "{}");
 });
@@ -228,14 +231,20 @@ test("every active turn carries one example of the running level", async () => {
   const { modes, env } = await fixture();
   await modes.set(A, "ultra");
   const reminder = run({ prompt: "request" }, env).hookSpecificOutput.additionalContext;
-  assert.match(reminder, /Match this ultra density\. Example "Why re-render\?" - ultra: "ultra sample\."/);
+  assert.match(
+    reminder,
+    /Match this ultra density\. Example "Why re-render\?" - ultra: "ultra sample\."/,
+  );
   await modes.set(A, "wenyan-ultra");
   assert.match(
     run({ prompt: "next" }, env).hookSpecificOutput.additionalContext,
     /Match this wenyan-ultra density\. .* - wenyan-ultra: "wenyan-ultra sample\."/,
   );
   await modes.set(A, "follow-agent");
-  assert.doesNotMatch(run({ prompt: "plain" }, env).hookSpecificOutput.additionalContext, /density/);
+  assert.doesNotMatch(
+    run({ prompt: "plain" }, env).hookSpecificOutput.additionalContext,
+    /density/,
+  );
 });
 
 test("the example is not repeated when native rules already include it", async () => {

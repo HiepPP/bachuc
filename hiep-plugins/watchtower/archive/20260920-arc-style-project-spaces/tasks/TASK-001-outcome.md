@@ -5,22 +5,27 @@
 Status: DONE
 
 Changed:
+
 - Registered a standalone page and sidebar item using the installed 0.8.0 SDK.
 
 Contract:
+
 - The approved implementation is a standalone plugin page. Paseo source and native sidebar project rows remain unchanged.
 - Existing projects, workspace IDs, paths, and agents are preserved.
 
 Verified:
+
 - Installed workspace-spaces and confirmed running. Opened the page in Paseo desktop with a populated catalog.
 - Plugin commands: `npm run format`, `npm run typecheck`, `npm run lint`, and `npm test` pass; six focused tests pass.
 - `paseo plugin ls workspace-spaces --json` reports running. Plugin logs show ready without load errors.
 
 Limitations:
+
 - Physical trackpad/touch, compact mobile layout, and simultaneous multi-client saves were not exercised.
 - Save conflict behavior relies on the host revision-checked settings API; no live conflict was injected.
 
 Handoff:
+
 - Spaces 1, 2, and 3 are available as initial user tabs. All projects are back in Space 1.
 - The original workspace view was restored. No temporary server, credential, or test project was created.
 

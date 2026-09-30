@@ -11,11 +11,11 @@
 
 One row per TASK. Group ties together items that write the same files.
 
-| Order | TASK | Group | Status | Spec | Deps | Context | Notes |
-|-------|------|-------|--------|------|------|---------|-------|
-| 1 | TASK-001 Recap log in Board | A | DONE | [watchtower/tasks/TASK-001-board-recap-log.md](watchtower/tasks/TASK-001-board-recap-log.md) | - | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Board only. Runs in parallel with group B. |
-| 2 | TASK-002 Turn diff summary in Thread branch | B | DONE | [watchtower/tasks/TASK-002-thread-branch-turn-diff.md](watchtower/tasks/TASK-002-thread-branch-turn-diff.md) | - | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares index files and README with TASK-003. |
-| 3 | TASK-003 GitHub PR and CI attachment in Thread branch | B | DONE | [watchtower/tasks/TASK-003-thread-branch-pr-attachment.md](watchtower/tasks/TASK-003-thread-branch-pr-attachment.md) | TASK-002 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Same files as TASK-002, so it runs after it. |
+| Order | TASK                                                  | Group | Status | Spec                                                                                                                 | Deps     | Context                                        | Notes                                        |
+| ----- | ----------------------------------------------------- | ----- | ------ | -------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------- | -------------------------------------------- |
+| 1     | TASK-001 Recap log in Board                           | A     | DONE   | [watchtower/tasks/TASK-001-board-recap-log.md](watchtower/tasks/TASK-001-board-recap-log.md)                         | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Board only. Runs in parallel with group B.   |
+| 2     | TASK-002 Turn diff summary in Thread branch           | B     | DONE   | [watchtower/tasks/TASK-002-thread-branch-turn-diff.md](watchtower/tasks/TASK-002-thread-branch-turn-diff.md)         | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares index files and README with TASK-003. |
+| 3     | TASK-003 GitHub PR and CI attachment in Thread branch | B     | DONE   | [watchtower/tasks/TASK-003-thread-branch-pr-attachment.md](watchtower/tasks/TASK-003-thread-branch-pr-attachment.md) | TASK-002 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Same files as TASK-002, so it runs after it. |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
