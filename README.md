@@ -3,7 +3,7 @@
 See what your agents are doing. Keep projects organized. Bring task context and
 workspace checks into Paseo without leaving your conversation.
 
-Fourteen independent local plugins. Install only what you need; each owns its
+Fifteen independent local plugins. Install only what you need; each owns its
 dependencies, checks, and configuration.
 
 Gallery refreshed September 22, 2026 from Paseo desktop **0.9.0-beta.2**.
@@ -152,6 +152,7 @@ status alone does not prove every plugin action works.
 | Plugin | Purpose |
 | --- | --- |
 | [vscode-warm-light](plugins/vscode-warm-light/README.md) | Apply the warm, customized VS Code Light+ palette through Paseo's theme API. |
+| [claude-look](plugins/claude-look/README.md) | Claude Light theme, Claude desktop's 768px chat column, and its 1.5 reply line-height. |
 | [next-prompt-actions](plugins/next-prompt-actions/README.md) | Send next-step prompts inside their blocks on desktop, with optional bounded Jev auto-run. |
 | [prompt-translate](plugins/prompt-translate/README.md) | Show English translations under Vietnamese prompts, and enhance drafts into English prompts with Cmd/Ctrl+Enter, on desktop. |
 | [skill-pins](plugins/skill-pins/README.md) | Pin skills such as watchtower in the desktop composer; each turn tells Claude or Codex to load them. |

@@ -1,0 +1,24 @@
+{
+  "name": "claude-look",
+  "version": "0.1.0",
+  "private": true,
+  "files": [
+    "paseo-plugin.json",
+    "index.client.tsx",
+    "client/"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "format": "oxfmt index.client.tsx client README.md package.json tsconfig.json paseo-plugin.json",
+    "lint": "oxlint index.client.tsx client"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.10.1",
+    "@types/react": "~19.2.0",
+    "oxfmt": "0.46.0",
+    "oxlint": "1.61.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "typescript": "^5.9.3"
+  }
+}
