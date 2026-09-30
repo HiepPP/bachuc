@@ -69,6 +69,19 @@ export function parseAheadBehind(output: string): { ahead: number; behind: numbe
   return { behind: Number(match[1]), ahead: Number(match[2]) };
 }
 
+/** Sums `git diff --numstat` lines; binary files (`-`) add nothing. */
+export function sumNumstat(output: string): { added: number; deleted: number } {
+  let added = 0;
+  let deleted = 0;
+  for (const line of output.split("\n")) {
+    const match = line.match(/^(-|\d+)\t(-|\d+)\t/);
+    if (!match) continue;
+    if (match[1] !== "-") added += Number(match[1]);
+    if (match[2] !== "-") deleted += Number(match[2]);
+  }
+  return { added, deleted };
+}
+
 export function parsePullRequest(output: string): BranchInfo["pr"] {
   try {
     const value = JSON.parse(output) as { number?: unknown; url?: unknown; state?: unknown };
@@ -104,6 +117,7 @@ const empty = (): BranchInfo => ({
   detached: false,
   sha: null,
   dirty: false,
+  changes: null,
   upstream: null,
   ahead: null,
   behind: null,
@@ -159,6 +173,11 @@ export function createBranchReader() {
     if (sha.code === 0) info.sha = sha.stdout.trim() || null;
     if (remote.code === 0) info.remoteUrl = parseRemoteUrl(remote.stdout);
     info.dirty = status.code === 0 && status.stdout.trim().length > 0;
+    if (info.dirty) {
+      const diff = await run("git", ["diff", "--numstat", "HEAD", "--"], cwd);
+      const lines = diff.code === 0 ? sumNumstat(diff.stdout) : { added: null, deleted: null };
+      info.changes = { files: status.stdout.split("\n").filter(Boolean).length, ...lines };
+    }
     if (upstream.code === 0 && upstream.stdout.trim()) {
       info.upstream = upstream.stdout.trim();
       const counts = await run(

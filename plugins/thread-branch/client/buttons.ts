@@ -106,6 +106,23 @@ export function describeRefsPill(
   };
 }
 
+/** `3 files +14 -3` for uncommitted tracked changes; hidden when the work tree is clean. */
+export function describeChangesPill(info: BranchInfo, refresh: () => Promise<void>): PluginButton {
+  const changes = info.changes;
+  const files = changes ? `${changes.files} ${changes.files === 1 ? "file" : "files"}` : "Changes";
+  const lines =
+    changes && changes.added !== null && changes.deleted !== null
+      ? ` +${changes.added} -${changes.deleted}`
+      : "";
+  return {
+    title: `${files} uncommitted${lines ? `,${lines} lines vs HEAD` : ""} · click to refresh`,
+    icon: "FileDiff",
+    label: `${files}${lines}`,
+    visible: info.repo && info.dirty && changes !== null,
+    behavior: { kind: "action", onPress: refresh },
+  };
+}
+
 /** Pull first: anything behind needs attention before pushing. */
 export function syncState(ahead: number, behind: number): SyncState {
   if (behind > 0) return "behind";

@@ -3,6 +3,7 @@ import test from "node:test";
 import { pillLabel, pillTitle } from "../client/label";
 import {
   describeBranchPill,
+  describeChangesPill,
   describePrPill,
   describeRefsPill,
   describeRepoPill,
@@ -18,6 +19,7 @@ const base: BranchInfo = {
   detached: false,
   sha: "a1b2c3d",
   dirty: false,
+  changes: null,
   upstream: null,
   ahead: null,
   behind: null,
@@ -152,4 +154,23 @@ test("refs menu item ids satisfy the host button id rule", () => {
   const ids = pill.behavior.items.map((item) => item.id);
   for (const id of ids) assert.match(id, /^[a-z][a-z0-9-]*$/);
   assert.equal(new Set(ids).size, refs.length);
+});
+
+test("changes pill shows file and line counts only when the work tree is dirty", () => {
+  const refresh = async () => {};
+  assert.equal(describeChangesPill(base, refresh).visible, false);
+  const pill = describeChangesPill(
+    { ...base, dirty: true, changes: { files: 3, added: 14, deleted: 3 } },
+    refresh,
+  );
+  assert.equal(pill.visible, true);
+  assert.equal(pill.label, "3 files +14 -3");
+  assert.equal(pill.title, "3 files uncommitted, +14 -3 lines vs HEAD · click to refresh");
+  assert.equal(pill.behavior.kind, "action");
+  const single = describeChangesPill(
+    { ...base, dirty: true, changes: { files: 1, added: null, deleted: null } },
+    refresh,
+  );
+  assert.equal(single.label, "1 file");
+  assert.equal(single.title, "1 file uncommitted · click to refresh");
 });

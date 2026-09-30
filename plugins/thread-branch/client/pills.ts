@@ -7,6 +7,7 @@ import { copyText } from "@getpaseo/plugin/client/react-native";
 import { getBranchRpc, type BranchInfo } from "../shared/branch";
 import {
   describeBranchPill,
+  describeChangesPill,
   describePrPill,
   describeRefsPill,
   describeRepoPill,
@@ -43,6 +44,7 @@ function signature(info: BranchInfo) {
     info.detached,
     info.sha,
     info.dirty,
+    info.changes,
     info.upstream,
     info.ahead,
     info.behind,
@@ -76,6 +78,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
       pr: PluginButtonRegistration;
       repo: PluginButtonRegistration;
       refs: PluginButtonRegistration;
+      changes: PluginButtonRegistration;
       signature: string;
     }
   >();
@@ -122,6 +125,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
       const pr = describePrPill(info, actions.openPr);
       const repo = describeRepoPill(info, actions.openRepo);
       const refs = describeRefsPill(info, agentRefs, open);
+      const changes = describeChangesPill(info, actions.refresh);
       const existing = pills.get(agentId);
       if (existing) {
         // Updating behavior closes an open menu; skip no-op updates from the poll loop.
@@ -132,6 +136,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
           existing.pr.update(pr);
           existing.repo.update(repo);
           existing.refs.update(refs);
+          existing.changes.update(changes);
           existing.signature = next;
         } catch (error) {
           console.warn("[thread-branch] Failed to update pills", agentId, error);
@@ -156,6 +161,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
           pr: add("thread-branch-pr", pr),
           repo: add("thread-branch-repo", repo),
           refs: add("thread-branch-refs", refs),
+          changes: add("thread-branch-changes", changes),
           signature: next,
         });
       } catch (error) {
@@ -225,6 +231,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
     existing?.pr.remove();
     existing?.repo.remove();
     existing?.refs.remove();
+    existing?.changes.remove();
     pills.delete(agentId);
     if (!keepAgent) {
       agents.delete(agentId);
@@ -284,12 +291,13 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
     clearTimeout(timer);
     unsubscribe();
     void observation?.release().catch(() => {});
-    for (const { branch, sync, pr, repo, refs } of pills.values()) {
+    for (const { branch, sync, pr, repo, refs, changes } of pills.values()) {
       branch.remove();
       sync.remove();
       pr.remove();
       repo.remove();
       refs.remove();
+      changes.remove();
     }
     pills.clear();
     agents.clear();

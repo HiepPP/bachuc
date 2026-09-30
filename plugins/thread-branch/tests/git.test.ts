@@ -6,11 +6,20 @@ import {
   parsePullRequest,
   parseRemoteUrl,
   run,
+  sumNumstat,
 } from "../server/git";
 
 test("parses rev-list left-right counts as behind/ahead", () => {
   assert.deepEqual(parseAheadBehind("1\t3\n"), { behind: 1, ahead: 3 });
   assert.equal(parseAheadBehind("fatal: no upstream"), null);
+});
+
+test("sums numstat lines and skips binary counts", () => {
+  assert.deepEqual(sumNumstat("3\t1\ta.ts\n-\t-\timg.png\n10\t0\tb.ts\n"), {
+    added: 13,
+    deleted: 1,
+  });
+  assert.deepEqual(sumNumstat(""), { added: 0, deleted: 0 });
 });
 
 test("parses gh pr view JSON and rejects malformed output", () => {
@@ -90,4 +99,36 @@ test("a command killed by its timeout is not reported as success", async () => {
   const result = await run("sh", ["-c", "echo partial; sleep 5"], "/tmp", 300);
   assert.notEqual(result.code, 0);
   assert.equal(result.stdout, "partial\n");
+});
+
+test("counts uncommitted tracked files and lines only when the work tree is dirty", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "thread-branch-"));
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: root });
+  try {
+    git("init", "-q", "-b", "main");
+    await writeFile(join(root, "a.txt"), "1\n2\n3\n");
+    await writeFile(join(root, "b.txt"), "x\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "init");
+    const reader = createBranchReader();
+    await writeFile(join(root, "untracked.txt"), "ignored\n");
+    const clean = await reader.get(root, true);
+    assert.equal(clean.dirty, false);
+    assert.equal(clean.changes, null);
+
+    await writeFile(join(root, "a.txt"), "1\nchanged\n3\n4\n");
+    await writeFile(join(root, "b.txt"), "x\ny\n");
+    git("add", "b.txt");
+    const dirty = await reader.get(root, true);
+    assert.equal(dirty.dirty, true);
+    // Staged and unstaged edits both count against HEAD; the untracked file does not.
+    assert.deepEqual(dirty.changes, { files: 2, added: 3, deleted: 1 });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

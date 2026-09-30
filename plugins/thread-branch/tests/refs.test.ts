@@ -59,6 +59,7 @@ test("refs pill opens each link and hides without refs or a remote", async () =>
     detached: false,
     sha: "a1b2c3d",
     dirty: false,
+    changes: null,
     upstream: null,
     ahead: null,
     behind: null,

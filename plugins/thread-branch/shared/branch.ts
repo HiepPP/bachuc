@@ -7,6 +7,15 @@ export const pullRequestSchema = z.object({
   state: z.string(),
 });
 
+export const changesSchema = z.object({
+  /** Tracked files listed by `git status --porcelain`; untracked files are not counted. */
+  files: z.number().int().positive(),
+  /** Lines vs HEAD, staged and unstaged; null when `git diff --numstat HEAD` fails (no commit yet). */
+  added: z.number().int().nonnegative().nullable(),
+  deleted: z.number().int().nonnegative().nullable(),
+});
+export type Changes = z.infer<typeof changesSchema>;
+
 export const branchInfoSchema = z.object({
   /** False when `cwd` is not inside a git work tree or git is unavailable. */
   repo: z.boolean(),
@@ -14,6 +23,8 @@ export const branchInfoSchema = z.object({
   detached: z.boolean(),
   sha: z.string().nullable(),
   dirty: z.boolean(),
+  /** Null when the work tree is clean. */
+  changes: changesSchema.nullable(),
   upstream: z.string().nullable(),
   ahead: z.number().int().nonnegative().nullable(),
   behind: z.number().int().nonnegative().nullable(),
