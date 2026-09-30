@@ -11,7 +11,12 @@ export interface Node {
   disabled: boolean;
   checked?: boolean;
   title: string;
-  style: { cssText: string; setProperty(key: string, value: string): void };
+  style: {
+    cssText: string;
+    setProperty(key: string, value: string): void;
+    removeProperty?(key: string): void;
+  };
+  getBoundingClientRect?(): { width: number };
   querySelector(selector: string): Node | null;
   querySelectorAll(selector: string): ArrayLike<Node>;
   closest(selector: string): Node | null;
@@ -21,7 +26,11 @@ export interface Node {
   removeAttribute(name: string): void;
   appendChild(node: Node): void;
   remove(): void;
-  addEventListener(name: string, handler: () => void): void;
+  addEventListener(
+    name: string,
+    handler: (event: { key?: string; metaKey?: boolean }) => void,
+  ): void;
+  removeEventListener?(name: string, handler: (event: { metaKey?: boolean }) => void): void;
   value?: string;
   focus?(): void;
   setSelectionRange?(start: number, end: number): void;
@@ -203,7 +212,8 @@ const styles = `
 [${OWNER}] .npa-send {--npa-icon:${iconMask(icons.send)};min-width:80px;background:var(--npa-ink,#18181b);color:var(--npa-paper,#fff);border-color:var(--npa-ink,#18181b);}
 [${OWNER}] .npa-send.npa-commit {--npa-icon:${iconMask(icons.commit)};}
 [${OWNER}] .npa-send.npa-push {--npa-icon:${iconMask(icons.push)};}
-[${OWNER}] .npa-start {--npa-icon:${iconMask(icons.thread)};}
+[${OWNER}] .npa-start, [${OWNER}] .npa-send[data-npa-thread] {--npa-icon:${iconMask(icons.thread)};}
+[${OWNER}] .npa-start[data-npa-here] {--npa-icon:${iconMask(icons.send)};}
 [${OWNER}] .npa-goal {--npa-icon:${iconMask(icons.done)};}
 [${OWNER}] .npa-other-head {display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;margin-bottom:12px;}
 [${OWNER}] .npa-other-title {font-size:13px;font-weight:600;line-height:20px;}
@@ -318,6 +328,14 @@ export function install(controller: Controller, doc: Document = document, identi
   const style = doc.createElement("style");
   style.textContent = styles + recapStyles;
   doc.head.appendChild(style);
+  // Holding Cmd over Send or Start in new thread swaps it to the other action until Cmd or the
+  // pointer leaves.
+  let hovered: ((meta: boolean) => void) | null = null;
+  const onKey = (event: { key?: string; metaKey?: boolean }) => {
+    if (event.key === "Meta") hovered?.(!!event.metaKey);
+  };
+  doc.addEventListener("keydown", onKey);
+  doc.addEventListener("keyup", onKey);
   function setColors(ui: Node, block: Node) {
     if (typeof getComputedStyle !== "function") return;
     const ink = getComputedStyle(block).color;
@@ -458,7 +476,39 @@ export function install(controller: Controller, doc: Document = document, identi
         },
       });
     }
-    function updateStarts(next: Candidate[]) {
+    // Cmd flips a Send and a Start button to the other action, which then needs its own guards.
+    let blocked = snapshot.busy || snapshot.note === "Jev reviewing...";
+    function flipOnCmd(button: Node, flip: (on: boolean) => void) {
+      const hover = (event: { metaKey?: boolean }) => {
+        hovered = flip;
+        flip(!!event.metaKey);
+      };
+      button.addEventListener("mouseenter", (event) => {
+        // A shorter label pulls the edge out from under the pointer, which leaves, flips back,
+        // grows and enters again. Hold the entry width until the pointer leaves.
+        const width = button.getBoundingClientRect?.().width;
+        if (width) button.style.setProperty("min-width", `${width}px`);
+        hover(event);
+      });
+      button.addEventListener("mousemove", hover);
+      button.addEventListener("mouseleave", () => {
+        if (hovered === flip) hovered = null;
+        flip(false);
+        button.style.removeProperty?.("min-width");
+      });
+    }
+    function sendHere(key: string | string[]) {
+      return action(async () => {
+        const outcome = controller.send(context, key);
+        controller.sending?.(
+          outcome.then((r) => r.sent).catch(() => false),
+          context,
+        );
+        await outcome;
+      }, "Sending...");
+    }
+    function updateStarts(next: Candidate[], latest: Snapshot) {
+      blocked = latest.busy || latest.note === "Jev reviewing...";
       next
         .filter((c) => c.thread)
         .forEach((candidate, index) => {
@@ -470,7 +520,9 @@ export function install(controller: Controller, doc: Document = document, identi
                 ? "Check threads"
                 : candidate.state === "sending"
                   ? "Starting..."
-                  : "Start in new thread";
+                  : starts[index].getAttribute("data-npa-here") !== null && !blocked
+                    ? "Send"
+                    : "Start in new thread";
           // A new thread never waits for this conversation to become idle.
           starts[index].disabled = candidate.state !== "ready";
         });
@@ -504,8 +556,27 @@ export function install(controller: Controller, doc: Document = document, identi
           start.setAttribute("class", "npa-start");
           start.setAttribute("aria-label", `Start in new thread: ${candidate.text}`);
           start.textContent = "Start in new thread";
-          start.addEventListener("click", () => {
+          const sendable = () => !blocked && !gitAction(candidate.text);
+          const hereMode = (on: boolean) => {
+            on &&= sendable() && !start.disabled;
+            if (on === (start.getAttribute("data-npa-here") !== null)) return;
+            if (on) start.setAttribute("data-npa-here", "true");
+            else start.removeAttribute("data-npa-here");
+            start.setAttribute(
+              "aria-label",
+              `${on ? "Send suggested prompt" : "Start in new thread"}: ${candidate.text}`,
+            );
+            if (!start.disabled) start.textContent = on ? "Send" : "Start in new thread";
+          };
+          flipOnCmd(start, hereMode);
+          start.addEventListener("click", (event) => {
             if (start.disabled || !valid(block, context, candidate)) return;
+            if (event.metaKey && sendable()) {
+              hereMode(false);
+              start.textContent = "Sending...";
+              void sendHere(candidate.key);
+              return;
+            }
             start.textContent = "Starting...";
             void action(() => controller.start!(context, candidate.key), "Starting new thread...");
           });
@@ -519,11 +590,13 @@ export function install(controller: Controller, doc: Document = document, identi
     }
     function update(all: Candidate[], latest: Snapshot) {
       note.textContent = [latest.note, latest.warning].filter(Boolean).join(" ");
-      updateStarts(all);
+      updateStarts(all, latest);
       all
         .filter((c) => !c.thread)
         .forEach((candidate, index) => {
           edits[index].disabled = false;
+          sends[index].disabled =
+            latest.busy || candidate.state !== "ready" || latest.note === "Jev reviewing...";
           sends[index].textContent =
             candidate.state === "sent"
               ? "Sent"
@@ -531,9 +604,9 @@ export function install(controller: Controller, doc: Document = document, identi
                 ? "Check chat"
                 : candidate.state === "sending"
                   ? "Sending..."
-                  : (gitActions[index]?.label ?? "Send");
-          sends[index].disabled =
-            latest.busy || candidate.state !== "ready" || latest.note === "Jev reviewing...";
+                  : sends[index].getAttribute("data-npa-thread") !== null && !sends[index].disabled
+                    ? "Start in new thread"
+                    : (gitActions[index]?.label ?? "Send");
         });
     }
     async function action(run: () => Promise<unknown>, label: string) {
@@ -572,22 +645,15 @@ export function install(controller: Controller, doc: Document = document, identi
         },
         async send(picked) {
           if (!picked.every((c) => valid(block, context, c))) return;
-          await action(async () => {
-            const keys = picked.map((c) => c.key);
-            const outcome = controller.send(context, keys.length === 1 ? keys[0] : keys);
-            controller.sending?.(
-              outcome.then((r) => r.sent).catch(() => false),
-              context,
-            );
-            await outcome;
-          }, "Sending...");
+          const keys = picked.map((c) => c.key);
+          await sendHere(keys.length === 1 ? keys[0] : keys);
         },
       });
       renderOthers();
-      updateStarts(candidates);
+      updateStarts(candidates, snapshot);
       mount((next, latest) => {
         note.textContent = [latest.note, latest.warning].filter(Boolean).join(" ");
-        updateStarts(next);
+        updateStarts(next, latest);
         update(
           next.filter((c) => !c.thread),
           latest,
@@ -619,21 +685,29 @@ export function install(controller: Controller, doc: Document = document, identi
         "class",
         git ? `npa-send npa-${git.kind === "push" ? "push" : "commit"}` : "npa-send",
       );
-      send.setAttribute(
-        "aria-label",
-        `${git?.label ?? "Send"} suggested prompt: ${candidate.text}`,
-      );
-      send.addEventListener("click", () => {
+      const label = `${git?.label ?? "Send"} suggested prompt: ${candidate.text}`;
+      send.setAttribute("aria-label", label);
+      // Git actions need this conversation's work, so they never start a new thread.
+      const threadable = !git && !!controller.start;
+      const threadMode = (on: boolean) => {
+        on &&= threadable && !send.disabled;
+        if (on === (send.getAttribute("data-npa-thread") !== null)) return;
+        if (on) send.setAttribute("data-npa-thread", "true");
+        else send.removeAttribute("data-npa-thread");
+        send.setAttribute("aria-label", on ? `Start in new thread: ${candidate.text}` : label);
+        if (!send.disabled) send.textContent = on ? "Start in new thread" : "Send";
+      };
+      if (threadable) flipOnCmd(send, threadMode);
+      send.addEventListener("click", (event) => {
         if (send.disabled || !valid(block, context, candidate)) return;
+        if (threadable && event.metaKey) {
+          threadMode(false);
+          send.textContent = "Starting...";
+          void action(() => controller.start!(context, candidate.key), "Starting new thread...");
+          return;
+        }
         send.textContent = "Sending...";
-        void action(async () => {
-          const outcome = controller.send(context, candidate.key);
-          controller.sending?.(
-            outcome.then((r) => r.sent).catch(() => false),
-            context,
-          );
-          await outcome;
-        }, "Sending...");
+        void sendHere(candidate.key);
       });
       sends.push(send);
       actions.appendChild(send);
@@ -860,6 +934,8 @@ export function install(controller: Controller, doc: Document = document, identi
   return () => {
     stopped = true;
     observer.disconnect();
+    doc.removeEventListener?.("keydown", onKey);
+    doc.removeEventListener?.("keyup", onKey);
     clearInterval(timer);
     clearTimeout(scanTimer);
     for (const block of owned.keys()) clear(block);

@@ -186,6 +186,111 @@ test("DOM button preserves code/copy/draft; sends once and cleans up on disable"
     else Reflect.deleteProperty(globalThis, "MutationObserver");
   }
 });
+test("Cmd over Send switches it to Start in new thread; Cmd-click starts it", async () => {
+  const { document, window } = parseHTML(
+    '<html><head></head><body><div data-testid="assistant-message"><div data-paseo-markdown-tag="pre"><span data-paseo-markdown-tag="code">prompt: Test UI.</span></div></div></body></html>',
+  );
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "MutationObserver");
+  Object.defineProperty(globalThis, "MutationObserver", {
+    value: window.MutationObserver,
+    configurable: true,
+  });
+  const calls: string[] = [];
+  const cleanup = install(
+    {
+      inspect: async () => snapshot,
+      send: async (_scope, key) => (calls.push(`send:${key}`), { sent: true }),
+      start: async (_scope, key) => (calls.push(`start:${key}`), { started: true }),
+    },
+    document as unknown as Parameters<typeof install>[1],
+    () => ({ ...context, message: "```\nprompt: Test UI.\n```" }),
+  );
+  const fire = (target: { dispatchEvent(event: object): void }, type: string, init = {}) =>
+    target.dispatchEvent(Object.assign(new window.Event(type, { bubbles: true }), init));
+  try {
+    await pause();
+    const send = document.querySelector(".npa-send")!;
+    Object.assign(send, { getBoundingClientRect: () => ({ width: 90 }) });
+    fire(send, "mouseenter");
+    assert.equal(send.textContent, "Send");
+    assert.equal(send.style.minWidth, "90px", "entry width holds while hovered");
+    fire(document, "keydown", { key: "Meta", metaKey: true });
+    assert.equal(send.textContent, "Start in new thread");
+    assert.equal(send.getAttribute("data-npa-thread"), "true");
+    fire(document, "keyup", { key: "Meta", metaKey: false });
+    assert.equal(send.textContent, "Send");
+    fire(send, "mousemove", { metaKey: true });
+    assert.equal(send.textContent, "Start in new thread");
+    fire(send, "mouseleave");
+    assert.equal(send.textContent, "Send");
+    assert.equal(send.getAttribute("data-npa-thread"), null);
+    assert.equal(send.style.minWidth, "");
+    fire(send, "click", { metaKey: true });
+    await pause();
+    assert.deepEqual(calls, ["start:key"]);
+  } finally {
+    cleanup();
+    if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
+    else Reflect.deleteProperty(globalThis, "MutationObserver");
+  }
+});
+test("Cmd over Start in new thread switches it to Send; Cmd-click sends here unless busy", async () => {
+  const { document, window } = parseHTML(
+    '<html><head></head><body><div data-testid="assistant-message"><div data-paseo-markdown-tag="pre"><span data-paseo-markdown-tag="code">prompt: Test UI.\nthread: new</span></div></div></body></html>',
+  );
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "MutationObserver");
+  Object.defineProperty(globalThis, "MutationObserver", {
+    value: window.MutationObserver,
+    configurable: true,
+  });
+  let current: Snapshot = {
+    ...snapshot,
+    busy: true,
+    candidates: [
+      {
+        ...snapshot.candidates[0],
+        block: "prompt: Test UI.\nthread: new",
+        source: "```\nprompt: Test UI.\nthread: new\n```",
+        thread: "new",
+      },
+    ],
+  };
+  const calls: string[] = [];
+  const cleanup = install(
+    {
+      inspect: async () => current,
+      send: async (_scope, key) => (calls.push(`send:${key}`), { sent: true }),
+      start: async (_scope, key) => (calls.push(`start:${key}`), { started: true }),
+    },
+    document as unknown as Parameters<typeof install>[1],
+    () => ({ ...context, message: "```\nprompt: Test UI.\nthread: new\n```" }),
+  );
+  const fire = (target: { dispatchEvent(event: object): void }, type: string, init = {}) =>
+    target.dispatchEvent(Object.assign(new window.Event(type, { bubbles: true }), init));
+  try {
+    await pause();
+    let start = document.querySelector(".npa-start")!;
+    fire(start, "mouseenter", { metaKey: true });
+    assert.equal(start.textContent, "Start in new thread", "a busy conversation cannot send here");
+    fire(start, "mouseleave");
+    current = { ...current, busy: false };
+    await new Promise((r) => setTimeout(r, 2700));
+    start = document.querySelector(".npa-start")!;
+    fire(start, "mouseenter");
+    fire(document, "keydown", { key: "Meta", metaKey: true });
+    assert.equal(start.textContent, "Send");
+    assert.equal(start.getAttribute("data-npa-here"), "true");
+    fire(document, "keyup", { key: "Meta", metaKey: false });
+    assert.equal(start.textContent, "Start in new thread");
+    fire(start, "click", { metaKey: true });
+    await pause();
+    assert.deepEqual(calls, ["send:key"]);
+  } finally {
+    cleanup();
+    if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
+    else Reflect.deleteProperty(globalThis, "MutationObserver");
+  }
+});
 test("legacy prompts render individual controls without bulk actions and hide the raw fence", async () => {
   const block = "prompt: First.\nprompt: Second.";
   const many: Snapshot = {

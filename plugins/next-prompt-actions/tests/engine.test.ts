@@ -214,8 +214,8 @@ test("new-thread suggestions start once in a new thread and never send here", as
   const [here, other] = (await f.engine.inspect(scope)).candidates;
   assert.equal(here.thread, undefined);
   assert.equal(other.thread, "new");
-  await assert.rejects(f.engine.send(scope, other.key), /new thread/);
-  await assert.rejects(f.engine.start(scope, here.key), /stale/);
+  await assert.rejects(f.engine.send(scope, other.key, { automatic: true }), /new thread/);
+  assert.equal(here.state, "ready");
   // A busy conversation does not block an independent thread.
   f.current.busy = true;
   assert.equal(await f.engine.start(scope, other.key), true);
@@ -225,6 +225,30 @@ test("new-thread suggestions start once in a new thread and never send here", as
   const inspected = await f.engine.inspect(scope);
   assert.equal(inspected.candidates[1].state, "sent");
   assert.equal(inspected.note, "Started in a new thread.");
+});
+test("a current-task suggestion can start once in a new thread, except Git actions", async () => {
+  const f = fixture();
+  f.current.rows[1].text = "## Next Steps\n```\nprompt: Report results.\nprompt: Commit.\n```";
+  const [here, commit] = (await f.engine.inspect(scope)).candidates;
+  await assert.rejects(f.engine.start(scope, commit.key), /Git/);
+  assert.equal(await f.engine.start(scope, here.key), true);
+  await assert.rejects(f.engine.send(scope, here.key), /stale/);
+  assert.deepEqual(f.started, [{ text: "Report results.", id: `next-prompt-${here.key}` }]);
+  assert.deepEqual(f.sent, []);
+});
+test("a new-thread suggestion can be sent here once by a manual send", async () => {
+  const f = fixture();
+  f.current.rows[1].text =
+    "## Next Steps\n```\nprompt: Report results.\nprompt: Audit the logs.\nthread: new\n```";
+  const [here, other] = (await f.engine.inspect(scope)).candidates;
+  await assert.rejects(f.engine.send(scope, [here.key, other.key]), /new thread/);
+  assert.equal(await f.engine.send(scope, other.key), true);
+  await assert.rejects(f.engine.start(scope, other.key), /stale/);
+  assert.deepEqual(
+    f.sent.map((s) => s.text),
+    ["Audit the logs."],
+  );
+  assert.deepEqual(f.started, []);
 });
 test("an uncertain new-thread start is never retried", async () => {
   const f = fixture();

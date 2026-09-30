@@ -163,7 +163,8 @@ export class Engine {
         picked.length !== keys.length
       )
         throw new Error("Prompt is stale, busy, or already submitted.");
-      if (picked.some((c) => c.thread))
+      // Only a manual Cmd-click sends an unrelated suggestion here, and only on its own.
+      if (picked.some((c) => c.thread) && (automatic || picked.length !== 1))
         throw new Error("Unrelated suggestions start in a new thread.");
       let text = joinPrompts(picked.map((c) => c.text));
       const actions = picked.map((candidate) => gitAction(candidate.text));
@@ -223,16 +224,19 @@ export class Engine {
     }
   }
 
-  /** Starts an unrelated suggestion as a new conversation; this conversation stays unchanged. */
+  /** Starts a suggestion as a new conversation; this conversation stays unchanged. */
   async start(scope: Scope, key: string): Promise<boolean> {
     if (this.stopped || this.locks.has(scope.agentId)) throw new Error("Send already in progress.");
     this.locks.add(scope.agentId);
     try {
       const current = await this.driver.read(scope);
       const candidate = this.candidates(scope, current).find(
-        (c) => c.key === key && c.thread && c.state === "ready",
+        (c) => c.key === key && c.state === "ready",
       );
       if (!candidate) throw new Error("Prompt is stale or already started.");
+      // A Git action needs this conversation's work; a new thread has none of it.
+      if (gitAction(candidate.text))
+        throw new Error("Git suggestions require an individual manual send.");
       const entry = this.store.get(scope.agentId);
       // Persist reservation before dispatch. An uncertain acknowledgement is never retried.
       entry.handled[key] = "sending";

@@ -15,6 +15,10 @@ clicks; their blocks keep individual controls, and Jev does not auto-run them.
 An optional `why:` line under a prompt shows as its reason and is never sent.
 An optional `thread: new` line under a prompt marks it as unrelated to the current task (see [Goal and new-thread suggestions](#goal-and-new-thread-suggestions)).
 Send preserves the composer draft. Edit replaces it with the selected prompt text for manual review.
+Hold Cmd while the pointer is over an enabled Send button to turn it into Start in new thread.
+Cmd-click then starts that prompt in a new thread instead of sending it here (see below). Git actions keep their normal behavior.
+The reverse also works: Cmd over Start in new thread turns it into Send, and Cmd-click sends that prompt here.
+This needs an idle conversation and no Jev review in progress.
 
 ## Recap and next-step layout
 
@@ -88,7 +92,7 @@ Each group or combination contains 2–20 distinct IDs. Legacy blocks retain the
 - A start is reserved before dispatch and uses the suggestion key as the idempotency key; an uncertain result shows
   Check threads and is never retried.
 - New-thread prompts cannot appear in `exclusiveGroups` or `allowedCombinations`; such a block is rejected.
-  Send rejects them server-side, and Jev auto-run ignores them.
+  Send rejects them server-side unless one is sent alone by a manual Cmd-click. Jev auto-run ignores them.
 
 ## Compatibility
 
