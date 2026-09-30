@@ -19,7 +19,6 @@ const styles = `
 [${CONTROL}] [data-sp-trigger]:focus-visible { outline:2px solid currentColor; outline-offset:2px; }
 [${CONTROL}] [data-sp-label] { overflow:hidden; text-overflow:ellipsis; }
 [${CONTROL}] [data-sp-sep] { opacity:.55; }
-[${CONTROL}][data-sp-state="empty"] [data-sp-trigger] { opacity:.7; }
 [${CONTROL}][data-sp-state="active"] [data-sp-trigger] {
   background:color-mix(in srgb,currentColor 12%,transparent); }
 [${CONTROL}][data-sp-state="active"] [data-sp-trigger]:hover,
@@ -74,9 +73,22 @@ export function pillTitle(skills: readonly SkillId[] | undefined) {
     : "Pin skills for this chat";
 }
 
+// The model selector label carries the host theme foreground; inherited color may not.
+function modelLabel(root: El) {
+  const model = root.querySelector(MODEL);
+  return (
+    model &&
+    Array.from(model.querySelectorAll("div,span")).find(
+      (node) => node.textContent?.trim() && !node.querySelector("div,span,svg"),
+    )
+  );
+}
+
 function surfaceColor(doc: Doc, root: El) {
   const computed = doc.defaultView?.getComputedStyle;
-  const foreground = computed?.(root).color || "CanvasText";
+  const composer = root.closest(ROOT);
+  const label = composer && modelLabel(composer);
+  const foreground = (label && computed?.(label).color) || computed?.(root).color || "CanvasText";
   for (let node: El | null = root; node; node = node.parentElement) {
     const background = computed?.(node).backgroundColor;
     if (background && background !== "transparent" && !/^rgba\([^)]*,\s*0\)$/.test(background))
@@ -321,13 +333,8 @@ export function installSkillsMenu(
       const root = wrapper.closest(ROOT);
       if (!root || !owns(root)) continue;
       // Copy the model selector's text style, as the Caveman pill does, so both match the host.
-      const model = root.querySelector(MODEL);
-      const modelLabel =
-        model &&
-        Array.from(model.querySelectorAll("div,span")).find(
-          (node) => node.textContent?.trim() && !node.querySelector("div,span,svg"),
-        );
-      const typography = modelLabel && doc.defaultView?.getComputedStyle?.(modelLabel);
+      const label = modelLabel(root);
+      const typography = label && doc.defaultView?.getComputedStyle?.(label);
       if (typography) {
         const css = `color:${typography.color};font-family:${typography.fontFamily};font-size:${typography.fontSize};font-weight:${typography.fontWeight};font-style:${typography.fontStyle};line-height:${typography.lineHeight};letter-spacing:${typography.letterSpacing};`;
         if (control.trigger.getAttribute("data-sp-typography") !== css) {

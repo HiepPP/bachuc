@@ -214,6 +214,8 @@ test("the pill copies the model selector's text style and marks picks with a che
       "color:rgb(1, 2, 3);font-family:Inter;font-size:13px;font-weight:500;font-style:normal;line-height:18px;letter-spacing:0px;",
     );
     trigger.click();
+    const style = (document.querySelector("[data-sp-menu]") as El).getAttribute("style") ?? "";
+    assert.match(style, /--sp-foreground:rgb\(1, 2, 3\)/);
     const checks = Array.from(document.querySelectorAll("[data-sp-check]")).map(
       (n) => (n as El).textContent,
     );
