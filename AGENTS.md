@@ -38,14 +38,33 @@ Before adopting an API, check the target daemon/app version and the matching doc
 
 - Documentation index: https://paseo.sh/llms.txt
 - Quickstart: https://paseo.sh/docs/plugins.md
-- Plugin reference: https://paseo.sh/docs/plugins/v0.8/reference.md
-- Provider plugins: https://paseo.sh/docs/plugins/v0.8/providers
-- If a Paseo source checkout is available, inspect `docs/plugins.md`,
-  `public-docs/plugins/v0.8/reference.md`, and nearby `plugin-examples/`.
+- Plugin reference: https://paseo.sh/docs/plugins/reference.md
+- Provider plugins: https://paseo.sh/docs/plugins/providers.md
 
 A checkout can contain unreleased APIs. Do not assume every documented capability exists
 in the installed host. Declare the supported range in `paseo-plugin.json` under
 `requirements.paseo`; check client compatibility when adding UI.
+
+## Explore Paseo source
+
+Before designing a non-trivial plugin, read how the host implements the API you will use.
+The local checkout is `~/Projects/paseo`. Treat it as read-only: never edit, commit, or
+switch branches there without explicit permission.
+
+1. Compare versions: `git -C ~/Projects/paseo describe --tags` against `paseo --version`.
+   If they differ, say so and prefer behavior verified against the installed host.
+2. Read docs: `public-docs/plugins/reference.md` (plus `index.md`, `providers.md`,
+   `migration.md` there) and `docs/plugins.md`. Paseo's own `CLAUDE.md` and
+   `docs/architecture.md` explain host structure.
+3. Read the closest `plugin-examples/<name>/` and copy its patterns.
+4. Read host implementation in `packages/`: `plugin/` (SDK contracts and types),
+   `server/src/server/plugins/` (daemon plugin host), `app/src/plugins/` (client
+   contributions and UI), `protocol/` (message schemas).
+5. Use GitNexus repo `paseo` for flows and callers, and `rg` for text. Check index freshness
+   first; verify graph results against source.
+
+Record host facts a design depends on with the Paseo version or commit SHA, for example in the
+plugin's spec or README.
 
 ## Plugin capabilities
 
