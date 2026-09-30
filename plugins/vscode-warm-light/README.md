@@ -56,7 +56,7 @@ that every semantic token renders identically.
 ## Install and select
 
 Requires Paseo daemon and client 0.8.0 or later with `addTheme` support. Verified
-API contract: [Paseo theme reference](https://paseo.sh/docs/plugins/v0.8/reference#contribute-a-theme).
+API contract: [Paseo theme reference](https://paseo.sh/docs/plugins/reference.md#contribute-a-theme).
 
 ```sh
 cd plugins/vscode-warm-light
