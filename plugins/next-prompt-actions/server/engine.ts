@@ -167,7 +167,10 @@ export class Engine {
       if (picked.some((c) => c.thread) && (automatic || picked.length !== 1))
         throw new Error("Unrelated suggestions start in a new thread.");
       let text = joinPrompts(picked.map((c) => c.text));
-      const actions = picked.map((candidate) => gitAction(candidate.text));
+      // Unrelated work sent here is a plain Send; only current-task Git actions become /commit.
+      const actions = picked.map((candidate) =>
+        candidate.thread ? null : gitAction(candidate.text),
+      );
       if (actions.some(Boolean)) {
         if (automatic || picked.length !== 1)
           throw new Error("Git suggestions require an individual manual send.");
@@ -234,8 +237,9 @@ export class Engine {
         (c) => c.key === key && c.state === "ready",
       );
       if (!candidate) throw new Error("Prompt is stale or already started.");
-      // A Git action needs this conversation's work; a new thread has none of it.
-      if (gitAction(candidate.text))
+      // A current-task Git action needs this conversation's work; a new thread has none of it.
+      // An unrelated suggestion carries its own context, so it may commit in its own thread.
+      if (!candidate.thread && gitAction(candidate.text))
         throw new Error("Git suggestions require an individual manual send.");
       const entry = this.store.get(scope.agentId);
       // Persist reservation before dispatch. An uncertain acknowledgement is never retried.

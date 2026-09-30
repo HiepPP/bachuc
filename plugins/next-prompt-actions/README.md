@@ -18,6 +18,7 @@ Send preserves the composer draft. Edit replaces it with the selected prompt tex
 Hold Cmd while the pointer is over an enabled Send button to turn it into New thread.
 The click then starts that prompt in a new thread instead of sending it here (see below). Git actions keep their normal behavior.
 The reverse also works: Cmd over Start in new thread turns it into Send, and the click sends that prompt here.
+An Other work prompt that mentions commit or push still starts in a new thread and swaps only to a plain Send; it is never wrapped in `/commit`.
 This needs an idle conversation and no Jev review in progress.
 The swap changes no button size, and the click always does what the button shows.
 

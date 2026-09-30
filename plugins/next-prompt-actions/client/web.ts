@@ -589,11 +589,10 @@ export function install(controller: Controller, doc: Document = document, identi
           start.setAttribute("type", "button");
           start.setAttribute("class", "npa-start");
           start.setAttribute("aria-label", `Start in new thread: ${candidate.text}`);
-          // Git actions need this conversation's work, so they can never be sent from here.
-          const swappable = !gitAction(candidate.text);
-          faces(start, "Start in new thread", swappable ? "Send" : undefined);
+          // Unrelated work only swaps between a new thread and a plain send here.
+          faces(start, "Start in new thread", "Send");
           const hereMode = (on: boolean) => {
-            on &&= swappable && !blocked && !start.disabled;
+            on &&= !blocked && !start.disabled;
             if (on === (start.getAttribute("data-npa-here") !== null)) return;
             if (on) start.setAttribute("data-npa-here", "true");
             else start.removeAttribute("data-npa-here");
@@ -602,7 +601,7 @@ export function install(controller: Controller, doc: Document = document, identi
               `${on ? "Send suggested prompt" : "Start in new thread"}: ${candidate.text}`,
             );
           };
-          if (swappable) flipOnCmd(start, hereMode);
+          flipOnCmd(start, hereMode);
           // The click does what the button shows, so it reads the swap, never the modifier key.
           start.addEventListener("click", () => {
             if (start.disabled || !valid(block, context, candidate)) return;

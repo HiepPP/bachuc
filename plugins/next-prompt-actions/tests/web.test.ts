@@ -345,6 +345,51 @@ test("Cmd over Start in new thread swaps its face to Send unless blocked; the cl
     else Reflect.deleteProperty(globalThis, "MutationObserver");
   }
 });
+test("an unrelated Git action swaps only between Start and a plain Send", async () => {
+  const text = "Review the janitor changes. If tests pass, commit and push.";
+  const block = `prompt: ${text}\nthread: new`;
+  const current: Snapshot = {
+    ...snapshot,
+    candidates: [{ ...snapshot.candidates[0], block, text, source: block, thread: "new" }],
+  };
+  const { document, window } = parseHTML(
+    `<html><head></head><body><div data-testid="assistant-message"><div data-paseo-markdown-tag="pre"><span data-paseo-markdown-tag="code">${block}</span></div></div></body></html>`,
+  );
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "MutationObserver");
+  Object.defineProperty(globalThis, "MutationObserver", {
+    value: window.MutationObserver,
+    configurable: true,
+  });
+  const calls: string[] = [];
+  const cleanup = install(
+    {
+      inspect: async () => current,
+      send: async (_scope, key) => (calls.push(`send:${key}`), { sent: true }),
+      start: async (_scope, key) => (calls.push(`start:${key}`), { started: true }),
+    },
+    document as unknown as Parameters<typeof install>[1],
+    () => ({ ...context, message: block }),
+  );
+  const fire = (target: { dispatchEvent(event: object): void }, type: string, init = {}) =>
+    target.dispatchEvent(Object.assign(new window.Event(type, { bubbles: true }), init));
+  try {
+    await pause();
+    const start = document.querySelector(".npa-start")!;
+    fire(start, "mouseenter");
+    fire(document, "keydown", { key: "Meta", metaKey: true });
+    assert.equal(shown(start), "Send");
+    assert.equal(start.getAttribute("aria-label"), `Send suggested prompt: ${text}`);
+    fire(document, "keyup", { key: "Meta", metaKey: false });
+    assert.equal(shown(start), "Start in new thread");
+    fire(start, "click");
+    await pause();
+    assert.deepEqual(calls, ["start:key"]);
+  } finally {
+    cleanup();
+    if (previous) Object.defineProperty(globalThis, "MutationObserver", previous);
+    else Reflect.deleteProperty(globalThis, "MutationObserver");
+  }
+});
 test("a Git action beside a swappable Send neither swaps nor breaks the swap", async () => {
   const block = "prompt: Commit the fix.\nprompt: Test UI.";
   const current: Snapshot = {

@@ -236,6 +236,27 @@ test("a current-task suggestion can start once in a new thread, except Git actio
   assert.deepEqual(f.started, [{ text: "Report results.", id: `next-prompt-${here.key}` }]);
   assert.deepEqual(f.sent, []);
 });
+test("an unrelated Git suggestion starts in a new thread with its own text", async () => {
+  const f = fixture();
+  f.current.rows[1].text =
+    "## Next Steps\n```\nprompt: Report results.\nprompt: Review the janitor changes. If tests pass, commit and push only plugins/thread-janitor.\nthread: new\n```";
+  const [, other] = (await f.engine.inspect(scope)).candidates;
+  assert.equal(other.thread, "new");
+  assert.equal(await f.engine.start(scope, other.key), true);
+  assert.deepEqual(f.started, [{ text: other.text, id: `next-prompt-${other.key}` }]);
+  assert.deepEqual(f.sent, []);
+});
+test("an unrelated Git suggestion sent here is a plain send, not /commit", async () => {
+  const f = fixture();
+  f.current.rows[1].text =
+    "## Next Steps\n```\nprompt: Report results.\nprompt: Review the janitor changes. If tests pass, commit and push only plugins/thread-janitor.\nthread: new\n```";
+  const [, other] = (await f.engine.inspect(scope)).candidates;
+  assert.equal(await f.engine.send(scope, other.key), true);
+  assert.deepEqual(
+    f.sent.map((s) => s.text),
+    [other.text],
+  );
+});
 test("a new-thread suggestion can be sent here once by a manual send", async () => {
   const f = fixture();
   f.current.rows[1].text =
