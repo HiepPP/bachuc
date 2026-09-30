@@ -119,6 +119,9 @@ Require `running` with no load error and exercise the changed contribution. Relo
 local source; it does not require a Paseo rebuild. A failed reload stays failed: inspect the
 error and fix it. Never restart the main daemon to load plugin changes.
 
+Verify UI changes in the light theme only. The user works in light theme, so do not
+switch the app to dark theme or test dark theme unless explicitly asked.
+
 For `Transport not connected (status: disconnected)` during plugin RPC, manually reload
 the affected plugin. Local `~/.zshrc` defines `prefresh` as `paseo plugin reload`:
 
