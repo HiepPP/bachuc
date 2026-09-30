@@ -443,6 +443,9 @@ function IconTooltipContent({
   );
 }
 
+// Hosts, Import session, and Help are hidden from the footer; flip to show them again.
+const SHOW_FOOTER_EXTRAS = false;
+
 function SidebarFooter({
   theme,
   handleOpenProject,
@@ -478,20 +481,24 @@ function SidebarFooter({
         theme={theme}
       />
       <View style={styles.footerIconRow}>
-        <SidebarHostPicker
-          theme={theme}
-          label={labels.hosts}
-          onAddHost={handleAddHost}
-          onOpenHostSettings={handleOpenHostSettings}
-        />
-        <FooterIconButton
-          onPress={handleImportSession}
-          testID="sidebar-import-session"
-          label={labels.importSession}
-          icon={Import}
-          theme={theme}
-        />
-        <SidebarHelpMenu />
+        {SHOW_FOOTER_EXTRAS ? (
+          <>
+            <SidebarHostPicker
+              theme={theme}
+              label={labels.hosts}
+              onAddHost={handleAddHost}
+              onOpenHostSettings={handleOpenHostSettings}
+            />
+            <FooterIconButton
+              onPress={handleImportSession}
+              testID="sidebar-import-session"
+              label={labels.importSession}
+              icon={Import}
+              theme={theme}
+            />
+            <SidebarHelpMenu />
+          </>
+        ) : null}
         <FooterIconButton
           onPress={handleSettings}
           testID="sidebar-settings"
