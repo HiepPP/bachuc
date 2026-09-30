@@ -27,7 +27,8 @@ import {
   type AggregatedSchedule,
   type ScheduleHostError,
 } from "@/hooks/use-schedules";
-import { getHostRuntimeStore, useHosts } from "@/runtime/host-runtime";
+import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import { useVisibleHosts } from "@/hosts/use-visible-hosts";
 import {
   resolveSchedule,
   type ScheduleBucket,
@@ -65,9 +66,9 @@ export function SchedulesScreen(): ReactElement {
 function SchedulesScreenContent(): ReactElement {
   const { loadState, hostErrors, isError, refetch } = useSchedules();
   const schedules = loadState.status === "loaded" ? loadState.data : EMPTY_SCHEDULES;
-  const { agents } = useAggregatedAgents({ includeArchived: true });
-  const { projects } = useProjects();
-  const hosts = useHosts();
+  const { agents } = useAggregatedAgents({ includeArchived: true, hostScope: "visible" });
+  const { projects } = useProjects({ hostScope: "visible" });
+  const hosts = useVisibleHosts();
   const runtime = getHostRuntimeStore();
   const runtimeVersion = useSyncExternalStore(
     (onStoreChange) => runtime.subscribeAll(onStoreChange),
@@ -214,7 +215,7 @@ function SchedulesScreenBody({
   statusFilter: ScheduleBucket;
   onStatusFilterChange: (value: ScheduleBucket) => void;
   showHostFilter: boolean;
-  hosts: ReturnType<typeof useHosts>;
+  hosts: ReturnType<typeof useVisibleHosts>;
   selectedHost: string;
   onSelectHost: (serverId: string) => void;
   onRetry: () => void;

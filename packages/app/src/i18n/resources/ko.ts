@@ -2266,6 +2266,7 @@ export const ko: TranslationResources = {
         toggleSettings: "설정 토글",
         toggleFocusMode: "집중 모드 토글",
         cycleTheme: "테마 순환",
+        cycleActiveHost: "다음 호스트로 전환",
         focusMessageInput: "메시지 입력란에 포커스",
         cycleAgentMode: "에이전트 모드 전환",
         toggleVoiceMode: "음성 모드 토글",

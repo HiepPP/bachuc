@@ -24,6 +24,8 @@ import {
 import { HostPicker } from "@/components/hosts/host-picker";
 import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/display-preferences/menu";
 import { SidebarNavRows } from "@/components/sidebar/sidebar-nav-rows";
+import { ActiveHostSwitch } from "@/components/sidebar/active-host-switch";
+import { useHasActiveSidebarHostFilter } from "@/hooks/use-sidebar-workspaces-list";
 import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { Shortcut } from "@/components/ui/shortcut";
@@ -41,7 +43,7 @@ import type { PinnedSidebarGroups } from "@/hooks/use-sidebar-pins";
 import { RetainedPanelActivity } from "@/components/retained-panel";
 import type { SidebarWorkspaceGroup } from "@/components/sidebar/sidebar-labels";
 import type { SidebarProjectIconTarget } from "@/utils/sidebar-project-row-model";
-import { type SidebarGroupMode, useSidebarViewStore } from "@/stores/sidebar-view-store";
+import type { SidebarGroupMode } from "@/stores/sidebar-view-store";
 import { useHosts } from "@/runtime/host-runtime";
 import { usePanelStore } from "@/stores/panel-store";
 import { useOwnsWindowChromeCorner, WindowChromeSafeArea } from "@/utils/desktop-window";
@@ -531,7 +533,7 @@ function MobileSidebar({
   insetsBottom,
   closeSidebar,
 }: MobileSidebarProps) {
-  const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
+  const hasActiveHostFilter = useHasActiveSidebarHostFilter();
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
 
   const handleWorkspacePress = useCallback(() => {
@@ -555,6 +557,7 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
+        <ActiveHostSwitch onBeforeNavigate={closeSidebar} />
         <SidebarNavRows style={styles.sidebarHeaderGroup} onBeforeNavigate={closeSidebar} />
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
           <Pressable
@@ -643,7 +646,7 @@ function DesktopSidebar({
   active,
 }: DesktopSidebarProps) {
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
-  const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
+  const hasActiveHostFilter = useHasActiveSidebarHostFilter();
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
@@ -751,6 +754,7 @@ function DesktopSidebar({
           ) : (
             <TitlebarDragRegion />
           )}
+          <ActiveHostSwitch />
           <SidebarNavRows style={sidebarHeaderGroupStyle} />
         </View>
 

@@ -2378,6 +2378,7 @@ export const en = {
         toggleSettings: "Toggle settings",
         toggleFocusMode: "Toggle focus mode",
         cycleTheme: "Cycle theme",
+        cycleActiveHost: "Switch to next host",
         focusMessageInput: "Focus message input",
         cycleAgentMode: "Cycle agent mode",
         toggleVoiceMode: "Toggle voice mode",

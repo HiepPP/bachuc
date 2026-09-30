@@ -42,7 +42,7 @@ import {
 import { useScheduleMutations } from "@/hooks/use-schedule-mutations";
 import { useAggregatedAgents } from "@/hooks/use-aggregated-agents";
 import { useProjects } from "@/hooks/use-projects";
-import { useHosts } from "@/runtime/host-runtime";
+import { useVisibleHosts } from "@/hosts/use-visible-hosts";
 import { useSessionStore } from "@/stores/session-store";
 import { buildScheduleProjectTargets } from "@/schedules/schedule-project-targets";
 import { useScheduleFormModel } from "@/schedules/use-schedule-form-model";
@@ -240,8 +240,8 @@ function OpenScheduleFormSheet({
   schedule,
 }: ScheduleFormSheetProps & { onDismiss: () => void }): ReactElement {
   const controlSize: FieldControlSize = useIsCompactFormFactor() ? "md" : "sm";
-  const { projects } = useProjects();
-  const hostProfiles = useHosts();
+  const { projects } = useProjects({ hostScope: "visible" });
+  const hostProfiles = useVisibleHosts();
   const hosts = useStoreWithEqualityFn(
     useSessionStore,
     useMemo(() => selectScheduleHosts(hostProfiles), [hostProfiles]),
@@ -266,7 +266,7 @@ function OpenScheduleFormSheet({
   const model = useScheduleFormModel(snapshot);
   const state = useSyncExternalStore(model.subscribe, model.getState, model.getState);
   const providerSnapshot = useScheduleFormProviderSnapshot(model, state);
-  const { agents } = useAggregatedAgents({ includeArchived: true });
+  const { agents } = useAggregatedAgents({ includeArchived: true, hostScope: "visible" });
   const mutationServerId = state.selectedServerId ?? serverId ?? "";
   const { createSchedule, updateSchedule, isCreating, isUpdating } = useScheduleMutations({
     serverId: mutationServerId,

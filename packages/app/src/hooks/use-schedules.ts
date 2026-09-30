@@ -1,10 +1,7 @@
 import { useMemo } from "react";
 import { useFetchQuery } from "@/data/query";
-import {
-  getHostRuntimeStore,
-  useHostRuntimeConnectionStatuses,
-  useHosts,
-} from "@/runtime/host-runtime";
+import { getHostRuntimeStore, useHostRuntimeConnectionStatuses } from "@/runtime/host-runtime";
+import { useVisibleHosts } from "@/hosts/use-visible-hosts";
 import {
   fetchAggregatedSchedules,
   schedulesQueryBaseKey,
@@ -34,7 +31,7 @@ export interface UseSchedulesResult {
 }
 
 export function useSchedules(): UseSchedulesResult {
-  const hosts = useHosts();
+  const hosts = useVisibleHosts();
   const runtime = getHostRuntimeStore();
   const hostInputs = useMemo<ScheduleHostInput[]>(
     () => hosts.map((host) => ({ serverId: host.serverId, serverName: host.label })),

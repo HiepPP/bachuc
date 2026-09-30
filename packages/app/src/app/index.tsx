@@ -6,13 +6,18 @@ import {
   resolveStartupRoute,
   resolveWorkspaceSelectionStatus,
 } from "@/navigation/host-runtime-bootstrap";
-import { useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
+import { useHostRegistryStatus } from "@/runtime/host-runtime";
 import { useHasHydratedWorkspaces, useWorkspaceExists } from "@/stores/session-store-hooks";
 import {
   useIsLastWorkspaceSelectionHydrated,
   useLastWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
+import {
+  useActiveHostHydrated,
+  useActiveServerId,
+  useVisibleHosts,
+} from "@/hosts/use-visible-hosts";
 
 const isDesktop = shouldUseDesktopDaemon();
 
@@ -20,10 +25,17 @@ export default function Index() {
   const pathname = usePathname();
   const bootstrapState = useHostRuntimeBootstrapState();
   const anyOnlineHostServerId = useEarliestOnlineHostServerId();
-  const hosts = useHosts();
+  const hosts = useVisibleHosts();
+  const activeServerId = useActiveServerId();
+  const isActiveHostHydrated = useActiveHostHydrated();
   const hostRegistryStatus = useHostRegistryStatus();
-  const workspaceSelection = useLastWorkspaceSelection();
-  const isWorkspaceSelectionLoaded = useIsLastWorkspaceSelectionHydrated();
+  const lastWorkspaceSelection = useLastWorkspaceSelection();
+  // With an active host, start on it: its host index restores its own last workspace.
+  const workspaceSelection =
+    activeServerId && lastWorkspaceSelection?.serverId !== activeServerId
+      ? null
+      : lastWorkspaceSelection;
+  const isWorkspaceSelectionLoaded = useIsLastWorkspaceSelectionHydrated() && isActiveHostHydrated;
   const workspaceSelectionServerId = workspaceSelection?.serverId ?? null;
   const workspaceSelectionWorkspaceId = workspaceSelection?.workspaceId ?? null;
   const hasHydratedWorkspaceSelectionHost = useHasHydratedWorkspaces(workspaceSelectionServerId);
@@ -37,7 +49,7 @@ export default function Index() {
     startupBlocker: bootstrapState.startupBlocker,
     hostRegistryStatus,
     hosts,
-    anyOnlineHostServerId,
+    anyOnlineHostServerId: activeServerId ?? anyOnlineHostServerId,
     workspaceSelection,
     workspaceSelectionStatus: resolveWorkspaceSelectionStatus({
       hasHydratedWorkspaces: hasHydratedWorkspaceSelectionHost,

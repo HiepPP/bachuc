@@ -45,6 +45,8 @@ import { WorkspaceSetupDialog } from "@/components/workspace-setup-dialog";
 import { WorkspaceShortcutTargetsSubscriber } from "@/components/workspace-shortcut-targets-subscriber";
 import { FloatingPanelPortalHost } from "@/components/ui/floating-panel-portal";
 import { HostChooserModal, useHostChooser } from "@/hosts/host-chooser";
+import { useActiveHostRouteSync } from "@/hosts/use-visible-hosts";
+import { useCycleActiveHost } from "@/components/sidebar/active-host-switch";
 import {
   getIsElectronRuntime,
   HEADER_INNER_HEIGHT,
@@ -468,6 +470,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
 
+  const cycleActiveHost = useCycleActiveHost();
   const cycleTheme = useCallback(() => {
     void updateSettings({ theme: getNextThemePreference(settings.theme) });
   }, [settings.theme, updateSettings]);
@@ -509,6 +512,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
     toggleBothSidebars: toggleDesktopSidebars,
     exitFocusMode,
     cycleTheme,
+    cycleActiveHost,
   });
 
   useActiveWorktreeNewAction();
@@ -672,6 +676,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
         <OfferLinkListener />
         <HostSessionManager />
         <FaviconStatusSync />
+        <ActiveHostRouteSync />
         {children}
       </VoiceProvider>
     </AppearanceProvider>
@@ -743,7 +748,7 @@ interface PendingOpenProjectRequest {
 let nextOpenProjectRequestId = 1;
 
 function OpenProjectListener() {
-  const chooseHost = useHostChooser();
+  const chooseHost = useHostChooser("all");
   const hostRegistryLoaded = useHostRegistryLoaded();
   const [request, setRequest] = useState<PendingOpenProjectRequest | null>(null);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
@@ -863,6 +868,11 @@ function AppWithSidebar({ children }: { children: ReactNode }) {
       routeHasKnownHost);
 
   return <AppContainer chromeEnabled={shouldShowAppChrome}>{children}</AppContainer>;
+}
+
+function ActiveHostRouteSync() {
+  useActiveHostRouteSync();
+  return null;
 }
 
 function FaviconStatusSync() {

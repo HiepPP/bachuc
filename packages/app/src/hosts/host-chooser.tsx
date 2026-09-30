@@ -24,6 +24,7 @@ import {
   useWebOverlayRegistration,
 } from "@/lib/overlay-root";
 import { useHosts } from "@/runtime/host-runtime";
+import { type HostScope, useScopedHosts } from "@/hosts/use-visible-hosts";
 import { orderHostsLocalFirst, type HostProfile } from "@/types/host-connection";
 import { buildSettingsAddHostRoute } from "@/utils/host-routes";
 
@@ -69,8 +70,12 @@ function matchesHostQuery(host: HostProfile, query: string): boolean {
   );
 }
 
-export function useHostChooser() {
-  const hosts = useHosts();
+/**
+ * Creation flows pick among the hosts on screen by default; with an active host that is the only
+ * choice. A local path from the OS passes "all", because only the user knows which host has it.
+ */
+export function useHostChooser(hostScope: HostScope = "visible") {
+  const hosts = useScopedHosts(hostScope);
   const localServerId = useLocalDaemonServerId();
   const open = useHostChooserStore((state) => state.open);
 

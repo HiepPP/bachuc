@@ -36,6 +36,20 @@ function multiplicity(entries: Record<string, boolean> = {}): ReadonlyMap<string
 }
 
 describe("resolveNewWorkspaceInitialServerId", () => {
+  it("stays on the active host when the last active project is on a hidden host", () => {
+    // The screen passes only the visible hosts, so a hidden host is unknown here.
+    expect(
+      resolveNewWorkspaceInitialServerId({
+        allServerIds: ["active"],
+        routeServerId: "hidden",
+        lastActiveProject: projectFor("hidden"),
+        projects: [projectFor("active"), projectFor("hidden")],
+        hostConnectionStatusByServerId: statuses({ active: "online", hidden: "online" }),
+        workspaceMultiplicityByServerId: multiplicity(),
+      }),
+    ).toBe("active");
+  });
+
   it("prefers explicit route host context over online-host fallback", () => {
     expect(
       resolveNewWorkspaceInitialServerId({

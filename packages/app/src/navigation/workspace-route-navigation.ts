@@ -42,6 +42,19 @@ export function registerWorkspaceRouteNavigationRef(
 interface MountedRouteStack {
   key: string;
   focusedRouteName: string | null;
+  focusedServerId: string | null;
+}
+
+function readFocusedRoute(route: unknown): { name: string | null; serverId: string | null } {
+  if (!route || typeof route !== "object") {
+    return { name: null, serverId: null };
+  }
+  const { name, params } = route as { name?: unknown; params?: { serverId?: unknown } | null };
+  const serverId = params?.serverId;
+  return {
+    name: typeof name === "string" ? name : null,
+    serverId: typeof serverId === "string" ? serverId : null,
+  };
 }
 
 function findStackWithMountedRouteName(
@@ -76,14 +89,11 @@ function findStackWithMountedRouteName(
       candidate.index < candidate.routes.length
         ? candidate.index
         : candidate.routes.length - 1;
-    const focusedRoute = candidate.routes[focusedIndex];
-    const focusedRouteName =
-      focusedRoute && typeof focusedRoute === "object"
-        ? (focusedRoute as { name?: unknown }).name
-        : null;
+    const focusedRoute = readFocusedRoute(candidate.routes[focusedIndex]);
     return {
       key: candidate.key,
-      focusedRouteName: typeof focusedRouteName === "string" ? focusedRouteName : null,
+      focusedRouteName: focusedRoute.name,
+      focusedServerId: focusedRoute.serverId,
     };
   }
 
@@ -114,7 +124,15 @@ function dispatchHostWorkspacePopTo(
 
   const rootState = navigation.getRootState();
   const hostStack = findStackWithMountedRouteName(rootState, ROOT_HOST_ROUTE_NAME);
-  if (!hostStack || hostStack.focusedRouteName === ROOT_HOST_ROUTE_NAME) {
+  if (!hostStack) {
+    return false;
+  }
+  // The focused host route is reused for a same-host hop (dismissTo handles it). Another host still
+  // needs POP_TO: it updates the params in place instead of appending a second root host route.
+  const isFocusedHostRoute = hostStack.focusedRouteName === ROOT_HOST_ROUTE_NAME;
+  const isSwitchingHost =
+    hostStack.focusedServerId !== null && hostStack.focusedServerId !== selection.serverId;
+  if (isFocusedHostRoute && !isSwitchingHost) {
     return false;
   }
   const open = getHostWorkspaceOpenParamFromPathname(route);

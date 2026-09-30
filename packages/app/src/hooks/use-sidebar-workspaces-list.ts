@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -8,6 +8,9 @@ import { useHostProjects } from "@/projects/host-projects";
 import { getHostRuntimeStore, useHostRegistryLoaded, useHosts } from "@/runtime/host-runtime";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
 import { useSidebarViewStore } from "@/stores/sidebar-view-store";
+import { useActiveHostStore } from "@/stores/active-host-store";
+import { isNative } from "@/constants/platform";
+import { useActiveServerId } from "@/hosts/use-visible-hosts";
 import {
   buildSidebarWorkspacePlacementModel,
   computeSidebarOrderUpdates,
@@ -94,6 +97,64 @@ export interface SidebarWorkspacesListResult {
   refreshAll: () => void;
 }
 
+/**
+ * The hosts the sidebar is pinned to. The active host wins over the sidebar's own host filter,
+ * which only applies while every host is shown, so two filters never disagree.
+ */
+export function useEffectiveSidebarHostFilters(): readonly string[] {
+  const activeServerId = useActiveServerId();
+  const hostFilters = useSidebarViewStore((state) => state.hostFilters);
+  return useMemo(
+    () => (activeServerId ? [activeServerId] : hostFilters),
+    [activeServerId, hostFilters],
+  );
+}
+
+export function useHasActiveSidebarHostFilter(): boolean {
+  return useEffectiveSidebarHostFilters().length > 0;
+}
+
+/**
+ * Hosts whose directory demand the sidebar holds. Native keeps the previous host warm while a
+ * single host is active, so switching back does not refetch it. Display still follows `serverIds`.
+ */
+export function resolveSidebarDemandServerIds(input: {
+  serverIds: readonly string[];
+  allServerIds: readonly string[];
+  activeServerId: string | null;
+  previousServerId: string | null;
+  keepPrevious: boolean;
+}): readonly string[] {
+  const { serverIds, allServerIds, activeServerId, previousServerId, keepPrevious } = input;
+  if (
+    !keepPrevious ||
+    activeServerId === null ||
+    previousServerId === null ||
+    !allServerIds.includes(previousServerId) ||
+    serverIds.includes(previousServerId)
+  ) {
+    return serverIds;
+  }
+  return [...serverIds, previousServerId];
+}
+
+/**
+ * Which demand handles to take and drop to move from `held` to `next`. A host in both is left
+ * alone: releasing the last handle on a host tears down its subscriptions at once, so releasing
+ * and re-acquiring it would refetch its directory.
+ */
+export function diffDemandServerIds(
+  held: Iterable<string>,
+  next: readonly string[],
+): { acquire: string[]; release: string[] } {
+  const heldIds = new Set(held);
+  const nextIds = new Set(next);
+  return {
+    acquire: [...nextIds].filter((serverId) => !heldIds.has(serverId)),
+    release: [...heldIds].filter((serverId) => !nextIds.has(serverId)),
+  };
+}
+
 export function useSidebarWorkspacesList(options?: {
   hostFilters?: readonly string[];
   enabled?: boolean;
@@ -103,7 +164,7 @@ export function useSidebarWorkspacesList(options?: {
   const hostRegistryLoaded = useHostRegistryLoaded();
   const allServerIds = useMemo(() => allHosts.map((h) => h.serverId), [allHosts]);
 
-  const storeHostFilters = useSidebarViewStore((state) => state.hostFilters);
+  const storeHostFilters = useEffectiveSidebarHostFilters();
   const hostFilters = options?.hostFilters ?? storeHostFilters;
   const reconcileHostFilters = useSidebarViewStore((state) => state.reconcileHostFilters);
   const isActive = options?.enabled !== false;
@@ -121,11 +182,41 @@ export function useSidebarWorkspacesList(options?: {
     }
     return matched;
   }, [allServerIds, hostFilters, hostRegistryLoaded]);
+  const activeServerId = useActiveServerId();
+  const previousServerId = useActiveHostStore((state) => state.previousServerId);
+  // Native has no always-on favicon demand (hooks/use-favicon-status.ts uses `demand: !isNative`),
+  // so releasing the previous host's demand on switch forces a full refetch when switching back.
+  const demandServerIds = useMemo(
+    () =>
+      resolveSidebarDemandServerIds({
+        serverIds,
+        allServerIds,
+        activeServerId,
+        previousServerId,
+        keepPrevious: isNative,
+      }),
+    [serverIds, allServerIds, activeServerId, previousServerId],
+  );
+  const heldDemandRef = useRef(new Map<string, () => void>());
+  // Acquire before release, and never touch a host that stays in the set.
   useEffect(() => {
-    if (!isActive) return;
-    const releases = serverIds.map((serverId) => runtime.acquireDirectoryDemand(serverId));
-    return () => releases.forEach((release) => release());
-  }, [isActive, runtime, serverIds]);
+    const held = heldDemandRef.current;
+    const { acquire, release } = diffDemandServerIds(held.keys(), isActive ? demandServerIds : []);
+    for (const serverId of acquire) {
+      held.set(serverId, runtime.acquireDirectoryDemand(serverId));
+    }
+    for (const serverId of release) {
+      held.get(serverId)?.();
+      held.delete(serverId);
+    }
+  }, [isActive, runtime, demandServerIds]);
+  useEffect(() => {
+    const held = heldDemandRef.current;
+    return () => {
+      for (const releaseDemand of held.values()) releaseDemand();
+      held.clear();
+    };
+  }, [runtime]);
 
   useEffect(() => {
     if (!hostRegistryLoaded) {

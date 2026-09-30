@@ -12,6 +12,7 @@ import { ScreenTitle } from "@/components/headers/screen-title";
 import { HostPicker } from "@/components/hosts/host-picker";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
+import { useActiveServerId } from "@/hosts/use-visible-hosts";
 import type { Theme } from "@/styles/theme";
 import type { ShortcutKey } from "@/utils/format-shortcut";
 import { usePluginHostNavigation } from "./host-navigation";
@@ -96,6 +97,7 @@ function PluginHostSwitcher({
   serverIds: string[];
 }) {
   const allHosts = useHosts();
+  const activeServerId = useActiveServerId();
   const hosts = useMemo(
     () => allHosts.filter((host) => serverIds.includes(host.serverId)),
     [allHosts, serverIds],
@@ -111,7 +113,8 @@ function PluginHostSwitcher({
     [identity, pluginId],
   );
   const openPicker = useCallback(() => setOpen(true), []);
-  const show = serverIds.length > 1 && hosts.length > 1;
+  // An active host already decides which host this page shows.
+  const show = activeServerId === null && serverIds.length > 1 && hosts.length > 1;
   if (!show) return null;
 
   return (
