@@ -1,0 +1,70 @@
+diff --git a/hiep-plugins/plugins/workspace-spaces/tests/sidebar.test.ts b/hiep-plugins/plugins/workspace-spaces/tests/sidebar.test.ts
+index d27a83c96..c59b0eff3 100644
+--- a/hiep-plugins/plugins/workspace-spaces/tests/sidebar.test.ts
++++ b/hiep-plugins/plugins/workspace-spaces/tests/sidebar.test.ts
+@@ -25,6 +25,7 @@ function setup(html = fixture, moveSucceeded = true, thirdSpace = false) {
+   if (thirdSpace) state = addSpace(state);
+   state = moveProject(state, projectKey("sidebar", "p"), "space-2");
+   let snapshot: SidebarSnapshot = {
++    host: null,
+     state,
+     busy: false,
+     error: "",
+@@ -438,3 +439,57 @@ test("heading follows selection, survives host rerenders, and restores on cleanu
+   assert.equal(heading.hasAttribute("data-paseo-space-heading"), false);
+   assert.equal(heading.hasAttribute("title"), false);
+ });
++
++test("each host keeps its own Spaces and switching hosts shows only that host's config", async () => {
++  let values: unknown = {};
++  let host: string | null = "host-a";
++  const controller = createSidebarController(
++    {
++      rpc: async (contract: { name: string }, input: { values?: unknown }) => {
++        if (contract.name === "spaces.catalog") return { projects: [] };
++        if (contract.name.endsWith(".read")) return { status: "ready", revision: "r", values };
++        values = input.values;
++        return { status: "saved", revision: "r", values };
++      },
++    } as unknown as Parameters<typeof createSidebarController>[0],
++    () => host,
++  );
++  const { document } = parseHTML(fixture);
++  const cleanup = mountSidebar(
++    document as unknown as DomDocument,
++    () => ({ observe() {}, disconnect() {} }),
++    controller,
++  );
++  const tabs = () =>
++    Array.from((document as unknown as DomDocument).querySelectorAll('[role="tab"]')).map((t) =>
++      t.getAttribute("aria-label"),
++    );
++  try {
++    await new Promise((resolve) => setImmediate(resolve));
++    assert.equal(await controller.create(), true);
++    assert.equal(await controller.rename("space-2", "A only"), true);
++    assert.equal(await controller.moveView("repo:p", "space-2"), true);
++    assert.deepEqual(tabs(), ["Workspace 1", "A only"]);
++
++    host = "host-b";
++    await controller.refresh();
++    assert.deepEqual(tabs(), ["Workspace 1"]);
++    assert.equal(document.querySelector("#p")!.hasAttribute("data-paseo-space-hidden"), false);
++    assert.equal(await controller.rename("space-1", "B home"), true);
++
++    host = null;
++    await controller.refresh();
++    assert.deepEqual(tabs(), ["Workspace 1"]);
++
++    host = "host-a";
++    await controller.refresh();
++    assert.deepEqual(tabs(), ["Workspace 1", "A only"]);
++    assert.equal(document.querySelector("#p")!.hasAttribute("data-paseo-space-hidden"), true);
++    const stored = values as { spaces: unknown[]; hosts: Record<string, { spaces: unknown[] }> };
++    assert.equal(stored.spaces.length, 1);
++    assert.deepEqual(Object.keys(stored.hosts).sort(), ["host-a", "host-b"]);
++    assert.equal(stored.hosts["host-b"].spaces.length, 1);
++  } finally {
++    cleanup();
++  }
++});
