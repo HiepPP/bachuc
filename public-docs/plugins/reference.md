@@ -749,6 +749,14 @@ Paseo owns the route, header, close action, host picker, error boundary, and que
 default to the calling plugin. `client.openNewWorkspace({ cwd, projectId, name, serverId })` opens
 the new workspace screen for a project directory.
 
+### Workspace header subtitle
+
+`client.addWorkspaceHeaderSubtitle({ id, Component })` replaces the project name beside the
+workspace title, for workspaces on the plugin's host. The component receives the surface `theme`,
+`host`, and `layout`, plus `workspaceId`, `projectId`, and `projectDisplayName`. The first
+contribution on the host wins. Paseo shows its own project name when the component throws, and
+hides the row when the project name repeats the workspace title on a wide layout.
+
 ### Sidebar projects and sections
 
 Each plugin contributes to the sidebar through one installation: the active host's, else the first.

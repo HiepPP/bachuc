@@ -7,7 +7,7 @@ import { BoardPage } from "./client/page";
 import { OrbSettingsScreen } from "./client/orb-settings";
 import { workspaceActions } from "./client/workspace";
 import { installBoardShortcut } from "./client/shortcut";
-import { installProjectHeader } from "./client/project-header";
+import { ProjectHeaderChip } from "./client/project-header-chip";
 
 export default function contribute(client: PluginClientContext) {
   const surface = client.addSurface("board", BoardPage);
@@ -26,7 +26,10 @@ export default function contribute(client: PluginClientContext) {
   workspaceActions.open = (input) => client.openNewWorkspace(input);
   // Opens the Board on the active host; one installation owns the shortcut.
   const shortcut = installBoardShortcut(() => client.openSurface("board"));
-  const projectHeader = installProjectHeader(client);
+  const projectHeader = client.addWorkspaceHeaderSubtitle({
+    id: "project",
+    Component: ProjectHeaderChip,
+  });
   const parent = installParentNavigation(client);
   const newThread = installNewThreadNavigation(client);
   const removeButtons = installRemoveButtons(

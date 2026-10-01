@@ -107,6 +107,10 @@ export interface PluginClientContext extends PluginCommandCapabilities {
   addSidebarProjectMenuItems(contribution: PluginSidebarProjectMenuContribution): PluginCleanup;
   /** Renders a section above the sidebar footer. */
   addSidebarSection(contribution: PluginSidebarSectionContribution): PluginCleanup;
+  /** Replaces the project name in the header of workspaces on this plugin's host. */
+  addWorkspaceHeaderSubtitle(
+    contribution: PluginWorkspaceHeaderSubtitleContribution,
+  ): PluginCleanup;
   /** Runs before a composer on this plugin's host sends or queues a message. */
   addComposerInterceptor(contribution: PluginComposerInterceptorContribution): PluginCleanup;
   /** Opens the new workspace screen for a project directory, on this plugin's host by default. */
@@ -175,6 +179,17 @@ export interface PluginSidebarSectionProps extends PluginHostProps, PluginSideba
 export interface PluginSidebarSectionContribution {
   id: string;
   Component: ComponentType<PluginSidebarSectionProps>;
+}
+
+export interface PluginWorkspaceHeaderSubtitleProps extends PluginHostProps {
+  workspaceId: string;
+  projectId: string;
+  projectDisplayName: string;
+}
+
+export interface PluginWorkspaceHeaderSubtitleContribution {
+  id: string;
+  Component: ComponentType<PluginWorkspaceHeaderSubtitleProps>;
 }
 
 /** `agentId` is null for composers that create a new agent. */

@@ -102,6 +102,7 @@ import {
   shouldShowWorkspaceSetup,
   useWorkspaceSetupStore,
 } from "@/stores/workspace-setup-store";
+import { PluginWorkspaceHeaderSubtitle } from "@/plugins/workspace-header-subtitle";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { useWorkspaceTerminalSessionRetention } from "@/terminal/hooks/use-workspace-terminal-session-retention";
 import type { CheckoutStatusPayload } from "@/git/use-status-query";
@@ -915,10 +916,12 @@ function WorkspaceHeaderProjectRow({
   subtitle,
   isSubtitleDistinct,
   serverId,
+  workspaceId,
 }: {
   subtitle: string;
   isSubtitleDistinct: boolean;
   serverId: string;
+  workspaceId: string;
 }) {
   const isCompact = useIsCompactFormFactor();
   const hostBadge = useHostBadges({ enabled: isCompact }).get(serverId) ?? null;
@@ -929,13 +932,19 @@ function WorkspaceHeaderProjectRow({
   return (
     <View style={styles.headerProjectRow}>
       {showProject ? (
-        <Text
-          testID="workspace-header-subtitle"
-          style={styles.headerProjectTitle}
-          numberOfLines={1}
+        <PluginWorkspaceHeaderSubtitle
+          serverId={serverId}
+          workspaceId={workspaceId}
+          projectDisplayName={subtitle}
         >
-          {subtitle}
-        </Text>
+          <Text
+            testID="workspace-header-subtitle"
+            style={styles.headerProjectTitle}
+            numberOfLines={1}
+          >
+            {subtitle}
+          </Text>
+        </PluginWorkspaceHeaderSubtitle>
       ) : null}
       {showProject && hostBadge ? <Text style={styles.headerProjectSeparator}>·</Text> : null}
       {hostBadge ? <HostBadge badge={hostBadge} /> : null}
@@ -1013,6 +1022,7 @@ function WorkspaceHeaderTitleBar({
             subtitle={subtitle}
             isSubtitleDistinct={isSubtitleDistinct}
             serverId={normalizedServerId}
+            workspaceId={normalizedWorkspaceId}
           />
         </View>
       )}

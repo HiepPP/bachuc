@@ -482,6 +482,27 @@ describe("evaluatePluginClientBundle", () => {
     ).toThrow("action has no onPress");
   });
 
+  it("collects a workspace header subtitle and rejects a duplicate id", () => {
+    const plugin = evaluatePluginClientBundle(
+      "example",
+      bundle(`
+        function Subtitle() { return null; }
+        plugin.addWorkspaceHeaderSubtitle({ id: "project", Component: Subtitle });
+      `),
+    );
+    expect(plugin.workspaceHeaderSubtitles?.map((subtitle) => subtitle.id)).toEqual(["project"]);
+    expect(() =>
+      evaluatePluginClientBundle(
+        "example",
+        bundle(`
+          function Subtitle() { return null; }
+          plugin.addWorkspaceHeaderSubtitle({ id: "project", Component: Subtitle });
+          plugin.addWorkspaceHeaderSubtitle({ id: "project", Component: Subtitle });
+        `),
+      ),
+    ).toThrow("Duplicate workspace header subtitle: project");
+  });
+
   it("rejects a bundle without a default contribution function", () => {
     expect(() => evaluatePluginClientBundle("example", `(function() { return {}; })`)).toThrow(
       "must default export a function",

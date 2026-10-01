@@ -25,6 +25,7 @@ import {
   type PluginSidebarProjectFilterContribution,
   type PluginSidebarProjectMenuContribution,
   type PluginSidebarSectionContribution,
+  type PluginWorkspaceHeaderSubtitleContribution,
   type PluginSurfaceProps,
   type PluginTimelineRendererContribution,
   type PluginTimelineTransformerContribution,
@@ -99,6 +100,8 @@ export function runPluginClientBundle(
   const sidebarProjectFilters: PluginSidebarProjectFilterContribution[] = [];
   const sidebarProjectMenus: PluginSidebarProjectMenuContribution[] = [];
   const sidebarSections: PluginSidebarSectionContribution[] = [];
+  const workspaceHeaderSubtitles: PluginWorkspaceHeaderSubtitleContribution[] = [];
+  const workspaceHeaderSubtitleIds = new Set<string>();
   const sidebarContributionIds = new Set<string>();
   const collector: Omit<EvaluatedPlugin, "id" | "cleanup"> = {
     surfaces: [],
@@ -115,6 +118,7 @@ export function runPluginClientBundle(
     sidebarProjectFilters,
     sidebarProjectMenus,
     sidebarSections,
+    workspaceHeaderSubtitles,
   };
   const composerInterceptorIds = new Set<string>();
   const surfaceIds = new Set<string>();
@@ -444,6 +448,19 @@ export function runPluginClientBundle(
         sidebarContributionIds.delete(`section:${sectionId}`),
       );
     },
+    addWorkspaceHeaderSubtitle(contribution) {
+      const subtitleId = requireId(contribution.id, "workspace header subtitle id");
+      if (workspaceHeaderSubtitleIds.has(subtitleId))
+        throw new Error(`Duplicate workspace header subtitle: ${subtitleId}`);
+      if (typeof contribution.Component !== "function")
+        throw new Error(`Workspace header subtitle ${subtitleId} is not a component`);
+      workspaceHeaderSubtitleIds.add(subtitleId);
+      return register(
+        workspaceHeaderSubtitles,
+        { id: subtitleId, Component: contribution.Component },
+        () => workspaceHeaderSubtitleIds.delete(subtitleId),
+      );
+    },
     openNewWorkspace(input) {
       if (!runtime.openNewWorkspace) throw new Error("New workspace is unavailable on this host");
       if (!input.cwd.trim()) throw new Error("openNewWorkspace needs a directory");
@@ -552,5 +569,6 @@ export function runPluginClientBundle(
     sidebarProjectFilters: collector.sidebarProjectFilters,
     sidebarProjectMenus: collector.sidebarProjectMenus,
     sidebarSections: collector.sidebarSections,
+    workspaceHeaderSubtitles: collector.workspaceHeaderSubtitles,
   };
 }

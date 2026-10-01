@@ -17,6 +17,7 @@ import type {
   PluginSurfaceContribution,
   PluginSettingsScreenContribution,
   PluginTimelineRendererContribution,
+  PluginWorkspaceHeaderSubtitleContribution,
   PluginTimelineTransformerContribution,
   PluginPanelLocation,
   PluginWorkspacePanelContribution,
@@ -43,6 +44,7 @@ export interface EvaluatedPlugin {
   sidebarProjectFilters?: PluginSidebarProjectFilterContribution[];
   sidebarProjectMenus?: PluginSidebarProjectMenuContribution[];
   sidebarSections?: PluginSidebarSectionContribution[];
+  workspaceHeaderSubtitles?: PluginWorkspaceHeaderSubtitleContribution[];
 }
 
 export interface InstalledPlugin extends EvaluatedPlugin {

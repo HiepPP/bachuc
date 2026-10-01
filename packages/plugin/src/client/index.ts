@@ -32,6 +32,8 @@ export type {
   PluginSidebarProjectMenuContribution,
   PluginSidebarSectionProps,
   PluginSidebarSectionContribution,
+  PluginWorkspaceHeaderSubtitleProps,
+  PluginWorkspaceHeaderSubtitleContribution,
   PluginComposerInterceptInput,
   PluginComposerInterceptResult,
   PluginComposerInterceptorContribution,
