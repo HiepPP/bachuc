@@ -1,0 +1,4 @@
+# Packaged desktop builds; ignored by packages/desktop/.gitignore, which GitNexus does not read.
+packages/desktop/release/
+# Symlink to hiep-plugins/plugins/jev-evaluator, which is indexed at its real path.
+plugin-examples/jev-evaluator
