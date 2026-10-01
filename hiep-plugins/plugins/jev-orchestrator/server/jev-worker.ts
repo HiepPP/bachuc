@@ -1,12 +1,23 @@
-import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
-import { experimental_evaluate as evaluate, type Experimental_EvaluationQuestion } from "ai";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Decision, Judge } from "./types";
 import { evaluationUsage, type TokenUsage } from "./usage";
 
-import { EvaluationError, typesafeEvaluationError } from "./evaluation-error";
+import { EvaluationError, sharedEvaluationError } from "./evaluation-error";
+
+type Answer = { type: string; choice: string; probabilities?: Record<string, number> };
+type SharedEvaluator = {
+  evaluateWithTypesafe(
+    configFile: string,
+    input: { state: unknown; questions: Record<string, unknown> },
+    options: { signal: AbortSignal; timeoutMs: number },
+  ): Promise<{
+    answers: Record<string, Answer | undefined>;
+    usage: { inputTokens: number | null; outputTokens: number | null };
+  }>;
+};
+
+// The evaluator plugin owns the SDK, the credential lookup, and the request; see its README.
+const EVALUATOR = new URL("../../jev-evaluator/server/typesafe.mjs", import.meta.url).href;
 
 export function createJudge(configFile: string, spacingMs = 26000): Judge {
   let queue = Promise.resolve();
@@ -21,17 +32,7 @@ export function createJudge(configFile: string, spacingMs = 26000): Judge {
       await previous;
       if (signal.aborted) throw new EvaluationError("JEV_CANCELLED");
       await delay(Math.max(0, next - Date.now()), undefined, { signal });
-      let config;
-      try {
-        config = JSON.parse(
-          await readFile(path.join(path.dirname(configFile), "typesafe-ai.json"), "utf8"),
-        );
-      } catch {
-        throw new EvaluationError("JEV_CONFIG_INVALID");
-      }
-      const key = config?.apiKey;
-      if (typeof key !== "string" || !key) throw new EvaluationError("JEV_CREDENTIAL_MISSING");
-      const questions: Record<string, Experimental_EvaluationQuestion> = {
+      const questions: Record<string, unknown> = {
         profile: {
           type: "choice",
           instructions:
@@ -110,21 +111,21 @@ export function createJudge(configFile: string, spacingMs = 26000): Judge {
       );
       if (Buffer.byteLength(JSON.stringify({ state: sanitized, questions })) > 100000)
         throw new EvaluationError("JEV_INPUT_INVALID");
-      const local = new AbortController();
-      const abort = () => local.abort();
-      signal.addEventListener("abort", abort, { once: true });
-      const timer = setTimeout(abort, 20000);
+      let shared: SharedEvaluator;
+      try {
+        shared = await import(EVALUATOR);
+      } catch {
+        throw new EvaluationError("JEV_CONFIG_INVALID");
+      }
       let usage: TokenUsage | undefined;
       let responded = false;
       try {
         next = Date.now() + spacingMs;
-        const result = await evaluate({
-          model: createTypeSafeAi({ apiKey: key }).evaluationModel("jev-latest"),
-          state: sanitized,
-          questions,
-          maxRetries: 0,
-          abortSignal: local.signal,
-        });
+        const result = await shared.evaluateWithTypesafe(
+          configFile,
+          { state: sanitized, questions },
+          { signal, timeoutMs: 20000 },
+        );
         responded = true;
         usage = evaluationUsage(result.usage);
         const choice = (id: string) => {
@@ -154,16 +155,11 @@ export function createJudge(configFile: string, spacingMs = 26000): Judge {
           usage,
         };
       } catch (error) {
-        const wrapped = local.signal.aborted
-          ? new EvaluationError(signal.aborted ? "JEV_CANCELLED" : "JEV_TIMEOUT")
-          : responded
-            ? new EvaluationError("JEV_RESPONSE_INVALID")
-            : typesafeEvaluationError(error);
+        const wrapped = responded
+          ? new EvaluationError("JEV_RESPONSE_INVALID")
+          : sharedEvaluationError(error);
         wrapped.usage = usage;
         throw wrapped;
-      } finally {
-        clearTimeout(timer);
-        signal.removeEventListener("abort", abort);
       }
     } finally {
       release();

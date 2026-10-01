@@ -27,7 +27,10 @@ export function missingUsage(source: string, note: string): TokenUsage {
 }
 export const tokenCount = (value: unknown): number | null =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
-export function evaluationUsage(raw: { inputTokens?: number; outputTokens?: number }): TokenUsage {
+export function evaluationUsage(raw: {
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+}): TokenUsage {
   const inputTokens = tokenCount(raw.inputTokens),
     outputTokens = tokenCount(raw.outputTokens);
   const complete = inputTokens !== null && outputTokens !== null;

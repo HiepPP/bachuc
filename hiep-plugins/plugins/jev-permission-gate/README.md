@@ -27,6 +27,8 @@ command hash, decision, source, probabilities, and timing; command text is not s
 command, tool name, and workspace-relative cwd are sent directly to Typesafe AI (`https://api.typesafe.ai/v1/systemone`, `jev-latest`).
 The server reads `{ "apiKey": "<your Typesafe key>" }` from `$PASEO_HOME/typesafe-ai.json`
 (default `~/.paseo/typesafe-ai.json`, mode `0600`). No Gateway fallback.
+The worker sends the request through `../jev-evaluator/server/typesafe.mjs`, so `jev-evaluator`
+must sit beside this plugin with its dependencies installed.
 Confidence thresholds are unchanged. Direct access to `typesafe-ai.json` is denied before
 the read-only allowlist or Jev evaluation.
 

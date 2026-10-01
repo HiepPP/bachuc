@@ -9,10 +9,6 @@
     "lint": "oxlint --disable-nested-config index.server.ts server tests",
     "test": "tsx --test tests/*.test.ts"
   },
-  "dependencies": {
-    "@ai-sdk/typesafe-ai": "3.0.8",
-    "ai": "7.0.106"
-  },
   "devDependencies": {
     "@getpaseo/client": "file:../../../packages/client",
     "@getpaseo/plugin": "file:../../../packages/plugin",

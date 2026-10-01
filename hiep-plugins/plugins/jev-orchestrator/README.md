@@ -85,6 +85,8 @@ paseo plugin ls jev-orchestrator --json
 Uses Typesafe AI directly at `https://api.typesafe.ai/v1/systemone`, model `jev-latest`.
 Store `{ "apiKey": "<your Typesafe key>" }` in `$PASEO_HOME/typesafe-ai.json`
 (default `~/.paseo/typesafe-ai.json`) with permissions `0600`. No Gateway fallback.
+The worker sends the request through `../jev-evaluator/server/typesafe.mjs`, so `jev-evaluator`
+must sit beside this plugin with its dependencies installed.
 The key is read only in the server; it never enters agent MCP settings or client code.
 Plugins must already be enabled. This is trusted unsandboxed code.
 

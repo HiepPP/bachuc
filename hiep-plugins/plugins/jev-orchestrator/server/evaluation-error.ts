@@ -84,12 +84,27 @@ export function gatewayEvaluationError(error: unknown): EvaluationError {
   );
 }
 
-// Never return the provider's raw response, request headers, or error message.
-export function typesafeEvaluationError(error: unknown): EvaluationError {
-  const status =
-    error && typeof error === "object" && "statusCode" in error ? error.statusCode : undefined;
-  return new EvaluationError(
-    typeof status === "number" ? "JEV_TYPESAFE_HTTP" : "JEV_TYPESAFE_FAILED",
-    { httpStatus: status },
-  );
+const SHARED_CODES: Record<string, EvaluationCode> = {
+  CONFIG_ERROR: "JEV_CONFIG_INVALID",
+  AUTH_CONFIGURATION_ERROR: "JEV_CREDENTIAL_MISSING",
+  INVALID_INPUT: "JEV_INPUT_INVALID",
+  INVALID_RESPONSE: "JEV_RESPONSE_INVALID",
+  TIMEOUT: "JEV_TIMEOUT",
+  CANCELLED: "JEV_CANCELLED",
+};
+
+/**
+ * Map the evaluator plugin's safe error to this plugin's codes. The evaluator already drops the
+ * provider's raw response, request headers, and error message.
+ */
+export function sharedEvaluationError(error: unknown): EvaluationError {
+  if (error instanceof EvaluationError) return error;
+  const value = error && typeof error === "object" ? (error as Record<string, unknown>) : {};
+  const mapped = typeof value.code === "string" ? SHARED_CODES[value.code] : undefined;
+  if (mapped) return new EvaluationError(mapped);
+  // The evaluator reports 502 for a failure without an HTTP status, so a real 502 lands here too.
+  const http = typeof value.status === "number" && value.status !== 502;
+  return new EvaluationError(http ? "JEV_TYPESAFE_HTTP" : "JEV_TYPESAFE_FAILED", {
+    httpStatus: http ? value.status : undefined,
+  });
 }

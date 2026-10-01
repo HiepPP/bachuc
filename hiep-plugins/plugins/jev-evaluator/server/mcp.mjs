@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { evaluateJev, JEV_MODEL, SafeEvaluationError } from "./evaluate.mjs";
+import { SafeEvaluationError } from "./evaluate.mjs";
+import { evaluateWithTypesafe } from "./typesafe.mjs";
 
 /** @type {z.ZodType<import("ai").JSONValue>} */
 const jsonValueSchema = z.lazy(() =>
@@ -73,10 +72,7 @@ server.registerTool(
   },
   async (input, extra) => {
     try {
-      const apiKey = await readTypesafeApiKey();
-      const provider = createTypeSafeAi({ apiKey });
-      const result = await evaluateJev(input, {
-        model: provider.evaluationModel(JEV_MODEL),
+      const result = await evaluateWithTypesafe(requireConfigPath(), input, {
         signal: extra.signal,
       });
       return {
@@ -109,7 +105,7 @@ server.registerTool(
   },
 );
 
-async function readTypesafeApiKey() {
+function requireConfigPath() {
   const configPath = process.env.PASEO_JEV_CONFIG_PATH;
   if (!configPath || !path.isAbsolute(configPath)) {
     throw new SafeEvaluationError(
@@ -118,28 +114,7 @@ async function readTypesafeApiKey() {
       "PASEO_JEV_CONFIG_PATH must be an absolute path.",
     );
   }
-
-  let config;
-  try {
-    config = JSON.parse(
-      await readFile(path.join(path.dirname(configPath), "typesafe-ai.json"), "utf8"),
-    );
-  } catch {
-    throw new SafeEvaluationError(
-      "CONFIG_ERROR",
-      500,
-      "Unable to read Typesafe credentials for the Jev evaluator.",
-    );
-  }
-  const apiKey = config?.apiKey;
-  if (typeof apiKey !== "string" || apiKey.length === 0) {
-    throw new SafeEvaluationError(
-      "AUTH_CONFIGURATION_ERROR",
-      500,
-      "Add apiKey to typesafe-ai.json in the Paseo home directory.",
-    );
-  }
-  return apiKey;
+  return configPath;
 }
 
 const transport = new StdioServerTransport();

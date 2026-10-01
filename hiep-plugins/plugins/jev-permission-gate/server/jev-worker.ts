@@ -1,18 +1,12 @@
 // Runs in a standalone Node process: the AI SDK fails inside the bundled plugin subprocess.
-import { createTypeSafeAi } from "@ai-sdk/typesafe-ai";
-import { experimental_evaluate as evaluate } from "ai";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { POLICY, QUESTIONS, type GateState, type Verdict } from "./policy";
 
+// The evaluator plugin owns the SDK, the credential lookup, and the request; see its README.
+const EVALUATOR = new URL("../../jev-evaluator/server/typesafe.mjs", import.meta.url).href;
+
 async function run(state: GateState, configFile: string): Promise<Verdict> {
-  const config = JSON.parse(
-    await readFile(path.join(path.dirname(configFile), "typesafe-ai.json"), "utf8"),
-  );
-  const key = config?.apiKey;
-  if (typeof key !== "string" || !key) throw new Error("Jev Typesafe credential unavailable.");
-  const result = await evaluate({
-    model: createTypeSafeAi({ apiKey: key }).evaluationModel("jev-latest"),
+  const { evaluateWithTypesafe } = await import(EVALUATOR);
+  const result = await evaluateWithTypesafe(configFile, {
     state: {
       policy: POLICY,
       command: state.command,
@@ -20,7 +14,6 @@ async function run(state: GateState, configFile: string): Promise<Verdict> {
       cwd_relative: state.cwdRelative,
     },
     questions: QUESTIONS,
-    maxRetries: 0,
   });
   const readOnly = result.answers.readOnly as { probability?: unknown };
   const action = result.answers.action as {
