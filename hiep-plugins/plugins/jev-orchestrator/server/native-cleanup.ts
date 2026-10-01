@@ -1,5 +1,5 @@
 import type { PaseoApi } from "@getpaseo/client";
-import { readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const MANIFEST = /^(claude|codex)-[0-9a-f]{24}\.json$/;
@@ -59,6 +59,7 @@ export class NativeCleanup {
   }
 
   private async writeLeases(leases: Leases) {
+    await mkdir(this.base, { recursive: true });
     const temporary = `${this.leaseFile}.tmp`;
     await writeFile(temporary, JSON.stringify(leases, null, 2) + "\n", { mode: 0o600 });
     await rename(temporary, this.leaseFile);

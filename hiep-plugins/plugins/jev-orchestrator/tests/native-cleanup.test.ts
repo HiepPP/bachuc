@@ -228,3 +228,19 @@ test("a prune in one PASEO_HOME leaves another home's definitions in the shared 
     await cleanupDirectory(temp);
   }
 });
+
+test("a launch creates the native directory before writing leases", async () => {
+  const temp = await mkdtemp(path.join(tmpdir(), "jev-cleanup-"));
+  try {
+    const base = path.join(temp, "plugin-data/native");
+    const cleanup = new NativeCleanup(base, []);
+
+    await cleanup.launch("first", async () => ({}));
+
+    assert.deepEqual(JSON.parse(await readFile(path.join(base, "leases.json"), "utf8")), {
+      first: null,
+    });
+  } finally {
+    await cleanupDirectory(temp);
+  }
+});
