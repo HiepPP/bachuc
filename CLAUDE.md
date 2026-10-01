@@ -16,7 +16,12 @@ This is an npm workspace monorepo:
 - `packages/website` — Marketing site (paseo.sh)
 - `hiep-plugins` — The user's own Paseo plugins (`hiep-plugins/plugins/*`), with their own `AGENTS.md`
 
-When the user asks to enhance, fix, or add code to a plugin, they mean the plugins in `hiep-plugins/plugins/`, not core plugin code in `packages/*` or `plugin-examples/`. Read `hiep-plugins/AGENTS.md` first. Install these plugins into **build** (`PASEO_HOME=~/.paseo-dev paseo plugin ...`) and **live** (`npm run cli -- plugin ...`), never into **stable** (`~/.paseo`, `6767`).
+This fork is dedicated to one user; it is not meant for other Paseo users. Extend it through plugins:
+
+- "Code a plugin" means editing `hiep-plugins/plugins/<plugin-id>`, not core plugin code in `packages/*` or `plugin-examples/`. Read `hiep-plugins/AGENTS.md` first. `hiep-plugins` is the only plugin source; the old repo `~/Projects/hiep-paseo-plugin` is frozen, so never edit it or install from it.
+- When a plugin cannot reach deep enough, add the smallest generic host API in `packages/*` that unblocks it, then build the feature in the plugin. Keep host changes thin (a hook, a contribution point, a context field), never the feature itself, so upstream merges stay cheap.
+- Plugins may require the fork version; supporting stock Paseo is not a goal.
+- Install these plugins into **build** (`PASEO_HOME=~/.paseo-dev paseo plugin ...`) and **live** (`npm run cli -- plugin ...`), never into **stable** (`~/.paseo`, `6767`).
 
 ## Docs
 

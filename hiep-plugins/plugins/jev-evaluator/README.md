@@ -17,14 +17,13 @@ Paseo uses its own Node executable, including the Electron helper on desktop.
 Run `npm run smoke` for a real, billable evaluation of synthetic state through MCP.
 
 ```sh
-git clone https://github.com/HiepPP/hiep-paseo-plugin.git
-cd hiep-paseo-plugin/plugins/jev-evaluator
+cd hiep-plugins/plugins/jev-evaluator   # from the HiepPP/paseo checkout
 npm ci
 npm run typecheck
 npm run lint
 npm test
-paseo plugin install "$PWD" --id jev-evaluator
-paseo plugin ls jev-evaluator --json
+PASEO_HOME=~/.paseo-dev paseo plugin install "$PWD" --id jev-evaluator   # build
+PASEO_HOME=~/.paseo-dev paseo plugin ls jev-evaluator --json
 ```
 
 Keep this directory and its dependencies available on the daemon machine. Install under the exact
@@ -77,8 +76,8 @@ Only send state you intend to share with Vercel. The wrapper sends no workspace 
 
 ## Update or disable
 
-After source edits, run the checks above and `paseo plugin reload jev-evaluator`.
-Run `paseo plugin disable jev-evaluator` to stop injecting the tool into new agents.
+After source edits, run the checks above and `PASEO_HOME=~/.paseo-dev paseo plugin reload jev-evaluator` (build), then `npm run cli -- plugin reload jev-evaluator` from the repo root (live).
+Run `PASEO_HOME=~/.paseo-dev paseo plugin disable jev-evaluator` to stop injecting the tool into new agents.
 Previously created agents retain their stored MCP entry; archive them when no longer needed.
 No daemon restart is required.
 

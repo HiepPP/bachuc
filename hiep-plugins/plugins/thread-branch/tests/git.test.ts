@@ -50,7 +50,7 @@ test("reads this repository and reports a non-git directory without throwing", a
   assert.equal(here.repo, true);
   assert.ok(here.branch || here.detached);
   assert.ok(here.sha);
-  assert.equal(here.remoteUrl, "https://github.com/HiepPP/hiep-paseo-plugin");
+  assert.equal(here.remoteUrl, "https://github.com/HiepPP/paseo");
   const outside = await reader.get("/");
   assert.equal(outside.repo, false);
   assert.equal(outside.pr, null);

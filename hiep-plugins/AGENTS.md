@@ -45,14 +45,26 @@ A checkout can contain unreleased APIs. Do not assume every documented capabilit
 in the installed host. Declare the supported range in `paseo-plugin.json` under
 `requirements.paseo`; check client compatibility when adding UI.
 
+## Dedicated fork and host changes
+
+This folder lives inside `HiepPP/paseo`, a Paseo fork dedicated to one user. It is the only plugin
+source: "code a plugin" means editing `hiep-plugins/plugins/<plugin-id>`. The old standalone repo
+`HiepPP/hiep-paseo-plugin` is frozen; never edit it or install from it.
+
+Every extension goes through a plugin. When a plugin cannot reach deep enough into Paseo, add the
+smallest generic host API in `packages/*` that unblocks it, then build the feature in the plugin.
+Keep host changes thin: a hook, a contribution point, or a context field, never the feature itself.
+Plugins may require the fork version (`requirements.paseo >=0.10.2-beta.900`); stock Paseo support
+is not a goal.
+
 ## Explore Paseo source
 
-Before designing a non-trivial plugin, read how the host implements the API you will use.
-The local checkout is `~/Projects/paseo`. Treat it as read-only: never edit, commit, or
-switch branches there without explicit permission.
+Before designing a non-trivial plugin, read how the host implements the API you will use. The
+host source is this repository (`packages/`, `public-docs/`, `docs/`). Host edits follow the
+Paseo root `CLAUDE.md`: typecheck, lint, focused tests, and GitNexus impact before editing a
+symbol.
 
-1. Compare versions: `git -C ~/Projects/paseo describe --tags` against `paseo --version`.
-   If they differ, say so and prefer behavior verified against the installed host.
+1. Test against the running instances by name (build or live), not the stable release.
 2. Read docs: `public-docs/plugins/reference.md` (plus `index.md`, `providers.md`,
    `migration.md` there) and `docs/plugins.md`. Paseo's own `CLAUDE.md` and
    `docs/architecture.md` explain host structure.
