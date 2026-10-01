@@ -122,21 +122,26 @@ Add the plugin to the root README catalog.
 Prompts name the three Paseo instances on this machine **stable**, **build**, and **live**
 (the Paseo repo's `CLAUDE.md` owns the full table):
 
-| Name       | Daemon | `PASEO_HOME`      | Plugins here                                          |
-| ---------- | ------ | ----------------- | ----------------------------------------------------- |
-| **stable** | `6767` | `~/.paseo`        | Never. Read only.                                     |
-| **build**  | `6770` | `~/.paseo-dev`    | Yes. The only instance these plugins are installed in |
-| **live**   | `6768` | `.dev/paseo-home` | No. To see them in the live app, pick its Build host  |
+| Name       | Daemon | `PASEO_HOME`      | Plugins here                      |
+| ---------- | ------ | ----------------- | --------------------------------- |
+| **stable** | `6767` | `~/.paseo`        | Never. Read only.                 |
+| **build**  | `6770` | `~/.paseo-dev`    | Yes                               |
+| **live**   | `6768` | `.dev/paseo-home` | Yes. Run from the Paseo repo root |
 
 ```sh
 # build — install, reload, inspect
 PASEO_HOME=~/.paseo-dev paseo daemon status --json   # home must be ~/.paseo-dev
 PASEO_HOME=~/.paseo-dev paseo plugin reload <plugin-id>
-# stable — never: no `paseo plugin ...` without PASEO_HOME=~/.paseo-dev
+# live — from the Paseo repo root
+npm run cli -- plugin install "$PWD/hiep-plugins/plugins/<plugin-id>" --id <plugin-id>
+npm run cli -- plugin reload <plugin-id>
+# stable — never: a bare `paseo plugin ...` targets stable
 ```
 
-Install, reload, and remove these plugins only in build. Prefix every `paseo plugin ...` and
-`paseo daemon ...` command with `PASEO_HOME=~/.paseo-dev`; a bare `paseo` targets stable. Confirm
+Install, reload, and remove these plugins in build and live, never in stable. For build, prefix
+every `paseo plugin ...` and `paseo daemon ...` command with `PASEO_HOME=~/.paseo-dev`; a bare
+`paseo` targets stable. For live, use `npm run cli -- ...` from the Paseo repo root. After a plugin
+change, reload it in both. Confirm
 with `PASEO_HOME=~/.paseo-dev paseo daemon status --json` that `home` is `~/.paseo-dev` before
 installing. Start the build daemon by opening the build app, not with the `paseo` on `PATH`.
 If plugins are disabled, explain the unsandboxed access and obtain permission before enabling them. Never print the daemon config wholesale because it can contain secrets.
