@@ -26,7 +26,12 @@ still own an exclusive writer. A close failure retains that runtime for cleanup 
 replacement. Once closure succeeds, a failed resume leaves the durable agent closed and retryable.
 
 Idle agents remain resident indefinitely. Runtime closure happens only through an explicit lifecycle
-action such as archive, replacement, reload, workspace teardown, or daemon shutdown.
+action such as close, archive, replacement, reload, workspace teardown, or daemon shutdown.
+
+Close is the action that releases processes and nothing else: `paseo agent close <id>`,
+`agent.closeRuntime()` in the client and plugin API, or `agent.runtime.close.request` on the wire,
+gated on `server_info.features.agentRuntimeClose`. It cancels a running turn, and closing an
+already closed agent succeeds.
 
 A provider runtime can still die on its own — crash, OOM kill, host suspend. Work the agent parked
 inside that process dies with it: Claude Code's background Bash shells, `Monitor` watches, and

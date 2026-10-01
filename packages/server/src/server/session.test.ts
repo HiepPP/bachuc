@@ -1504,6 +1504,99 @@ describe("plugin timeline append RPC", () => {
   });
 });
 
+describe("agent runtime close RPC", () => {
+  test("closes the runtime of a known agent and keeps its record", async () => {
+    const messages: unknown[] = [];
+    const record = createStoredAgentRecord({
+      id: "agent-1",
+      cwd: "/tmp/agent",
+      lastStatus: "closed",
+    });
+    const closeAgent = vi.fn().mockResolvedValue(undefined);
+    const remove = vi.fn();
+
+    const session = createSessionForTest({
+      messages,
+      agentManager: { getAgent: vi.fn(() => null), closeAgent },
+      agentStorage: { get: vi.fn().mockResolvedValue(record), remove },
+    });
+
+    await session.handleMessage({
+      type: "agent.runtime.close.request",
+      agentId: "agent-1",
+      requestId: "close-1",
+    });
+
+    expect(closeAgent).toHaveBeenCalledWith("agent-1");
+    expect(remove).not.toHaveBeenCalled();
+    expect(messages).toContainEqual({
+      type: "agent.runtime.close.response",
+      payload: { requestId: "close-1", agentId: "agent-1", accepted: true, error: null },
+    });
+  });
+
+  test("marks a stored agent left idle without a runtime as closed", async () => {
+    const messages: unknown[] = [];
+    const record = createStoredAgentRecord({
+      id: "agent-1",
+      cwd: "/tmp/agent",
+      lastStatus: "idle",
+    });
+    const upsert = vi.fn().mockResolvedValue(undefined);
+
+    const session = createSessionForTest({
+      messages,
+      agentManager: {
+        getAgent: vi.fn(() => null),
+        closeAgent: vi.fn().mockResolvedValue(undefined),
+      },
+      agentStorage: { get: vi.fn().mockResolvedValue(record), upsert },
+    });
+
+    await session.handleMessage({
+      type: "agent.runtime.close.request",
+      agentId: "agent-1",
+      requestId: "close-3",
+    });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "agent-1", lastStatus: "closed" }),
+    );
+    expect(messages).toContainEqual({
+      type: "agent.runtime.close.response",
+      payload: { requestId: "close-3", agentId: "agent-1", accepted: true, error: null },
+    });
+  });
+
+  test("rejects an unknown agent", async () => {
+    const messages: unknown[] = [];
+    const closeAgent = vi.fn();
+
+    const session = createSessionForTest({
+      messages,
+      agentManager: { getAgent: vi.fn(() => null), closeAgent },
+      agentStorage: { get: vi.fn().mockResolvedValue(null) },
+    });
+
+    await session.handleMessage({
+      type: "agent.runtime.close.request",
+      agentId: "missing",
+      requestId: "close-2",
+    });
+
+    expect(closeAgent).not.toHaveBeenCalled();
+    expect(messages).toContainEqual({
+      type: "agent.runtime.close.response",
+      payload: {
+        requestId: "close-2",
+        agentId: "missing",
+        accepted: false,
+        error: "Agent not found: missing",
+      },
+    });
+  });
+});
+
 describe("agent detach RPC", () => {
   test("detaches a stored subagent and emits the updated standalone agent", async () => {
     const messages: unknown[] = [];

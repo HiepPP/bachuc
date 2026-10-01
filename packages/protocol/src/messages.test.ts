@@ -286,6 +286,30 @@ describe("diagnostics message contract", () => {
   });
 });
 
+describe("agent runtime close RPC", () => {
+  test("parses the request, the response, and the server feature gate", () => {
+    const request = {
+      type: "agent.runtime.close.request",
+      agentId: "agent-1",
+      requestId: "req-close",
+    };
+    expect(SessionInboundMessageSchema.parse(request)).toEqual(request);
+
+    const response = SessionOutboundMessageSchema.parse({
+      type: "agent.runtime.close.response",
+      payload: { requestId: "req-close", agentId: "agent-1", accepted: true, error: null },
+    });
+    expect(response.type).toBe("agent.runtime.close.response");
+
+    const info = parseServerInfoStatusPayload({
+      status: "server_info",
+      serverId: "srv-test",
+      features: { agentRuntimeClose: true },
+    });
+    expect(info?.features?.agentRuntimeClose).toBe(true);
+  });
+});
+
 describe("agent detach RPC", () => {
   test("parses the namespaced detach request", () => {
     const parsed = SessionInboundMessageSchema.parse({

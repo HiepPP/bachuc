@@ -4888,6 +4888,62 @@ test("fetches agents via RPC with filters, sort, and pagination", async () => {
   });
 });
 
+test("closes an agent runtime through the namespaced RPC", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen({ features: { agentRuntimeClose: true } });
+  await connectPromise;
+
+  const promise = client.closeAgentRuntime("agent-1");
+
+  expect(mock.sent).toHaveLength(1);
+  const request = parseSentFrame(mock.sent[0]);
+  expect(request).toMatchObject({ type: "agent.runtime.close.request", agentId: "agent-1" });
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "agent.runtime.close.response",
+      payload: { requestId: request.requestId, agentId: "agent-1", accepted: true, error: null },
+    }),
+  );
+
+  await expect(promise).resolves.toBeUndefined();
+});
+
+test("refuses to close an agent runtime on a host without the capability", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen({ features: {} });
+  await connectPromise;
+
+  await expect(client.closeAgentRuntime("agent-1")).rejects.toThrow(
+    "Update the host to close an agent runtime.",
+  );
+  expect(mock.sent).toHaveLength(0);
+});
+
 test("detaches an agent through the namespaced detach RPC", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();

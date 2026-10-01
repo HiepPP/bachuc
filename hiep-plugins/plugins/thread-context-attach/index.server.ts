@@ -1,6 +1,6 @@
 import type { PaseoApi } from "@getpaseo/client";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { createExporter, exportDir, exportThread } from "./server/export";
+import { createExporter, exportDir, exportThread, needsBackfill } from "./server/export";
 import { createIndexer, createRunner, findQmd } from "./server/qmd";
 import { getThreadSnapshot, listThreads, searchThreadAttachments } from "./server/threads";
 import { getThreadSnapshotRpc, listThreadsRpc, searchThreadsRpc } from "./shared/threads";
@@ -24,12 +24,13 @@ export default function contribute(server: PluginServerContext) {
     backfillStarted = true;
     void paseo.agents
       .list({ filter: { includeArchived: false }, page: { limit: 200 } })
-      .then((page) =>
-        exporter.backfill(
-          paseo,
-          page.entries.map((entry) => entry.agent.id),
-        ),
-      )
+      .then(async (page) => {
+        const agentIds: string[] = [];
+        for (const { agent } of page.entries) {
+          if (await needsBackfill(agent, dir)) agentIds.push(agent.id);
+        }
+        return exporter.backfill(paseo, agentIds);
+      })
       .catch((error) => log(`backfill failed: ${error instanceof Error ? error.message : error}`));
   };
   const removeTurnEnded = server.on("agent.turn_ended", ({ agent }, { paseo }) => {

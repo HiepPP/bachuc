@@ -2,6 +2,7 @@ import type { PaseoAgent, PaseoAgentHandle, PaseoApi } from "@getpaseo/client";
 import type { PluginAttachmentItem, RpcInput } from "@getpaseo/plugin";
 import { pathToFileURL } from "node:url";
 import type { listThreadsRpc, Thread, ThreadSnapshot } from "../shared/threads";
+import { readWithoutKeepingRuntime } from "./runtime";
 import { buildSnapshot, lastAssistantText, matchesQuery, orderThreads } from "./snapshot";
 
 const TIMELINE_PAGE_SIZE = 200;
@@ -66,7 +67,10 @@ export async function getThreadSnapshot(paseo: PaseoApi, agentId: string): Promi
   const handle = paseo.agents.ref(agentId);
   const refreshed = await handle.refresh();
   if (!refreshed) throw new Error("Thread is unavailable on this host.");
-  return buildSnapshot(toThread(refreshed.agent), await readLastReply(handle));
+  const reply = await readWithoutKeepingRuntime(handle, refreshed.agent.status, () =>
+    readLastReply(handle),
+  );
+  return buildSnapshot(toThread(refreshed.agent), reply);
 }
 
 // Search runs per keystroke; reuse snapshots until the thread's activity changes.
@@ -76,7 +80,9 @@ async function cachedSnapshot(paseo: PaseoApi, thread: Thread): Promise<ThreadSn
   const key = `${thread.id}@${thread.lastActivityAt}`;
   const cached = snapshotCache.get(key);
   if (cached) return cached;
-  const snapshot = buildSnapshot(thread, await readLastReply(paseo.agents.ref(thread.id)));
+  const handle = paseo.agents.ref(thread.id);
+  const reply = await readWithoutKeepingRuntime(handle, thread.status, () => readLastReply(handle));
+  const snapshot = buildSnapshot(thread, reply);
   if (snapshotCache.size >= CACHE_LIMIT) snapshotCache.clear();
   snapshotCache.set(key, snapshot);
   return snapshot;

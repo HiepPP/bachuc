@@ -380,6 +380,8 @@ export interface PaseoAgentHandle {
   commands(options?: PaseoAgentCommandsOptions): Promise<PaseoAgentCommandsResult>;
   archive(): Promise<{ archivedAt: string }>;
   detach(): Promise<void>;
+  /** Releases the agent's provider processes. The agent stays and resumes on the next prompt. */
+  closeRuntime(): Promise<void>;
   subscribe(handler: (update: PaseoAgentUpdate) => void): () => void;
 }
 
@@ -979,6 +981,9 @@ function createAgentHandleFactory(
       },
       detach: async () => {
         await daemonClient.detachAgent(id);
+      },
+      closeRuntime: async () => {
+        await daemonClient.closeAgentRuntime(id);
       },
       subscribe: (handler) =>
         listen((update) => {

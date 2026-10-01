@@ -2942,6 +2942,24 @@ export class DaemonClient {
     return { archivedAt: result.archivedAt };
   }
 
+  /** Releases the agent's provider processes. The agent stays and resumes on the next prompt. */
+  async closeAgentRuntime(agentId: string): Promise<void> {
+    if (!this.lastServerInfoMessage) throw new DaemonConnectionError("Transport not connected");
+    if (this.lastServerInfoMessage.features?.agentRuntimeClose !== true) {
+      throw new Error("Update the host to close an agent runtime.");
+    }
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.runtime.close.response">({
+        message: {
+          type: "agent.runtime.close.request",
+          agentId,
+        },
+      });
+    if (!payload.accepted) {
+      throw new Error(payload.error ?? "closeAgentRuntime rejected");
+    }
+  }
+
   async detachAgent(agentId: string): Promise<void> {
     const payload = await this.sendNamespacedCorrelatedSessionRequest<"agent.detach.response">({
       message: {

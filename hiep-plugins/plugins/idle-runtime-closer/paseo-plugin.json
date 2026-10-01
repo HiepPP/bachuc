@@ -1,0 +1,6 @@
+{
+  "id": "idle-runtime-closer",
+  "requirements": {
+    "paseo": ">=0.10.2-beta.900"
+  }
+}

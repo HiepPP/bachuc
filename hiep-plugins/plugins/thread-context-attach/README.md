@@ -36,6 +36,11 @@ Attachments are snapshots. Remove and reattach to pick up a newer reply.
   The picker therefore cannot put the current workspace first or hide the current thread.
   `thread-context.list-threads` supports both when a caller passes `currentAgentId` or `currentWorkspaceId`.
 
+- Reading a timeline resumes the thread's provider processes. When the thread was `closed` before
+  the read, the plugin closes its runtime again afterwards, unless the thread is no longer `idle` or
+  has a pending permission. This needs a host with `server_info.features.agentRuntimeClose`; on an
+  older host the processes stay until something else closes them.
+
 No repository file is written. No agent is created, messaged, or archived. No credential is needed.
 
 ## Search from agents
@@ -48,7 +53,8 @@ The plugin also exports every Paseo thread to markdown so agents can search it w
   replies after it (`### Answer`). Tool calls and tool output are left out. Up to 10 timeline pages of
   200 entries are read per thread; a cut file says so under its header.
 - When: a thread's file is rewritten about 2 seconds after it finishes a turn. On the first hook or RPC
-  after load, every non-archived thread is exported once. Files of archived threads are kept.
+  after load, every non-archived thread is exported once, except a `closed` thread that already
+  has a file: it has had no turn since that export. Files of archived threads are kept.
 - Index: the named qmd index `paseo-threads`, with one collection of the same name. The plugin adds the
   collection when missing and runs `qmd --index paseo-threads update` at most once per 30 seconds.
   `embed` runs once after the first update, then only when an update reports new or updated threads,

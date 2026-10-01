@@ -1,8 +1,9 @@
 import type { PaseoAgentHandle, PaseoApi } from "@getpaseo/client";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { Thread } from "../shared/threads";
+import { readWithoutKeepingRuntime } from "./runtime";
 import { toThread } from "./threads";
 
 const PAGE_SIZE = 200;
@@ -110,9 +111,26 @@ export async function exportThread(
   const handle = paseo.agents.ref(agentId);
   const refreshed = await handle.refresh();
   if (!refreshed) return false;
-  const { entries, cut } = await readTimeline(handle);
+  const { entries, cut } = await readWithoutKeepingRuntime(handle, refreshed.agent.status, () =>
+    readTimeline(handle),
+  );
   const text = renderThreadMarkdown(toThread(refreshed.agent), entries, cut);
   return text === null ? false : writeIfChanged(dir, agentId, text);
+}
+
+/**
+ * A `closed` thread has had no turn since its last export, so its file is still current.
+ * Skipping it keeps backfill from resuming every closed thread after a daemon start.
+ */
+export async function needsBackfill(
+  agent: { id: string; status: string },
+  dir: string,
+): Promise<boolean> {
+  if (agent.status !== "closed") return true;
+  return access(path.join(dir, `${agent.id}.md`)).then(
+    () => false,
+    () => true,
+  );
 }
 
 type ExportOne = (paseo: PaseoApi, agentId: string) => Promise<boolean>;

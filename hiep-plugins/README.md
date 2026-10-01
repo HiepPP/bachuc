@@ -164,6 +164,7 @@ status alone does not prove every plugin action works.
 | [workspace-preflight](plugins/workspace-preflight/README.md)     | Discover workspace prerequisites, expose read-only MCP evidence, and optionally ask Jev for task relevance.                            |
 | [workspace-spaces](plugins/workspace-spaces/README.md)           | Group projects with numbered Spaces in the desktop sidebar; standalone fallback on other clients.                                      |
 | [thread-janitor](plugins/thread-janitor/README.md)               | Archive idle threads automatically, with no confirmation dialog.                                                                       |
+| [idle-runtime-closer](plugins/idle-runtime-closer/README.md)     | Close the processes of idle threads automatically; the threads stay and resume on the next prompt.                                     |
 | [thread-context-attach](plugins/thread-context-attach/README.md) | Attach the last reply of another Paseo thread to your next message.                                                                    |
 | [loop-verify](plugins/loop-verify/README.md)                     | Prototype: retry a labeled agent's goal in fresh child agents until a verify command passes, up to 5 rounds.                           |
 

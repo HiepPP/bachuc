@@ -2600,6 +2600,8 @@ export class Session {
     switch (msg.type) {
       case "agent.detach.request":
         return this.handleDetachAgentRequest(msg.agentId, msg.requestId);
+      case "agent.runtime.close.request":
+        return this.handleCloseAgentRuntimeRequest(msg.agentId, msg.requestId);
       default:
         return undefined;
     }
@@ -3219,6 +3221,37 @@ export class Session {
     }
 
     return { agentId, archivedAt };
+  }
+
+  private async handleCloseAgentRuntimeRequest(agentId: string, requestId: string): Promise<void> {
+    this.sessionLogger.info({ agentId, requestId }, "Closing agent runtime");
+
+    try {
+      const stored = this.agentManager.getAgent(agentId)
+        ? null
+        : await this.agentStorage.get(agentId);
+      if (!this.agentManager.getAgent(agentId) && !stored) {
+        throw new Error(`Agent not found: ${agentId}`);
+      }
+      await closeAgentCommand({ agentManager: this.agentManager }, agentId);
+      // A daemon that exited without closing leaves the record `idle` with no runtime behind it.
+      if (stored && stored.lastStatus !== "closed" && !this.agentManager.getAgent(agentId)) {
+        const closed = { ...stored, lastStatus: "closed" as const };
+        await this.agentStorage.upsert(closed);
+        await this.agentUpdates.emitStoredRecord(closed);
+      }
+      this.emit({
+        type: "agent.runtime.close.response",
+        payload: { requestId, agentId, accepted: true, error: null },
+      });
+    } catch (error) {
+      const message = getErrorMessageOr(error, "Failed to close agent runtime");
+      this.sessionLogger.error({ err: error, agentId, requestId }, "Failed to close agent runtime");
+      this.emit({
+        type: "agent.runtime.close.response",
+        payload: { requestId, agentId, accepted: false, error: message },
+      });
+    }
   }
 
   private async handleDetachAgentRequest(agentId: string, requestId: string): Promise<void> {

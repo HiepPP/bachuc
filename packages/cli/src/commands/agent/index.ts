@@ -13,6 +13,7 @@ import { addAttachOptions, runAttachCommand } from "./attach.js";
 import { addReloadOptions, runReloadCommand } from "./reload.js";
 import { addImportOptions, runImportCommand } from "./import.js";
 import { runUpdateCommand } from "./update.js";
+import { runCloseCommand } from "./close.js";
 import { runDetachCommand } from "./detach.js";
 import { addOpenOptions, runOpenCommand } from "./open.js";
 import { withOutput } from "../../output/index.js";
@@ -86,6 +87,15 @@ export function createAgentCommand(): Command {
   addJsonAndDaemonHostOptions(addReloadOptions(agent.command("reload"))).action(
     withOutput(runReloadCommand),
   );
+
+  addJsonAndDaemonHostOptions(
+    agent
+      .command("close")
+      .description(
+        "Release an agent's processes and keep the agent; the next prompt resumes it. Cancels a running turn",
+      )
+      .argument("<id>", "Agent ID, prefix, or name"),
+  ).action(withOutput(runCloseCommand));
 
   addJsonAndDaemonHostOptions(
     agent
