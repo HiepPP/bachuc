@@ -26,7 +26,9 @@ export default function contribute(server: PluginServerContext) {
   const judge = createJudge(configFile, root);
   const record = createLedger(path.join(home, "plugin-data/jev-permission-gate/decisions.jsonl"));
 
-  const off = server.on("agent.permission_requested", async ({ agent, request }, context) => {
+  // Answering before clients see the request means no prompt and no push for decided commands.
+  const off = server.before("agent.permission", async ({ request: hook }) => {
+    const request = hook.request;
     if (request.kind !== "tool") return;
     const command = shellCommand(request);
     if (command === null) return;
@@ -34,7 +36,7 @@ export default function contribute(server: PluginServerContext) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), HOOK_BUDGET_MS);
     const detailCwd = request.detail?.type === "shell" ? request.detail.cwd : undefined;
-    const cwdRelative = detailCwd ? path.relative(agent.cwd, detailCwd) || "." : ".";
+    const cwdRelative = detailCwd ? path.relative(hook.cwd, detailCwd) || "." : ".";
     try {
       const result = await gate(
         { command, tool: request.name, cwdRelative },
@@ -44,19 +46,19 @@ export default function contribute(server: PluginServerContext) {
       await record({
         ...result,
         ts: new Date().toISOString(),
-        agentId: agent.id,
+        agentId: hook.agentId,
         requestId: request.id,
         commandHash: hashCommand(command),
         ms: Date.now() - started,
       });
       if (result.decision === "escalate") return;
-      await context.paseo.agents.ref(agent.id).respondToPermission({
-        requestId: request.id,
-        response:
+      return {
+        ...hook,
+        decision:
           result.decision === "allow"
-            ? { behavior: "allow" }
-            : { behavior: "deny", message: `jev-permission-gate: ${result.reason}` },
-      });
+            ? { behavior: "allow" as const }
+            : { behavior: "deny" as const, message: `jev-permission-gate: ${result.reason}` },
+      };
     } catch (error) {
       console.error("jev-permission-gate failed", error instanceof Error ? error.message : error);
     } finally {

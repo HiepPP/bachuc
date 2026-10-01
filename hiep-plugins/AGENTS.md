@@ -111,17 +111,19 @@ cd plugins/<plugin-id>
 npm install
 npm run typecheck
 # Run the plugin's declared lint and focused test scripts, if present.
-paseo plugin install "$PWD" --id <plugin-id>
-paseo plugin ls <plugin-id> --json
+PASEO_HOME=~/.paseo-dev paseo plugin install "$PWD" --id <plugin-id>
+PASEO_HOME=~/.paseo-dev paseo plugin ls <plugin-id> --json
 ```
 
 `init` scaffolds files but does not install dependencies. Keep lockfiles committed.
 Document required configuration, commands, permissions, and provider limitations in the plugin README.
 Add the plugin to the root README catalog.
 
-Before installation, use `paseo daemon status --json` to identify the intended host and home.
-Use the installed `paseo` CLI for that instance; a Paseo checkout's development CLI may target
-a different home. If plugins are disabled, explain the unsandboxed access and obtain permission
+Install, reload, and remove these plugins only in Paseo Dev (`PASEO_HOME=~/.paseo-dev`,
+daemon `127.0.0.1:6770`). Never install them into the stable Paseo (`~/.paseo`, port `6767`).
+Prefix every `paseo plugin ...` and `paseo daemon ...` command with `PASEO_HOME=~/.paseo-dev`,
+and confirm with `PASEO_HOME=~/.paseo-dev paseo daemon status --json` that `home` is
+`~/.paseo-dev` before installing. If plugins are disabled, explain the unsandboxed access and obtain permission
 before enabling them. Never print the daemon config wholesale because it can contain secrets.
 
 ## Update and verify
@@ -129,9 +131,9 @@ before enabling them. Never print the daemon config wholesale because it can con
 After edits, run the plugin's formatter, typecheck, lint, and affected tests. Then:
 
 ```sh
-paseo plugin reload <plugin-id>
-paseo plugin ls <plugin-id> --json
-paseo plugin logs <plugin-id>
+PASEO_HOME=~/.paseo-dev paseo plugin reload <plugin-id>
+PASEO_HOME=~/.paseo-dev paseo plugin ls <plugin-id> --json
+PASEO_HOME=~/.paseo-dev paseo plugin logs <plugin-id>
 ```
 
 Require `running` with no load error and exercise the changed contribution. Reload recompiles

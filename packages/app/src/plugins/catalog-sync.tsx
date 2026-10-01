@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { useHostFeature } from "@/runtime/host-features";
 import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import { useActiveServerId } from "@/hosts/use-visible-hosts";
 import { pluginRegistry } from "./registry";
 
 export function PluginCatalogSync({
@@ -14,6 +15,10 @@ export function PluginCatalogSync({
 }) {
   const connected = useHostRuntimeIsConnected(serverId);
   const supported = useHostFeature(serverId, "plugins");
+  // With one host picked, only that host's plugin client code runs. Code from another host,
+  // such as an older plugin build that edits the DOM, cannot reach the window.
+  const activeServerId = useActiveServerId();
+  const hidden = activeServerId !== null && activeServerId !== serverId;
 
   useEffect(() => {
     let cancelled = false;
@@ -22,7 +27,7 @@ export function PluginCatalogSync({
       pluginRegistry.removeHost(serverId);
       return;
     }
-    if (!connected) {
+    if (!connected || hidden) {
       pluginRegistry.removeHost(serverId);
       return;
     }
@@ -79,7 +84,7 @@ export function PluginCatalogSync({
         .release()
         .catch((error) => console.warn("[Plugins] Failed to release catalog", error));
     };
-  }, [client, connected, serverId, supported]);
+  }, [client, connected, hidden, serverId, supported]);
 
   useEffect(() => () => pluginRegistry.removeHost(serverId), [serverId]);
   return null;

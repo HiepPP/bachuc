@@ -7,13 +7,14 @@ import {
   addSpace,
   adjacent,
   catalogRpc,
+  hostState,
   membership,
   moveProject,
   preferences,
   projectKey,
   renameSpace,
+  withHostState,
 } from "../shared/spaces";
-import { bindWheel } from "./web";
 import { touchDirection } from "./gesture";
 
 // Page navigation preserves selection per host without sharing it with other clients.
@@ -39,7 +40,8 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
   const region = useRef<View>(null);
   const scroll = useRef<ScrollView>(null);
   const positions = useRef(new Map<string, number>());
-  const values = settings.status === "ready" ? settings.values : null;
+  // The page shows one host's projects, so it reads and writes that host's own Spaces.
+  const values = settings.status === "ready" ? hostState(settings.values, host.id) : null;
   const selected = values?.spaces.some((s) => s.id === active)
     ? active
     : (values?.spaces[0].id ?? "space-1");
@@ -61,8 +63,6 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
         ),
       );
   };
-  const ready = settings.status === "ready";
-  useEffect(() => bindWheel(region.current, (direction) => switchRef.current(direction)), [ready]);
   useEffect(() => {
     scroll.current?.scrollTo({ y: positions.current.get(selected) ?? 0, animated: false });
   }, [selected]);
@@ -84,8 +84,8 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
     pending.current = true;
     setBusy(true);
     try {
-      const next = addSpace(settings.values);
-      if (await settings.save(next, settings.revision))
+      const next = addSpace(hostState(settings.values, host.id));
+      if (await settings.save(withHostState(settings.values, host.id, next), settings.revision))
         select(next.spaces[next.spaces.length - 1].id);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not create workspace.");
@@ -99,8 +99,9 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
     pending.current = true;
     setBusy(true);
     try {
-      const next = renameSpace(settings.values, renaming.id, renaming.name);
-      if (await settings.save(next, settings.revision)) setRenaming(null);
+      const next = renameSpace(hostState(settings.values, host.id), renaming.id, renaming.name);
+      if (await settings.save(withHostState(settings.values, host.id, next), settings.revision))
+        setRenaming(null);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not rename workspace.");
     } finally {
@@ -117,8 +118,12 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
     pending.current = true;
     setBusy(true);
     try {
-      const next = moveProject(settings.values, projectKey(host.id, projectId), target);
-      if (await settings.save(next, settings.revision)) {
+      const next = moveProject(
+        hostState(settings.values, host.id),
+        projectKey(host.id, projectId),
+        target,
+      );
+      if (await settings.save(withHostState(settings.values, host.id, next), settings.revision)) {
         setMoving(null);
         setNotice("Project moved.");
       }
@@ -164,7 +169,7 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
           <Text style={color}>Refresh</Text>
         </Pressable>
       </View>
-      {settings.status !== "ready" ? (
+      {settings.status !== "ready" || !values ? (
         <Text accessibilityRole="alert" style={color}>
           {settings.status === "loading"
             ? "Loading Spaces…"
@@ -220,7 +225,7 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
               accessibilityRole="button"
               disabled={busy || settings.saving}
               onPress={() => {
-                const space = settings.values.spaces.find((s) => s.id === selected);
+                const space = values.spaces.find((s) => s.id === selected);
                 if (space) {
                   setNotice("");
                   setRenaming({ ...space });
@@ -251,13 +256,13 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
                   <Text style={{ color: theme.colors.foregroundMuted }}>
                     Open another workspace and use “Move to workspace” on a project.
                   </Text>
-                  {selected !== settings.values.spaces[0].id ? (
+                  {selected !== values.spaces[0].id ? (
                     <Pressable
                       accessibilityRole="button"
                       style={button}
-                      onPress={() => select(settings.values.spaces[0].id)}
+                      onPress={() => select(values.spaces[0].id)}
                     >
-                      <Text style={color}>Open {settings.values.spaces[0].name}</Text>
+                      <Text style={color}>Open {values.spaces[0].name}</Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -300,7 +305,7 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
                     <SettingsSelect
                       label={`Move ${project.name}`}
                       value={selected}
-                      options={settings.values.spaces.map((s) => ({ label: s.name, value: s.id }))}
+                      options={values.spaces.map((s) => ({ label: s.name, value: s.id }))}
                       disabled={busy || catalog.isError}
                       onValueChange={(id) => {
                         void move(project.id, id);
@@ -333,7 +338,7 @@ function HostPage({ host, theme, navigation, layout }: PluginSurfaceProps) {
           </Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <ScrollView horizontal style={{ flex: 1 }} contentContainerStyle={{ gap: 8 }}>
-              {settings.values.spaces.map((space, index) => (
+              {values.spaces.map((space, index) => (
                 <Pressable
                   key={space.id}
                   accessibilityRole="tab"

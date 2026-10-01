@@ -33,6 +33,8 @@ interface PluginRuntimePort {
   before?: PluginLifecycle["before"];
   catalog: PluginRuntime["catalog"];
   invoke(pluginId: string, method: string, input: unknown): Promise<unknown>;
+  listTools?: PluginRuntime["listTools"];
+  callTool?: PluginRuntime["callTool"];
   getLogs(pluginId: string): PluginLogEntry[];
   clearLogs(pluginId: string): void;
   getProviderRegistrations?(pluginId: string): readonly PluginProviderMetadata[];
@@ -414,6 +416,20 @@ export class PluginService {
 
   invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown> {
     return this.runtime.invoke(pluginId, method, input);
+  }
+
+  listPluginTools(): ReturnType<PluginRuntime["listTools"]> {
+    return this.runtime.listTools?.() ?? [];
+  }
+
+  callPluginTool(
+    pluginId: string,
+    name: string,
+    input: unknown,
+    callerAgentId: string | null,
+  ): Promise<unknown> {
+    if (!this.runtime.callTool) throw new Error("Plugin tools are unavailable");
+    return this.runtime.callTool(pluginId, name, input, callerAgentId);
   }
 
   async stopAllPlugins(): Promise<void> {

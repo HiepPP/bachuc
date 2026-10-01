@@ -16,7 +16,7 @@ import {
   translateSettings,
   type TranslateSettings,
 } from "../shared/settings";
-import { modes } from "./mode-menu";
+import { modes } from "./modes";
 import { current } from "./state";
 
 export function TranslateSettingsScreen({ theme }: PluginSurfaceProps) {
@@ -64,15 +64,15 @@ export function TranslateSettingsScreen({ theme }: PluginSurfaceProps) {
         <SettingsCard>
           <SettingsSwitch
             label="Translate Vietnamese prompts"
-            hint="Show an English translation under each new Vietnamese prompt. Desktop only."
+            hint="Show an English translation under each new Vietnamese prompt."
             error={settings.saveError}
             value={values.translate}
             disabled={settings.saving}
             onValueChange={(translate) => void save({ ...values, translate })}
           />
           <SettingsSwitch
-            label="Cmd/Ctrl+Enter enhances and sends"
-            hint="Rewrites the composer draft as an English prompt, then sends it like Enter. Replaces the keyboard Queue shortcut."
+            label="Rewrite Vietnamese drafts to English"
+            hint="Default for composers that have not chosen yet. Change it per conversation in the composer's Prompt pill."
             value={values.enhanceShortcut}
             disabled={settings.saving}
             onValueChange={(enhanceShortcut) => void save({ ...values, enhanceShortcut })}
@@ -90,7 +90,7 @@ export function TranslateSettingsScreen({ theme }: PluginSurfaceProps) {
           />
           <SettingsSelect
             label="New-thread Caveman mode"
-            hint="New-thread composers start here. Each agent keeps the mode chosen in its composer."
+            hint="New agents start here. Each agent keeps the mode chosen in its composer's Prompt pill."
             value={values.cavemanMode}
             options={modes.map(({ label, value }) => ({ label, value }))}
             disabled={settings.saving}

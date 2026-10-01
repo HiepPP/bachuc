@@ -1,15 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { AgentModes } from "../server/modes";
-import { translateSettings } from "../shared/settings";
 const require = createRequire(import.meta.url);
-const { run, digest } = require("../server/caveman-hook.cjs");
+const { run, daemonContext } = require("../server/caveman-hook.cjs");
 const A = "00000000-0000-4000-8000-000000000001",
   B = "00000000-0000-4000-8000-000000000002";
 async function fixture(nativeRules = "Native rules") {
@@ -45,27 +44,6 @@ async function fixture(nativeRules = "Native rules") {
     env: { ...process.env, PASEO_HOME: home, PASEO_AGENT_ID: A },
   };
 }
-test("snapshots isolate agents and keep only prompt hashes", async () => {
-  const { root, modes, env } = await fixture();
-  const settings = translateSettings.schema.parse({});
-  await modes.prepare(
-    { agentId: A, text: "Giải thích", source: "Giải thích", mode: "lite" },
-    settings,
-  );
-  await modes.set(A, "wenyan-ultra");
-  await modes.set(B, "full");
-  const pending = path.join(root, "agents", A, "pending");
-  const raw = await readFile(path.join(pending, (await readdir(pending))[0]), "utf8");
-  assert.ok(!raw.includes("Giải thích"));
-  assert.equal(JSON.parse(raw).hash, digest("Giải thích"));
-  const out = run({ session_id: "test", prompt: "Giải thích" }, env);
-  assert.match(out.hookSpecificOutput.additionalContext, /Native rules lite/);
-  assert.match(out.hookSpecificOutput.additionalContext, /Vietnamese/);
-  assert.deepEqual(await modes.get(B), { mode: "full" });
-  assert.equal((await readdir(pending)).length, 0);
-  const next = run({ session_id: "test", prompt: "next" }, env);
-  assert.match(next.hookSpecificOutput.additionalContext, /wenyan-ultra/);
-});
 test("Caveman compression preserves required response structure after native reinforcement", async () => {
   const { modes, env } = await fixture("No preamble or recap.");
   await modes.set(A, "ultra");
@@ -84,9 +62,8 @@ test("Caveman compression preserves required response structure after native rei
   assert.match(normal, /Normal mode\. Stop caveman/);
   assert.doesNotMatch(normal, /Caveman changes wording only/);
 });
-test("explicit commands beat selection; Default resets; cancelled snapshots are removed", async () => {
-  const { root, modes, env } = await fixture();
-  const settings = translateSettings.schema.parse({});
+test("explicit commands beat selection and Default resets", async () => {
+  const { modes, env } = await fixture();
   await modes.set(A, "wenyan-ultra");
   assert.match(
     run({ prompt: "$caveman lite\nrequest" }, env).hookSpecificOutput.additionalContext,
@@ -97,12 +74,6 @@ test("explicit commands beat selection; Default resets; cancelled snapshots are 
     run({ prompt: "request" }, env).hookSpecificOutput.additionalContext,
     /Normal mode. Stop caveman/,
   );
-  const { token } = await modes.prepare(
-    { agentId: A, text: "request", source: "request", mode: "lite" },
-    settings,
-  );
-  await modes.cancel(A, token);
-  assert.deepEqual(await readdir(path.join(root, "agents", A, "pending")), []);
   await assert.rejects(modes.set("../outside", "lite"));
   assert.deepEqual(run({ prompt: "request" }, { ...env, PASEO_AGENT_ID: B }), {});
 });
@@ -132,28 +103,6 @@ test("hook installer preserves unrelated config, is idempotent, and removes only
   }
   execFileSync(process.execPath, [script, "--remove"], { env });
   for (const file of files) assert.deepEqual(JSON.parse(await readFile(file, "utf8")), existing);
-});
-
-test("editing a queue item cancels only its snapshot, including identical prompts", async () => {
-  const { modes, env, root } = await fixture();
-  const settings = translateSettings.schema.parse({});
-  const first = await modes.prepare(
-    { agentId: A, text: "same", source: "same", mode: "lite" },
-    settings,
-  );
-  await modes.bindQueue(A, first.token, "queue-one");
-  const second = await modes.prepare(
-    { agentId: A, text: "same", source: "same", mode: "wenyan-ultra" },
-    settings,
-  );
-  await modes.bindQueue(A, second.token, "queue-two");
-  // A fresh instance proves cancellation survives plugin reload.
-  await new AgentModes(root).cancelQueue(A, "queue-one");
-  const out = run({ prompt: "same" }, env);
-  assert.match(out.hookSpecificOutput.additionalContext, /wenyan-ultra/);
-  assert.deepEqual(await readdir(path.join(root, "agents", A, "pending")), []);
-  await modes.bindQueue(A, second.token, "already-consumed");
-  assert.deepEqual(await readdir(path.join(root, "agents", A, "pending")), []);
 });
 
 test("first-turn command bootstraps isolated mode for later hidden turns", async () => {
@@ -253,4 +202,45 @@ test("the example is not repeated when native rules already include it", async (
   const context = run({ prompt: "request" }, env).hookSpecificOutput.additionalContext;
   assert.equal(context.split('- ultra: "ultra sample."').length, 2);
   assert.doesNotMatch(context, /density/);
+});
+
+test("the daemon context uses the given choice and a separate state folder", async () => {
+  const { home } = await fixture();
+  const dir = path.join(home, "plugin-data/prompt-translate/v2/agents", A);
+  const runtime = { cavemanRoot: path.join(home, "caveman") };
+  const context = daemonContext({
+    prompt: "Giải thích",
+    agentId: A,
+    cwd: home,
+    dir,
+    runtime,
+    choice: { mode: "ultra", replyVietnamese: true, chineseScript: "skill-default" },
+  });
+  assert.match(context, /Use Caveman ultra/);
+  assert.match(context, /Native rules ultra/);
+  assert.match(context, /Reply in Vietnamese/);
+  // Only the per-agent native folder is written; no mode.json or snapshots.
+  assert.deepEqual(JSON.parse(await readFile(path.join(dir, "native/mode.json"), "utf8")), {
+    mode: "ultra",
+  });
+  const plain = daemonContext({
+    prompt: "request",
+    agentId: A,
+    cwd: home,
+    dir,
+    runtime,
+    choice: { mode: "follow-agent", replyVietnamese: false, chineseScript: "skill-default" },
+  });
+  assert.match(plain, /Normal mode\. Stop caveman/);
+});
+
+test("agent prefs merge mode and rewrite and fall back to the default rewrite", async () => {
+  const { root } = await fixture();
+  const modes = new AgentModes(root);
+  assert.equal(await modes.find(A), null);
+  assert.deepEqual(await modes.prefs(A, true), { mode: "follow-agent", rewrite: true });
+  await modes.update(A, { rewrite: false });
+  await modes.update(A, { mode: "lite" });
+  assert.deepEqual(await modes.prefs(A, true), { mode: "lite", rewrite: false });
+  assert.equal(await modes.find(A), "lite");
 });

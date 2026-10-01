@@ -147,8 +147,29 @@ export interface PaseoToolHostDependencies {
   resolveCallerContext?: (callerAgentId: string) => VoiceCallerContext | null;
   enableVoiceTools?: boolean;
   voiceOnly?: boolean;
+  pluginTools?: PaseoPluginToolHost;
   logger: Logger;
 }
+
+/** Tools that loaded plugins contribute through `server.registerTool`. */
+export interface PaseoPluginToolHost {
+  listPluginTools(): Array<{
+    pluginId: string;
+    tool: { name: string; description: string; inputSchema: Record<string, unknown> };
+  }>;
+  callPluginTool(
+    pluginId: string,
+    name: string,
+    input: unknown,
+    callerAgentId: string | null,
+  ): Promise<unknown>;
+}
+
+const PluginToolResultSchema = z.object({
+  text: z.string(),
+  structured: z.record(z.string(), z.unknown()).optional(),
+  isError: z.boolean().optional(),
+});
 
 function parseTimestamp(value: string | null | undefined): number {
   if (!value) {
@@ -3187,6 +3208,42 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       };
     },
   );
+
+  // Built-in names win; a clashing plugin tool is skipped.
+  for (const { pluginId, tool } of options.pluginTools?.listPluginTools() ?? []) {
+    if (tools.has(tool.name)) {
+      childLogger.warn({ pluginId, tool: tool.name }, "Skipping plugin tool with a taken name");
+      continue;
+    }
+    registerTool(
+      tool.name,
+      { description: tool.description, inputSchema: z.fromJSONSchema(tool.inputSchema) },
+      async (input) => {
+        try {
+          const result = PluginToolResultSchema.parse(
+            await options.pluginTools!.callPluginTool(
+              pluginId,
+              tool.name,
+              input,
+              callerAgentId ?? null,
+            ),
+          );
+          return {
+            content: [{ type: "text", text: result.text }],
+            ...(result.structured ? { structuredContent: result.structured } : {}),
+            ...(result.isError ? { isError: true } : {}),
+          };
+        } catch (error) {
+          return {
+            content: [
+              { type: "text", text: error instanceof Error ? error.message : String(error) },
+            ],
+            isError: true,
+          };
+        }
+      },
+    );
+  }
 
   return toCatalog();
 }

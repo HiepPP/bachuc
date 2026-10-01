@@ -3,16 +3,11 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import {
-  hostRpc,
   enhanceRpc,
   originalRpc,
   translateRpc,
   modeReadRpc,
   modeWriteRpc,
-  prepareModeRpc,
-  cancelModeRpc,
-  bindQueueModeRpc,
-  cancelQueueModeRpc,
 } from "./shared/contracts";
 import { translateSettings } from "./shared/settings";
 import { resolveEndpoint } from "./server/credentials";
@@ -22,30 +17,32 @@ import { AgentModes } from "./server/modes";
 import { Store } from "./server/store";
 import { withBridgeCavemanEnv } from "./server/session-env";
 import { markChild, unmarkChild } from "./server/child-markers";
+import { appendContext, promptText, readRuntime, turnContext } from "./server/turn";
 
 export default function contribute(server: PluginServerContext) {
   const home = process.env.PASEO_HOME || path.join(homedir(), ".paseo");
   const configFile = path.join(home, "config.json");
-  const serverId =
-    process.env.PASEO_SERVER_ID?.trim() ||
-    readFileSync(path.join(home, "server-id"), "utf8").trim();
+  const root = JSON.parse(readFileSync(configFile, "utf8")).plugins?.["prompt-translate"]?.path;
+  if (typeof root !== "string" || !path.isAbsolute(root))
+    throw new Error("Install under directory ID prompt-translate.");
+  const hookFile = path.join(root, "server/caveman-hook.cjs");
   const settings = server.registerSettings(translateSettings);
   const store = new Store(path.join(home, "plugin-data/prompt-translate/cache.json"));
   const dataDir = path.join(home, "plugin-data/prompt-translate");
-  const modes = new AgentModes(dataDir);
+  // `v2` keeps the old native hook, which reads `agents/` one level up, silent for this host.
+  const modesDir = path.join(dataDir, "v2");
+  const modes = new AgentModes(modesDir);
   const readSettings = async () => {
     const value = await settings.read();
     return value.status === "ready" ? value.values : translateSettings.schema.parse({});
   };
-  server.handle(hostRpc, () => ({ serverId }));
-  server.handle(modeReadRpc, ({ agentId }) => modes.get(agentId));
-  server.handle(modeWriteRpc, ({ agentId, mode }) => modes.set(agentId, mode));
-  server.handle(prepareModeRpc, async (input) => modes.prepare(input, await readSettings()));
-  server.handle(cancelModeRpc, ({ agentId, token }) => modes.cancel(agentId, token));
-  server.handle(bindQueueModeRpc, ({ agentId, token, queueId }) =>
-    modes.bindQueue(agentId, token, queueId),
+  server.handle(modeReadRpc, async ({ agentId }) =>
+    modes.prefs(agentId, (await readSettings()).enhanceShortcut),
   );
-  server.handle(cancelQueueModeRpc, ({ agentId, queueId }) => modes.cancelQueue(agentId, queueId));
+  server.handle(modeWriteRpc, async ({ agentId, mode, rewrite }) => {
+    await modes.update(agentId, { mode, rewrite });
+    return modes.prefs(agentId, (await readSettings()).enhanceShortcut);
+  });
   const service = createService({
     store,
     complete: createCompleter((provider) => resolveEndpoint(provider, configFile)),
@@ -54,13 +51,44 @@ export default function contribute(server: PluginServerContext) {
   server.handle(translateRpc, (input) => service.translate(input));
   server.handle(enhanceRpc, (input) => service.enhance(input));
   server.handle(originalRpc, (input) => service.original(input));
-  const sessionOpen = server.before("agent.session_open", ({ request }) =>
-    withBridgeCavemanEnv(request, dataDir),
-  );
+  const sessionOpen = server.before("agent.session_open", async ({ request }) => {
+    // New agents start with the host's new-thread mode; later changes stay per agent.
+    if (request.reason === "create" && (await modes.find(request.agentId)) === null)
+      await modes.update(request.agentId, { mode: (await readSettings()).cavemanMode });
+    return withBridgeCavemanEnv(request, dataDir);
+  });
+  const prompt = server.before("agent.prompt", async ({ request }) => {
+    if (request.kind !== "turn") return;
+    if (request.provider !== "claude" && request.provider !== "codex") return;
+    const runtime = readRuntime(dataDir);
+    if (!runtime) return;
+    const text = promptText(request.prompt);
+    const source = (await service.original({ text })).original ?? text;
+    let context: string;
+    try {
+      context = turnContext({
+        hookFile,
+        prompt: text,
+        source,
+        agentId: request.agentId,
+        cwd: request.cwd,
+        dir: path.join(modesDir, "agents", request.agentId),
+        runtime,
+        mode: (await modes.find(request.agentId)) ?? (await readSettings()).cavemanMode,
+        settings: await readSettings(),
+      });
+    } catch (error) {
+      // A failed Caveman run must not fail the user's turn; the turn goes out without context.
+      console.warn("[prompt-translate] Caveman context failed", error);
+      return;
+    }
+    return { ...request, prompt: appendContext(request.prompt, context) };
+  });
   const created = server.on("agent.created", ({ agent }) => markChild(dataDir, agent));
   const archived = server.on("agent.archived", ({ agent }) => unmarkChild(dataDir, agent));
   return () => {
     sessionOpen();
+    prompt();
     created();
     archived();
     store.close();

@@ -1,6 +1,11 @@
 import type { AgentStreamEvent, AgentTimelineItem } from "../../agent/agent-sdk-types.js";
 import { z } from "zod";
-import { CreateAgentRequestMessageSchema } from "@getpaseo/protocol/messages";
+import {
+  AgentAttachmentSchema,
+  AgentPermissionRequestPayloadSchema,
+  AgentPermissionResponseSchema,
+  CreateAgentRequestMessageSchema,
+} from "@getpaseo/protocol/messages";
 import type {
   PluginHookAgent,
   PluginHookContext,
@@ -25,7 +30,24 @@ export const lifecycleEventNames = [
   "workspace.created",
   "workspace.archived",
 ] as const;
-export const beforeHookNames = ["agent.create", "agent.session_open", "workspace.create"] as const;
+export const beforeHookNames = [
+  "agent.create",
+  "agent.session_open",
+  "workspace.create",
+  "agent.prompt",
+  "agent.permission",
+] as const;
+
+const PromptInputSchema = z.union([
+  z.string(),
+  z.array(
+    z.union([
+      z.object({ type: z.literal("text"), text: z.string() }).strict(),
+      z.object({ type: z.literal("image"), data: z.string(), mimeType: z.string() }).strict(),
+      AgentAttachmentSchema,
+    ]),
+  ),
+]);
 
 const beforeSchemas = {
   "agent.create": CreateAgentRequestMessageSchema.pick({ config: true, env: true }).strict(),
@@ -41,6 +63,26 @@ const beforeSchemas = {
     })
     .strict(),
   "workspace.create": WorkspaceCreateRequestSchema.omit({ type: true, requestId: true }).strict(),
+  "agent.prompt": z
+    .object({
+      agentId: z.string(),
+      workspaceId: z.string().nullable(),
+      provider: z.string(),
+      cwd: z.string(),
+      kind: z.enum(["turn", "steer"]),
+      prompt: PromptInputSchema,
+    })
+    .strict(),
+  "agent.permission": z
+    .object({
+      agentId: z.string(),
+      workspaceId: z.string().nullable(),
+      provider: z.string(),
+      cwd: z.string(),
+      request: AgentPermissionRequestPayloadSchema,
+      decision: AgentPermissionResponseSchema.nullable(),
+    })
+    .strict(),
 };
 
 export interface PluginLifecycle {
@@ -149,6 +191,23 @@ export function validateBeforeResult<Name extends keyof PluginBeforeRequests>(
       throw new Error("agent.session_open hooks can only change env");
     }
   }
+  if (name === "agent.prompt") {
+    const previous = beforeSchemas["agent.prompt"].parse(input);
+    const next = beforeSchemas["agent.prompt"].parse(result);
+    if (!sameHookTarget(previous, next) || previous.kind !== next.kind) {
+      throw new Error("agent.prompt hooks can only change prompt");
+    }
+  }
+  if (name === "agent.permission") {
+    const previous = beforeSchemas["agent.permission"].parse(input);
+    const next = beforeSchemas["agent.permission"].parse(result);
+    if (
+      !sameHookTarget(previous, next) ||
+      JSON.stringify(previous.request) !== JSON.stringify(next.request)
+    ) {
+      throw new Error("agent.permission hooks can only change decision");
+    }
+  }
   if (name === "agent.create") {
     const previous = beforeSchemas["agent.create"].parse(input);
     const next = beforeSchemas["agent.create"].parse(result);
@@ -157,6 +216,18 @@ export function validateBeforeResult<Name extends keyof PluginBeforeRequests>(
     }
   }
   return result;
+}
+
+function sameHookTarget(
+  previous: { agentId: string; workspaceId: string | null; provider: string; cwd: string },
+  next: { agentId: string; workspaceId: string | null; provider: string; cwd: string },
+): boolean {
+  return (
+    previous.agentId === next.agentId &&
+    previous.workspaceId === next.workspaceId &&
+    previous.provider === next.provider &&
+    previous.cwd === next.cwd
+  );
 }
 
 type Handler = (input: unknown, context: PluginHookContext) => unknown;

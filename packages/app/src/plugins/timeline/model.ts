@@ -17,9 +17,16 @@ export interface TimelineItemTransformInput {
   sourceId: string;
 }
 
+export type KeptTimelineSource = NonNullable<PluginTimelineTransformResult["source"]>;
+
+/** Plugin items, plus `source` when the transformer keeps the source item. */
+export type InstalledPluginTimelineItems = InstalledPluginTimelineItem[] & {
+  source?: KeptTimelineSource;
+};
+
 export type TimelineItemTransform = (
   input: TimelineItemTransformInput,
-) => InstalledPluginTimelineItem[] | undefined;
+) => InstalledPluginTimelineItems | undefined;
 
 function isTimelineData(value: unknown, ancestors: Set<object>): value is PluginTimelineData {
   if (value === null || typeof value === "string" || typeof value === "boolean") {
@@ -68,12 +75,28 @@ function parseTransformResult(value: unknown): PluginTimelineTransformResult {
       throw new Error(`transformed timeline item ${kind} data must be JSON-compatible`);
     }
   }
-  return { items: items as PluginTimelineItem[] };
+  return { items: items as PluginTimelineItem[], source: parseKeptSource(value) };
+}
+
+function parseKeptSource(value: object): KeptTimelineSource | undefined {
+  const source = Reflect.get(value, "source");
+  if (source === undefined) return undefined;
+  if (!source || typeof source !== "object")
+    throw new Error("transform result source must be an object");
+  const placement = Reflect.get(source, "placement");
+  const text = Reflect.get(source, "text");
+  if (placement !== "first" && placement !== "last") {
+    throw new Error(`invalid transform result source placement: ${String(placement)}`);
+  }
+  if (text !== undefined && typeof text !== "string") {
+    throw new Error("transform result source text must be a string");
+  }
+  return text === undefined ? { placement } : { placement, text };
 }
 
 export function transformTimelineItem(
   input: TimelineItemTransformInput & { plugins: readonly InstalledPlugin[] },
-): InstalledPluginTimelineItem[] | undefined {
+): InstalledPluginTimelineItems | undefined {
   for (const plugin of input.plugins) {
     for (const transformer of plugin.timelineTransformers) {
       if (transformer.query.itemType !== input.item.type) continue;
@@ -85,7 +108,7 @@ export function transformTimelineItem(
         const output = transform({ item: input.item, phase: input.phase });
         if (output === undefined) continue;
         const parsed = parseTransformResult(output);
-        return parsed.items.map((transformedItem, index) => ({
+        const items: InstalledPluginTimelineItems = parsed.items.map((transformedItem, index) => ({
           type: "plugin",
           id: transformedItem.id ?? `${input.sourceId}/${index}`,
           kind: transformedItem.kind,
@@ -93,6 +116,8 @@ export function transformTimelineItem(
           data: JSON.parse(JSON.stringify(transformedItem.data)) as PluginTimelineData,
           pluginId: plugin.id,
         }));
+        if (parsed.source) items.source = parsed.source;
+        return items;
       } catch (error) {
         console.warn(
           `[Plugins] Timeline transformer failed: ${plugin.id}/${transformer.id}`,

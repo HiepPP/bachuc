@@ -1,6 +1,6 @@
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
-import { Icon, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
+import { Icon, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useQuery } from "@tanstack/react-query";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -20,14 +20,13 @@ import { BoardViewSwitch, RecapsView } from "./recaps";
 import { BOARD_SIZE_DEFAULT, boardScale, boardSize, clampBoardSize } from "../shared/board-size";
 import { allocateColors, projectColors } from "../shared/project-colors";
 import { boardConnectionState } from "./connection";
-import { openNewWorkspaceForProject } from "./web";
+import { workspaceActions } from "./workspace";
 import { revealLatestPromptOnWeb } from "./latest-prompt";
 import { AgentAvatar } from "./avatar";
 import { Orb, OrbAvatar, orbSupported } from "./orb";
 import { orbSettings, type OrbSettings } from "../shared/orb";
 import { effortColor } from "../shared/effort";
 import { lastSettings } from "./warm";
-import { subscribeSendResult } from "./events";
 import { useClock } from "./clock";
 import { removeFinishedRun } from "./remove";
 
@@ -1192,19 +1191,6 @@ export function BoardPage({ host, theme, layout, navigation }: PluginSurfaceProp
     // action cannot briefly show the removed card when Board mounts again.
     gcTime: 0,
   });
-  const toast = useToast();
-  const { refetch } = board;
-  useEffect(
-    () =>
-      subscribeSendResult((sent) => {
-        void refetch();
-        if (!sent)
-          toast.show("The prompt may not have been sent. Check the conversation.", {
-            variant: "warning",
-          });
-      }),
-    [refetch, toast],
-  );
   const onStar = useStableCallback(async (id: string, starred: boolean) => {
     const result = await setStarred({ id, starred, observingSince: board.data!.observingSince });
     if (!result.updated) throw new Error("Run changed. Refresh and retry.");
@@ -1244,15 +1230,16 @@ export function BoardPage({ host, theme, layout, navigation }: PluginSurfaceProp
   const [projectError, setProjectError] = useState<string | null>(null);
   const onOpenProject = useStableCallback((run: BoardRun) => {
     setProjectError(null);
-    const opened =
-      run.cwd !== undefined &&
-      openNewWorkspaceForProject({
-        serverId: host.id,
-        cwd: run.cwd,
-        name: run.project,
-        projectId: run.projectId,
-      });
-    if (!opened) setProjectError("Starting a conversation from the Board needs the desktop app.");
+    if (run.cwd === undefined || !workspaceActions.open) {
+      setProjectError("This project has no folder to start a conversation in.");
+      return;
+    }
+    workspaceActions.open({
+      serverId: host.id,
+      cwd: run.cwd,
+      name: run.project,
+      projectId: run.projectId,
+    });
   });
   const openAgentStable = useStableCallback((agentId: string) => {
     navigation?.openAgent({ agentId });

@@ -98,3 +98,62 @@ test("session-open hooks reject changes to session identity instead of silently 
     ),
   ).rejects.toThrow("agent.session_open hooks can only change env");
 });
+
+const promptRequest = {
+  agentId: "agent-1",
+  workspaceId: null,
+  provider: "claude",
+  cwd: "/project",
+  kind: "turn" as const,
+  prompt: "Hello",
+};
+
+test("prompt hooks rewrite only the provider prompt", async () => {
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.prompt", ({ request }) => {
+    return { ...request, prompt: `${request.prompt as string}\n\nContext` };
+  });
+  expect(await hooks.invoke("operation", "before", "agent.prompt", promptRequest, paseo)).toEqual({
+    ...promptRequest,
+    prompt: "Hello\n\nContext",
+  });
+});
+
+test("prompt hooks cannot move the prompt to another agent", async () => {
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.prompt", ({ request }) => {
+    return { ...request, agentId: "agent-2" };
+  });
+  await expect(
+    hooks.invoke("operation", "before", "agent.prompt", promptRequest, paseo),
+  ).rejects.toThrow("agent.prompt hooks can only change prompt");
+});
+
+const permissionRequest = {
+  agentId: "agent-1",
+  workspaceId: "workspace-1",
+  provider: "claude",
+  cwd: "/project",
+  request: { id: "permission-1", provider: "claude", name: "Bash", kind: "tool" as const },
+  decision: null,
+};
+
+test("permission hooks set a decision", async () => {
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.permission", ({ request }) => {
+    return { ...request, decision: { behavior: "allow" as const } };
+  });
+  expect(
+    await hooks.invoke("operation", "before", "agent.permission", permissionRequest, paseo),
+  ).toEqual({ ...permissionRequest, decision: { behavior: "allow" } });
+});
+
+test("permission hooks cannot change the request", async () => {
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.permission", ({ request }) => {
+    return { ...request, request: { ...request.request, name: "Edit" } };
+  });
+  await expect(
+    hooks.invoke("operation", "before", "agent.permission", permissionRequest, paseo),
+  ).rejects.toThrow("agent.permission hooks can only change decision");
+});

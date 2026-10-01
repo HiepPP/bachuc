@@ -38,7 +38,7 @@ import { Icon } from "../icons";
 import { PluginRuntimeBoundary } from "../runtime-boundary";
 import { SurfaceErrorBoundary } from "../surface-error-boundary";
 import { toPluginTheme } from "../theme";
-import { buttonMatches, type RegisteredPluginButton } from "./model";
+import { buttonMatches, resolveButtonForContext, type RegisteredPluginButton } from "./model";
 import { pluginButtonStore } from "./store";
 
 interface ButtonView {
@@ -115,7 +115,7 @@ function renderCustomIcon(
 }
 
 function pressButton(view: ButtonView, path: readonly string[]) {
-  void pluginButtonStore.run(view.entry.key, path).catch((error: unknown) => {
+  void pluginButtonStore.run(view.entry.key, path, view.entry.context).catch((error: unknown) => {
     view.toast.error(error instanceof Error ? error.message : String(error));
   });
 }
@@ -263,9 +263,10 @@ function ButtonControl({ view }: { view: ButtonView }) {
   if (composer) label = button.label ?? button.title;
   else if (props.layout.compact) label = undefined;
   const press = useCallback(() => pressButton(view, []), [view]);
+  const contextKey = entry.context.context === "agent" ? entry.context.agentId : undefined;
   const setOpen = useCallback(
-    (open: boolean) => pluginButtonStore.setOpen(entry.key, open),
-    [entry.key],
+    (open: boolean) => pluginButtonStore.setOpen(entry.key, open, contextKey),
+    [contextKey, entry.key],
   );
   const buttonStyle = useCallback(
     ({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) =>
@@ -534,7 +535,10 @@ function useButtons(serverId: string, workspaceId: string, agentId: string | nul
     pluginButtonStore.getSnapshot,
   );
   return useMemo(
-    () => entries.filter((entry) => buttonMatches(entry, serverId, workspaceId, agentId)),
+    () =>
+      entries
+        .filter((entry) => buttonMatches(entry, serverId, workspaceId, agentId))
+        .map((entry) => resolveButtonForContext(entry, workspaceId, agentId)),
     [entries, serverId, workspaceId, agentId],
   );
 }

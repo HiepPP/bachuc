@@ -13,7 +13,7 @@ export type PluginButtonContentProps = PluginHostProps & PluginButtonContext & {
 export type PluginButtonIcon = string | ComponentType<PluginButtonIconProps>;
 
 export type PluginButtonBehavior =
-  | { kind: "action"; onPress(): void | Promise<void> }
+  | { kind: "action"; onPress(context?: PluginButtonContext): void | Promise<void> }
   | { kind: "menu"; items: readonly PluginButtonMenuEntry[] }
   | { kind: "popover"; Content: ComponentType<PluginButtonContentProps> };
 
@@ -52,6 +52,10 @@ export interface PluginHeaderButtonContribution {
   button: PluginButton;
 }
 
-export interface PluginComposerPillContribution extends PluginHeaderButtonContribution {
-  agentId: string;
+/** Omit `agentId` or `workspaceId` to show the pill on every matching agent composer. */
+export interface PluginComposerPillContribution {
+  id: string;
+  workspaceId?: string;
+  agentId?: string;
+  button: PluginButton;
 }

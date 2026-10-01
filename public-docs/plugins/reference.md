@@ -264,6 +264,7 @@ for remote workspaces; `localhost` URLs refer to that desktop.
 
 Use the [settings API](#settings-screens) for typed host-scoped persistence across clients.
 Use `openSettings`, `openSurface`, and `openPanel` for your own registered contributions.
+`openSurface(id, { pluginId })` also opens another plugin's surface.
 
 ### Server runtime
 
@@ -463,33 +464,26 @@ add limits or delays in your plugin when needed. Attachments and tool effects ar
 
 ### Answer a permission request
 
-Using `shellCommand` from the same [helper file](https://github.com/getpaseo/paseo/blob/main/plugin-examples/lifecycle-actions/server/inspect.ts):
+Answer in `before("agent.permission")`. A `decision` resolves the request before clients,
+attention badges, or push notifications see it. Using `shellCommand` from the same
+[helper file](https://github.com/getpaseo/paseo/blob/main/plugin-examples/lifecycle-actions/server/inspect.ts):
 
 ```ts
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { shellCommand } from "./server/inspect";
 
 export default function contribute(server: PluginServerContext) {
-  server.on("agent.permission_requested", async (event, context) => {
-    const command = shellCommand(event.request);
-    if (command === null) {
-      return;
-    }
-
-    const agent = context.paseo.agents.ref(event.agent.id);
+  server.before("agent.permission", ({ request }) => {
+    const command = shellCommand(request.request);
+    if (command === null) return;
     if (/\brm\s+-rf\b/.test(command)) {
-      await agent.respondToPermission({
-        requestId: event.request.id,
-        response: { behavior: "deny", message: "Recursive deletion is blocked." },
-      });
-      return;
+      return {
+        ...request,
+        decision: { behavior: "deny", message: "Recursive deletion is blocked." },
+      };
     }
-
     if (command.trim() === "git status") {
-      await agent.respondToPermission({
-        requestId: event.request.id,
-        response: { behavior: "allow" },
-      });
+      return { ...request, decision: { behavior: "allow" } };
     }
   });
 
@@ -502,10 +496,14 @@ export default function contribute(server: PluginServerContext) {
 | `rm -rf build`           | Declined                  |
 | `git status`             | Approved                  |
 | Other command or request | Left pending for the user |
-| Already-resolved request | SDK response fails        |
 
 The regex is an example policy, not a shell parser. Permission requests can also be questions,
 plans, and mode changes; requesting permission does not end the turn.
+
+The hook runs inside the agent's event queue, so keep it fast; later events for that agent wait.
+A throwing or timed-out hook falls back to the normal flow, so the user still sees the request.
+A request answered by a decision does not emit `agent.permission_requested`. To answer after the
+user has seen the request, use `agent.permission_requested` and `respondToPermission`.
 
 ### Events
 
@@ -564,6 +562,8 @@ type PluginTurnOutcome =
 | `agent.create`       | `config`, optional `env`                                                | Public agent config except `cwd`; `env` |
 | `agent.session_open` | `agentId`, `workspaceId`, `provider`, `cwd`, `reason`, `purpose`, `env` | Only `env`                              |
 | `workspace.create`   | `source`, optional `title`, `firstAgentContext`                         | Entire explicit creation request        |
+| `agent.prompt`       | `agentId`, `workspaceId`, `provider`, `cwd`, `kind`, `prompt`           | Only `prompt`                           |
+| `agent.permission`   | `agentId`, `workspaceId`, `provider`, `cwd`, `request`, `decision`      | Only `decision`                         |
 
 **`agent.create.config`** uses `AgentSessionConfig`:
 
@@ -576,6 +576,23 @@ type PluginTurnOutcome =
 | `mcpServers`, `toolPolicy`                    | MCP configuration and exact-tool preapprovals                              |
 | `cwd`                                         | Cannot change                                                              |
 | `internal`                                    | Daemon-owned; cannot change through this hook                              |
+
+**`agent.prompt`** runs before each turn (`kind: "turn"`) and each steer (`kind: "steer"`) of a
+non-internal agent, for every provider. `prompt` is a string or an array of text, image, and
+attachment blocks; keep its shape. The change reaches only the provider. The timeline keeps the text
+the user sent. Use it to add per-turn context:
+
+```ts
+server.before("agent.prompt", ({ request }) => {
+  const context = "\n\nFollow the team style guide.";
+  return typeof request.prompt === "string"
+    ? { ...request, prompt: request.prompt + context }
+    : { ...request, prompt: [...request.prompt, { type: "text", text: context }] };
+});
+```
+
+**`agent.permission`** receives `decision: null`. Set it to an `AgentPermissionResponse` to answer
+the request; see [Answer a permission request](#answer-a-permission-request).
 
 **`agent.session_open` request example:**
 
@@ -706,6 +723,23 @@ export default function contribute(client: PluginClientContext) {
 | `navigation` | Optional client navigation. `openAgent({ agentId, serverId? })` and `openWorkspace({ workspaceId, serverId? })` open targets on `serverId`, or on the selected host when omitted. `openBrowser({ url, workspaceId, serverId? })` is available only on Electron; see [links and browsers](#external-links-and-workspace-browsers). |
 
 Paseo owns the route, header, close action, host picker, error boundary, and query client. The plugin owns the surface body.
+
+`openSurface(id, { pluginId, serverId })` opens another plugin's surface or picks a host; both
+default to the calling plugin. `client.openNewWorkspace({ cwd, projectId, name, serverId })` opens
+the new workspace screen for a project directory.
+
+### Sidebar projects and sections
+
+Each plugin contributes to the sidebar through one installation: the active host's, else the first.
+
+| Registration                                                               | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `addSidebarProjectFilter({ id, subscribe, isVisible, onSwipe, getTitle })` | `isVisible(project, { activeServerId })` hides a project and its workspaces. Call the `subscribe` listener when answers change; pass `{ direction: 1 }` or `{ direction: -1 }` when the filter moved to the next or previous view, and the host slides the list out, applies the change, and slides it back in (skipped under reduced motion). A throw hides nothing. Optional `onSwipe(direction, context)` gets one call per horizontal trackpad swipe over the project list on desktop; `1` means next. Optional `getTitle(context)` replaces the "Workspaces" heading while it returns a non-empty string; the host re-reads it when the filter notifies. |
+| `addSidebarProjectMenuItems({ id, getItems })`                             | `getItems(project, context)` returns `{ id, title, disabled?, checked?, items?, onSelect? }` items for the kebab and right-click project menus, before Remove. `checked` draws the menu's check. An item with `items` opens them as a submenu, showing the checked child's title as its value.                                                                                                                                                                                                                                                                                                                                                                |
+| `addSidebarSection({ id, Component })`                                     | Renders above the sidebar footer on every platform. Props add `activeServerId` to the host props.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+
+`project` is `{ viewKey, name, serverIds, projectIds }`. `activeServerId` is `null` when the
+sidebar shows all hosts. Filters narrow the user's list; project pickers still see every project.
 
 ## Host UI
 
@@ -937,7 +971,9 @@ export default function contribute(client: PluginClientContext) {
 
 `query.itemType` is the stable, coarse selector. Inspect the selected item inside `transform` for
 provider- or tool-specific recognition. Returning `undefined` keeps the original entry. Returning
-`items` replaces it; an empty array removes it. Item `data` must be JSON-compatible. The `phase`
+`items` replaces it; an empty array removes it. Add `source: { placement: "first" | "last" }` to
+keep the native entry before or after `items`. For `user_message` and `assistant_message`,
+`source.text` replaces the text the native entry renders; images, copy, and rewind stay. Item `data` must be JSON-compatible. The `phase`
 input is `"streaming"` for the live assistant message, running tool calls, and loading reasoning;
 it is `"complete"` for committed or fetched messages and finished tools or reasoning.
 Assistant and reasoning callbacks receive the full accumulated text on each update, including
@@ -1368,7 +1404,7 @@ Every callback receives:
 | `context`                 | All                 | Matching discriminator.                                                                                         |
 | `paseo`                   | All                 | Selected host's existing `PaseoApi`.                                                                            |
 | `rpc(contract, input)`    | All                 | Typed call to this installation's daemon-side plugin handler.                                                   |
-| `openSurface(id)`         | All                 | Opens one of this plugin's registered global surfaces.                                                          |
+| `openSurface(id, opts)`   | All                 | Opens a registered global surface; `opts.pluginId` and `opts.serverId` target another plugin or host.           |
 | `workspace`               | Workspace and agent | Synchronous workspace snapshot.                                                                                 |
 | `agent`                   | Agent               | Synchronous matching agent snapshot.                                                                            |
 | `openPanel(id, options?)` | Workspace and agent | Opens a registered panel in the callback's current context. Pass `{ location: "explorer" }` to target Explorer. |
@@ -1450,7 +1486,9 @@ into a shared overflow menu. Placement and overflow are host decisions.
 
 `client.addComposerPill({ id, workspaceId, agentId, button })` uses the same [button descriptor](#button-descriptor)
 and returns the same registration. It targets one agent's composer track alongside Tasks and
-Subagents. Composer pills always show the icon and `label` (or `title` when `label` is omitted).
+Subagents. Omit `agentId` to show the pill on every agent composer on the plugin's host; omit
+`workspaceId` too for every workspace. Action callbacks receive the composer's
+`{ context: "agent", workspaceId, agentId }`, and icon and popover components get the same fields. Composer pills always show the icon and `label` (or `title` when `label` is omitted).
 They never show a chevron, including for menus and popovers.
 
 ```tsx
@@ -1475,6 +1513,28 @@ const pill = client.addComposerPill({
 For pills that follow the agent directory, use an explicit [owned list subscription](/docs/sdk/events#follow-one-agents-status).
 The [local plugin example](https://github.com/getpaseo/paseo/blob/main/plugin-examples/local-plugin/client/main.tsx)
 replaces registrations on each snapshot and aborts the observation during entry cleanup, including pending bootstrap.
+
+## Composer interceptors and text
+
+`client.addComposerInterceptor({ id, intercept })` runs before a composer on the plugin's host
+sends or queues a message, after slash commands. `intercept({ target, text, action })` returns
+`{ text }` to change the message, `{ cancel: true }` to keep the draft, or nothing. Interceptors run
+in plugin order, and each one sees the previous result. The input is locked while they run. A
+thrown error keeps the draft and shows the message.
+
+`target` is `{ serverId, workspaceId, agentId }`; `agentId` is `null` for a composer that creates a
+new agent. `action` is `"send"` or `"queue"`. A queued message is final when queued.
+
+`client.setComposerText({ agentId, text })` replaces an agent composer's text and focuses it. When
+the composer is not mounted, the text becomes that agent's stored draft.
+
+```ts
+client.addComposerInterceptor({
+  id: "sign",
+  intercept: ({ text, target }) =>
+    target.agentId ? { text: `${text}\n\n-- sent from Paseo` } : undefined,
+});
+```
 
 ## Button descriptor
 
@@ -1758,6 +1818,28 @@ export default function contribute(server: PluginServerContext) {
 Inputs and outputs are validated on both sides. RPC names start with a lowercase letter and contain lowercase letters, numbers, dots, hyphens, or underscores. `useRpc()` returns a typed async function. Use TanStack Query for request state, caching, and mutations.
 
 Backend handlers receive the same `PaseoApi` as `{ paseo }`. Their connection belongs to the subprocess and closes when the plugin stops. It does not subscribe to timelines or catalog events until plugin code subscribes. Follow the [SDK event contract](../../sdk/events.md) for cleanup and timeline replacements. Backend code can use Node APIs and dependencies installed in the plugin directory.
+
+## Agent tools
+
+`server.registerTool({ name, description, inputSchema, annotations, handler })` adds an MCP tool to
+the daemon's `paseo` MCP server, so every agent that has Paseo tools can call it as
+`mcp__paseo__<name>`. `inputSchema` is a Zod object schema. `handler(input, { paseo, callerAgentId })`
+returns `{ text, structured?, isError? }`; a thrown error becomes an error result.
+
+```ts
+server.registerTool({
+  name: "team_status",
+  description: "Report the caller's team status.",
+  inputSchema: z.object({ team: z.string() }),
+  handler: async ({ team }, { callerAgentId }) => ({ text: `${team}: ok for ${callerAgentId}` }),
+});
+```
+
+Register tools during setup. Names match `^[a-z][a-z0-9_]*$`. A name that a built-in Paseo tool
+uses is skipped and logged. Calls time out after 120 seconds. `callerAgentId` is the agent the
+daemon MCP route was opened for; it has the same trust as built-in Paseo tools, so check the caller
+before acting on other agents. OpenCode and OMP native tool catalogs are built at daemon start and
+do not list plugin tools.
 
 ## Debug backend output
 

@@ -1,5 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { boardSize } from "./shared/board-size";
@@ -7,7 +7,7 @@ import { orbSettings } from "./shared/orb";
 import { projectColors } from "./shared/project-colors";
 import { createRunStore } from "./server/store";
 import { createRunPersistence } from "./server/persistence";
-import { createBridge, withBoardMcp } from "./server/bridge";
+import { z } from "zod";
 import { listBoardAgents } from "./server/snapshot";
 import { boardHostRpc, boardRpc, removeRunRpc, starRunRpc } from "./shared/board";
 import { createRecapStore, parseRecap, recapEntry } from "./server/recaps";
@@ -52,45 +52,29 @@ export default function contribute(server: PluginServerContext) {
     store.start(agent, turnId);
     await persistence.save(store.exportState());
   });
-  const bridge = createBridge(
-    async (callerId, agentId) => {
+  // Served by the daemon MCP server; the daemon names the calling agent, so an agent can remove
+  // only itself and its descendants.
+  server.registerTool({
+    name: "board_remove",
+    description:
+      "Remove your own Paseo thread, or one of your subagent threads, from Board. Omit agentId for your own thread. A finished thread is removed now with its finished subagents; a running thread is removed when its current turn completes, while failed or cancelled turns stay visible. Only hides the card: never archives or deletes the agent, and a new turn shows it again.",
+    inputSchema: z.object({ agentId: z.string().min(1).max(100).optional() }),
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async handler({ agentId }, { callerAgentId }) {
+      if (!callerAgentId) return { text: "Board remove needs a calling agent.", isError: true };
       await ready;
       ensureActive();
-      const outcome = store.removeByAgent(callerId, agentId);
-      if (outcome.result === "removed" || outcome.result === "scheduled")
-        await persistence.save(store.exportState());
-      return outcome;
+      const outcome = store.removeByAgent(callerAgentId, agentId ?? callerAgentId);
+      const done = outcome.result === "removed" || outcome.result === "scheduled";
+      if (done) await persistence.save(store.exportState());
+      return { text: JSON.stringify(outcome), structured: outcome, isError: !done };
     },
-    path.join(home, "plugin-data/board/bridge.json"),
-  );
-  void bridge.ready.catch((error: unknown) =>
-    console.error(`[board] board_remove bridge unavailable: ${String(error)}`),
-  );
-  // The MCP entry runs from the installed directory; without it Board works but skips the tool.
-  let root: string | undefined;
-  try {
-    const dir = JSON.parse(readFileSync(path.join(home, "config.json"), "utf8")).plugins?.board
-      ?.path;
-    if (typeof dir === "string" && existsSync(path.join(dir, "server/mcp.ts"))) root = dir;
-  } catch {}
-  const removeCreate = server.before("agent.create", async ({ request }) => {
-    if (!root) return request;
-    const url = await bridge.ready.catch(() => undefined);
-    if (!url) return request;
-    try {
-      return withBoardMcp(request, root, url, bridge.issue);
-    } catch (error) {
-      // A full lease table must not block agent creation.
-      console.error(`[board] board_remove not injected: ${String(error)}`);
-      return request;
-    }
   });
-  const removeOpen = server.before("agent.session_open", ({ request }) => {
-    const token = request.env?.PASEO_BOARD_TOKEN;
-    if (token) bridge.bind(token, request.agentId);
-    return request;
-  });
-  const removeArchived = server.on("agent.archived", ({ agent }) => bridge.revoke(agent.id));
   const recaps = createRecapStore(path.join(home, "plugin-data/board/recaps.jsonl"));
   const removeEnd = server.on(
     "agent.turn_ended",
@@ -259,10 +243,6 @@ export default function contribute(server: PluginServerContext) {
     controller.abort();
     removeStart();
     removeEnd();
-    removeCreate();
-    removeOpen();
-    removeArchived();
-    bridge.close();
     await ready.catch(() => undefined);
     await persistence.flush();
     store.clear();

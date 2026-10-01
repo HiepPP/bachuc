@@ -1,8 +1,7 @@
-import { mkdir, readFile, rename, writeFile, unlink, access, readdir } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { cavemanModeSchema, type TranslateSettings } from "../shared/settings";
-import { hasVietnamese } from "../shared/vietnamese";
 
 type Mode = TranslateSettings["cavemanMode"];
 export class AgentModes {
@@ -30,66 +29,39 @@ export class AgentModes {
       throw error;
     }
   }
+  /** The saved mode, or null when the agent never saved one. */
+  async find(agentId: string): Promise<Mode | null> {
+    const saved = await this.read(agentId);
+    return saved ? cavemanModeSchema.parse(saved.mode) : null;
+  }
+  async prefs(agentId: string, defaultRewrite: boolean): Promise<{ mode: Mode; rewrite: boolean }> {
+    const saved = await this.read(agentId);
+    return {
+      mode: saved ? cavemanModeSchema.parse(saved.mode) : "follow-agent",
+      rewrite: typeof saved?.rewrite === "boolean" ? saved.rewrite : defaultRewrite,
+    };
+  }
+  // Merges so a mode change keeps the rewrite choice and the reverse.
+  async update(agentId: string, patch: { mode?: Mode; rewrite?: boolean }) {
+    const saved = (await this.read(agentId)) ?? { mode: "follow-agent" };
+    const next = {
+      ...saved,
+      ...(patch.mode ? { mode: cavemanModeSchema.parse(patch.mode) } : {}),
+      ...(patch.rewrite === undefined ? {} : { rewrite: patch.rewrite }),
+    };
+    await this.write(path.join(this.dir(agentId), "mode.json"), next);
+    return next;
+  }
   async set(agentId: string, mode: Mode) {
-    await this.write(path.join(this.dir(agentId), "mode.json"), {
-      mode: cavemanModeSchema.parse(mode),
-    });
+    await this.update(agentId, { mode });
     return { mode };
   }
-  async prepare(
-    input: { agentId: string; text: string; source: string; mode: Mode },
-    settings: TranslateSettings,
-  ) {
-    const runtime = JSON.parse(await readFile(path.join(this.root, "hook-runtime.json"), "utf8"));
-    await access(path.join(runtime.cavemanRoot, "src/hooks/caveman-mode-tracker.js"));
-    await this.set(input.agentId, input.mode);
-    const token = `${Date.now()}-${randomUUID()}`;
-    const hash = createHash("sha256").update(input.text.replace(/\r\n/g, "\n")).digest("hex");
-    await this.write(path.join(this.dir(input.agentId), "pending", `${token}.json`), {
-      hash,
-      mode: input.mode,
-      chineseScript: settings.chineseScript,
-      replyVietnamese: settings.matchReplyLanguage && hasVietnamese(input.source),
-      createdAt: Date.now(),
-    });
-    return { token };
-  }
-  async bindQueue(agentId: string, token: string, queueId: string) {
-    if (!/^\d+-[a-f0-9-]+$/i.test(token)) throw new Error("Invalid turn token");
-    await this.write(path.join(this.dir(agentId), "pending", `${token}.queue`), { queueId });
+  private async read(agentId: string): Promise<{ mode: unknown; rewrite?: unknown } | null> {
     try {
-      await access(path.join(this.dir(agentId), "pending", `${token}.json`));
+      return JSON.parse(await readFile(path.join(this.dir(agentId), "mode.json"), "utf8"));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      await this.cancel(agentId, token);
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
     }
-    return {};
-  }
-  async cancelQueue(agentId: string, queueId: string) {
-    const dir = path.join(this.dir(agentId), "pending");
-    const names = await readdir(dir).catch((error) => {
-      if (error.code !== "ENOENT") throw error;
-      return [] as string[];
-    });
-    for (const name of names) {
-      if (!name.endsWith(".queue")) continue;
-      try {
-        const value = JSON.parse(await readFile(path.join(dir, name), "utf8"));
-        if (value.queueId === queueId) await this.cancel(agentId, name.slice(0, -6));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
-    }
-    return {};
-  }
-  async cancel(agentId: string, token: string) {
-    if (!/^\d+-[a-f0-9-]+$/i.test(token)) throw new Error("Invalid turn token");
-    await unlink(path.join(this.dir(agentId), "pending", `${token}.json`)).catch((error) => {
-      if (error.code !== "ENOENT") throw error;
-    });
-    await unlink(path.join(this.dir(agentId), "pending", `${token}.queue`)).catch((error) => {
-      if (error.code !== "ENOENT") throw error;
-    });
-    return {};
   }
 }

@@ -96,6 +96,12 @@ resolve_dev_daemon_endpoint() {
 }
 
 configure_dev_paseo_home() {
+  # Agents launched by the stable app inherit its PASEO_HOME. A dev command must never adopt the
+  # stable home, so drop it and fall through to the repo dev home.
+  if [ -n "${PASEO_HOME:-}" ] && [ "${PASEO_HOME%/}" = "$HOME/.paseo" ]; then
+    echo "dev-home: ignoring inherited PASEO_HOME=$PASEO_HOME (stable home)" >&2
+    unset PASEO_HOME
+  fi
   if [ -n "${PASEO_HOME:-}" ]; then
     export PASEO_HOME
     if [ -n "${PASEO_DEV_SEED_HOME:-}" ]; then

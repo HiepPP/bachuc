@@ -37,6 +37,12 @@ export const hostRpc = defineRpc({
   input: z.object({}),
   output: z.object({ serverId: z.string() }),
 });
+// Timeline rows know only the agent; the daemon resolves its workspace.
+export const scopeRpc = defineRpc({
+  name: "prompts.scope",
+  input: z.object({ agentId: z.string().min(1) }),
+  output: scopeSchema,
+});
 export const inspectRpc = defineRpc({
   name: "prompts.inspect",
   input: scopeSchema,

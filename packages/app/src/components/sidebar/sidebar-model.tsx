@@ -19,6 +19,7 @@ import { buildSidebarProjection } from "./sidebar-projection";
 import type { SidebarProjectIconTarget } from "@/utils/sidebar-project-row-model";
 import { filterWorkspacesByLabels, type SidebarWorkspaceGroup } from "./sidebar-labels";
 import { filterWorkspacesByProjects, resolveActiveProjectFilters } from "./sidebar-project-filter";
+import { usePluginHiddenProjectViewKeys } from "@/plugins/sidebar";
 import {
   hasAuthoritativeWorkspaceLabelCatalog,
   useWorkspaceLabelProjection,
@@ -36,6 +37,8 @@ interface SidebarModel extends SidebarWorkspacesListResult {
   /** The project filter as it is actually being applied — see `resolveActiveProjectFilters`. */
   resolvedProjectFilters: readonly string[];
   hasProjectsBeforeFilter: boolean;
+  /** Whether a plugin filter is hiding at least one project, so an empty list is not "no projects". */
+  hasPluginProjectFilter: boolean;
   groupMode: SidebarGroupMode;
   workspaceGroups: SidebarWorkspaceGroup[];
   projectIconTargets: SidebarProjectIconTarget[];
@@ -81,6 +84,8 @@ export function SidebarModelProvider({
     reconcileLabelFilter(availableLabelNames);
   }, [availableLabelNames, hasAuthoritativeLabelCatalog, reconcileLabelFilter]);
   const hasActiveLabelFilter = hasActiveSidebarLabelFilter(labelFilter);
+  const pluginHiddenViewKeys = usePluginHiddenProjectViewKeys(list.projects);
+  const hasPluginProjectFilter = pluginHiddenViewKeys.size > 0;
   const resolvedProjectFilters = useMemo(
     () =>
       resolveActiveProjectFilters(
@@ -105,9 +110,11 @@ export function SidebarModelProvider({
       workspaces: [...workspaceEntriesByKey.values()],
       projectFilters: resolvedProjectFilters,
     });
-    const filtered = filterWorkspacesByLabels({ workspaces: byProject, ...labelFilter });
+    const filtered = filterWorkspacesByLabels({ workspaces: byProject, ...labelFilter }).filter(
+      (workspace) => !pluginHiddenViewKeys.has(workspace.projectViewKey),
+    );
     return new Map(filtered.map((workspace) => [workspace.workspaceKey, workspace]));
-  }, [labelFilter, resolvedProjectFilters, workspaceEntriesByKey]);
+  }, [labelFilter, pluginHiddenViewKeys, resolvedProjectFilters, workspaceEntriesByKey]);
   const visibleWorkspaceKeys = useMemo(
     () => new Set(filteredWorkspaceEntriesByKey.keys()),
     [filteredWorkspaceEntriesByKey],
@@ -117,7 +124,10 @@ export function SidebarModelProvider({
   // a header row you can create your first workspace under. The label filter can only ask about
   // workspaces, so a project it empties has nothing left to show.
   const filteredProjects = useMemo(() => {
-    let projects = list.projects;
+    let projects =
+      pluginHiddenViewKeys.size > 0
+        ? list.projects.filter((project) => !pluginHiddenViewKeys.has(project.viewKey))
+        : list.projects;
     if (hasActiveProjectFilter) {
       const included = new Set(resolvedProjectFilters);
       projects = projects.filter((project) => included.has(project.viewKey));
@@ -134,6 +144,7 @@ export function SidebarModelProvider({
   }, [
     hasActiveLabelFilter,
     hasActiveProjectFilter,
+    pluginHiddenViewKeys,
     resolvedProjectFilters,
     list.projects,
     visibleWorkspaceKeys,
@@ -171,6 +182,7 @@ export function SidebarModelProvider({
       allProjects: list.projects,
       resolvedProjectFilters,
       hasProjectsBeforeFilter: list.projects.length > 0,
+      hasPluginProjectFilter,
       workspaceEntriesByKey: filteredWorkspaceEntriesByKey,
       groupMode,
       workspaceGroups: projection.workspaceGroups,
@@ -182,6 +194,7 @@ export function SidebarModelProvider({
     }),
     [
       resolvedProjectFilters,
+      hasPluginProjectFilter,
       collapsedProjectKeys,
       groupMode,
       list,
@@ -193,6 +206,11 @@ export function SidebarModelProvider({
   );
 
   return <SidebarModelContext.Provider value={value}>{children}</SidebarModelContext.Provider>;
+}
+
+/** Null outside a SidebarModelProvider, for rows that can also render on their own. */
+export function useOptionalSidebarModel(): SidebarModel | null {
+  return useContext(SidebarModelContext);
 }
 
 export function useSidebarModel(): SidebarModel {

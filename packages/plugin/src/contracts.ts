@@ -91,6 +91,11 @@ export interface PluginTimelineItem {
 
 export interface PluginTimelineTransformResult {
   items: PluginTimelineItem[];
+  /**
+   * Keep the source item next to `items` instead of replacing it. `text` replaces the rendered
+   * text of a `user_message` or `assistant_message` and is ignored for other item types.
+   */
+  source?: { placement: "first" | "last"; text?: string };
 }
 
 export type PluginCleanup = () => void | Promise<void>;

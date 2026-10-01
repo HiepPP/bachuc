@@ -51,11 +51,11 @@ test("only finished threads get Remove; navigate only after confirmed removal; c
       agents: { ref: () => ({ refresh: async () => ({ agent: { workspaceId: "workspace" } }) }) },
     },
     addComposerPill(pill: PluginComposerPillContribution) {
-      pills.set(pill.agentId, pill);
+      pills.set(pill.agentId ?? "", pill);
       return {
         update() {},
         remove() {
-          pills.delete(pill.agentId);
+          pills.delete(pill.agentId ?? "");
         },
       };
     },

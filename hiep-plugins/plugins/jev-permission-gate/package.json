@@ -6,7 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "format": "oxfmt index.server.ts server tests README.md package.json tsconfig.json paseo-plugin.json",
-    "lint": "oxlint index.server.ts server tests",
+    "lint": "oxlint --disable-nested-config index.server.ts server tests",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
@@ -14,9 +14,9 @@
     "ai": "7.0.106"
   },
   "devDependencies": {
-    "@getpaseo/client": "0.9.0-beta.2",
-    "@getpaseo/plugin": "0.9.0-beta.2",
-    "@getpaseo/protocol": "0.9.0-beta.2",
+    "@getpaseo/client": "file:../../../packages/client",
+    "@getpaseo/plugin": "file:../../../packages/plugin",
+    "@getpaseo/protocol": "file:../../../packages/protocol",
     "@types/node": "^22.0.0",
     "oxfmt": "0.46.0",
     "oxlint": "1.61.0",

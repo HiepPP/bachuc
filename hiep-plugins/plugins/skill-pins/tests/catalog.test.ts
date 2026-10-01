@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { catalog, skillsSchema } from "../shared/catalog";
-import { prepareSkillsRpc, skillsWriteRpc } from "../shared/contracts";
+import { skillsReadRpc, skillsWriteRpc } from "../shared/contracts";
 
 test("catalog holds the three pinned skills in menu order", () => {
   assert.deepEqual(
@@ -23,6 +23,6 @@ test("unknown skill IDs are rejected", () => {
 });
 
 test("RPC wire names are lowercase with dots and hyphens", () => {
-  for (const rpc of [prepareSkillsRpc, skillsWriteRpc])
+  for (const rpc of [skillsReadRpc, skillsWriteRpc])
     assert.match(rpc.name, /^skill-pins\.[a-z-]+$/);
 });

@@ -26,7 +26,6 @@ export function createService(deps: {
     },
     async enhance({ text }: { text: string; deferCaveman?: boolean }) {
       const settings = await deps.settings();
-      if (!settings.enhanceShortcut) throw new Error("Enhance shortcut is off");
       const { provider, enhanceModel: model } = settings;
       const enhanced = await deps.store.run(hash(ENHANCE_CACHE_MODE, provider, model, text), () =>
         deps.complete({ mode: "enhance", provider, model, text }),

@@ -1,4 +1,6 @@
+import { router } from "expo-router";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
+import { buildNewWorkspaceRoute } from "@/utils/host-routes";
 import { createPluginHosts } from "./hosts";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { PluginClientOpenPanelOptions } from "@getpaseo/plugin/client";
@@ -11,6 +13,7 @@ import { createPluginClientStateSource } from "./client-state/source";
 import type { PluginClientRuntime } from "./evaluate";
 import { createPluginNavigation } from "./navigation";
 import { pluginButtonStore } from "./buttons";
+import { setPluginComposerText } from "./composer";
 import { createPluginSurfaceRuntime } from "./surface-runtime";
 import type { InstalledPlugin } from "./types";
 
@@ -34,6 +37,19 @@ export function createPluginClientRuntime(
     },
     addHeaderButton(contribution) {
       return pluginButtonStore.addHeaderButton(installation, contribution);
+    },
+    openNewWorkspace({ cwd, projectId, name, serverId }) {
+      router.push(
+        buildNewWorkspaceRoute({
+          serverId: serverId?.trim() || installation.serverId,
+          sourceDirectory: cwd.trim(),
+          ...(projectId ? { projectId } : {}),
+          ...(name ? { displayName: name } : {}),
+        }),
+      );
+    },
+    setComposerText({ agentId, text }) {
+      setPluginComposerText(installation.serverId, agentId.trim(), text);
     },
     openPanel(panelId, options) {
       openClientPanel({ installation, runtime, state, panelId, options });

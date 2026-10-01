@@ -1,43 +1,24 @@
 # Next prompt actions
 
-Send suggestions under `What Next`, `What's Next`, or `Next Steps` directly from their blocks.
-Legacy fenced `prompt:` suggestions keep individual Edit and Send controls. They cannot be sent together.
-Structured `next-prompts` v1 blocks with several suggestions use selection controls; one suggestion keeps direct Edit and Send.
-The raw fence is hidden, not removed.
-Explicit Git suggestions replace Send with one action: Commit sends `/commit --no-push`,
-Commit & Push sends `/commit` only when push is explicitly requested, and Push sends the
-original push-only suggestion without invoking the commit skill. English and Vietnamese action
-phrases are recognized conservatively; mentions such as "Review commit" and negated requests keep Send.
-No-push constraints take precedence. The original scope and constraints are preserved, with a reminder
-to preserve unrelated work. Existing leading `/commit` or `$commit` commands are normalized once.
-All actions share Send's busy, stale, and duplicate guards. Git actions require individual manual
-clicks; their blocks keep individual controls, and Jev does not auto-run them.
-An optional `why:` line under a prompt shows as its reason and is never sent.
-An optional `thread: new` line under a prompt marks it as unrelated to the current task (see [Goal and new-thread suggestions](#goal-and-new-thread-suggestions)).
-Send preserves the composer draft. Edit replaces it with the selected prompt text for manual review.
-Hold Cmd while the pointer is over an enabled Send button to turn it into New thread.
-The click then starts that prompt in a new thread instead of sending it here (see below). Git actions keep their normal behavior.
-The reverse also works: Cmd over Start in new thread turns it into Send, and the click sends that prompt here.
-An Other work prompt that mentions commit or push still starts in a new thread and swaps only to a plain Send; it is never wrapped in `/commit`.
-This needs an idle conversation and no Jev review in progress.
-The swap changes no button size, and the click always does what the button shows.
+Send suggestions under `What Next`, `What's Next`, or `Next Steps` directly from the reply, on
+every Paseo client. Requires the Paseo fork `>=0.10.2-beta.900`; the stable 0.10.1 host refuses it.
 
-## Recap and next-step layout
-
-A suggestion block under What Next becomes one panel ([design](../../docs/designs/recap-next-panel-2026-09-25/panel-v3.html), [rules](../../docs/designs/recap-next-panel-2026-09-25/TASTE.md)).
-The panel shows a directly preceding Recap (branch, commit status, and work summary), the What Next title and intro, and the suggestions.
-A Recap with exactly the Branch, Did, and Commit/push fields joins the panel, or shows as a compact strip when no panel follows.
-Recap parsing follows the global answer rules: Branch, Did, and Commit/push, followed by What Next or Next Steps. Fields may span separate history rows; late or changed blocks trigger a fresh fold. Plain Recap fields also join the following panel, either as three paragraphs or three lines separated by Markdown line breaks. Inline code and links are preserved. Other Recap shapes keep their original rendering.
-Native Markdown is hidden in place, not removed, and returns when the plugin is disabled.
-
-- Current reply: the panel has controls. One suggestion gets direct Edit and Send. Several suggestions separate exclusive
-  choices from additional suggestions, with a shared bar for the count, Edit selected, and Send selected.
+- The reply keeps its native Markdown up to the What Next heading. The rest becomes one panel
+  with the heading, its intro text, and the suggestions. The raw fences are not shown.
+- Each suggestion has **Edit**, which fills this conversation's composer, and **Send**.
+  **New thread** starts the prompt in a separate conversation. A `thread: new` suggestion shows
+  **Start in new thread** instead of Send.
+- Structured `next-prompts` v1 blocks with several suggestions use radio and checkbox rows that
+  follow `exclusiveGroups` and `allowedCombinations`, with **Edit selected** and **Send selected**.
   No alternatives or default selections are invented.
-- Earlier replies: once a newer turn starts, the server no longer offers their suggestions. Their panels stay readable
-  but have no buttons or inputs. This applies only when the nearest heading above the block is What Next or Next Steps.
-
-Paseo renders each Markdown block of a reply as its own history row, so the panel joins rows that share a message ID.
-Rows mounted while scrolling are folded before paint to avoid layout jumps in the virtualized history.
+- Explicit Git suggestions replace Send with one action: Commit sends `/commit --no-push`,
+  Commit & Push sends `/commit` only when push is explicitly requested, and Push sends the
+  original push-only suggestion. Git actions have no New thread button, and Jev never auto-runs
+  them.
+- An optional `why:` line shows as the suggestion's reason and is never sent.
+- Only the latest reply offers buttons. Earlier panels stay readable without them.
+- The panel is a timeline plugin row. Recap sections and other text before the What Next
+  heading keep their native rendering.
 
 ## Structured suggestions
 
@@ -98,23 +79,15 @@ Each group or combination contains 2–20 distinct IDs. Legacy blocks retain the
 
 ## Compatibility
 
-Desktop only; the installed runtime used for this change is Paseo 0.9.1.
-The manifest also permits 0.8.x and 0.9.0-beta.2; this change was not runtime-tested on those versions.
-The user approved this private DOM adapter; it does not edit Paseo source.
-It reads native Markdown markers and React ancestor props for host, workspace, message, and agent identity.
-Unknown shapes, partial streams, incomplete latest turns, stale messages, and wrong hosts fail closed.
-A reply gets actions only when its rendered timestamp is later than the latest user message. Exact row timestamps
-are not compared, because a reply watched while streaming keeps its last live chunk time.
-Browser and native mobile clients receive no DOM contribution.
+Uses the plugin timeline API with `source` kept, `setComposerText`, and cross-plugin
+`openSurface`, all added in the Paseo fork `0.10.2-beta.900`. No DOM code. The panel needs the
+agent's workspace, which the daemon resolves through `prompts.scope`.
 
 ## Back to Board after send
 
 Settings → Next prompt actions → Back to Board after send. Host setting; defaults OFF.
-When ON, any manual send action opens the Board at once while the send finishes in the background.
-The Board refreshes when the send is acknowledged and shows a warning toast if it failed or is uncertain.
-Requires the `board` plugin, which listens for `paseo-board:v2:open`, `paseo-board:v2:sent`, and `paseo-board:v2:send-failed`.
-
-Missing or disabled Board registration adds a warning to suggestion panels. Manual Send stays available.
+When ON, a manual Send opens the Board surface of the `board` plugin at once, and the send
+finishes in the background. Missing or disabled Board registration adds a warning to the panel.
 
 ## Jev auto-run
 

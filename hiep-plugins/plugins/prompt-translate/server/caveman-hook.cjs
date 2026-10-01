@@ -82,6 +82,27 @@ function run(data, env = process.env) {
       break;
     }
   }
+  const result = turnContext({ data, env, agentId, dir, runtime, choice, hash, consumed });
+  if (initial) {
+    selected.mode = result.firstMode;
+    fs.writeFileSync(modeFile, JSON.stringify(selected), { mode: 0o600 });
+  }
+  if (consumed) {
+    fs.unlinkSync(consumed);
+    fs.rmSync(consumed.replace(/\.json$/, ".queue"), { force: true });
+  }
+  return result.output;
+}
+
+// The Paseo daemon hook passes the turn's choice directly; no snapshots or bootstrap.
+function daemonContext(input) {
+  const { prompt, agentId, cwd, dir, runtime, choice, env = process.env } = input;
+  const data = { hook_event_name: "UserPromptSubmit", prompt, cwd, session_id: agentId };
+  return turnContext({ data, env, agentId, dir, runtime, choice, hash: digest(prompt) }).output
+    .hookSpecificOutput.additionalContext;
+}
+
+function turnContext({ data, env, agentId, dir, runtime, choice, hash, consumed }) {
   if (!modes.has(choice.mode)) throw new Error("Invalid Caveman mode");
   const hookDir = path.join(runtime.cavemanRoot, "src/hooks");
   const { parseModeChange } = require(path.join(hookDir, "caveman-parse.js"));
@@ -91,13 +112,8 @@ function run(data, env = process.env) {
   const change = parseModeChange(userPrompt, {
     getDefaultMode: () => config.getDefaultMode(data.cwd),
   });
-  if (initial) {
-    const firstMode =
-      change?.action === "set" && modes.has(change.mode) ? change.mode : "follow-agent";
-    selected.mode = firstMode;
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(modeFile, JSON.stringify(selected), { mode: 0o600 });
-  }
+  const firstMode =
+    change?.action === "set" && modes.has(change.mode) ? change.mode : "follow-agent";
   const requested = choice.mode === "follow-agent" ? "off" : choice.mode;
   const hookPrompt = change ? userPrompt : `/caveman ${requested}`;
   const nativeDir = path.join(dir, "native");
@@ -167,16 +183,15 @@ function run(data, env = process.env) {
       at: new Date().toISOString(),
     }),
   );
-  if (consumed) {
-    fs.unlinkSync(consumed);
-    fs.rmSync(consumed.replace(/\.json$/, ".queue"), { force: true });
-  }
   return {
-    ...output,
-    hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext },
+    firstMode,
+    output: {
+      ...output,
+      hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext },
+    },
   };
 }
-module.exports = { run, native, digest };
+module.exports = { run, native, digest, daemonContext };
 if (require.main === module) {
   // Only the Claude registration passes --claude; Codex keeps its own Caveman plugin.
   const outside = process.argv.includes("--claude") && !uuid.test(process.env.PASEO_AGENT_ID || "");

@@ -53,6 +53,7 @@ import { buildSettingsAddHostRoute, buildSettingsRoute } from "@/utils/host-rout
 import { openHostOverview } from "@/navigation/settings-navigation";
 import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
+import { PluginSidebarSections, usePluginSidebarTitle } from "@/plugins/sidebar";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 
 type SidebarTheme = ReturnType<typeof useUnistyles>["theme"];
@@ -67,6 +68,7 @@ interface SidebarSharedProps {
   projects: SidebarProjectEntry[];
   hasProjectsBeforeFilter: boolean;
   hasActiveProjectFilter: boolean;
+  hasPluginProjectFilter: boolean;
   workspaceEntriesByKey: ReadonlyMap<string, SidebarWorkspaceEntry>;
   isInitialLoad: boolean;
   isRevalidating: boolean;
@@ -115,6 +117,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const {
     projects,
     hasProjectsBeforeFilter,
+    hasPluginProjectFilter,
     resolvedProjectFilters,
     workspaceEntriesByKey,
     isInitialLoad,
@@ -210,6 +213,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     projects,
     hasProjectsBeforeFilter,
     hasActiveProjectFilter: resolvedProjectFilters.length > 0,
+    hasPluginProjectFilter,
     workspaceEntriesByKey,
     isInitialLoad,
     isRevalidating,
@@ -521,6 +525,7 @@ function MobileSidebar({
   projects,
   hasProjectsBeforeFilter,
   hasActiveProjectFilter,
+  hasPluginProjectFilter,
   workspaceEntriesByKey,
   isInitialLoad,
   isRevalidating,
@@ -600,6 +605,7 @@ function MobileSidebar({
             projects={projects}
             hasProjectsBeforeFilter={hasProjectsBeforeFilter}
             hasActiveProjectFilter={hasActiveProjectFilter}
+            hasPluginProjectFilter={hasPluginProjectFilter}
             workspaceEntriesByKey={workspaceEntriesByKey}
             isRefreshing={isManualRefresh && isRevalidating}
             onRefresh={handleRefresh}
@@ -611,6 +617,8 @@ function MobileSidebar({
             listHeaderComponent={workspacesSectionHeaderElement}
           />
         )}
+
+        <PluginSidebarSections />
 
         <SidebarFooter
           theme={theme}
@@ -634,6 +642,7 @@ function DesktopSidebar({
   projects,
   hasProjectsBeforeFilter,
   hasActiveProjectFilter,
+  hasPluginProjectFilter,
   workspaceEntriesByKey,
   isInitialLoad,
   isRevalidating,
@@ -779,6 +788,7 @@ function DesktopSidebar({
             projects={projects}
             hasProjectsBeforeFilter={hasProjectsBeforeFilter}
             hasActiveProjectFilter={hasActiveProjectFilter}
+            hasPluginProjectFilter={hasPluginProjectFilter}
             workspaceEntriesByKey={workspaceEntriesByKey}
             isRefreshing={isManualRefresh && isRevalidating}
             onRefresh={handleRefresh}
@@ -789,6 +799,8 @@ function DesktopSidebar({
         )}
 
         <SidebarCalloutSlot />
+
+        <PluginSidebarSections />
 
         <SidebarFooter
           theme={theme}
@@ -812,9 +824,13 @@ function DesktopSidebar({
 }
 
 function WorkspacesSectionHeader() {
+  // A plugin filter such as Spaces can name the current view in place of "Workspaces".
+  const title = usePluginSidebarTitle() ?? "Workspaces";
   return (
     <View style={styles.workspacesSectionHeader}>
-      <Text style={styles.workspacesSectionTitle}>Workspaces</Text>
+      <Text style={styles.workspacesSectionTitle} numberOfLines={1}>
+        {title}
+      </Text>
       <View style={styles.workspacesSectionActions}>
         <Tooltip delayDuration={300}>
           <TooltipTrigger asChild>
@@ -872,6 +888,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingBottom: theme.spacing[1],
   },
   workspacesSectionTitle: {
+    flexShrink: 1,
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.normal,

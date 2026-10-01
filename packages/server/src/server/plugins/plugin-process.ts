@@ -9,8 +9,8 @@ import * as pluginSharedRuntime from "@getpaseo/plugin";
 import * as pluginProviderRuntime from "@getpaseo/plugin/server/provider";
 import * as pluginAcpRuntime from "@getpaseo/plugin/server/acp";
 import type { SettingsDefinition, PluginRpcContract } from "@getpaseo/plugin";
-import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import type { ZodType } from "zod";
+import type { PluginHandlerContext, PluginToolDefinition } from "@getpaseo/plugin/server";
+import { toJSONSchema, type ZodType } from "zod";
 import {
   ProviderEventSchema,
   type ProviderConnection,
@@ -48,6 +48,7 @@ const hooks = new PluginHookHandlers(() => {
   send({ type: "hooks.changed", hooks: hooks.catalog() });
 });
 const handlers = new Map<string, RegisteredRpc>();
+const tools = new Map<string, PluginToolDefinition<ZodType>>();
 const providers = new Map<string, ProviderRegistration>();
 const providerConnections = new Map<
   string,
@@ -101,6 +102,46 @@ function register(contract: PluginRpcContract, handler: RpcHandler): void {
   }
   const method = validateMethod(contract.name);
   handlers.set(method, { contract: { ...contract, name: method }, handler });
+}
+
+function registerTool(definition: PluginToolDefinition<ZodType>): void {
+  const name = definition.name.trim();
+  if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new Error(`Invalid plugin tool name: ${name}`);
+  if (tools.has(name)) throw new Error(`Duplicate plugin tool name: ${name}`);
+  if (typeof definition.handler !== "function") {
+    throw new Error(`Plugin tool ${name} must provide a handler`);
+  }
+  if (toolInputSchema(definition).type !== "object") {
+    throw new Error(`Plugin tool ${name} input schema must describe an object`);
+  }
+  tools.set(name, { ...definition, name });
+}
+
+function toolInputSchema(definition: PluginToolDefinition<ZodType>): Record<string, unknown> {
+  return toJSONSchema(definition.inputSchema, { io: "input" }) as Record<string, unknown>;
+}
+
+function toolMetadata(definition: PluginToolDefinition<ZodType>) {
+  return {
+    name: definition.name,
+    description: definition.description,
+    inputSchema: toolInputSchema(definition),
+    ...(definition.annotations ? { annotations: definition.annotations } : {}),
+  };
+}
+
+async function callTool(
+  message: Extract<PluginProcessRequest, { type: "tool.call" }>,
+): Promise<unknown> {
+  const tool = tools.get(message.name);
+  if (!tool) throw new Error(`Unknown plugin tool: ${message.name}`);
+  if (!paseo) throw new Error("Plugin Paseo API is unavailable");
+  const input = await tool.inputSchema.parseAsync(message.input);
+  const result = await tool.handler(input, { paseo, callerAgentId: message.callerAgentId });
+  if (!result || typeof result.text !== "string") {
+    throw new Error(`Plugin tool ${message.name} returned an invalid result`);
+  }
+  return jsonTransportValue(result);
 }
 
 function registerProvider(provider: ProviderRegistration): void {
@@ -250,6 +291,7 @@ function evaluateBundle(bundle: string): void {
     handle: register,
     registerProvider,
     registerSettings,
+    registerTool,
     on: hooks.on,
     before: hooks.before,
   });
@@ -289,6 +331,9 @@ async function initialize(message: Extract<PluginProcessRequest, { type: "initia
     type: "ready",
     methods: [...handlers.keys()].sort(),
     hooks: hooks.catalog(),
+    tools: [...tools.values()]
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map(toolMetadata),
     providers: [...providers.values()]
       .sort((left, right) => left.id.localeCompare(right.id))
       .map(providerMetadata),
@@ -441,8 +486,15 @@ process.on("message", (rawMessage: unknown) => {
 });
 
 function handleHookMessage(
-  message: Extract<PluginProcessRequest, { type: "hook" | "hook.cancel" }>,
+  message: Extract<PluginProcessRequest, { type: "hook" | "hook.cancel" | "tool.call" }>,
 ): void {
+  if (message.type === "tool.call") {
+    void callTool(message).then(
+      (output) => send({ type: "result", requestId: message.requestId, output }),
+      (error) => send({ type: "error", requestId: message.requestId, error: describeError(error) }),
+    );
+    return;
+  }
   if (message.type === "hook.cancel") {
     hooks.cancel(message.requestId);
     return;
@@ -468,8 +520,9 @@ function handleHookMessage(
   }
 }
 
+// Hook and tool calls share one route so the message switch stays small.
 function isHookMessage(
   message: PluginProcessRequest,
-): message is Extract<PluginProcessRequest, { type: "hook" | "hook.cancel" }> {
-  return message.type === "hook" || message.type === "hook.cancel";
+): message is Extract<PluginProcessRequest, { type: "hook" | "hook.cancel" | "tool.call" }> {
+  return message.type === "hook" || message.type === "hook.cancel" || message.type === "tool.call";
 }

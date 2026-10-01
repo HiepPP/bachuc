@@ -166,6 +166,137 @@ export default function contribute(server) {
   }
 }, 60_000);
 
+async function readHookLogs(client: DaemonClient, pluginId: string) {
+  const logs = await client.getPluginLogs(pluginId);
+  return logs
+    .filter((entry) => entry.message.startsWith('{"hook":'))
+    .map((entry) => JSON.parse(entry.message) as { hook: string; [key: string]: unknown });
+}
+
+test("prompt hooks change the provider prompt and permission hooks answer before clients see it", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "paseo-prompt-hooks-"));
+  const daemon = await createTestPaseoDaemon({ daemonVersion: "0.8.0" });
+  const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws`, appVersion: "0.8.0" });
+  try {
+    await writeFile(
+      path.join(directory, "paseo-plugin.json"),
+      JSON.stringify({ id: "prompt-hooks", requirements: { paseo: ">=0.8.0" } }),
+    );
+    await writeFile(
+      path.join(directory, "index.server.ts"),
+      `
+export default function contribute(server) {
+  server.before("agent.prompt", ({ request }) => {
+    console.log(JSON.stringify({ hook: "agent.prompt", kind: request.kind, prompt: request.prompt }));
+    return { ...request, prompt: request.prompt + " Run rm -f permission.txt" };
+  });
+  server.before("agent.permission", ({ request }) => {
+    console.log(JSON.stringify({ hook: "agent.permission", name: request.request.name }));
+    return { ...request, decision: { behavior: "deny", message: "Denied by plugin" } };
+  });
+  server.on("agent.permission_requested", () => {
+    console.log(JSON.stringify({ hook: "agent.permission_requested" }));
+  });
+  return () => {};
+}
+`,
+    );
+    await client.connect();
+    await client.fetchAgents({ subscribe: {} });
+    await client.patchDaemonConfig({ pluginsEnabled: true });
+    await client.installDirectoryPlugin(directory);
+    const agent = await client.createAgent({
+      provider: "claude",
+      cwd: directory,
+      title: "Prompt hooks",
+      modeId: "default",
+    });
+    await client.sendMessage(agent.id, "Say hi.");
+    await client.waitForFinish(agent.id, 30_000);
+    await expect
+      .poll(() => readHookLogs(client, "prompt-hooks"), { timeout: 10_000 })
+      .toEqual([
+        { hook: "agent.prompt", kind: "turn", prompt: "Say hi." },
+        { hook: "agent.permission", name: "Bash" },
+      ]);
+    const timeline = await client.fetchAgentTimeline(agent.id, { projection: "projected" });
+    const userMessages = timeline.entries
+      .map((entry) => entry.item)
+      .filter((item) => item.type === "user_message");
+    expect(userMessages).toEqual([expect.objectContaining({ text: "Say hi." })]);
+    expect(daemon.daemon.agentManager.getAgent(agent.id)?.pendingPermissions.size ?? 0).toBe(0);
+
+    // An initial prompt has no client message ID; the timeline must still show the typed text.
+    const second = await client.createAgent({
+      provider: "claude",
+      cwd: directory,
+      title: "Prompt hooks without message ID",
+      modeId: "default",
+      initialPrompt: "Say hello.",
+    });
+    await client.waitForFinish(second.id, 30_000);
+    const secondTimeline = await client.fetchAgentTimeline(second.id, { projection: "projected" });
+    expect(
+      secondTimeline.entries
+        .map((entry) => entry.item)
+        .filter((item) => item.type === "user_message"),
+    ).toEqual([expect.objectContaining({ text: "Say hello." })]);
+  } finally {
+    await client.close();
+    await daemon.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 60_000);
+
+test("a failing permission hook keeps the permission for the normal flow", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "paseo-permission-fallback-"));
+  const daemon = await createTestPaseoDaemon({ daemonVersion: "0.8.0" });
+  const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws`, appVersion: "0.8.0" });
+  try {
+    await writeFile(
+      path.join(directory, "paseo-plugin.json"),
+      JSON.stringify({ id: "permission-fallback", requirements: { paseo: ">=0.8.0" } }),
+    );
+    await writeFile(
+      path.join(directory, "index.server.ts"),
+      `
+export default function contribute(server) {
+  server.before("agent.permission", () => {
+    throw new Error("Gate unavailable");
+  });
+  server.on("agent.permission_requested", async (event, context) => {
+    console.log(JSON.stringify({ hook: "agent.permission_requested" }));
+    await context.paseo.agents.ref(event.agent.id).respondToPermission({
+      requestId: event.request.id,
+      response: { behavior: "deny", message: "Declined by plugin" },
+    });
+  });
+  return () => {};
+}
+`,
+    );
+    await client.connect();
+    await client.fetchAgents({ subscribe: {} });
+    await client.patchDaemonConfig({ pluginsEnabled: true });
+    await client.installDirectoryPlugin(directory);
+    const agent = await client.createAgent({
+      provider: "claude",
+      cwd: directory,
+      title: "Permission fallback",
+      modeId: "default",
+    });
+    await client.sendMessage(agent.id, "Run rm -f permission.txt");
+    await expect
+      .poll(() => readHookLogs(client, "permission-fallback"), { timeout: 10_000 })
+      .toEqual([{ hook: "agent.permission_requested" }]);
+    await client.waitForFinish(agent.id, 30_000);
+  } finally {
+    await client.close();
+    await daemon.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 60_000);
+
 test("agent creation hooks change the provider and environment before the session opens", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "paseo-agent-hooks-"));
   const daemon = await createTestPaseoDaemon({ daemonVersion: "0.8.0" });

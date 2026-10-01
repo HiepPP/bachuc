@@ -6,17 +6,17 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "format": "oxfmt index.server.ts index.client.tsx server client shared tests README.md package.json tsconfig.json paseo-plugin.json",
-    "lint": "oxlint index.server.ts index.client.tsx server client shared tests",
+    "lint": "oxlint --disable-nested-config index.server.ts index.client.tsx server client shared tests",
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "thinking-orbs": "^0.3.2"
+    "thinking-orbs": "^0.3.2",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@getpaseo/client": "0.9.0-beta.2",
-    "@getpaseo/plugin": "0.9.0-beta.2",
-    "@getpaseo/protocol": "0.9.0-beta.2",
+    "@getpaseo/client": "file:../../../packages/client",
+    "@getpaseo/plugin": "file:../../../packages/plugin",
+    "@getpaseo/protocol": "file:../../../packages/protocol",
     "@tanstack/react-query": "^5.90.11",
     "@types/node": "^22.0.0",
     "@types/react": "~19.2.0",
@@ -25,7 +25,6 @@
     "react": "19.1.0",
     "react-native": "0.81.5",
     "tsx": "^4.20.0",
-    "typescript": "^5.9.3",
-    "zod": "^4.4.3"
+    "typescript": "^5.9.3"
   }
 }

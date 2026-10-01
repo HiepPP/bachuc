@@ -24,6 +24,7 @@ import type {
   PluginProcessMessage,
   PluginProcessRequest,
   PluginProviderMetadata,
+  PluginToolMetadata,
 } from "./plugin-process-protocol.js";
 import { PluginProcessMessageSchema } from "./plugin-process-protocol.js";
 import { PluginSessionSocket } from "./session-socket.js";
@@ -31,6 +32,8 @@ import { PluginSessionSocket } from "./session-socket.js";
 const CLIENT_ENTRY_FILENAMES = ["index.client.ts", "index.client.tsx"] as const;
 const SERVER_ENTRY_FILENAMES = ["index.server.ts", "index.server.tsx"] as const;
 const REQUEST_TIMEOUT_MS = 30_000;
+// Agent tools can wait on real work, such as an evaluator call.
+const TOOL_CALL_TIMEOUT_MS = 120_000;
 const MAX_LOG_ENTRIES = 500;
 const MAX_LOG_BYTES = 256 * 1024;
 const MAX_LOG_LINE_BYTES = 16 * 1024;
@@ -65,6 +68,7 @@ interface LoadedPlugin {
   methods: ReadonlySet<string>;
   hooks: { events: string[]; before: string[] };
   providers: readonly PluginProviderMetadata[];
+  tools: readonly PluginToolMetadata[];
   child: PluginChild | null;
   outputCapture: PluginOutputCapture | null;
   pending: Map<string, PendingInvocation>;
@@ -442,6 +446,29 @@ export class PluginRuntime {
     return this.request(loaded, { type: "invoke", requestId: randomUUID(), method, input });
   }
 
+  listTools(): Array<{ pluginId: string; tool: PluginToolMetadata }> {
+    return [...this.plugins.values()]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .flatMap((loaded) => loaded.tools.map((tool) => ({ pluginId: loaded.id, tool })));
+  }
+
+  async callTool(
+    pluginId: string,
+    name: string,
+    input: unknown,
+    callerAgentId: string | null,
+  ): Promise<unknown> {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    if (!loaded.tools.some((tool) => tool.name === name))
+      throw new Error(`Plugin ${pluginId} does not contribute tool ${name}`);
+    return this.request(
+      loaded,
+      { type: "tool.call", requestId: randomUUID(), name, input, callerAgentId },
+      TOOL_CALL_TIMEOUT_MS,
+    );
+  }
+
   emit<Name extends keyof PluginLifecycleEvents>(
     name: Name,
     event: PluginLifecycleEvents[Name],
@@ -517,6 +544,7 @@ export class PluginRuntime {
   private request(
     loaded: LoadedPlugin,
     message: Extract<PluginProcessRequest, { requestId: string }>,
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<unknown> {
     const child = loaded.child;
     const pluginId = loaded.id;
@@ -529,7 +557,7 @@ export class PluginRuntime {
           void send(child, { type: "hook.cancel", requestId }).catch(() => {});
         }
         reject(new Error(`Plugin RPC timed out: ${pluginId}.${message.type}`));
-      }, REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
       loaded.pending.set(requestId, { resolve, reject, timeout });
       void send(child, message).catch((error) => {
         clearTimeout(timeout);
@@ -566,6 +594,7 @@ export class PluginRuntime {
         methods: new Set(),
         hooks: { events: [], before: [] },
         providers: [],
+        tools: [],
         child: null,
         outputCapture: null,
         pending: new Map(),
@@ -674,6 +703,7 @@ export class PluginRuntime {
       methods: new Set(ready.methods),
       hooks: ready.hooks ?? { events: [], before: [] },
       providers: ready.providers ?? [],
+      tools: ready.tools ?? [],
       child,
       outputCapture,
       pending,

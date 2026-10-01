@@ -6,12 +6,6 @@ import { cavemanModeSchema } from "./settings";
 export const MAX_TEXT = 20_000;
 const text = z.string().min(1).max(MAX_TEXT);
 
-export const hostRpc = defineRpc({
-  name: "translate.host",
-  input: z.object({}),
-  output: z.object({ serverId: z.string().min(1) }),
-});
-
 export const translateRpc = defineRpc({
   name: "translate.translate",
   input: z.object({ text, cacheOnly: z.boolean().default(false) }),
@@ -29,34 +23,14 @@ export const originalRpc = defineRpc({
 });
 
 const agentId = z.string().uuid();
+const prefs = z.object({ mode: cavemanModeSchema, rewrite: z.boolean() });
 export const modeReadRpc = defineRpc({
   name: "translate.mode.read",
   input: z.object({ agentId }),
-  output: z.object({ mode: cavemanModeSchema }),
+  output: prefs,
 });
 export const modeWriteRpc = defineRpc({
   name: "translate.mode.write",
-  input: z.object({ agentId, mode: cavemanModeSchema }),
-  output: z.object({ mode: cavemanModeSchema }),
-});
-export const prepareModeRpc = defineRpc({
-  name: "translate.mode.prepare",
-  input: z.object({ agentId, text, source: text, mode: cavemanModeSchema }),
-  output: z.object({ token: z.string() }),
-});
-export const cancelModeRpc = defineRpc({
-  name: "translate.mode.cancel",
-  input: z.object({ agentId, token: z.string() }),
-  output: z.object({}),
-});
-
-export const bindQueueModeRpc = defineRpc({
-  name: "translate.mode.bind-queue",
-  input: z.object({ agentId, token: z.string(), queueId: z.string().min(1) }),
-  output: z.object({}),
-});
-export const cancelQueueModeRpc = defineRpc({
-  name: "translate.mode.cancel-queue",
-  input: z.object({ agentId, queueId: z.string().min(1) }),
-  output: z.object({}),
+  input: z.object({ agentId, mode: cavemanModeSchema.optional(), rewrite: z.boolean().optional() }),
+  output: prefs,
 });

@@ -61,12 +61,7 @@ test("enhance uses the enhance model and records the original", async () => {
   assert.equal(requests[0].model, "google/gemini-2.5-flash-lite");
   assert.deepEqual(await service.original({ text: prompt }), { original: "sửa lỗi" });
   assert.deepEqual(await service.original({ text: "sửa lỗi" }), { original: null });
-  const off = await setup({ enhanceShortcut: false });
-  await assert.rejects(off.service.enhance({ deferCaveman: true, text: "sửa lỗi" }), {
-    message: "Enhance shortcut is off",
-  });
   store.close();
-  off.store.close();
 });
 
 test("reply preference keeps mode commands and is skipped for English or when disabled", async () => {

@@ -90,6 +90,9 @@ import { AutocompletePopover } from "@/components/ui/autocomplete-popover";
 import type { AutocompleteOption } from "@/components/ui/autocomplete";
 import { useAgentAutocomplete } from "@/hooks/use-agent-autocomplete";
 import { usePluginClientSlashCommands } from "@/plugins/client-slash-commands";
+import { createPluginClientStateSource } from "@/plugins/client-state/source";
+import { registerComposerHandle, runComposerInterceptors } from "@/plugins/composer";
+import { pluginRegistry } from "@/plugins/registry";
 import {
   executePluginClientSlashCommand,
   resolvePluginClientSlashCommand,
@@ -1417,6 +1420,43 @@ function ComposerContentImpl({
     [onChangeText],
   );
 
+  useEffect(() => {
+    if (inputMode === "terminal") return undefined;
+    return registerComposerHandle(serverId, agentId, {
+      setText: (text) => replaceUserInput(text),
+      focus: () => messageInputRef.current?.focus(),
+    });
+  }, [agentId, inputMode, replaceUserInput, serverId]);
+
+  // Plugin interceptors on this host may rewrite or cancel the message. Null means cancel.
+  const interceptPluginText = useCallback(
+    async (text: string, action: "send" | "queue"): Promise<string | null> => {
+      if (inputMode === "terminal") return text;
+      const interceptors = pluginRegistry
+        .getSnapshot()
+        .filter((plugin) => plugin.serverId === serverId)
+        .flatMap((plugin) => plugin.composerInterceptors ?? []);
+      if (interceptors.length === 0) return text;
+      const isAgent = createPluginClientStateSource(serverId).getAgent(agentId) !== null;
+      const target = {
+        serverId,
+        workspaceId: workspaceId ?? null,
+        agentId: isAgent ? agentId : null,
+      };
+      setIsProcessing(true);
+      try {
+        const outcome = await runComposerInterceptors(interceptors, { target, text, action });
+        return outcome.kind === "cancel" ? null : outcome.text;
+      } catch (error) {
+        setSendError(error instanceof Error ? error.message : String(error));
+        return null;
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [agentId, inputMode, serverId, workspaceId],
+  );
+
   const runClientSlashCommand = useCallback(
     (command: ClientSlashCommand): boolean => {
       if (command.execution !== "immediate" || !onClientSlashCommand) {
@@ -1727,15 +1767,20 @@ function ComposerContentImpl({
       });
       if (pluginSlashCommand && runPluginClientSlashCommand(pluginSlashCommand)) return;
 
-      if (blurOnSubmit) {
-        messageInputRef.current?.blur();
-      }
-      void sendMessageWithContent(payload.text, outgoingAttachments, payload.forceSend);
+      void (async () => {
+        const text = await interceptPluginText(payload.text, "send");
+        if (text === null) return;
+        if (blurOnSubmit) {
+          messageInputRef.current?.blur();
+        }
+        void sendMessageWithContent(text, outgoingAttachments, payload.forceSend);
+      })();
     },
     [
       attachments,
       blurOnSubmit,
       buildOutgoingAttachments,
+      interceptPluginText,
       runClientSlashCommand,
       pluginClientSlashCommands,
       runPluginClientSlashCommand,
@@ -1979,11 +2024,15 @@ function ComposerContentImpl({
         commands: pluginClientSlashCommands,
       });
       if (pluginSlashCommand && runPluginClientSlashCommand(pluginSlashCommand)) return;
-      queueMessage(payload.text, outgoingAttachments);
+      void (async () => {
+        const text = await interceptPluginText(payload.text, "queue");
+        if (text !== null) queueMessage(text, outgoingAttachments);
+      })();
     },
     [
       attachments,
       buildOutgoingAttachments,
+      interceptPluginText,
       pluginClientSlashCommands,
       queueMessage,
       runClientSlashCommand,

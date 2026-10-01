@@ -2,8 +2,11 @@
 
 Answers shell permission requests for Paseo agents before they reach the user.
 Regex handles the certain cases; Jev classifies the rest; anything uncertain stays with the user.
+It uses the `agent.permission` before hook, so an answered request never shows a prompt or sends a
+push notification. Requires the Paseo fork `>=0.10.2-beta.900`; the stable 0.10.1 host refuses it.
+While the gate decides, other events of that agent wait, up to the 25-second budget.
 
-Order per `agent.permission_requested` with a shell command:
+Order per `agent.permission` request with a shell command:
 
 1. Regex deny: `rm -rf`, `git push`, `git reset --hard`, `git checkout --`, `git clean -f`, `sudo`,
    pipe into a shell, `find -delete`, secret files (`.env`, `*.pem`, `credentials`, `typesafe-ai.json`).

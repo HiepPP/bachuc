@@ -79,6 +79,7 @@ import {
 } from "./agent-run-state.js";
 import { invokeRewindCapability, type RewindMode } from "./rewind/rewind.js";
 import { isSystemInjectedEnvelope } from "./agent-prompt.js";
+import { markPluginPromptContext } from "./plugin-prompt-context.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
 import { stripInternalPaseoMcpServer, withRuntimePaseoMcpServer } from "./runtime-mcp-config.js";
 import { resolveCreateAgentTitles } from "./create-agent-title.js";
@@ -2431,14 +2432,21 @@ export class AgentManager {
     pendingRun: PendingForegroundRun;
     prompt: AgentPromptInput;
     options?: AgentRunOptions;
-  }): Promise<string> {
-    const { agent, agentId, pendingRun, prompt, options } = params;
+  }): Promise<{ turnId: string; options?: AgentRunOptions }> {
+    const { agent, agentId, pendingRun, prompt } = params;
+    let { options } = params;
     try {
-      const result = await agent.session.startTurn(prompt, options);
+      const providerPrompt = await this.applyPromptHook(agent, prompt, "turn");
+      // A rewritten prompt needs a client message ID so the timeline records the original and
+      // the provider's echo of the rewritten text is matched instead of shown.
+      if (providerPrompt !== prompt && !options?.clientMessageId) {
+        options = { ...options, clientMessageId: randomUUID() };
+      }
+      const result = await agent.session.startTurn(providerPrompt, options);
       if (pendingRun.settled) {
         throw new Error(`Agent ${agentId} run was canceled before its turn started`);
       }
-      return result.turnId;
+      return { turnId: result.turnId, options };
     } catch (error) {
       if (pendingRun.settled) {
         throw error;
@@ -2508,13 +2516,15 @@ export class AgentManager {
     const streamForwarder = async function* streamForwarder(this: AgentManager) {
       let turnId: string;
       let turnStream: ReturnType<AgentRunState["createTurnStream"]> | null = null;
-      turnId = await this.startPendingForegroundTurn({
+      const started = await this.startPendingForegroundTurn({
         agent,
         agentId,
         pendingRun,
         prompt,
         options,
       });
+      turnId = started.turnId;
+      const runOptions = started.options;
 
       if (isReplacement) {
         agent.pendingReplacement = false;
@@ -2533,17 +2543,17 @@ export class AgentManager {
         { type: "turn_started", provider: agent.provider, turnId },
         { timestamp: turnStartedAt.toISOString() },
       );
-      const stagedSubmittedPromptEcho = options?.clientMessageId
+      const stagedSubmittedPromptEcho = runOptions?.clientMessageId
         ? pendingRun.stagedEvents.find(
             (event): event is Extract<AgentStreamEvent, { type: "timeline" }> =>
               event.type === "timeline" &&
               event.item.type === "user_message" &&
-              event.item.clientMessageId === options.clientMessageId,
+              event.item.clientMessageId === runOptions.clientMessageId,
           )
         : undefined;
-      if (options?.clientMessageId) {
-        this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, {
-          messageId: options.clientMessageId,
+      if (runOptions?.clientMessageId) {
+        this.recordSubmittedPrompt(agent, prompt, runOptions.clientMessageId, {
+          messageId: runOptions.clientMessageId,
           turnId,
           providerMessageId:
             stagedSubmittedPromptEcho?.item.type === "user_message"
@@ -2703,8 +2713,9 @@ export class AgentManager {
     if (!expectedTurnId || !agent.session.steerActiveTurn) {
       return { status: "unavailable" };
     }
+    const providerPrompt = await this.applyPromptHook(agent, prompt, "steer");
     const result = await this.runSteerAdmission(agent, expectedTurnId, async () => {
-      const admission = await agent.session.steerActiveTurn!(prompt, {
+      const admission = await agent.session.steerActiveTurn!(providerPrompt, {
         ...options,
         expectedTurnId,
       });
@@ -2732,9 +2743,12 @@ export class AgentManager {
       return { status: "inactive" };
     }
 
+    const providerPrompt = agent.session.steerActiveTurn
+      ? await this.applyPromptHook(agent, prompt, "steer")
+      : prompt;
     const result = agent.session.steerActiveTurn
       ? await this.runSteerAdmission(agent, expectedTurnId, async () => {
-          const admission = await agent.session.steerActiveTurn!(prompt, {
+          const admission = await agent.session.steerActiveTurn!(providerPrompt, {
             ...options,
             expectedTurnId,
           });
@@ -2765,6 +2779,26 @@ export class AgentManager {
         stripSteerOptions(options),
       ),
     };
+  }
+
+  // Plugins change only what the provider receives; callers record the original prompt.
+  private async applyPromptHook(
+    agent: ActiveManagedAgent,
+    prompt: AgentPromptInput,
+    kind: "turn" | "steer",
+  ): Promise<AgentPromptInput> {
+    if (!this.pluginLifecycle || agent.internal) {
+      return prompt;
+    }
+    const request = await this.pluginLifecycle.before("agent.prompt", {
+      agentId: agent.id,
+      workspaceId: agent.workspaceId ?? null,
+      provider: agent.provider,
+      cwd: agent.cwd,
+      kind,
+      prompt,
+    });
+    return markPluginPromptContext(prompt, request.prompt as AgentPromptInput);
   }
 
   private assertSteerAdmissionOwnsTurn(agent: ActiveManagedAgent, expectedTurnId: string): void {
@@ -4365,8 +4399,7 @@ export class AgentManager {
         this.onStreamTurnStarted({ agent, eventTurnId, isForegroundEvent, flags });
         return undefined;
       case "permission_requested":
-        this.onStreamPermissionRequested(agent, event);
-        return undefined;
+        return this.onStreamPermissionRequestedWithPlugins(agent, event, options, flags);
       case "permission_resolved":
         this.onStreamPermissionResolved({ agent, event, options, flags });
         return undefined;
@@ -4585,6 +4618,40 @@ export class AgentManager {
     }
     agent.lifecycle = "running";
     this.emitState(agent);
+  }
+
+  // A plugin decision answers the request before clients, attention, or push see it. Hook
+  // failures fall back to the normal flow so a permission is never dropped.
+  private async onStreamPermissionRequestedWithPlugins(
+    agent: ActiveManagedAgent,
+    event: Extract<AgentStreamEvent, { type: "permission_requested" }>,
+    options: { fromHistory?: boolean } | undefined,
+    flags: StreamEventFlags,
+  ): Promise<void> {
+    if (this.pluginLifecycle && !agent.internal && !options?.fromHistory) {
+      try {
+        const { decision } = await this.pluginLifecycle.before("agent.permission", {
+          agentId: agent.id,
+          workspaceId: agent.workspaceId ?? null,
+          provider: agent.provider,
+          cwd: agent.cwd,
+          request: event.request,
+          decision: null,
+        });
+        if (decision) {
+          await agent.session.respondToPermission(event.request.id, decision);
+          flags.shouldDispatchEvent = false;
+          flags.shouldNotifyWaiters = false;
+          return;
+        }
+      } catch (error) {
+        this.logger.warn(
+          { err: error, agentId: agent.id, requestId: event.request.id },
+          "agent.manager.permission.plugin_failed",
+        );
+      }
+    }
+    this.onStreamPermissionRequested(agent, event);
   }
 
   private onStreamPermissionRequested(

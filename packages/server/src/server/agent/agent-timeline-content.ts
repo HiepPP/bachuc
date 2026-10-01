@@ -1,5 +1,6 @@
 import type { AgentTimelineItem } from "./agent-sdk-types.js";
 import type { JsonValue } from "@getpaseo/protocol/agent-types";
+import { stripPluginPromptContext } from "./plugin-prompt-context.js";
 
 const TOOL_CALL_CONTENT_MAX_LENGTH = 64 * 1024;
 export const PLUGIN_TIMELINE_DATA_MAX_BYTES = 64 * 1024;
@@ -52,6 +53,10 @@ function limitPlainText(item: AgentTimelineItem): AgentTimelineItem {
 }
 
 export function limitAgentTimelineItemContent(item: AgentTimelineItem): AgentTimelineItem {
+  if (item.type === "user_message") {
+    const text = stripPluginPromptContext(item.text);
+    if (text !== item.text) item = { ...item, text };
+  }
   item = limitFailedShellError(item);
   item = limitPlainText(item);
   if (

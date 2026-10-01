@@ -1,7 +1,7 @@
 # Board
 
 Paseo conversation board. The Board sidebar item opens Running and Just finished columns.
-Supports Paseo daemon and client 0.8.x and 0.9.0-beta.2. Uses standard plugin surfaces, sidebar registration, RPCs, and lifecycle hooks.
+Requires the Paseo fork `>=0.10.2-beta.900`; the stable 0.10.1 host refuses the plugin. Uses plugin surfaces, sidebar registration, RPCs, lifecycle hooks, a daemon-served agent tool, and plugin navigation.
 
 ## Behavior
 
@@ -25,7 +25,7 @@ Supports Paseo daemon and client 0.8.x and 0.9.0-beta.2. Uses standard plugin su
 - On desktop, the project name in Paseo's workspace header (beside the workspace title) is shown as a bold chip with the project mark. The chip uses the project's Board color once Board has assigned one, otherwise a neutral tint. Paseo hides that name when it matches the workspace title, and project names shared by several projects stay neutral. Colors and names refresh every 10 seconds. The chip is a scoped style over Paseo's `workspace-header-subtitle` element; if Paseo renames that element, the header keeps its default look. Native clients keep Paseo's header.
 - A removed conversation appears again when it starts a new turn. Status and duration describe the latest turn.
 - Remove hides a finished card, and its finished subagents, from Board on all connected clients. It never deletes or archives the agent or chat.
-- New Claude and Codex agents get a `board` MCP server with one tool, `board_remove`. An agent can remove only its own thread or its subagent threads (default: its own). A finished thread is removed at once with its finished subagents. A running thread is removed when its current turn completes; failed or cancelled turns stay visible. Agents created before the plugin reload do not have the tool. The local bridge listens on `127.0.0.1` and keeps its port and bound tokens in `$PASEO_HOME/plugin-data/board/bridge.json` (mode `0600`).
+- Every agent with Paseo tools can call `mcp__paseo__board_remove`, served by the daemon MCP server. An agent can remove only its own thread or its subagent threads (default: its own); the daemon names the calling agent. A finished thread is removed at once with its finished subagents. A running thread is removed when its current turn completes; failed or cancelled turns stay visible.
 - Cards refresh from the host every two seconds while the page is open. Archived or deleted agents disappear on the next successful refresh, including cards restored after a restart. Idle unarchived conversations keep their finished cards.
 - Completion, failure, and cancellation come from actual lifecycle outcomes. Idle never implies success.
 - Missing terminal events show Outcome unknown. A later terminal event can resolve that state.
@@ -54,7 +54,7 @@ The microphone button remains available. Browser and mobile clients use the Boar
 
 Board uses the native sidebar contribution. With the default navigation and current plugin set, it follows Schedules.
 Paseo owns ordering; customized clients can move Board below Schedules in Settings → Appearance → Sidebar navigation.
-The plugin does not overwrite user preferences or modify Paseo source. The desktop Remove placement uses a scoped DOM adapter; the action remains agent-scoped and owned by Paseo.
+The plugin does not overwrite user preferences or modify Paseo source. The Remove, Jump To Parent, and Remove & New Thread buttons stay in the Paseo header. Remove & New Thread and the project action open the new workspace screen through `client.openNewWorkspace`. Cmd+D opens the Board on the active host; the first loaded installation owns the shortcut. The project header colors and the latest-prompt reveal still use scoped DOM code, because no plugin API covers them.
 
 ## Checks and install
 

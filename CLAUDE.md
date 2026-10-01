@@ -14,6 +14,9 @@ This is an npm workspace monorepo:
 - `packages/relay` — E2E encrypted relay for remote access
 - `packages/desktop` — Electron desktop wrapper
 - `packages/website` — Marketing site (paseo.sh)
+- `hiep-plugins` — The user's own Paseo plugins (`hiep-plugins/plugins/*`), with their own `AGENTS.md`
+
+When the user asks to enhance, fix, or add code to a plugin, they mean the plugins in `hiep-plugins/plugins/`, not core plugin code in `packages/*` or `plugin-examples/`. Read `hiep-plugins/AGENTS.md` first. Install these plugins only into Paseo Dev (`PASEO_HOME=~/.paseo-dev paseo plugin ...`), never into the stable Paseo on `~/.paseo` / `6767`.
 
 ## Docs
 
@@ -110,11 +113,11 @@ Three Paseo instances can run side by side on this machine. Each has its own dae
 | Paseo Dev (packaged from this repo)             | `127.0.0.1:6770` | `~/.paseo-dev`              | `~/Library/Application Support/Paseo Dev` | `~/.paseo-dev/daemon.log`, `~/Library/Logs/Paseo Dev/main.log` |
 | Repo dev (`npm run dev`, `npm run dev:desktop`) | `127.0.0.1:6768` | `.dev/paseo-home`           | `.dev/user-data`                          | `.dev/paseo-home/daemon.log`                                   |
 
+- **Do not build Paseo Dev unless the prompt asks for a build.** To test a source change, run the repo dev instance: `npm run dev` (daemon) and `npm run dev:desktop` (Metro + Electron) in two terminals. App changes reach the Electron window on their own within seconds, and `protocol`/`client` rebuild through `tsc --watch`. The daemon does not restart on a server change: restart `npm run dev` yourself, and restart `npm run dev:desktop` after a `packages/desktop/src` change. `npm run build:desktop` packages the app and costs over a minute per run.
+- An agent shell inside Paseo inherits `PASEO_HOME=~/.paseo`. `scripts/dev-home.sh` ignores that value, so `npm run dev`, `npm run dev:desktop`, and `npm run cli` use `.dev/paseo-home`; check that the startup banner shows `Home: …/.dev/paseo-home`. A bare `paseo ...` still targets the stable home: prefix it with `PASEO_HOME=~/.paseo-dev`, or use `npm run cli` for the repo dev daemon. The `paseo` on `PATH` is the stable app's CLI, so `PASEO_HOME=~/.paseo-dev paseo daemon start` runs the stable daemon version on the Paseo Dev home and fork-only plugins fail to load; start that daemon by opening Paseo Dev or with `packages/desktop/release/mac-arm64/Paseo.app/Contents/Resources/bin/paseo`.
 - Never restart or stop the stable `6767` daemon from a dev task. `npm run cli -- ...` targets the repo dev home. Target Paseo Dev with `PASEO_HOME=~/.paseo-dev paseo ...`.
 - Paseo Dev builds to `packages/desktop/release/mac-arm64/Paseo Dev.app` (bundle ID `sh.paseo.desktop.dev`). `packages/desktop/src/main.ts` switches a packaged build off the stable home and seeds `daemon.listen` 6770 in `~/.paseo-dev/config.json`, so it never adopts the `6767` daemon.
 - Daemon state inside a home: `config.json` (settings, profiles, plugin sources), `agents/`, `projects/`, `schedules/`, `plugin-data/`, `plugin-settings/`, `desktop-attachments/`, `models/`, plus identity files `server-id` and `daemon-keypair.json`.
-- **Do not build Paseo Dev unless the prompt asks for a build.** To test a source change, run the repo dev instance: `npm run dev` (daemon) and `npm run dev:desktop` (Metro + Electron) in two terminals. App changes reach the Electron window on their own within seconds, and `protocol`/`client` rebuild through `tsc --watch`. The daemon does not restart on a server change: restart `npm run dev` yourself, and restart `npm run dev:desktop` after a `packages/desktop/src` change. `npm run build:desktop` packages the app and costs over a minute per run.
-- An agent shell inside Paseo inherits `PASEO_HOME=~/.paseo`, which makes the dev scripts run a second daemon on the stable home. Start them with `env -u PASEO_HOME npm run dev` and `env -u PASEO_HOME npm run dev:desktop`.
 - `~/.paseo-dev` was cloned from `~/.paseo` on 2026-09-28, keeping its own `server-id` and keypair. Prod server IDs in `projects/`, `plugin-settings/`, and `plugin-data/` were rewritten to the dev ID. The previous dev home is at `~/.paseo-dev.bak-20260928-145243`. Electron Local Storage was not cloned, because its host registry points at `6767`.
 
 See [docs/development.md](docs/development.md) for full setup, build sync requirements, and debugging.

@@ -209,4 +209,37 @@ describe("plugin timeline transforms", () => {
     });
     expect(transformed?.[0]?.id).toBe("summary");
   });
+
+  it("passes a kept source through and rejects an invalid placement", () => {
+    const item = { type: "plugin" as const, kind: "report", version: 1, data: null };
+    const kept = transformTimelineItem({
+      item: toolCall,
+      phase: "complete",
+      sourceId: "agent_tool_call-1",
+      plugins: [
+        plugin({
+          id: "reports",
+          transform: () => ({ items: [item], source: { placement: "last" as const } }),
+        }),
+      ],
+    });
+    expect(kept?.source).toEqual({ placement: "last" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const invalid = transformTimelineItem({
+      item: toolCall,
+      phase: "complete",
+      sourceId: "agent_tool_call-1",
+      plugins: [
+        plugin({
+          id: "reports",
+          transform: () =>
+            ({ items: [item], source: { placement: "middle" } }) as unknown as {
+              items: (typeof item)[];
+            },
+        }),
+      ],
+    });
+    expect(invalid).toBeUndefined();
+    warn.mockRestore();
+  });
 });

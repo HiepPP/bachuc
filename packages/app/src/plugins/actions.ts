@@ -9,6 +9,8 @@ import type { PluginClientStateSource } from "@getpaseo/plugin/client/host";
 import { resolvePluginPanelOpenLocation } from "./workspace-panels/locations";
 import type { PluginSurfaceRuntime } from "./surface-runtime";
 import type { InstalledPlugin } from "./types";
+import { createPluginNavigation } from "./navigation";
+import { useActiveHostStore } from "@/stores/active-host-store";
 
 export interface PluginNavigation {
   openSettings(pluginId: string, screenId: string): void;
@@ -35,11 +37,22 @@ export function createPluginCapabilities(
         throw new Error(`Plugin settings screen is unavailable: ${screenId}`);
       navigation.openSettings(plugin.id, screenId);
     },
-    openSurface(surfaceId) {
-      if (!plugin.surfaces.some((surface) => surface.id === surfaceId)) {
-        throw new Error(`Plugin surface is unavailable: ${surfaceId}`);
+    openSurface(surfaceId, options) {
+      const pluginId = options?.pluginId?.trim() || plugin.id;
+      // Plugin pages follow the active host, like plugin sidebar rows.
+      const serverId =
+        options?.serverId?.trim() ||
+        useActiveHostStore.getState().activeServerId ||
+        plugin.serverId;
+      if (pluginId === plugin.id && serverId === plugin.serverId) {
+        if (!plugin.surfaces.some((surface) => surface.id === surfaceId)) {
+          throw new Error(`Plugin surface is unavailable: ${surfaceId}`);
+        }
+        navigation.openSurface(plugin.id, surfaceId);
+        return;
       }
-      navigation.openSurface(plugin.id, surfaceId);
+      // Another plugin or host: the surface route reports a missing surface itself.
+      createPluginNavigation({ serverId, workspaceId: null }).openSurface(pluginId, surfaceId);
     },
   };
 }

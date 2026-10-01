@@ -22,6 +22,18 @@ export type {
   PluginAgentCommandContext,
   PluginCommandCenterItemContribution,
   PluginClientSlashCommandContribution,
+  PluginComposerTarget,
+  PluginSidebarProject,
+  PluginSidebarContext,
+  PluginSidebarFilterChange,
+  PluginSidebarProjectFilterContribution,
+  PluginSidebarProjectMenuItem,
+  PluginSidebarProjectMenuContribution,
+  PluginSidebarSectionProps,
+  PluginSidebarSectionContribution,
+  PluginComposerInterceptInput,
+  PluginComposerInterceptResult,
+  PluginComposerInterceptorContribution,
   SettingsState,
 } from "./contracts.js";
 export type {

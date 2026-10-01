@@ -24,12 +24,17 @@ export interface RegisteredPluginButton {
   button: ResolvedPluginButton;
   pending: boolean;
   open: boolean;
+  /** For shared composer pills, the agent whose menu is open. */
+  openContextKey?: string;
 }
+
+/** Shared composer pills store "" for an omitted workspace or agent. */
+const ANY = "";
 
 function resolveAction(
   behavior: PluginButtonBehavior,
   path: readonly string[],
-): (() => void | Promise<void>) | null {
+): ((context: PluginButtonContext) => void | Promise<void>) | null {
   if (path.length === 0) return behavior.kind === "action" ? behavior.onPress : null;
   if (behavior.kind !== "menu") return null;
   const item = behavior.items.find((entry) => entry.id === path[0]);
@@ -67,22 +72,22 @@ export class PluginButtonStore {
     installation: InstalledPlugin,
     input: PluginComposerPillContribution,
   ): PluginButtonRegistration {
-    if (!input.agentId.trim()) throw new Error("Plugin composer pill needs an agent");
     return this.add(installation, input, "composer", {
       context: "agent",
-      workspaceId: input.workspaceId.trim(),
-      agentId: input.agentId.trim(),
+      workspaceId: input.workspaceId?.trim() ?? ANY,
+      agentId: input.agentId?.trim() ?? ANY,
     });
   }
 
   private add(
     installation: InstalledPlugin,
-    input: PluginHeaderButtonContribution,
+    input: Pick<PluginHeaderButtonContribution, "id" | "button">,
     placement: ButtonPlacement,
     context: PluginButtonContext,
   ): PluginButtonRegistration {
     const id = requireButtonId(input.id);
-    if (!context.workspaceId.trim()) throw new Error("Plugin button needs a workspace");
+    if (placement === "header" && !context.workspaceId.trim())
+      throw new Error("Plugin button needs a workspace");
     const duplicate = this.entries.some(
       (entry) =>
         entry.installation === installation &&
@@ -123,21 +128,25 @@ export class PluginButtonStore {
     };
   }
 
-  setOpen(key: number, open: boolean): void {
+  setOpen(key: number, open: boolean, contextKey?: string): void {
     const entry = this.entries.find((candidate) => candidate.key === key);
     if (!entry) return;
     if (open && (!entry.button.visible || entry.button.disabled || entry.pending)) return;
-    this.replace(key, { open });
+    this.replace(key, { open, openContextKey: open ? contextKey : undefined });
   }
 
-  async run(key: number, path: readonly string[] = []): Promise<void> {
+  async run(
+    key: number,
+    path: readonly string[] = [],
+    context?: PluginButtonContext,
+  ): Promise<void> {
     const entry = this.entries.find((candidate) => candidate.key === key);
     if (!entry || !entry.button.visible || entry.button.disabled || entry.pending) return;
     const action = resolveAction(entry.button.behavior, path);
     if (!action) return;
     this.replace(key, { pending: true });
     try {
-      await action();
+      await action(context ?? entry.context);
     } finally {
       this.replace(key, { pending: false });
     }
@@ -145,7 +154,7 @@ export class PluginButtonStore {
 
   private replace(
     key: number,
-    patch: Partial<Pick<RegisteredPluginButton, "button" | "open" | "pending">>,
+    patch: Partial<Pick<RegisteredPluginButton, "button" | "open" | "openContextKey" | "pending">>,
   ): void {
     if (!this.entries.some((entry) => entry.key === key)) return;
     this.publish(this.entries.map((entry) => (entry.key === key ? { ...entry, ...patch } : entry)));
@@ -163,16 +172,27 @@ export function buttonMatches(
   workspaceId: string,
   agentId: string | null,
 ): boolean {
-  if (
-    entry.installation.serverId !== serverId ||
-    entry.context.workspaceId !== workspaceId ||
-    !entry.button.visible
-  )
-    return false;
+  if (entry.installation.serverId !== serverId || !entry.button.visible) return false;
+  if (entry.context.workspaceId !== ANY && entry.context.workspaceId !== workspaceId) return false;
   if (agentId === null) return entry.placement === "header";
   return (
     entry.placement === "composer" &&
     entry.context.context === "agent" &&
-    entry.context.agentId === agentId
+    (entry.context.agentId === ANY || entry.context.agentId === agentId)
   );
+}
+
+/** Gives a shared composer pill the context of the composer that renders it. */
+export function resolveButtonForContext(
+  entry: RegisteredPluginButton,
+  workspaceId: string,
+  agentId: string | null,
+): RegisteredPluginButton {
+  if (entry.context.context !== "agent" || agentId === null) return entry;
+  if (entry.context.workspaceId !== ANY && entry.context.agentId !== ANY) return entry;
+  return {
+    ...entry,
+    context: { context: "agent", workspaceId, agentId },
+    open: entry.open && (entry.openContextKey === undefined || entry.openContextKey === agentId),
+  };
 }

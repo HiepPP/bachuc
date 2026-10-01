@@ -101,7 +101,103 @@ export interface PluginClientContext extends PluginCommandCapabilities {
   addTimelineRenderer<Schema extends ZodType>(
     contribution: PluginTimelineRendererContribution<Schema>,
   ): PluginCleanup;
+  /** Hides sidebar projects. Call the subscribed listener when the answer changes. */
+  addSidebarProjectFilter(contribution: PluginSidebarProjectFilterContribution): PluginCleanup;
+  /** Adds items to the sidebar project menus, before Remove. */
+  addSidebarProjectMenuItems(contribution: PluginSidebarProjectMenuContribution): PluginCleanup;
+  /** Renders a section above the sidebar footer. */
+  addSidebarSection(contribution: PluginSidebarSectionContribution): PluginCleanup;
+  /** Runs before a composer on this plugin's host sends or queues a message. */
+  addComposerInterceptor(contribution: PluginComposerInterceptorContribution): PluginCleanup;
+  /** Opens the new workspace screen for a project directory, on this plugin's host by default. */
+  openNewWorkspace(input: {
+    cwd: string;
+    projectId?: string;
+    name?: string;
+    serverId?: string;
+  }): void;
+  /** Replaces the text of an agent's composer on this plugin's host and focuses it. */
+  setComposerText(input: { agentId: string; text: string }): void;
   openPanel(id: string, options: PluginClientOpenPanelOptions): void;
+}
+
+export interface PluginSidebarProject {
+  viewKey: string;
+  name: string;
+  serverIds: readonly string[];
+  projectIds: readonly string[];
+}
+
+/** `activeServerId` is null when the sidebar shows all hosts. */
+export interface PluginSidebarContext {
+  activeServerId: string | null;
+}
+
+/** Pass `direction` when the filter moved to an adjacent view, so the host slides the list. */
+export interface PluginSidebarFilterChange {
+  direction?: 1 | -1;
+}
+
+export interface PluginSidebarProjectFilterContribution {
+  id: string;
+  subscribe(listener: (change?: PluginSidebarFilterChange) => void): () => void;
+  isVisible(project: PluginSidebarProject, context: PluginSidebarContext): boolean;
+  /**
+   * Called for a horizontal trackpad swipe over the project list on desktop. `1` is a swipe
+   * toward the next item, `-1` toward the previous one. One gesture calls it once.
+   */
+  onSwipe?(direction: 1 | -1, context: PluginSidebarContext): void;
+  /** Replaces the sidebar's "Workspaces" heading while it returns a non-empty string. */
+  getTitle?(context: PluginSidebarContext): string | null;
+}
+
+export interface PluginSidebarProjectMenuItem {
+  id: string;
+  title: string;
+  disabled?: boolean;
+  /** Draws the menu's check, for the chosen value in a list of options. */
+  checked?: boolean;
+  /** Opens these items as a submenu instead of calling `onSelect`. */
+  items?: readonly PluginSidebarProjectMenuItem[];
+  onSelect?(): void | Promise<void>;
+}
+
+export interface PluginSidebarProjectMenuContribution {
+  id: string;
+  getItems(
+    project: PluginSidebarProject,
+    context: PluginSidebarContext,
+  ): readonly PluginSidebarProjectMenuItem[];
+}
+
+export interface PluginSidebarSectionProps extends PluginHostProps, PluginSidebarContext {}
+
+export interface PluginSidebarSectionContribution {
+  id: string;
+  Component: ComponentType<PluginSidebarSectionProps>;
+}
+
+/** `agentId` is null for composers that create a new agent. */
+export interface PluginComposerTarget {
+  serverId: string;
+  workspaceId: string | null;
+  agentId: string | null;
+}
+
+export interface PluginComposerInterceptInput {
+  target: PluginComposerTarget;
+  text: string;
+  action: "send" | "queue";
+}
+
+/** Return `{ text }` to change the message, `{ cancel: true }` to keep the draft, or nothing. */
+export type PluginComposerInterceptResult = { text: string } | { cancel: true } | undefined;
+
+export interface PluginComposerInterceptorContribution {
+  id: string;
+  intercept(
+    input: PluginComposerInterceptInput,
+  ): PluginComposerInterceptResult | Promise<PluginComposerInterceptResult>;
 }
 
 export type PluginClientContribution = (client: PluginClientContext) => PluginCleanup;
@@ -174,7 +270,8 @@ export interface PluginCommandCapabilities {
     contract: PluginRpcContract<InputSchema, OutputSchema>,
     input: ZodInput<InputSchema>,
   ): Promise<ZodOutput<OutputSchema>>;
-  openSurface(id: string): void;
+  /** Opens a surface. `pluginId` opens another plugin's surface; `serverId` picks its host. */
+  openSurface(id: string, options?: { pluginId?: string; serverId?: string }): void;
   openSettings(id: string): void;
 }
 

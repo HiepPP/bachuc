@@ -1,26 +1,41 @@
 import { defineRpc, defineSettings } from "@getpaseo/plugin";
 import { z } from "zod";
-export const stateSchema = z
-  .object({
-    spaces: z
-      .array(z.object({ id: z.string().min(1), name: z.string().min(1) }))
-      .min(1)
-      .default([{ id: "space-1", name: "Workspace 1" }]),
-    members: z.record(z.string(), z.string()).default({}),
-  })
-  .refine(
-    (s) =>
-      new Set(s.spaces.map((x) => x.id)).size === s.spaces.length &&
-      Object.values(s.members).every((id) => s.spaces.some((x) => x.id === id)),
-    "Invalid Space membership",
-  );
+const spacesShape = {
+  spaces: z
+    .array(z.object({ id: z.string().min(1), name: z.string().min(1) }))
+    .min(1)
+    .default([{ id: "space-1", name: "Workspace 1" }]),
+  members: z.record(z.string(), z.string()).default({}),
+};
+const validSpaces = (s: { spaces: { id: string }[]; members: Record<string, string> }) =>
+  new Set(s.spaces.map((x) => x.id)).size === s.spaces.length &&
+  Object.values(s.members).every((id) => s.spaces.some((x) => x.id === id));
+export const stateSchema = z.object(spacesShape).refine(validSpaces, "Invalid Space membership");
 export type SpacesState = z.infer<typeof stateSchema>;
+// Root spaces/members belong to the "All hosts" view; each pinned host keeps its own entry.
+export const preferencesSchema = z
+  .object({ ...spacesShape, hosts: z.record(z.string(), stateSchema).default({}) })
+  .refine(validSpaces, "Invalid Space membership");
+export type SpacesPreferences = z.infer<typeof preferencesSchema>;
 export const preferences = defineSettings({
   id: "spaces",
   scope: "host",
   version: 1,
-  schema: stateSchema,
+  schema: preferencesSchema,
 });
+export function hostState(prefs: SpacesPreferences, host: string | null): SpacesState {
+  if (host === null) return { spaces: prefs.spaces, members: prefs.members };
+  return Object.hasOwn(prefs.hosts, host) ? prefs.hosts[host] : stateSchema.parse({});
+}
+export function withHostState(
+  prefs: SpacesPreferences,
+  host: string | null,
+  state: SpacesState,
+): SpacesPreferences {
+  return preferencesSchema.parse(
+    host === null ? { ...prefs, ...state } : { ...prefs, hosts: { ...prefs.hosts, [host]: state } },
+  );
+}
 export const catalogRpc = defineRpc({
   name: "spaces.catalog",
   input: z.object({}),

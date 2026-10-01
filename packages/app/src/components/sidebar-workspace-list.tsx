@@ -1,4 +1,9 @@
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { useOptionalSidebarModel } from "@/components/sidebar/sidebar-model";
+import { usePluginProjectMenuItems } from "@/plugins/sidebar";
+import { PluginSidebarSlide } from "@/plugins/sidebar/slide";
+import { usePluginSidebarSwipe } from "@/plugins/sidebar/swipe";
+import type { PluginSidebarProjectMenuItem } from "@getpaseo/plugin/client";
 import {
   View,
   Text,
@@ -84,6 +89,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
+import { MenuSubTrigger, type MenuPageDefinition } from "@/components/ui/menu";
 import { ProjectLeadingVisual } from "@/components/sidebar/project-leading-visual";
 import { useToast } from "@/contexts/toast-context";
 import { getForgePresentation, normalizeForge } from "@/git/forge";
@@ -221,6 +227,8 @@ interface SidebarWorkspaceListProps {
   hasProjectsBeforeFilter: boolean;
   /** Whether a project filter is actually being applied — the resolved list, not the stored one. */
   hasActiveProjectFilter: boolean;
+  /** Whether a plugin filter is hiding projects, such as an empty Space. */
+  hasPluginProjectFilter: boolean;
   workspaceEntriesByKey: ReadonlyMap<string, SidebarWorkspaceEntry>;
   collapsedProjectKeys: ReadonlySet<string>;
   onToggleProjectCollapsed: (projectViewKey: string) => void;
@@ -487,6 +495,7 @@ function ProjectKebabMenu({
   removeProjectStatus: "idle" | "pending" | "success";
 }) {
   const { t } = useTranslation();
+  const pluginMenu = usePluginProjectMenu(projectViewKey, "dropdown");
   return (
     <DropdownMenu compactMode="sheet">
       <DropdownMenuTrigger
@@ -498,9 +507,15 @@ function ProjectKebabMenu({
       >
         {renderKebabTriggerIcon}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" width={220} sheetTitle={t("sidebar.project.actions.menu")}>
+      <DropdownMenuContent
+        align="end"
+        width={220}
+        pages={pluginMenu.pages}
+        sheetTitle={t("sidebar.project.actions.menu")}
+      >
         <ProjectMenuItems
           surface="dropdown"
+          pluginItems={pluginMenu.items}
           projectViewKey={projectViewKey}
           settingsTarget={settingsTarget}
           projectPath={projectPath}
@@ -527,6 +542,83 @@ function ProjectMenuItem({
   return <DropdownMenuItem {...props}>{children}</DropdownMenuItem>;
 }
 
+function PluginProjectMenuItem({
+  surface,
+  itemKey,
+  item,
+}: {
+  surface: ProjectMenuSurface;
+  itemKey: string;
+  item: PluginSidebarProjectMenuItem;
+}) {
+  const toast = useToast();
+  const handleSelect = useCallback(() => {
+    void Promise.resolve(item.onSelect?.()).catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : String(error));
+    });
+  }, [item, toast]);
+  if (item.items) {
+    return (
+      <MenuSubTrigger
+        id={pluginMenuPageId(itemKey)}
+        value={item.items.find((child) => child.checked)?.title}
+        disabled={item.disabled}
+        testID={`sidebar-project-menu-plugin-${itemKey}`}
+      >
+        {item.title}
+      </MenuSubTrigger>
+    );
+  }
+  return (
+    <ProjectMenuItem
+      surface={surface}
+      testID={`sidebar-project-menu-plugin-${itemKey}`}
+      disabled={item.disabled}
+      selected={item.checked}
+      onSelect={handleSelect}
+    >
+      {item.title}
+    </ProjectMenuItem>
+  );
+}
+
+function pluginMenuPageId(itemKey: string): string {
+  return `plugin:${itemKey}`;
+}
+
+type PluginProjectMenuEntries = ReturnType<typeof usePluginProjectMenuItems>;
+
+/** Plugin items for a project menu, plus a page for each item that opens a submenu. */
+function usePluginProjectMenu(projectViewKey: string, surface: ProjectMenuSurface) {
+  const projectEntry = useOptionalSidebarModel()?.allProjects.find(
+    (project) => project.viewKey === projectViewKey,
+  );
+  const items = usePluginProjectMenuItems(projectEntry ?? null);
+  const pages = useMemo<MenuPageDefinition[]>(
+    () =>
+      items.flatMap(({ key, item }) =>
+        item.items
+          ? [
+              {
+                id: pluginMenuPageId(key),
+                title: item.title,
+                content: item.items.map((child) => (
+                  <PluginProjectMenuItem
+                    key={child.id}
+                    surface={surface}
+                    itemKey={`${key}/${child.id}`}
+                    item={child}
+                  />
+                )),
+              },
+            ]
+          : [],
+      ),
+    [items, surface],
+  );
+  return { items, pages };
+}
+
 function ProjectMenuItems({
   surface,
   projectViewKey,
@@ -534,8 +626,10 @@ function ProjectMenuItems({
   projectPath,
   onRemoveProject,
   removeProjectStatus,
+  pluginItems,
 }: {
   surface: ProjectMenuSurface;
+  pluginItems: PluginProjectMenuEntries;
   projectViewKey: string;
   settingsTarget: { serverId: string; projectId: string } | null;
   projectPath: string;
@@ -587,6 +681,9 @@ function ProjectMenuItems({
         path={projectPath}
         testID={`sidebar-project-menu-open-folder-${projectViewKey}`}
       />
+      {pluginItems.map(({ key, item }) => (
+        <PluginProjectMenuItem key={key} surface={surface} itemKey={key} item={item} />
+      ))}
       <ProjectMenuItem
         surface={surface}
         testID={`sidebar-project-menu-remove-${projectViewKey}`}
@@ -871,6 +968,7 @@ function ProjectHeaderRow({
   removeProjectStatus = "idle",
   dragHandleProps,
 }: ProjectHeaderRowProps) {
+  const pluginMenu = usePluginProjectMenu(project.viewKey, "context");
   const [isHovered, setIsHovered] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
@@ -1035,9 +1133,11 @@ function ProjectHeaderRow({
         align="start"
         width={220}
         testID={`sidebar-project-context-menu-${project.viewKey}`}
+        pages={pluginMenu.pages}
       >
         <ProjectMenuItems
           surface="context"
+          pluginItems={pluginMenu.items}
           projectViewKey={project.viewKey}
           settingsTarget={settingsTarget}
           projectPath={projectPath}
@@ -1890,6 +1990,7 @@ export function SidebarWorkspaceList({
   projects,
   hasProjectsBeforeFilter,
   hasActiveProjectFilter,
+  hasPluginProjectFilter,
   workspaceEntriesByKey,
   collapsedProjectKeys,
   onToggleProjectCollapsed,
@@ -1998,6 +2099,7 @@ export function SidebarWorkspaceList({
         listHeaderComponent={listHeaderComponent}
         sidebarFilterEmpty={sidebarFilterEmpty}
         hasActiveProjectFilter={hasActiveProjectFilter}
+        hasPluginProjectFilter={hasPluginProjectFilter}
         parentGestureRef={parentGestureRef}
         dragGestureHostActive={dragGestureHostActive}
         pathname={pathname}
@@ -2009,7 +2111,8 @@ export function SidebarWorkspaceList({
       />
     );
 
-  return content;
+  // Plugin filters such as Spaces slide the list when they move to an adjacent view.
+  return <PluginSidebarSlide>{content}</PluginSidebarSlide>;
 }
 
 /**
@@ -2094,6 +2197,7 @@ function ProjectModeList({
   listHeaderComponent,
   sidebarFilterEmpty,
   hasActiveProjectFilter,
+  hasPluginProjectFilter,
   parentGestureRef,
   dragGestureHostActive,
   pathname,
@@ -2123,6 +2227,9 @@ function ProjectModeList({
 }) {
   const hasActiveHostFilter = useHasActiveSidebarHostFilter();
   const [creatingWorkspaceIds, setCreatingWorkspaceIds] = useState<Set<string>>(() => new Set());
+  // Horizontal trackpad swipes over the list go to plugin sidebar filters, such as Spaces.
+  const swipeTargetRef = useRef<ScrollView>(null);
+  usePluginSidebarSwipe(swipeTargetRef);
   const creatingWorkspaceTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
@@ -2396,9 +2503,14 @@ function ProjectModeList({
     ],
   );
 
+  // A plugin filter that hides every project, such as an empty Space, leaves nothing to onboard:
+  // the projects exist, they are just hidden.
+  const emptyBody = hasPluginProjectFilter ? null : (
+    <SidebarProjectEmptyState onAddProject={onAddProject} onImportSession={onImportSession} />
+  );
   const projectBody =
     projects.length === 0 ? (
-      <SidebarProjectEmptyState onAddProject={onAddProject} onImportSession={onImportSession} />
+      emptyBody
     ) : (
       <DraggableList
         testID="sidebar-project-list"
@@ -2457,6 +2569,7 @@ function ProjectModeList({
       {unpinnedProjects.length > 0 ||
       hasActiveHostFilter ||
       hasActiveProjectFilter ||
+      hasPluginProjectFilter ||
       sidebarFilterEmpty
         ? listHeaderComponent
         : null}
@@ -2479,6 +2592,7 @@ function ProjectModeList({
         </NestableScrollContainer>
       ) : (
         <ScrollView
+          ref={swipeTargetRef}
           style={styles.list}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}

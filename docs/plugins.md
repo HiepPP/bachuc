@@ -326,6 +326,23 @@ Emit from the operation owner, not a client subscription. Provider history repla
 live hooks. Observers must not be awaited inside agent mutations: a callback can send a prompt or
 answer a permission through its own daemon session. Awaiting it there deadlocks that command.
 
+Two before hooks are awaited inside agent operations, so their callbacks must not call back into the
+same agent:
+
+- `agent.prompt` runs in `AgentManager` before `session.startTurn` and before both
+  `steerActiveTurn` calls, outside the steer barrier. Callers record the original prompt, so the
+  timeline never shows plugin context. Echo matching uses `clientMessageId`, not text.
+- `agent.permission` runs inside the per-agent event queue, before pending state, attention, push,
+  and stream dispatch. A decision calls `session.respondToPermission` directly. Any hook failure
+  falls back to the normal flow; a dropped permission would hang the turn.
+
+## Agent tools
+
+`server.registerTool` tools travel in the plugin `ready` message and are called with a `tool.call`
+process request. `createPaseoToolCatalog` appends them after built-ins, so the per-request HTTP MCP
+route sees them. Native catalogs for OpenCode and OMP are built once at daemon start, before plugins
+load, and do not.
+
 ## Contribute a provider
 
 Register a provider from `index.server.ts`. The provider connection is callback-based and owns all
@@ -398,6 +415,21 @@ Mounted surfaces and command invocations have shorter API lifetimes.
 
 Keep the client entry synchronous: return its cleanup function immediately and start asynchronous
 work inside it. See the maintained [composer pill example](../plugin-examples/local-plugin/client/main.tsx).
+
+A pill without `agentId` or `workspaceId` is one store entry that matches every composer.
+`resolveButtonForContext` gives each rendering its own context, and `openContextKey` keeps its menu
+open only in the composer that opened it.
+
+## Contribute composer and sidebar behavior
+
+Composer interceptors run from `handleSubmit` and `handleQueue` in `packages/app/src/composer/index.tsx`,
+only for plugins installed on the composer's host. Mounted composers register a handle in
+`packages/app/src/plugins/composer/` so `setComposerText` can reach them; without one, the text goes to
+the stored draft.
+
+Sidebar filters, project menu items, and sections live in `packages/app/src/plugins/sidebar/`. The
+filter runs inside `SidebarModelProvider` before the user's project and label filters and never
+touches `allProjects`, which pickers need.
 
 ## Contribute timeline items
 

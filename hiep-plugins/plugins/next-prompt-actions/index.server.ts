@@ -3,7 +3,7 @@ import type { PaseoApi } from "@getpaseo/client";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { hostRpc, inspectRpc, sendRpc, startRpc, toggleRpc } from "./shared/contracts";
+import { hostRpc, inspectRpc, scopeRpc, sendRpc, startRpc, toggleRpc } from "./shared/contracts";
 import { Engine } from "./server/engine";
 import { Store } from "./server/store";
 import { createDriver } from "./server/paseo";
@@ -30,6 +30,13 @@ export default function contribute(server: PluginServerContext) {
     createJudge(root, configFile),
     () => readDependencies(configFile),
   );
+  server.handle(scopeRpc, async ({ agentId }, context) => {
+    api = context.paseo;
+    const handle = context.paseo.agents.ref(agentId);
+    await handle.refresh();
+    if (!handle.workspaceId) throw new Error("Conversation unavailable.");
+    return { serverId, agentId, workspaceId: handle.workspaceId };
+  });
   server.handle(inspectRpc, (input, context) => {
     api = context.paseo;
     return engine.inspect(input);

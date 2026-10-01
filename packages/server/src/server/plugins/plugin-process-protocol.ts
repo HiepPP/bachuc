@@ -15,6 +15,18 @@ export interface PluginProviderMetadata {
   iconPath?: string;
 }
 
+export interface PluginToolMetadata {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
+}
+
 export type PluginProcessRequest =
   | {
       type: "initialize";
@@ -32,6 +44,13 @@ export type PluginProcessRequest =
   | { type: "hook"; requestId: string; kind: "event" | "before"; name: string; input: unknown }
   | { type: "hook.cancel"; requestId: string }
   | { type: "invoke"; requestId: string; method: string; input: unknown }
+  | {
+      type: "tool.call";
+      requestId: string;
+      name: string;
+      input: unknown;
+      callerAgentId: string | null;
+    }
   | {
       type: "provider.connect";
       providerId: string;
@@ -57,6 +76,7 @@ export type PluginProcessMessage =
       methods: string[];
       providers: PluginProviderMetadata[];
       hooks?: { events: string[]; before: string[] };
+      tools?: PluginToolMetadata[];
     }
   | { type: "result"; requestId: string; output: unknown }
   | { type: "error"; requestId: string; error: string }
@@ -95,6 +115,22 @@ const providerConnectRequestSchema = z
   .object({
     versions: z.array(z.number().int().positive()),
     capabilities: z.array(z.string()),
+  })
+  .strict();
+const toolMetadataSchema = z
+  .object({
+    name: z.string().regex(/^[a-z][a-z0-9_]*$/),
+    description: z.string(),
+    inputSchema: z.record(z.string(), z.unknown()),
+    annotations: z
+      .object({
+        readOnlyHint: z.boolean().optional(),
+        destructiveHint: z.boolean().optional(),
+        idempotentHint: z.boolean().optional(),
+        openWorldHint: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 const frameFields = {
@@ -151,6 +187,15 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
       .strict(),
     z
       .object({
+        type: z.literal("tool.call"),
+        requestId: z.string().min(1),
+        name: z.string().min(1),
+        input: z.unknown(),
+        callerAgentId: z.string().nullable(),
+      })
+      .strict(),
+    z
+      .object({
         type: z.literal("provider.connect"),
         providerId: z.string().min(1),
         connectionId: z.string().min(1),
@@ -183,6 +228,7 @@ export const PluginProcessMessageSchema: z.ZodType<PluginProcessMessage> = z.dis
         methods: z.array(z.string()),
         providers: z.array(providerMetadataSchema),
         hooks: hooksSchema.optional(),
+        tools: z.array(toolMetadataSchema).optional(),
       })
       .strict(),
     z

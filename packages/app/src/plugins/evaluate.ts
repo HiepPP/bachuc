@@ -20,7 +20,11 @@ import {
   type PluginCommandCenterItemContribution,
   type PluginClientContext,
   type PluginClientSlashCommandContribution,
+  type PluginComposerInterceptorContribution,
   type PluginSidebarContribution,
+  type PluginSidebarProjectFilterContribution,
+  type PluginSidebarProjectMenuContribution,
+  type PluginSidebarSectionContribution,
   type PluginSurfaceProps,
   type PluginTimelineRendererContribution,
   type PluginTimelineTransformerContribution,
@@ -80,7 +84,10 @@ export type PluginClientRuntime = Pick<
   | "openPanel"
   | "addComposerPill"
   | "addHeaderButton"
-> & { hosts: ReturnType<typeof createPluginHosts> };
+> &
+  Partial<Pick<PluginClientContext, "setComposerText" | "openNewWorkspace">> & {
+    hosts: ReturnType<typeof createPluginHosts>;
+  };
 
 export function runPluginClientBundle(
   id: string,
@@ -88,6 +95,11 @@ export function runPluginClientBundle(
   runtime: PluginClientRuntime,
   onChange: () => void = () => undefined,
 ): EvaluatedPlugin {
+  const composerInterceptors: PluginComposerInterceptorContribution[] = [];
+  const sidebarProjectFilters: PluginSidebarProjectFilterContribution[] = [];
+  const sidebarProjectMenus: PluginSidebarProjectMenuContribution[] = [];
+  const sidebarSections: PluginSidebarSectionContribution[] = [];
+  const sidebarContributionIds = new Set<string>();
   const collector: Omit<EvaluatedPlugin, "id" | "cleanup"> = {
     surfaces: [],
     settingsScreens: [],
@@ -99,7 +111,12 @@ export function runPluginClientBundle(
     themes: [],
     timelineTransformers: [],
     timelineRenderers: [],
+    composerInterceptors,
+    sidebarProjectFilters,
+    sidebarProjectMenus,
+    sidebarSections,
   };
+  const composerInterceptorIds = new Set<string>();
   const surfaceIds = new Set<string>();
   const settingsScreenIds = new Set<string>();
   const sidebarItemIds = new Set<string>();
@@ -128,6 +145,14 @@ export function runPluginClientBundle(
       },
       remove,
     };
+  }
+  function requireSidebarId(value: string, kind: "filter" | "menu" | "section"): string {
+    const normalized = requireId(value, `sidebar ${kind} id`);
+    const key = `${kind}:${normalized}`;
+    if (sidebarContributionIds.has(key))
+      throw new Error(`Duplicate sidebar ${kind}: ${normalized}`);
+    sidebarContributionIds.add(key);
+    return normalized;
   }
   const notifyChange = () => {
     if (setupComplete) onChange();
@@ -361,6 +386,70 @@ export function runPluginClientBundle(
         timelineRendererIds.delete(rendererId),
       );
     },
+    addComposerInterceptor(contribution) {
+      const interceptorId = requireId(contribution.id, "composer interceptor id");
+      if (composerInterceptorIds.has(interceptorId)) {
+        throw new Error(`Duplicate composer interceptor: ${interceptorId}`);
+      }
+      if (typeof contribution.intercept !== "function") {
+        throw new Error(`Composer interceptor ${interceptorId} has no intercept function`);
+      }
+      composerInterceptorIds.add(interceptorId);
+      return register(
+        composerInterceptors,
+        { id: interceptorId, intercept: contribution.intercept },
+        () => composerInterceptorIds.delete(interceptorId),
+      );
+    },
+    addSidebarProjectFilter(contribution) {
+      const filterId = requireSidebarId(contribution.id, "filter");
+      if (
+        typeof contribution.isVisible !== "function" ||
+        typeof contribution.subscribe !== "function"
+      )
+        throw new Error(`Sidebar project filter ${filterId} needs isVisible and subscribe`);
+      if (contribution.onSwipe !== undefined && typeof contribution.onSwipe !== "function")
+        throw new Error(`Sidebar project filter ${filterId} onSwipe must be a function`);
+      if (contribution.getTitle !== undefined && typeof contribution.getTitle !== "function")
+        throw new Error(`Sidebar project filter ${filterId} getTitle must be a function`);
+      return register(
+        sidebarProjectFilters,
+        {
+          id: filterId,
+          isVisible: contribution.isVisible,
+          subscribe: contribution.subscribe,
+          ...(contribution.onSwipe ? { onSwipe: contribution.onSwipe } : {}),
+          ...(contribution.getTitle ? { getTitle: contribution.getTitle } : {}),
+        },
+        () => sidebarContributionIds.delete(`filter:${filterId}`),
+      );
+    },
+    addSidebarProjectMenuItems(contribution) {
+      const menuId = requireSidebarId(contribution.id, "menu");
+      if (typeof contribution.getItems !== "function")
+        throw new Error(`Sidebar project menu ${menuId} needs getItems`);
+      return register(sidebarProjectMenus, { id: menuId, getItems: contribution.getItems }, () =>
+        sidebarContributionIds.delete(`menu:${menuId}`),
+      );
+    },
+    addSidebarSection(contribution) {
+      const sectionId = requireSidebarId(contribution.id, "section");
+      if (typeof contribution.Component !== "function")
+        throw new Error(`Sidebar section ${sectionId} is not a component`);
+      return register(sidebarSections, { id: sectionId, Component: contribution.Component }, () =>
+        sidebarContributionIds.delete(`section:${sectionId}`),
+      );
+    },
+    openNewWorkspace(input) {
+      if (!runtime.openNewWorkspace) throw new Error("New workspace is unavailable on this host");
+      if (!input.cwd.trim()) throw new Error("openNewWorkspace needs a directory");
+      runtime.openNewWorkspace(input);
+    },
+    setComposerText(input) {
+      if (!runtime.setComposerText) throw new Error("Composer text is unavailable on this host");
+      if (!input.agentId.trim()) throw new Error("setComposerText needs an agent");
+      runtime.setComposerText(input);
+    },
     addComposerPill(contribution) {
       if (stopped) throw new Error("Plugin has stopped");
       return trackButton(runtime.addComposerPill(contribution));
@@ -455,5 +544,9 @@ export function runPluginClientBundle(
     themes: collector.themes,
     timelineTransformers: collector.timelineTransformers,
     timelineRenderers: collector.timelineRenderers,
+    composerInterceptors: collector.composerInterceptors,
+    sidebarProjectFilters: collector.sidebarProjectFilters,
+    sidebarProjectMenus: collector.sidebarProjectMenus,
+    sidebarSections: collector.sidebarSections,
   };
 }

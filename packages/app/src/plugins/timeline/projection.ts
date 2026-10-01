@@ -100,7 +100,7 @@ function transformSourceItem(
     sourceId: item.id,
   });
   if (transformed === undefined) return [item];
-  return transformed.map((pluginItem) => {
+  const projectedItems = transformed.map((pluginItem): StreamItem => {
     const projected: PluginTimelineStreamItem = {
       kind: "plugin",
       id: `${pluginItem.pluginId}/${pluginItem.id}`,
@@ -115,6 +115,17 @@ function transformSourceItem(
     if (item.turnId) projected.turnId = item.turnId;
     return projected;
   });
+  if (!transformed.source) return projectedItems;
+  const kept = keptSourceItem(item, transformed.source.text);
+  return transformed.source.placement === "first"
+    ? [kept, ...projectedItems]
+    : [...projectedItems, kept];
+}
+
+function keptSourceItem(item: StreamItem, text: string | undefined): StreamItem {
+  if (text === undefined) return item;
+  if (item.kind !== "user_message" && item.kind !== "assistant_message") return item;
+  return { ...item, text };
 }
 
 export function projectPluginTimelineItems(

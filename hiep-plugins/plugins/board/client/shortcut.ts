@@ -44,6 +44,10 @@ export function bindBoardShortcut(target: ShortcutTarget, open: () => void) {
   return () => target.removeEventListener("keydown", listener, true);
 }
 
+// Every host evaluates its own bundle in the same window. The first installation owns the
+// shortcut, so one key press opens one Board.
+const OWNER = "__paseoBoardShortcutOwner";
+
 export function installBoardShortcut(open: () => void) {
   if (
     typeof window === "undefined" ||
@@ -52,5 +56,13 @@ export function installBoardShortcut(open: () => void) {
     !/Macintosh|Mac OS X/.test(navigator.userAgent)
   )
     return () => {};
-  return bindBoardShortcut(window, open);
+  const owner = globalThis as Record<string, unknown>;
+  if (owner[OWNER]) return () => {};
+  const token = {};
+  owner[OWNER] = token;
+  const unbind = bindBoardShortcut(window, open);
+  return () => {
+    unbind();
+    if (owner[OWNER] === token) delete owner[OWNER];
+  };
 }

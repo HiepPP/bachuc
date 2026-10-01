@@ -1,6 +1,6 @@
 {
   "id": "workspace-spaces",
   "requirements": {
-    "paseo": "^0.8.0 || >=0.9.0-beta.2"
+    "paseo": ">=0.10.2-beta.900"
   }
 }

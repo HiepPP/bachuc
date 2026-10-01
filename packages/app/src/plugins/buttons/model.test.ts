@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import type { PluginButton } from "@getpaseo/plugin/client";
 import type { InstalledPlugin } from "../types";
-import { PluginButtonStore, buttonMatches } from "./model";
+import { PluginButtonStore, buttonMatches, resolveButtonForContext } from "./model";
 
 function installation(): InstalledPlugin {
   return {
@@ -166,5 +166,52 @@ describe("plugin buttons", () => {
     });
     await buttons.run(key, ["nested", "run"]);
     expect(calls).toBe(2);
+  });
+
+  it("shows a shared composer pill on every agent and passes each agent to its action", async () => {
+    const buttons = store();
+    const seen: unknown[] = [];
+    buttons.addComposerPill(installation(), {
+      id: "skills",
+      button: {
+        title: "Skills",
+        icon: "Scan",
+        behavior: {
+          kind: "action",
+          onPress: (context) => {
+            seen.push(context);
+          },
+        },
+      },
+    });
+    const shared = buttons.getSnapshot()[0];
+    expect(buttonMatches(shared, "host-a", "workspace-1", "agent-1")).toBe(true);
+    expect(buttonMatches(shared, "host-a", "workspace-2", "agent-2")).toBe(true);
+    expect(buttonMatches(shared, "host-a", "workspace-1", null)).toBe(false);
+    expect(buttonMatches(shared, "host-b", "workspace-1", "agent-1")).toBe(false);
+    const first = resolveButtonForContext(shared, "workspace-1", "agent-1");
+    const second = resolveButtonForContext(shared, "workspace-2", "agent-2");
+    await buttons.run(shared.key, [], first.context);
+    await buttons.run(shared.key, [], second.context);
+    expect(seen).toEqual([
+      { context: "agent", workspaceId: "workspace-1", agentId: "agent-1" },
+      { context: "agent", workspaceId: "workspace-2", agentId: "agent-2" },
+    ]);
+  });
+
+  it("opens a shared composer pill only for the agent that opened it", () => {
+    const buttons = store();
+    buttons.addComposerPill(installation(), {
+      id: "skills",
+      button: {
+        title: "Skills",
+        icon: "Scan",
+        behavior: { kind: "menu", items: [] },
+      },
+    });
+    buttons.setOpen(buttons.getSnapshot()[0].key, true, "agent-1");
+    const shared = buttons.getSnapshot()[0];
+    expect(resolveButtonForContext(shared, "workspace", "agent-1").open).toBe(true);
+    expect(resolveButtonForContext(shared, "workspace", "agent-2").open).toBe(false);
   });
 });

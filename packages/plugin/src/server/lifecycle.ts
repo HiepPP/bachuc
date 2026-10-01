@@ -1,6 +1,7 @@
 import type {
   AgentPermissionRequest,
   AgentPermissionResponse,
+  AgentPromptInput,
   AgentTimelineItem,
   AgentSessionConfig,
 } from "@getpaseo/protocol/agent-types";
@@ -39,6 +40,26 @@ export interface PluginSessionOpenRequest {
   env: Record<string, string>;
 }
 
+/** Only `prompt` may change. The timeline keeps the prompt the user sent. */
+export interface PluginPromptRequest {
+  agentId: string;
+  workspaceId: string | null;
+  provider: string;
+  cwd: string;
+  kind: "turn" | "steer";
+  prompt: AgentPromptInput;
+}
+
+/** Only `decision` may change. A decision answers the request before clients see it. */
+export interface PluginPermissionDecisionRequest {
+  agentId: string;
+  workspaceId: string | null;
+  provider: string;
+  cwd: string;
+  request: AgentPermissionRequest;
+  decision: AgentPermissionResponse | null;
+}
+
 export type PluginTurnOutcome =
   | { kind: "completed" }
   | { kind: "failed"; error: { message: string; code?: string } }
@@ -68,6 +89,8 @@ export interface PluginBeforeRequests {
   "agent.create": { config: AgentSessionConfig; env?: Record<string, string> };
   "agent.session_open": PluginSessionOpenRequest;
   "workspace.create": Omit<WorkspaceCreateRequest, "type" | "requestId">;
+  "agent.prompt": PluginPromptRequest;
+  "agent.permission": PluginPermissionDecisionRequest;
 }
 
 export interface PluginLifecycleRegistration {

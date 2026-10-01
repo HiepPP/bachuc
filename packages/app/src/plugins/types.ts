@@ -8,8 +8,12 @@ import type {
 import type {
   PluginCommandCenterItemContribution,
   PluginClientSlashCommandContribution,
+  PluginComposerInterceptorContribution,
   PluginComposerPillContribution,
   PluginSidebarContribution,
+  PluginSidebarProjectFilterContribution,
+  PluginSidebarProjectMenuContribution,
+  PluginSidebarSectionContribution,
   PluginSurfaceContribution,
   PluginSettingsScreenContribution,
   PluginTimelineRendererContribution,
@@ -35,6 +39,10 @@ export interface EvaluatedPlugin {
   themes: PluginThemeContribution[];
   timelineTransformers: PluginTimelineTransformerContribution[];
   timelineRenderers: PluginTimelineRendererContribution[];
+  composerInterceptors?: PluginComposerInterceptorContribution[];
+  sidebarProjectFilters?: PluginSidebarProjectFilterContribution[];
+  sidebarProjectMenus?: PluginSidebarProjectMenuContribution[];
+  sidebarSections?: PluginSidebarSectionContribution[];
 }
 
 export interface InstalledPlugin extends EvaluatedPlugin {

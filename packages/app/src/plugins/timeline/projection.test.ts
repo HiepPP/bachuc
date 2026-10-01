@@ -151,4 +151,59 @@ describe("plugin timeline projection", () => {
     ]);
     expect(filtered).toEqual([]);
   });
+
+  it("keeps the source message with replaced text before plugin items", () => {
+    const source: StreamItem = {
+      kind: "assistant_message",
+      id: "assistant-1",
+      text: "Done.\n\n## What Next",
+      timestamp: new Date("2026-01-01T00:00:00.000Z"),
+    };
+    const transform: TimelineItemTransform = () =>
+      Object.assign(
+        [
+          {
+            type: "plugin" as const,
+            id: "panel",
+            pluginId: "next",
+            kind: "panel",
+            version: 1,
+            data: null,
+          },
+        ],
+        { source: { placement: "first" as const, text: "Done." } },
+      );
+
+    expect(projectPluginTimelineItems([source], transform)).toMatchObject([
+      { kind: "assistant_message", id: "assistant-1", text: "Done." },
+      { kind: "plugin", id: "next/panel" },
+    ]);
+  });
+
+  it("keeps the source message after plugin items without changing it", () => {
+    const source: StreamItem = {
+      kind: "user_message",
+      id: "user-1",
+      text: "Xin chao",
+      timestamp: new Date("2026-01-01T00:00:00.000Z"),
+    };
+    const transform: TimelineItemTransform = () =>
+      Object.assign(
+        [
+          {
+            type: "plugin" as const,
+            id: "note",
+            pluginId: "translate",
+            kind: "note",
+            version: 1,
+            data: null,
+          },
+        ],
+        { source: { placement: "last" as const } },
+      );
+
+    const projected = projectPluginTimelineItems([source], transform);
+    expect(projected).toMatchObject([{ kind: "plugin" }, { kind: "user_message" }]);
+    expect(projected[1]).toBe(source);
+  });
 });
