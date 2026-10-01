@@ -224,11 +224,20 @@ export interface PluginSurfaceContribution {
   Component: ComponentType<PluginSurfaceProps>;
 }
 
+export interface PluginSidebarAction {
+  /** `workspaceId` is the open workspace on this plugin's host, or null outside one. */
+  onPress(context: { workspaceId: string | null }): void;
+  /** Disables the row while no workspace on this plugin's host is open. */
+  requiresWorkspace?: boolean;
+}
+
 export interface PluginSidebarContribution {
   id: string;
   title: string;
   icon: string;
   surface: string;
+  /** Runs instead of opening `surface` when the row is pressed. */
+  action?: PluginSidebarAction;
 }
 
 export type PluginTimelineTransformerContribution<

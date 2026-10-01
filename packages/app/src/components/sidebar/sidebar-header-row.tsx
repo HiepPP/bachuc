@@ -18,6 +18,7 @@ interface SidebarHeaderRowProps {
   label: string;
   onPress: () => void;
   isActive?: boolean;
+  disabled?: boolean;
   testID?: string;
   nativeID?: string;
   accessibilityLabel?: string;
@@ -36,6 +37,7 @@ export function SidebarHeaderRow({
   label,
   onPress,
   isActive = false,
+  disabled = false,
   testID,
   nativeID,
   accessibilityLabel,
@@ -53,8 +55,9 @@ export function SidebarHeaderRow({
     ({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.button,
       (Boolean(hovered) || isActive) && styles.buttonHovered,
+      disabled && styles.buttonDisabled,
     ],
-    [isActive],
+    [disabled, isActive],
   );
 
   const renderChildren = useCallback(
@@ -80,6 +83,7 @@ export function SidebarHeaderRow({
     <View style={containerStyle}>
       <Pressable
         onPress={onPress}
+        disabled={disabled}
         testID={testID}
         nativeID={nativeID}
         accessible
@@ -139,6 +143,9 @@ const styles = StyleSheet.create((theme) => ({
   },
   buttonHovered: {
     backgroundColor: theme.colors.surfaceSidebarHover,
+  },
+  buttonDisabled: {
+    opacity: theme.opacity[50],
   },
   label: {
     fontSize: theme.fontSize.base,

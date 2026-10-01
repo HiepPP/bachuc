@@ -460,6 +460,28 @@ describe("evaluatePluginClientBundle", () => {
     ).toThrow("references missing surface missing");
   });
 
+  it("keeps a sidebar action and rejects one without onPress", () => {
+    const plugin = evaluatePluginClientBundle(
+      "example",
+      bundle(`
+        function Surface() { return null; }
+        plugin.addSurface("main", Surface);
+        plugin.addSidebarItem({ id: "main", title: "Example", icon: "Blocks", surface: "main", action: { onPress() {}, requiresWorkspace: true } });
+      `),
+    );
+    expect(plugin.sidebarItems[0]?.action?.requiresWorkspace).toBe(true);
+    expect(() =>
+      evaluatePluginClientBundle(
+        "example",
+        bundle(`
+          function Surface() { return null; }
+          plugin.addSurface("main", Surface);
+          plugin.addSidebarItem({ id: "main", title: "Example", icon: "Blocks", surface: "main", action: {} });
+        `),
+      ),
+    ).toThrow("action has no onPress");
+  });
+
   it("rejects a bundle without a default contribution function", () => {
     expect(() => evaluatePluginClientBundle("example", `(function() { return {}; })`)).toThrow(
       "must default export a function",

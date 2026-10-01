@@ -713,6 +713,27 @@ export default function contribute(client: PluginClientContext) {
 }
 ```
 
+A sidebar item can run code instead of opening its surface. `surface` stays required and names the
+fallback surface.
+
+```ts
+client.addSidebarItem({
+  id: "main",
+  title: "My plugin",
+  icon: "Blocks",
+  surface: "main",
+  action: {
+    requiresWorkspace: true,
+    onPress: ({ workspaceId }) => {
+      if (workspaceId) client.openPanel("panel", { workspaceId });
+    },
+  },
+});
+```
+
+`workspaceId` is the open workspace on the plugin's host, or `null` outside one.
+`requiresWorkspace` disables the row while it is `null`.
+
 `PluginSurfaceProps` contains:
 
 | Field        | Meaning                                                                                                                                                                                                                                                                                                                           |

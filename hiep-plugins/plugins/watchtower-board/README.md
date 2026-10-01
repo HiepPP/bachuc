@@ -1,7 +1,7 @@
 # Watchtower board for Paseo
 
 Read Watchtower plans in a workspace panel and attach a task brief through the composer picker.
-Requires Paseo daemon and client 0.8.0+, Node 22+, and enabled trusted plugins.
+Requires the fork daemon and client 0.10.2-beta.900+, Node 22+, and enabled trusted plugins.
 
 ## Use
 

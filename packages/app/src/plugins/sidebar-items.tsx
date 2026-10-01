@@ -2,6 +2,7 @@ import { router, usePathname } from "expo-router";
 import { useCallback } from "react";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { useActiveServerId } from "@/hosts/use-visible-hosts";
+import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { resolvePluginIcon } from "./icons";
 import { buildPluginSurfaceRoute, hostIdFromPathname } from "./routes";
 import {
@@ -70,16 +71,28 @@ function PluginSidebarTargetRow({
         id: group.contributionId,
       }),
   );
-  const navigate = useCallback(() => {
+  const selection = useActiveWorkspaceSelection();
+  const workspaceId = selection?.serverId === target.plugin.serverId ? selection.workspaceId : null;
+  const action = target.item.action;
+  const press = useCallback(() => {
     rememberPluginContributionHost(group.key, target.plugin.serverId);
     onBeforeNavigate?.();
-    router.push(route);
-  }, [group.key, onBeforeNavigate, route, target.plugin.serverId]);
+    if (!action) {
+      router.push(route);
+      return;
+    }
+    try {
+      action.onPress({ workspaceId });
+    } catch (error) {
+      console.warn(`[Plugins] Sidebar action failed for ${group.key}`, error);
+    }
+  }, [action, group.key, onBeforeNavigate, route, target.plugin.serverId, workspaceId]);
   return (
     <SidebarHeaderRow
       icon={resolvePluginIcon(group.icon)}
       label={group.title}
-      onPress={navigate}
+      onPress={press}
+      disabled={Boolean(action?.requiresWorkspace) && !workspaceId}
       isActive={isActive}
       testID={`plugin-sidebar-${group.pluginId}-${group.contributionId}`}
       variant="compact"

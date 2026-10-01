@@ -10,9 +10,9 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "devDependencies": {
-    "@getpaseo/client": "0.8.0",
-    "@getpaseo/plugin": "0.8.0",
-    "@getpaseo/protocol": "0.8.0",
+    "@getpaseo/client": "file:../../../packages/client",
+    "@getpaseo/plugin": "file:../../../packages/plugin",
+    "@getpaseo/protocol": "file:../../../packages/protocol",
     "@tanstack/react-query": "^5.90.11",
     "@types/node": "^22.0.0",
     "@types/react": "~19.2.0",
