@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import {
   defaultRangeExtractor,
@@ -27,6 +28,12 @@ import {
 import type { StreamRenderInput, StreamStrategy, StreamViewportHandle } from "./strategy";
 import { useRevisedHistoryRows } from "./history-row-revision";
 import { createStreamStrategy } from "./strategy";
+import {
+  findLatestPromptId,
+  getLatestPromptAnchorVersion,
+  subscribeLatestPromptAnchor,
+  takeLatestPromptAnchor,
+} from "./latest-prompt-anchor";
 import {
   abandonHistoryStartPaginationRequest,
   createHistoryStartPaginationState,
@@ -858,6 +865,34 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     hasRouteBottomAnchorRequest,
     isActivationReady,
     scheduleStickToBottom,
+  ]);
+
+  // Declared after the activation effect above, so in the commit that activates the transcript
+  // this runs second and replaces its bottom pin. `scrollToMessage` stops following output, which
+  // keeps later activation passes from pinning to the bottom again.
+  const latestPromptAnchorVersion = useSyncExternalStore(
+    subscribeLatestPromptAnchor,
+    getLatestPromptAnchorVersion,
+    getLatestPromptAnchorVersion,
+  );
+  useLayoutEffect(() => {
+    if (!isActive || !isActivationReady) return;
+    const promptId = findLatestPromptId([
+      segments.historyVirtualized,
+      segments.historyMounted,
+      segments.liveHead,
+    ]);
+    if (!promptId || !takeLatestPromptAnchor(props.agentId)) return;
+    scrollToMessage(promptId);
+  }, [
+    isActive,
+    isActivationReady,
+    latestPromptAnchorVersion,
+    props.agentId,
+    scrollToMessage,
+    segments.historyMounted,
+    segments.historyVirtualized,
+    segments.liveHead,
   ]);
 
   // Following output is a layout invariant: rows, footer, and bottom offset must

@@ -5,19 +5,21 @@ describe("plugin host navigation", () => {
   function setup(electron = true) {
     const destinations: unknown[] = [];
     const browsers: string[] = [];
+    const anchors: string[] = [];
     const workspaces = new Set(["selected:one", "remote:two"]);
     const navigation = createPluginHostNavigation("selected", {
       browserAvailable: electron,
       resolveWorkspace: ({ serverId, workspaceId }) =>
         workspaces.has(`${serverId}:${workspaceId}`) ? workspaceId : null,
       openAgent: (input) => destinations.push(input),
+      requestLatestPromptAnchor: (agentId) => anchors.push(agentId),
       openWorkspace: (input) => destinations.push(input),
       createBrowser: ({ initialUrl }) => {
         browsers.push(initialUrl);
         return { browserId: `browser-${browsers.length}` };
       },
     });
-    return { navigation, destinations, browsers, workspaces };
+    return { navigation, destinations, browsers, workspaces, anchors };
   }
 
   it("creates and focuses a local browser in the selected or explicit host workspace", () => {
@@ -40,6 +42,19 @@ describe("plugin host navigation", () => {
         workspaceId: "two",
         target: { kind: "browser", browserId: "browser-2" },
       },
+    ]);
+  });
+
+  it("requests the latest prompt anchor only when an agent is opened with it", () => {
+    const { navigation, destinations, anchors } = setup();
+    navigation.openAgent({ agentId: "a" });
+    navigation.openAgent({ agentId: "b", anchor: "bottom" });
+    navigation.openAgent({ agentId: "c", serverId: "remote", anchor: "latest-prompt" });
+    expect(anchors).toEqual(["c"]);
+    expect(destinations).toEqual([
+      { serverId: "selected", agentId: "a" },
+      { serverId: "selected", agentId: "b" },
+      { serverId: "remote", agentId: "c" },
     ]);
   });
 

@@ -21,7 +21,6 @@ import { BOARD_SIZE_DEFAULT, boardScale, boardSize, clampBoardSize } from "../sh
 import { allocateColors, projectColors } from "../shared/project-colors";
 import { boardConnectionState } from "./connection";
 import { workspaceActions } from "./workspace";
-import { revealLatestPromptOnWeb } from "./latest-prompt";
 import { AgentAvatar } from "./avatar";
 import { Orb, OrbAvatar, orbSupported } from "./orb";
 import { orbSettings, type OrbSettings } from "../shared/orb";
@@ -1242,8 +1241,7 @@ export function BoardPage({ host, theme, layout, navigation }: PluginSurfaceProp
     });
   });
   const openAgentStable = useStableCallback((agentId: string) => {
-    navigation?.openAgent({ agentId });
-    revealLatestPromptOnWeb();
+    navigation?.openAgent({ agentId, anchor: "latest-prompt" });
   });
   const openAgent = navigation ? openAgentStable : undefined;
   const onRemove = useStableCallback(async (id: string) => {

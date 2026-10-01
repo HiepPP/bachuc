@@ -69,6 +69,7 @@ import { resolveStreamRenderStrategy } from "./strategy-resolver";
 import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strategy";
 import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
+import { useLatestPromptAnchorLoader } from "@/agent-stream/use-latest-prompt-anchor-loader";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
 import {
@@ -625,6 +626,18 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       enabled: supportsChatOutline && chatOutlineEnabled,
       viewportRef,
       onJumpError: handleTimelineHistoryLoadError,
+      visibleMessageIds,
+      revealLoadedMessage: revealLoadedHistory,
+    });
+
+    useLatestPromptAnchorLoader({
+      agentId,
+      serverId: resolvedServerId,
+      timelineEpoch,
+      tail: effectiveStreamItems,
+      head: effectiveStreamHead,
+      enabled: supportsChatOutline,
+      isActive,
       visibleMessageIds,
       revealLoadedMessage: revealLoadedHistory,
     });

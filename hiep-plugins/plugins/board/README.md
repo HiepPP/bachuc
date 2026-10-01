@@ -54,7 +54,7 @@ The microphone button remains available. Browser and mobile clients use the Boar
 
 Board uses the native sidebar contribution. With the default navigation and current plugin set, it follows Schedules.
 Paseo owns ordering; customized clients can move Board below Schedules in Settings → Appearance → Sidebar navigation.
-The plugin does not overwrite user preferences or modify Paseo source. The Remove, Jump To Parent, and Remove & New Thread buttons stay in the Paseo header. Remove & New Thread and the project action open the new workspace screen through `client.openNewWorkspace`. Cmd+D opens the Board on the active host; the first loaded installation owns the shortcut. The latest-prompt reveal still uses scoped DOM code, because no plugin API covers it.
+The plugin does not overwrite user preferences or modify Paseo source. The Remove, Jump To Parent, and Remove & New Thread buttons stay in the Paseo header. Remove & New Thread and the project action open the new workspace screen through `client.openNewWorkspace`. Cmd+D opens the Board on the active host; the first loaded installation owns the shortcut. Opening a run passes `anchor: "latest-prompt"` to `navigation.openAgent`.
 
 ## Checks and install
 

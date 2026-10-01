@@ -39,7 +39,12 @@ interface PluginNavigableHostProps extends PluginHostProps {
       readonly workspaceId: string;
       readonly serverId?: string;
     }) => void;
-    readonly openAgent: (input: { readonly agentId: string; readonly serverId?: string }) => void;
+    readonly openAgent: (input: {
+      readonly agentId: string;
+      readonly serverId?: string;
+      /** Where the transcript opens. Defaults to its bottom. `latest-prompt` is web only. */
+      readonly anchor?: "bottom" | "latest-prompt";
+    }) => void;
     readonly openWorkspace: (input: {
       readonly workspaceId: string;
       readonly serverId?: string;

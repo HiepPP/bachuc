@@ -5,6 +5,7 @@ import { isHttpUrl } from "@/utils/http-url";
 interface HostNavigationOwner {
   browserAvailable: boolean;
   openAgent(input: { serverId: string; agentId: string }): void;
+  requestLatestPromptAnchor(agentId: string): void;
   openWorkspace(input: NavigateToWorkspaceInput): void;
   resolveWorkspace(input: { serverId: string; workspaceId: string }): string | null;
   createBrowser(input: { initialUrl: string }): { browserId: string };
@@ -15,8 +16,10 @@ export function createPluginHostNavigation(
   owner: HostNavigationOwner,
 ): NonNullable<PluginSurfaceProps["navigation"]> {
   return {
-    openAgent: ({ agentId, serverId: targetServerId }) =>
-      owner.openAgent({ serverId: targetServerId ?? serverId, agentId }),
+    openAgent: ({ agentId, serverId: targetServerId, anchor }) => {
+      if (anchor === "latest-prompt") owner.requestLatestPromptAnchor(agentId);
+      owner.openAgent({ serverId: targetServerId ?? serverId, agentId });
+    },
     openWorkspace: ({ workspaceId, serverId: targetServerId }) =>
       owner.openWorkspace({ serverId: targetServerId ?? serverId, workspaceId }),
     openBrowser: owner.browserAvailable
