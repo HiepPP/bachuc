@@ -1,6 +1,6 @@
 # Idle Runtime Closer
 
-Server-only Paseo plugin that releases the processes of idle threads. A thread idle for more
+Paseo plugin that releases the processes of idle threads. A thread idle for more
 than 30 minutes has its runtime closed: the provider CLI and its MCP servers exit, and the
 thread stays in the list with status `closed`. Opening it or sending a prompt resumes it with
 its conversation intact.
@@ -9,6 +9,12 @@ Nothing is archived or deleted. To archive old threads, use
 [thread-janitor](../thread-janitor/README.md).
 
 ## What gets closed
+
+The **Dọn process** composer button closes only the selected thread's runtime through
+`closeRuntime()`. It keeps the conversation and does not archive the thread or its workspace.
+It rejects threads that are running, initializing, or waiting for permission. Background work
+and in-memory MCP state are lost when the runtime closes. Opening the thread again can resume
+its runtime. The button remains available when automatic cleanup is disabled.
 
 An agent's runtime is closed when all of these are true:
 
