@@ -119,12 +119,27 @@ PASEO_HOME=~/.paseo-dev paseo plugin ls <plugin-id> --json
 Document required configuration, commands, permissions, and provider limitations in the plugin README.
 Add the plugin to the root README catalog.
 
-Install, reload, and remove these plugins only in Paseo Dev (`PASEO_HOME=~/.paseo-dev`,
-daemon `127.0.0.1:6770`). Never install them into the stable Paseo (`~/.paseo`, port `6767`).
-Prefix every `paseo plugin ...` and `paseo daemon ...` command with `PASEO_HOME=~/.paseo-dev`,
-and confirm with `PASEO_HOME=~/.paseo-dev paseo daemon status --json` that `home` is
-`~/.paseo-dev` before installing. If plugins are disabled, explain the unsandboxed access and obtain permission
-before enabling them. Never print the daemon config wholesale because it can contain secrets.
+Prompts name the three Paseo instances on this machine **stable**, **build**, and **live**
+(the Paseo repo's `CLAUDE.md` owns the full table):
+
+| Name       | Daemon | `PASEO_HOME`      | Plugins here                                          |
+| ---------- | ------ | ----------------- | ----------------------------------------------------- |
+| **stable** | `6767` | `~/.paseo`        | Never. Read only.                                     |
+| **build**  | `6770` | `~/.paseo-dev`    | Yes. The only instance these plugins are installed in |
+| **live**   | `6768` | `.dev/paseo-home` | No. To see them in the live app, pick its Build host  |
+
+```sh
+# build — install, reload, inspect
+PASEO_HOME=~/.paseo-dev paseo daemon status --json   # home must be ~/.paseo-dev
+PASEO_HOME=~/.paseo-dev paseo plugin reload <plugin-id>
+# stable — never: no `paseo plugin ...` without PASEO_HOME=~/.paseo-dev
+```
+
+Install, reload, and remove these plugins only in build. Prefix every `paseo plugin ...` and
+`paseo daemon ...` command with `PASEO_HOME=~/.paseo-dev`; a bare `paseo` targets stable. Confirm
+with `PASEO_HOME=~/.paseo-dev paseo daemon status --json` that `home` is `~/.paseo-dev` before
+installing. Start the build daemon by opening the build app, not with the `paseo` on `PATH`.
+If plugins are disabled, explain the unsandboxed access and obtain permission before enabling them. Never print the daemon config wholesale because it can contain secrets.
 
 ## Update and verify
 
