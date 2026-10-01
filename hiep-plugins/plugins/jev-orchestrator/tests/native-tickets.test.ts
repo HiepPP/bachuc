@@ -21,6 +21,30 @@ import { NativeTickets } from "../server/native-tickets";
 import { prepareNativeLaunch, defaultNativeSettings } from "../server/native-launch";
 import type { Judge } from "../server/types";
 
+interface Ticket {
+  action: string;
+  state: string;
+  taskName: string;
+  routedAgentType: string;
+  model: string;
+}
+interface HookOutput {
+  hookSpecificOutput: {
+    permissionDecision: string;
+    permissionDecisionReason: string;
+    updatedInput: { agent_type: string; message: string; model?: string };
+  };
+}
+interface FailureInfo {
+  failureStage: string;
+  failureCode: string;
+  evaluationError: unknown;
+}
+interface TicketRecord extends Ticket, FailureInfo {}
+interface TicketStatus {
+  records: TicketRecord[];
+}
+
 async function cleanup(dir: string) {
   for (const e of await readdir(dir, { withFileTypes: true })) {
     const f = path.join(dir, e.name);
@@ -56,8 +80,8 @@ async function fixture(
       input: value,
     });
   const prepare = (value = input) =>
-    tickets.handle("native_prepare", "parent", root, value) as Promise<any>;
-  const consume = (ticket: any, changes = {}) =>
+    tickets.handle("native_prepare", "parent", root, value) as Promise<Ticket>;
+  const consume = (ticket: Pick<Ticket, "taskName">, changes = {}) =>
     tickets.handle("native_consume", "parent", root, {
       sessionId: "native-session",
       cwd: root,
@@ -70,7 +94,7 @@ async function fixture(
         reasoning_effort: "high",
         ...changes,
       },
-    }) as Promise<any>;
+    }) as Promise<HookOutput>;
   return {
     root,
     env,
@@ -123,8 +147,9 @@ test("preflight binds plaintext, evaluates once, and racing consumes grant exact
     );
     const results = await Promise.allSettled([f.consume(a), f.consume(a)]);
     assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
-    const output = (results.find((r) => r.status === "fulfilled") as PromiseFulfilledResult<any>)
-      .value;
+    const output = (
+      results.find((r) => r.status === "fulfilled") as PromiseFulfilledResult<HookOutput>
+    ).value;
     assert.equal(output.hookSpecificOutput.updatedInput.agent_type, a.routedAgentType);
     assert.equal(output.hookSpecificOutput.updatedInput.message, "gAAAAA-ciphertext");
     assert.equal(output.hookSpecificOutput.updatedInput.model, undefined);
@@ -210,7 +235,7 @@ test("real command hook registers root intent and consumes over the scoped bridg
     PASEO_ORCH_TOKEN: token,
   };
   const hook = (tool: string, input: unknown) =>
-    new Promise<any>((resolve, reject) => {
+    new Promise<HookOutput>((resolve, reject) => {
       const child = spawn(
         process.execPath,
         [
@@ -266,7 +291,7 @@ test("real command hook registers root intent and consumes over the scoped bridg
       body: JSON.stringify({ action: "native_prepare", input: f.input }),
     });
     assert.equal(res.status, 200);
-    const ticket = (await res.json()) as any;
+    const ticket = (await res.json()) as Ticket;
     const input = {
       task_name: ticket.taskName,
       agent_type: "default",
@@ -336,7 +361,7 @@ test("Astra/low self decision is deduplicated and cannot authorize a spawn", asy
     assert.equal(calls, 1);
     await assert.rejects(f.consume(result));
     const files = await readdir(path.join(f.root, ".codex/agents"));
-    for (const file of files.filter((f) => f.startsWith("jev-native-ticket-")))
+    for (const file of files.filter((name) => name.startsWith("jev-native-ticket-")))
       assert.match(
         await readFile(path.join(f.root, ".codex/agents", file), "utf8"),
         /Unissued Jev ticket/,
@@ -394,7 +419,7 @@ test("preflight exposes safe stage/code through bridge and status without retryi
       body: JSON.stringify({ action: "native_prepare", input: f.input }),
     });
     assert.equal(response.status, 400);
-    const body = (await response.json()) as any;
+    const body = (await response.json()) as FailureInfo;
     assert.equal(body.failureStage, "evaluation");
     assert.equal(body.failureCode, "NATIVE_EVALUATION_FAILED");
     assert.deepEqual(body.evaluationError, {
@@ -403,7 +428,7 @@ test("preflight exposes safe stage/code through bridge and status without retryi
       processExitCode: 1,
     });
     assert.doesNotMatch(JSON.stringify(body), new RegExp(secret));
-    const status = (await f.tickets.handle("native_status", "parent", f.root, {})) as any;
+    const status = (await f.tickets.handle("native_status", "parent", f.root, {})) as TicketStatus;
     assert.equal(status.records[0].state, "failed");
     assert.equal(status.records[0].failureStage, body.failureStage);
     assert.equal(status.records[0].failureCode, body.failureCode);
@@ -445,7 +470,12 @@ test("runtime, invalid decision and role-write failures have distinct stages", a
     try {
       await f.intent();
       await assert.rejects(f.prepare());
-      const status = (await f.tickets.handle("native_status", "parent", f.root, {})) as any;
+      const status = (await f.tickets.handle(
+        "native_status",
+        "parent",
+        f.root,
+        {},
+      )) as TicketStatus;
       const expected = {
         runtime: ["parent_runtime", "NATIVE_PARENT_RUNTIME_FAILED"],
         decision: ["decision_validation", "NATIVE_DECISION_INVALID"],

@@ -9,7 +9,10 @@ const NATIVE_PROVIDERS = new Set(["claude", "codex"]);
 
 // Agent ID to the manifest file its session opened with; null records an open without one.
 type Leases = Record<string, string | null>;
-export type LiveAgent = { id: string; provider: string };
+export interface LiveAgent {
+  id: string;
+  provider: string;
+}
 
 export async function listLiveAgents(paseo: Pick<PaseoApi, "agents">): Promise<LiveAgent[]> {
   const agents: LiveAgent[] = [];

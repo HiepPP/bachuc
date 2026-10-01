@@ -52,10 +52,9 @@ export function nativePreset(
     runtime,
     routes: sourceTypes.map((sourceType, index) => ({
       sourceType,
-      candidates: pairs[runtime].map(({ suffix, ...candidate }) => ({
-        ...candidate,
-        agentType: `jev-${runtime}-r${index}-${suffix}`,
-      })),
+      candidates: pairs[runtime].map(({ suffix, ...candidate }) =>
+        Object.assign(candidate, { agentType: `jev-${runtime}-r${index}-${suffix}` }),
+      ),
     })),
   });
 }

@@ -91,14 +91,14 @@ export type NativeHookEvent = Record<string, unknown> & {
   tool_input?: unknown;
 };
 // An empty object leaves the tool call to the provider's normal permission flow.
-export type NativeHookOutput = {
+export interface NativeHookOutput {
   hookSpecificOutput?: {
     hookEventName: "PreToolUse";
     permissionDecision?: "allow" | "deny";
     permissionDecisionReason?: string;
     updatedInput?: Record<string, unknown>;
   };
-};
+}
 
 const TIMED_OUT = "Jev native routing timed out. No subagent was started.";
 
@@ -114,7 +114,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-type NativeRequest = { task: string; role: string; input: Record<string, unknown> };
+interface NativeRequest {
+  task: string;
+  role: string;
+  input: Record<string, unknown>;
+}
 
 // Returns a deny reason when the event is not a routable subagent start.
 function taskAndRole(

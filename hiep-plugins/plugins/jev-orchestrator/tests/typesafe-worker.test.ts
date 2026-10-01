@@ -5,6 +5,18 @@ import { mkdtemp, writeFile, unlink, rmdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+function mockStatus(scenario: string) {
+  if (scenario === "401") return 401;
+  if (scenario === "429") return 429;
+  return 200;
+}
+
+function expectedWorkerCode(scenario: string) {
+  if (scenario === "missing") return "JEV_CREDENTIAL_MISSING";
+  if (scenario === "invalid") return "JEV_TYPESAFE_FAILED";
+  return "JEV_TYPESAFE_HTTP";
+}
+
 test("real worker uses direct Typesafe, validates responses, and never retries or falls back", async () => {
   const folder = await mkdtemp(path.join(tmpdir(), "jev-typesafe-test-"));
   const credential = path.join(folder, "typesafe-ai.json");
@@ -22,7 +34,7 @@ test("real worker uses direct Typesafe, validates responses, and never retries o
           if (new Headers(init.headers).get('authorization') !== 'Bearer ${key}') throw new Error('wrong key');
           const body = JSON.parse(init.body);
           if (body.model !== 'jev-latest' || body.questions.profile.type !== 'choice') throw new Error('wrong request');
-          const status = ${scenario === "401" ? 401 : scenario === "429" ? 429 : 200};
+          const status = ${mockStatus(scenario)};
           const response = status !== 200 ? {error: {message: 'private-upstream-body'}} : {
             model: 'jev-latest', answers: {profile: {type: 'choice', choice: '${scenario === "invalid" ? "unknown" : "c0"}', probabilities: {c0: 1}, confidence: 1}},
             usage: {input_tokens: 20, output_tokens: 4}
@@ -72,14 +84,7 @@ test("real worker uses direct Typesafe, validates responses, and never retries o
         assert.equal(result.usage.totalTokens, 24);
       } else {
         assert.equal(code, 1);
-        assert.equal(
-          result.diagnostics.workerCode,
-          scenario === "missing"
-            ? "JEV_CREDENTIAL_MISSING"
-            : scenario === "invalid"
-              ? "JEV_TYPESAFE_FAILED"
-              : "JEV_TYPESAFE_HTTP",
-        );
+        assert.equal(result.diagnostics.workerCode, expectedWorkerCode(scenario));
         if (scenario === "401" || scenario === "429")
           assert.equal(result.diagnostics.httpStatus, Number(scenario));
       }

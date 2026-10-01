@@ -44,7 +44,10 @@ export function defaultNativeSettings() {
   };
 }
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
-type Role = { fields: Record<string, unknown>; body?: string };
+interface Role {
+  fields: Record<string, unknown>;
+  body?: string;
+}
 const warned = new Set<string>();
 
 // Claude Code accepts plain `key: value` frontmatter that strict YAML rejects, such as a
@@ -60,6 +63,18 @@ export function parseFlatFrontmatter(text: string): Record<string, string> | und
     fields[match[1]] = /^(["']).*\1$/.test(value) ? value.slice(1, -1) : value;
   }
   return fields;
+}
+function parseFrontmatter(text: string, file: string) {
+  try {
+    return parseYaml(text);
+  } catch {
+    const fields = parseFlatFrontmatter(text);
+    if (fields) return fields;
+    if (!warned.has(file))
+      console.warn(`Jev native: skipped invalid YAML agent definition: ${file}`);
+    warned.add(file);
+    return undefined;
+  }
 }
 async function scan(directory: string, runtime: Runtime, roles: Map<string, Role>) {
   let entries;
@@ -84,18 +99,7 @@ async function scan(directory: string, runtime: Runtime, roles: Map<string, Role
     } else {
       const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/.exec(text);
       if (!match) continue;
-      let fields;
-      try {
-        fields = parseYaml(match[1]);
-      } catch {
-        fields = parseFlatFrontmatter(match[1]);
-        if (!fields) {
-          if (!warned.has(file))
-            console.warn(`Jev native: skipped invalid YAML agent definition: ${file}`);
-          warned.add(file);
-          continue;
-        }
-      }
+      const fields = parseFrontmatter(match[1], file);
       if (fields && typeof fields.name === "string")
         roles.set(fields.name, { fields, body: match[2] });
     }
@@ -196,7 +200,7 @@ export async function prepareNativeLaunch(
         path: path.join(agentDirectory, `${agentType}.${runtime === "codex" ? "toml" : "md"}`),
         sha256: hash(content),
       });
-      return { ...candidate, agentType, content };
+      return Object.assign({}, candidate, { agentType, content });
     }),
   }));
   const policy = nativePolicySchema.parse({

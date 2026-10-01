@@ -5,13 +5,46 @@ import path from "node:path";
 import type { Engine } from "./engine";
 import { NativePreflightError } from "./native-preflight-error";
 
+function failureResponse(error: unknown): { status: number; body: string } {
+  if (error instanceof NativePreflightError)
+    return {
+      status: 400,
+      body: JSON.stringify({
+        error: error.message,
+        failureStage: error.failureStage,
+        failureCode: error.code,
+        evaluationError: error.evaluation,
+      }),
+    };
+  // Expose only a known transport failure, never arbitrary SDK errors or task data.
+  if (
+    error instanceof Error &&
+    /^Transport not connected(?: \(status: [a-z_]+\))?$/.test(error.message)
+  )
+    return {
+      status: 503,
+      body: JSON.stringify({
+        code: "daemon_disconnected",
+        error:
+          "Paseo daemon transport disconnected. Run paseo plugin reload jev-orchestrator, then create a fresh Paseo agent. Do not restart the daemon.",
+      }),
+    };
+  return {
+    status: 400,
+    body: '{"error":"Operation rejected. Check the task contract, scope, dependency graph, and job status."}',
+  };
+}
+
 export function createBridge(
   engine: Engine,
   scope: (parentId: string) => Promise<{ cwd: string }>,
   native?: (action: string, parentId: string, cwd: string, input: unknown) => Promise<unknown>,
   stateFile?: string,
 ) {
-  type Lease = { cwd: string; parentId?: string };
+  interface Lease {
+    cwd: string;
+    parentId?: string;
+  }
   // Resumed agents keep the MCP binding persisted in their config, so bound leases and
   // the port must survive daemon restarts. Unbound leases belong to a dead create.
   let saved: { port?: number; leases?: [string, Lease][] } = {};
@@ -28,6 +61,20 @@ export function createBridge(
     const temp = `${stateFile}.${process.pid}.tmp`;
     writeFileSync(temp, JSON.stringify({ port, leases: [...leases] }), { mode: 0o600 });
     renameSync(temp, stateFile);
+  };
+  const dispatch = async (
+    input: { action?: unknown; id?: unknown; input?: unknown },
+    parentId: string,
+    cwd: string,
+  ): Promise<unknown> => {
+    if (typeof input.action === "string" && input.action.startsWith("native_") && native)
+      return native(input.action, parentId, cwd, input.input);
+    if (input.action === "submit") return { ids: await engine.submit(parentId, cwd, input.input) };
+    if (input.action === "status")
+      return { jobs: engine.list(parentId), history: engine.history(parentId) };
+    if (input.action === "cancel" && typeof input.id === "string")
+      return { cancelled: await engine.cancel(parentId, input.id) };
+    throw new Error("Unknown action.");
   };
   const server = createServer(async (request, response) => {
     const token = request.headers.authorization?.replace(/^Bearer /, "");
@@ -52,48 +99,10 @@ export function createBridge(
       const input = JSON.parse(text);
       const current = await scope(lease.parentId);
       if (current.cwd !== lease.cwd) throw new Error("Workspace scope changed.");
-      let result: unknown;
-      if (typeof input.action === "string" && input.action.startsWith("native_") && native)
-        result = await native(input.action, lease.parentId, lease.cwd, input.input);
-      else if (input.action === "submit")
-        result = { ids: await engine.submit(lease.parentId, lease.cwd, input.input) };
-      else if (input.action === "status")
-        result = { jobs: engine.list(lease.parentId), history: engine.history(lease.parentId) };
-      else if (input.action === "cancel" && typeof input.id === "string")
-        result = { cancelled: await engine.cancel(lease.parentId, input.id) };
-      else throw new Error("Unknown action.");
-      response.end(JSON.stringify(result));
+      response.end(JSON.stringify(await dispatch(input, lease.parentId, lease.cwd)));
     } catch (error) {
-      if (error instanceof NativePreflightError) {
-        response.writeHead(400).end(
-          JSON.stringify({
-            error: error.message,
-            failureStage: error.failureStage,
-            failureCode: error.code,
-            evaluationError: error.evaluation,
-          }),
-        );
-        return;
-      }
-      // Expose only a known transport failure, never arbitrary SDK errors or task data.
-      if (
-        error instanceof Error &&
-        /^Transport not connected(?: \(status: [a-z_]+\))?$/.test(error.message)
-      ) {
-        response.writeHead(503).end(
-          JSON.stringify({
-            code: "daemon_disconnected",
-            error:
-              "Paseo daemon transport disconnected. Run paseo plugin reload jev-orchestrator, then create a fresh Paseo agent. Do not restart the daemon.",
-          }),
-        );
-        return;
-      }
-      response
-        .writeHead(400)
-        .end(
-          '{"error":"Operation rejected. Check the task contract, scope, dependency graph, and job status."}',
-        );
+      const failure = failureResponse(error);
+      response.writeHead(failure.status).end(failure.body);
     }
   });
   server.requestTimeout = 30000;

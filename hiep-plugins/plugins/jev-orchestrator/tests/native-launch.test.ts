@@ -14,6 +14,13 @@ import {
 } from "../server/native-launch";
 import { installNativeHooks } from "../server/native-install";
 
+interface RouteEntry {
+  sourceType: string;
+}
+interface DefinitionEntry {
+  agentType: string;
+}
+
 async function cleanup(directory: string) {
   for (const item of await readdir(directory, { withFileTypes: true })) {
     const target = path.join(directory, item.name);
@@ -40,11 +47,11 @@ test("Paseo launch prepares immutable pinned variants without modifying source r
     assert.equal(env.PASEO_JEV_NATIVE_RUNTIME, "codex");
     assert.ok(env.PASEO_JEV_NATIVE_POLICY);
     const manifest = JSON.parse(await readFile(env.PASEO_JEV_NATIVE_POLICY, "utf8"));
-    const worker = manifest.policy.routes.find((item: any) => item.sourceType === "worker");
+    const worker = manifest.policy.routes.find((item: RouteEntry) => item.sourceType === "worker");
     assert.equal(worker.candidates.length, 2);
     for (const candidate of worker.candidates) {
       const definition = manifest.definitions.find(
-        (item: any) => item.agentType === candidate.agentType,
+        (item: DefinitionEntry) => item.agentType === candidate.agentType,
       );
       const fields = parse(await readFile(definition.path, "utf8"));
       assert.equal(fields.model, candidate.model);
@@ -68,10 +75,12 @@ test("Paseo launch prepares immutable pinned variants without modifying source r
     );
     const claudeEnv = await prepareNativeLaunch(paseoHome, userHome, temp, "claude");
     const claudeManifest = JSON.parse(await readFile(claudeEnv.PASEO_JEV_NATIVE_POLICY, "utf8"));
-    const audit = claudeManifest.policy.routes.find((item: any) => item.sourceType === "audit");
+    const audit = claudeManifest.policy.routes.find(
+      (item: RouteEntry) => item.sourceType === "audit",
+    );
     for (const candidate of audit.candidates) {
       const definition = claudeManifest.definitions.find(
-        (item: any) => item.agentType === candidate.agentType,
+        (item: DefinitionEntry) => item.agentType === candidate.agentType,
       );
       const generated = await readFile(definition.path, "utf8");
       const fields = parseYaml(generated.split("---\n")[1]);
@@ -93,15 +102,17 @@ test("Paseo launch prepares immutable pinned variants without modifying source r
     );
     const lenientEnv = await prepareNativeLaunch(paseoHome, userHome, temp, "claude");
     const lenient = JSON.parse(await readFile(lenientEnv.PASEO_JEV_NATIVE_POLICY, "utf8"));
-    const debuggerRoute = lenient.policy.routes.find((item: any) => item.sourceType === "debugger");
+    const debuggerRoute = lenient.policy.routes.find(
+      (item: RouteEntry) => item.sourceType === "debugger",
+    );
     assert.ok(debuggerRoute);
     assert.equal(
-      lenient.policy.routes.some((item: any) => item.sourceType === "nested"),
+      lenient.policy.routes.some((item: RouteEntry) => item.sourceType === "nested"),
       false,
     );
     for (const candidate of debuggerRoute.candidates) {
       const definition = lenient.definitions.find(
-        (item: any) => item.agentType === candidate.agentType,
+        (item: DefinitionEntry) => item.agentType === candidate.agentType,
       );
       const generated = await readFile(definition.path, "utf8");
       const fields = parseYaml(generated.split("---\n")[1]);
@@ -131,7 +142,7 @@ test("each PASEO_HOME gets its own definition names in the shared agents folder"
       await writeFile(path.join(base, "settings.json"), JSON.stringify(defaultNativeSettings()));
       const env = await prepareNativeLaunch(paseoHome, userHome, temp, "claude");
       const manifest = JSON.parse(await readFile(env.PASEO_JEV_NATIVE_POLICY, "utf8"));
-      names.push(new Set(manifest.definitions.map((item: any) => item.agentType)));
+      names.push(new Set(manifest.definitions.map((item: DefinitionEntry) => item.agentType)));
     }
     assert.ok([...names[0]].every((name) => !names[1].has(name)));
   } finally {
@@ -160,7 +171,7 @@ test("Claude routes only listed roles and an empty match disables native routing
 
     const env = await launch(defaultNativeSettings());
     const manifest = JSON.parse(await readFile(env.PASEO_JEV_NATIVE_POLICY, "utf8"));
-    assert.deepEqual(manifest.policy.routes.map((route: any) => route.sourceType).sort(), [
+    assert.deepEqual(manifest.policy.routes.map((route: RouteEntry) => route.sourceType).sort(), [
       "Explore",
       "Plan",
       "debugger",

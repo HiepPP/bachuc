@@ -5,7 +5,20 @@ import { fileURLToPath } from "node:url";
 import { defaultNativeSettings, nativeSettingsSchema } from "./native-launch";
 
 const quote = (text: string) => "'" + text.replaceAll("'", "'\\''") + "'";
-async function readObject(file: string): Promise<Record<string, any>> {
+interface HookEntry {
+  type?: unknown;
+  command?: unknown;
+  timeout?: unknown;
+}
+interface HookGroup {
+  matcher?: unknown;
+  hooks?: HookEntry[];
+}
+interface HookConfig {
+  hooks?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+async function readObject(file: string): Promise<HookConfig> {
   try {
     return JSON.parse(await readFile(file, "utf8"));
   } catch (error) {
@@ -46,19 +59,18 @@ export async function installNativeHooks(
     const file = path.join(userHome, relative);
     const config = await readObject(file);
     const hooks = config.hooks ?? {};
-    const groups = hooks.PreToolUse ?? [];
-    if (!Array.isArray(groups)) throw new Error("Invalid existing PreToolUse hooks.");
-    const owned = groups.filter((group: any) =>
-      group.hooks?.some((hook: any) => hook.command === command),
-    );
+    const existingGroups = hooks.PreToolUse ?? [];
+    if (!Array.isArray(existingGroups)) throw new Error("Invalid existing PreToolUse hooks.");
+    const groups: HookGroup[] = existingGroups;
+    const owned = groups.filter((group) => group.hooks?.some((hook) => hook.command === command));
     if (owned.length === 1 && owned[0].matcher === matcher) continue;
     const migrateLegacy =
       relative === ".codex/hooks.json" &&
       owned.length === 1 &&
       ["^(spawn_agent|Agent)$", "^(spawn_agent|Agent|collaborationspawn_agent)$"].includes(
-        owned[0].matcher,
+        owned[0].matcher as string,
       ) &&
-      owned[0].hooks.length === 1 &&
+      owned[0].hooks?.length === 1 &&
       owned[0].hooks[0].type === "command" &&
       owned[0].hooks[0].timeout === 30;
     if (owned.length && !migrateLegacy)
@@ -68,7 +80,7 @@ export async function installNativeHooks(
       hooks: {
         ...hooks,
         PreToolUse: migrateLegacy
-          ? groups.map((group: any) => (group === owned[0] ? { ...group, matcher } : group))
+          ? groups.map((group) => (group === owned[0] ? { ...group, matcher } : group))
           : [...groups, { matcher, hooks: [{ type: "command", command, timeout: 30 }] }],
       },
     };

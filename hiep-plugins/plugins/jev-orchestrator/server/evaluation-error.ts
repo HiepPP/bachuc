@@ -18,11 +18,11 @@ const codes = [
   "JEV_CANCELLED",
 ] as const;
 export type EvaluationCode = (typeof codes)[number];
-export type EvaluationDiagnostics = {
+export interface EvaluationDiagnostics {
   workerCode: EvaluationCode;
   httpStatus?: number;
   processExitCode?: number | null;
-};
+}
 export function safeEvaluationDiagnostics(value: unknown): EvaluationDiagnostics | undefined {
   if (!value || typeof value !== "object") return;
   const v = value as Record<string, unknown>;
@@ -74,12 +74,10 @@ export function gatewayEvaluationError(error: unknown): EvaluationError {
     }
     current = value.cause;
   }
+  if (status === 403 && restricted)
+    return new EvaluationError("JEV_MODEL_ACCESS_DENIED", { httpStatus: status });
   return new EvaluationError(
-    status === 403 && restricted
-      ? "JEV_MODEL_ACCESS_DENIED"
-      : typeof status === "number"
-        ? "JEV_GATEWAY_HTTP"
-        : "JEV_GATEWAY_FAILED",
+    typeof status === "number" ? "JEV_GATEWAY_HTTP" : "JEV_GATEWAY_FAILED",
     { httpStatus: status },
   );
 }

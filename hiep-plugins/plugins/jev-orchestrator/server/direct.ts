@@ -16,13 +16,13 @@ import { missingUsage, type TokenUsage } from "./usage";
 
 type Selection = Profile & { thinkingOptionId: string };
 type Candidate = Selection & { profileId: string };
-export type DirectResult = {
+export interface DirectResult {
   agentId: string;
   selection: Selection;
   routingMs: number;
   usage: TokenUsage;
-};
-export type DirectRecord = {
+}
+export interface DirectRecord {
   requestId: string;
   workspaceId: string;
   fingerprint: string;
@@ -34,7 +34,32 @@ export type DirectRecord = {
   agentId?: string;
   usage: TokenUsage;
   error?: string;
-};
+}
+
+function allowedModel(
+  profile: Profile,
+  catalogs: Map<string, PaseoProviderModelsResult>,
+  allowedModels: ModelAllowlist,
+) {
+  const catalog = catalogs.get(profile.provider);
+  const model = catalog?.models?.find(
+    (m) => m.id === profile.model || m.aliases?.includes(profile.model),
+  );
+  const allowed = allowedModels.find(
+    (entry) => entry.provider === profile.provider && entry.model === profile.model,
+  );
+  if (!allowed)
+    throw new Error(`Model missing from allowlist: ${profile.provider}/${profile.model}`);
+  if (catalog?.error || !model || model.isSelectable === false)
+    throw new Error("Allowed model unavailable.");
+  for (const effort of allowed.effortIds) {
+    if ((isLunaModel(model.id) || isLunaModel(profile.model)) && effort !== "max")
+      throw new Error("Luna only permits max effort.");
+    if (!model.thinkingOptions?.some((option) => option.id === effort))
+      throw new Error(`Unsupported effort ${effort} for ${profile.model}`);
+  }
+  return { model, allowed };
+}
 
 export function expandCandidates(
   profiles: Profile[],
@@ -43,23 +68,7 @@ export function expandCandidates(
 ): Candidate[] {
   const candidates: Candidate[] = [];
   for (const profile of profiles) {
-    const catalog = catalogs.get(profile.provider);
-    const model = catalog?.models?.find(
-      (m) => m.id === profile.model || m.aliases?.includes(profile.model),
-    );
-    const allowed = allowedModels.find(
-      (entry) => entry.provider === profile.provider && entry.model === profile.model,
-    );
-    if (!allowed)
-      throw new Error(`Model missing from allowlist: ${profile.provider}/${profile.model}`);
-    if (catalog?.error || !model || model.isSelectable === false)
-      throw new Error("Allowed model unavailable.");
-    for (const effort of allowed.effortIds) {
-      if ((isLunaModel(model.id) || isLunaModel(profile.model)) && effort !== "max")
-        throw new Error("Luna only permits max effort.");
-      if (!model.thinkingOptions?.some((option) => option.id === effort))
-        throw new Error(`Unsupported effort ${effort} for ${profile.model}`);
-    }
+    const { model, allowed } = allowedModel(profile, catalogs, allowedModels);
     for (const option of model.thinkingOptions ?? []) {
       if (!allowed.effortIds.includes(option.id as ModelAllowlist[number]["effortIds"][number]))
         continue;
@@ -165,7 +174,9 @@ export class DirectRouter {
                   effortSchema.safeParse(id).success &&
                   (!(isLunaModel(model.id) || isLunaModel(profile.model)) || id === "max"),
               );
-      return { ...profile, effortIds: effortIds as ModelAllowlist[number]["effortIds"] };
+      return Object.assign({}, profile, {
+        effortIds: effortIds as ModelAllowlist[number]["effortIds"],
+      });
     });
   }
 
@@ -293,7 +304,7 @@ export class DirectRouter {
           " Creation outcome may be unknown; inspect jev-direct-request labels. Do not resubmit with a new ID.";
       record.endedAt = Date.now();
       this.save();
-      throw new Error(record.error);
+      throw new Error(record.error, { cause: error });
     }
   }
   stop() {

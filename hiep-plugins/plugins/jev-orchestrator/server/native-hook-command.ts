@@ -85,8 +85,142 @@ export async function runNativeHookCommand(input: unknown, manifestPath: string,
   }
 }
 
+interface Failure {
+  reason?: string;
+}
+interface HookEvent {
+  tool_name?: unknown;
+  transcript_path?: unknown;
+  session_id?: unknown;
+  hook_event_name?: unknown;
+  cwd?: unknown;
+  tool_input?: unknown;
+}
+
+// Native children inherit environment/MCP entries. Only the root transcript
+// may prepare or consume tickets for this Paseo parent.
+async function assertRootTranscript(event: HookEvent) {
+  if (typeof event.transcript_path !== "string" || typeof event.session_id !== "string")
+    throw new Error("Root transcript required.");
+  const transcript = await realpath(event.transcript_path);
+  const codexHome = await realpath(process.env.CODEX_HOME || path.join(homedir(), ".codex"));
+  const relative = path.relative(codexHome, transcript);
+  if (
+    !relative.startsWith(`sessions${path.sep}`) &&
+    !relative.startsWith(`archived_sessions${path.sep}`)
+  )
+    throw new Error("Invalid transcript scope.");
+  const file = await open(transcript, "r");
+  let firstLine;
+  try {
+    const buffer = Buffer.alloc(262144);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    const text = buffer.subarray(0, bytesRead).toString("utf8");
+    if (!text.includes("\n")) throw new Error("Missing session metadata.");
+    firstLine = JSON.parse(text.slice(0, text.indexOf("\n")));
+  } finally {
+    await file.close();
+  }
+  const metadata = firstLine.payload;
+  if (
+    firstLine.type !== "session_meta" ||
+    metadata.id !== event.session_id ||
+    metadata.parent_thread_id ||
+    metadata.thread_source === "subagent" ||
+    typeof metadata.source === "object"
+  )
+    throw new Error("Only the root parent may use native tickets.");
+}
+
+async function rejectionReason(response: Response) {
+  if (response.status === 503) {
+    const error = await response.json().catch(() => null);
+    if (error?.code === "daemon_disconnected")
+      return "Jev native routing unavailable: Paseo daemon transport disconnected. Run paseo plugin reload jev-orchestrator, then create a fresh Paseo agent. Do not restart the daemon.";
+  }
+  return response.status === 403
+    ? "Jev native session binding expired or invalid. Create a fresh Paseo agent; old tickets cannot be reused."
+    : "Jev native ticket rejected. Check native_delegation_status, request contract, workspace, policy, expiry and remaining slots. Do not retry with a new request ID.";
+}
+
+async function runTicketHook(event: HookEvent, failure: Failure) {
+  const bindingError = nativeBindingError(process.env);
+  if (bindingError) {
+    failure.reason = bindingError;
+    throw new Error("Missing or invalid ticket binding.");
+  }
+  await assertRootTranscript(event);
+  const url = process.env.PASEO_ORCH_URL;
+  const token = process.env.PASEO_ORCH_TOKEN;
+  if (
+    event.hook_event_name !== "PreToolUse" ||
+    !url ||
+    !token ||
+    !/^http:\/\/127\.0\.0\.1:\d+\/mcp$/.test(url)
+  )
+    throw new Error("Missing ticket binding.");
+  const intent = event.tool_name === "mcp__jev_orchestrator__prepare_native_delegate";
+  failure.reason =
+    "Jev native bridge unreachable. Check jev-orchestrator plugin status; after a plugin reload, create a fresh Paseo agent. Do not restart the daemon.";
+  const response = await fetch(url, {
+    method: "POST",
+    redirect: "error",
+
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      action: intent ? "native_intent" : "native_consume",
+      input: { sessionId: event.session_id, cwd: event.cwd, input: event.tool_input },
+    }),
+  });
+  if (!response.ok) {
+    failure.reason = await rejectionReason(response);
+    throw new Error("Ticket rejected.");
+  }
+  failure.reason =
+    "Jev native bridge returned an invalid response. Check jev-orchestrator plugin logs.";
+  const result = await response.json();
+  return intent ? {} : result;
+}
+
+async function readEvent(): Promise<HookEvent> {
+  let raw = "";
+  for await (const chunk of process.stdin) {
+    raw += chunk.toString();
+    if (Buffer.byteLength(raw) > 100000) throw new Error("Input too large.");
+  }
+  return JSON.parse(raw);
+}
+
+async function routeHook(
+  manifestPath: string | undefined,
+  runtime: string | undefined,
+  failure: Failure,
+) {
+  if (
+    !manifestPath ||
+    !path.isAbsolute(manifestPath) ||
+    !["codex", "claude"].includes(runtime ?? "")
+  )
+    throw new Error("Paseo native routing scope required.");
+  const manifest = manifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
+  if (manifest.policy.runtime !== runtime) throw new Error("Runtime scope mismatch.");
+  const event = await readEvent();
+  if (
+    runtime === "codex" &&
+    (event.tool_name === "collaborationspawn_agent" ||
+      event.tool_name === "mcp__jev_orchestrator__prepare_native_delegate")
+  )
+    return runTicketHook(event, failure);
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const configFile = path.join(
+    process.env.PASEO_HOME || path.join(homedir(), ".paseo"),
+    "config.json",
+  );
+  return runNativeHookCommand(event, manifestPath, createJudge(configFile, root));
+}
+
 async function main() {
-  let failureReason: string | undefined;
+  const failure: Failure = {};
   const manifestPath = process.env.PASEO_JEV_NATIVE_POLICY;
   const runtime = process.env.PASEO_JEV_NATIVE_RUNTIME;
   if (!manifestPath && !runtime) {
@@ -98,112 +232,10 @@ async function main() {
     process.stdout.write(JSON.stringify(deny()) + "\n", () => process.exit(0));
   }, 25000);
   try {
-    if (
-      !manifestPath ||
-      !path.isAbsolute(manifestPath) ||
-      !["codex", "claude"].includes(runtime ?? "")
-    )
-      throw new Error("Paseo native routing scope required.");
-    const manifest = manifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
-    if (manifest.policy.runtime !== runtime) throw new Error("Runtime scope mismatch.");
-    let raw = "";
-    for await (const chunk of process.stdin) {
-      raw += chunk.toString();
-      if (Buffer.byteLength(raw) > 100000) throw new Error("Input too large.");
-    }
-    const event = JSON.parse(raw);
-    if (
-      runtime === "codex" &&
-      (event.tool_name === "collaborationspawn_agent" ||
-        event.tool_name === "mcp__jev_orchestrator__prepare_native_delegate")
-    ) {
-      const bindingError = nativeBindingError(process.env);
-      if (bindingError) {
-        failureReason = bindingError;
-        throw new Error("Missing or invalid ticket binding.");
-      }
-      // Native children inherit environment/MCP entries. Only the root transcript
-      // may prepare or consume tickets for this Paseo parent.
-      if (typeof event.transcript_path !== "string" || typeof event.session_id !== "string")
-        throw new Error("Root transcript required.");
-      const transcript = await realpath(event.transcript_path);
-      const codexHome = await realpath(process.env.CODEX_HOME || path.join(homedir(), ".codex"));
-      const relative = path.relative(codexHome, transcript);
-      if (
-        !relative.startsWith(`sessions${path.sep}`) &&
-        !relative.startsWith(`archived_sessions${path.sep}`)
-      )
-        throw new Error("Invalid transcript scope.");
-      const file = await open(transcript, "r");
-      let firstLine;
-      try {
-        const buffer = Buffer.alloc(262144);
-        const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-        const text = buffer.subarray(0, bytesRead).toString("utf8");
-        if (!text.includes("\n")) throw new Error("Missing session metadata.");
-        firstLine = JSON.parse(text.slice(0, text.indexOf("\n")));
-      } finally {
-        await file.close();
-      }
-      const metadata = firstLine.payload;
-      if (
-        firstLine.type !== "session_meta" ||
-        metadata.id !== event.session_id ||
-        metadata.parent_thread_id ||
-        metadata.thread_source === "subagent" ||
-        typeof metadata.source === "object"
-      )
-        throw new Error("Only the root parent may use native tickets.");
-      const url = process.env.PASEO_ORCH_URL;
-      const token = process.env.PASEO_ORCH_TOKEN;
-      if (
-        event.hook_event_name !== "PreToolUse" ||
-        !url ||
-        !token ||
-        !/^http:\/\/127\.0\.0\.1:\d+\/mcp$/.test(url)
-      )
-        throw new Error("Missing ticket binding.");
-      const intent = event.tool_name === "mcp__jev_orchestrator__prepare_native_delegate";
-      failureReason =
-        "Jev native bridge unreachable. Check jev-orchestrator plugin status; after a plugin reload, create a fresh Paseo agent. Do not restart the daemon.";
-      const response = await fetch(url, {
-        method: "POST",
-        redirect: "error",
-
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          action: intent ? "native_intent" : "native_consume",
-          input: { sessionId: event.session_id, cwd: event.cwd, input: event.tool_input },
-        }),
-      });
-      if (!response.ok) {
-        failureReason =
-          response.status === 403
-            ? "Jev native session binding expired or invalid. Create a fresh Paseo agent; old tickets cannot be reused."
-            : "Jev native ticket rejected. Check native_delegation_status, request contract, workspace, policy, expiry and remaining slots. Do not retry with a new request ID.";
-        if (response.status === 503) {
-          const error = await response.json().catch(() => null);
-          if (error?.code === "daemon_disconnected")
-            failureReason =
-              "Jev native routing unavailable: Paseo daemon transport disconnected. Run paseo plugin reload jev-orchestrator, then create a fresh Paseo agent. Do not restart the daemon.";
-        }
-        throw new Error("Ticket rejected.");
-      }
-      failureReason =
-        "Jev native bridge returned an invalid response. Check jev-orchestrator plugin logs.";
-      const result = await response.json();
-      process.stdout.write(JSON.stringify(intent ? {} : result) + "\n");
-      return;
-    }
-    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-    const configFile = path.join(
-      process.env.PASEO_HOME || path.join(homedir(), ".paseo"),
-      "config.json",
-    );
-    const result = await runNativeHookCommand(event, manifestPath, createJudge(configFile, root));
+    const result = await routeHook(manifestPath, runtime, failure);
     process.stdout.write(JSON.stringify(result) + "\n");
   } catch {
-    process.stdout.write(JSON.stringify(deny(failureReason)) + "\n");
+    process.stdout.write(JSON.stringify(deny(failure.reason)) + "\n");
   } finally {
     clearTimeout(timer);
   }

@@ -6,11 +6,11 @@ import path from "node:path";
 import { readAgentUsage } from "../server/agent-usage";
 import { runChecks } from "../server/checks";
 import { createDriver } from "../server/paseo";
-import type { Profile } from "../server/types";
+import type { Check, Profile } from "../server/types";
 import { missingUsage, summarizeUsage, type TokenUsage } from "../server/usage";
 
 type Arm = "baseline" | "direct";
-type DirectResponse = {
+interface DirectResponse {
   agentId: string;
   selection: {
     id: string;
@@ -23,8 +23,8 @@ type DirectResponse = {
   };
   routingMs: number;
   usage: TokenUsage;
-};
-type DirectRecord = {
+}
+interface DirectRecord {
   requestId: string;
   workspaceId: string;
   status: "routing" | "creating" | "created" | "failed" | "interrupted";
@@ -33,7 +33,7 @@ type DirectRecord = {
   agentId?: string;
   usage: TokenUsage;
   error?: string;
-};
+}
 
 const repo = path.resolve(import.meta.dirname, "../../..");
 const pluginRoot = path.join(repo, "plugins/jev-orchestrator");
@@ -171,134 +171,156 @@ const cases = [
   },
 ];
 
-async function runArm(
-  testCase: (typeof cases)[number],
-  repetition: number,
-  arm: Arm,
+type TestCase = (typeof cases)[number];
+type Selection = DirectResponse["selection"];
+interface ArmRecord extends Record<string, unknown> {
+  arm: Arm;
+  requestId: string;
+  checkHashBefore?: string;
+  checkInitiallyUnchanged?: boolean;
+  failBeforeChecks?: Check[];
+  failBeforeVerified?: boolean;
+  workspaceId?: string;
+  executionStartedAt?: number;
+  executionWallMs?: number;
+  selection?: Selection;
+  routingMs?: number | null;
+  agentId?: string;
+  completionPassed?: boolean;
+  failure?: string;
+  runtimeMatch?: ReturnType<typeof runtimeMatch>;
+  finalChecks?: Check[];
+  finalCheckPassed?: boolean;
+  checkHashAfter?: string;
+  checkUnchanged?: boolean;
+  archivedBeforeAccounting?: boolean;
+}
+interface ArmState {
+  agent?: PaseoAgentHandle;
+  direct?: DirectResponse;
+  directRecord?: DirectRecord;
+}
+
+async function verifyFixture(
+  record: ArmRecord,
+  testCase: TestCase,
   target: string,
   check: string,
-  prompt: string,
   expectedCheckHash: string,
+) {
+  await writeFile(target, testCase.initial);
+  record.checkHashBefore = await fileHash(check);
+  record.checkInitiallyUnchanged = record.checkHashBefore === expectedCheckHash;
+  if (!record.checkInitiallyUnchanged) throw new Error("Independent check file changed.");
+  record.failBeforeChecks = await runChecks(
+    repo,
+    [{ argv: [process.execPath, check], timeoutMs: 5000 }],
+    new AbortController().signal,
+  );
+  record.failBeforeVerified = record.failBeforeChecks[0]?.exitCode !== 0;
+  if (!record.failBeforeVerified)
+    throw new Error("Fixture unexpectedly passed before the agent ran.");
+}
+
+async function executeArm(
+  record: ArmRecord,
+  state: ArmState,
+  testCase: TestCase,
+  repetition: number,
+  prompt: string,
   baseline: Profile,
   allowed: Profile[],
 ) {
-  const harnessStartedAt = Date.now();
-  const requestId = randomUUID();
-  const record: Record<string, any> = {
-    case: testCase.id,
-    repetition,
-    arm,
-    requestId,
-    harnessStartedAt,
-    prompt,
-    promptHash: createHash("sha256").update(prompt).digest("hex"),
-    target: path.relative(repo, target),
-    invariants: {
-      parentAgent: false,
-      delegationProhibitedByPrompt: true,
-      orchestratorMcpInjectionDisabled: true,
-      workspaceKind: "directory",
-    },
-  };
-  results.push(record);
-  await save();
+  const { arm, requestId } = record;
+  const workspace = await api.workspaces.create({
+    source: { kind: "directory", path: repo },
+    title: `Jev direct benchmark ${testCase.id} ${repetition} ${arm}`,
+    requestId: randomUUID(),
+  });
+  record.workspaceId = workspace.id;
+  ownedWorkspaces.add(workspace.id);
 
-  let agent: PaseoAgentHandle | undefined;
-  let direct: DirectResponse | undefined;
-  let directRecord: DirectRecord | undefined;
-  try {
-    await writeFile(target, testCase.initial);
-    record.checkHashBefore = await fileHash(check);
-    record.checkInitiallyUnchanged = record.checkHashBefore === expectedCheckHash;
-    if (!record.checkInitiallyUnchanged) throw new Error("Independent check file changed.");
-    record.failBeforeChecks = await runChecks(
-      repo,
-      [{ argv: [process.execPath, check], timeoutMs: 5000 }],
-      new AbortController().signal,
-    );
-    record.failBeforeVerified = record.failBeforeChecks[0]?.exitCode !== 0;
-    if (!record.failBeforeVerified)
-      throw new Error("Fixture unexpectedly passed before the agent ran.");
-
-    const workspace = await api.workspaces.create({
-      source: { kind: "directory", path: repo },
-      title: `Jev direct benchmark ${testCase.id} ${repetition} ${arm}`,
-      requestId: randomUUID(),
+  record.executionStartedAt = Date.now();
+  const launchStartedAt = Date.now();
+  let agent: PaseoAgentHandle;
+  let selection: Selection;
+  if (arm === "baseline") {
+    selection = profileSelection(baseline);
+    record.selection = selection;
+    agent = await workspace.agents.create({
+      config: profileConfig(baseline),
+      env: { PASEO_ORCH_CHILD: "1" },
+      labels: {
+        "jev-direct-benchmark": runId,
+        "jev-direct-arm": arm,
+        "jev-direct-case": testCase.id,
+      },
+      prompt,
+      requestId,
+      title: `Jev direct baseline ${testCase.id} ${repetition}`,
     });
-    record.workspaceId = workspace.id;
-    ownedWorkspaces.add(workspace.id);
-
-    record.executionStartedAt = Date.now();
-    const launchStartedAt = Date.now();
-    if (arm === "baseline") {
-      record.selection = profileSelection(baseline);
-      agent = await workspace.agents.create({
-        config: profileConfig(baseline),
-        env: { PASEO_ORCH_CHILD: "1" },
-        labels: {
-          "jev-direct-benchmark": runId,
-          "jev-direct-arm": arm,
-          "jev-direct-case": testCase.id,
-        },
-        prompt,
-        requestId,
-        title: `Jev direct baseline ${testCase.id} ${repetition}`,
-      });
-      record.routingMs = null;
-    } else {
-      direct = (await dc.invokePluginRpc("jev-orchestrator", "direct.run", {
-        workspaceId: workspace.id,
-        requestId,
-        prompt,
-        allowedProfileIds: allowed.map((profile) => profile.id),
-        allowedModels: allowed.map((profile) => ({
-          provider: profile.provider,
-          model: profile.model,
-          effortIds: profile.model === "gpt-5.6-luna" ? ["max"] : ["low", "medium", "high"],
-        })),
-        shareWithJev: true,
-      })) as DirectResponse;
-      record.directResponse = direct;
-      record.selection = direct.selection;
-      record.routingMs = direct.routingMs;
-      agent = api.agents.ref(direct.agentId);
-    }
-    record.launchMs = Date.now() - launchStartedAt;
-    record.agentId = agent.id;
-    ownedAgents.add(agent.id);
-    const completion = await agent.waitForFinish(300000);
-    record.completion = completion;
-    record.completionPassed = completion.status === "idle";
-    if (!record.completionPassed)
-      record.failure = `Agent finished with status ${completion.status}: ${completion.error ?? "no error"}`;
-    await agent.refresh();
-    record.observed = observedSettings(agent);
-    record.runtimeMatch = runtimeMatch(agent, record.selection);
-  } catch (error) {
-    record.failure ??= errorMessage(error);
-    if (arm === "direct" && record.workspaceId) {
-      try {
-        const status = (await dc.invokePluginRpc("jev-orchestrator", "direct.status", {
-          workspaceId: record.workspaceId,
-          requestId,
-        })) as { records: DirectRecord[] };
-        record.directStatus = status.records;
-        directRecord = status.records.find((entry) => entry.requestId === requestId);
-        if (directRecord) {
-          record.routingMs ??= directRecord.routingMs ?? null;
-          record.selection ??= directRecord.selection;
-          if (directRecord.agentId && !agent) {
-            agent = api.agents.ref(directRecord.agentId);
-            ownedAgents.add(agent.id);
-            record.agentId = agent.id;
-          }
-        }
-      } catch (statusError) {
-        record.directStatusFailure = errorMessage(statusError);
-      }
-    }
+    state.agent = agent;
+    record.routingMs = null;
+  } else {
+    const direct = (await dc.invokePluginRpc("jev-orchestrator", "direct.run", {
+      workspaceId: workspace.id,
+      requestId,
+      prompt,
+      allowedProfileIds: allowed.map((profile) => profile.id),
+      allowedModels: allowed.map((profile) => ({
+        provider: profile.provider,
+        model: profile.model,
+        effortIds: profile.model === "gpt-5.6-luna" ? ["max"] : ["low", "medium", "high"],
+      })),
+      shareWithJev: true,
+    })) as DirectResponse;
+    state.direct = direct;
+    record.directResponse = direct;
+    selection = direct.selection;
+    record.selection = selection;
+    record.routingMs = direct.routingMs;
+    agent = api.agents.ref(direct.agentId);
+    state.agent = agent;
   }
+  record.launchMs = Date.now() - launchStartedAt;
+  record.agentId = agent.id;
+  ownedAgents.add(agent.id);
+  const completion = await agent.waitForFinish(300000);
+  record.completion = completion;
+  record.completionPassed = completion.status === "idle";
+  if (!record.completionPassed)
+    record.failure = `Agent finished with status ${completion.status}: ${completion.error ?? "no error"}`;
+  await agent.refresh();
+  record.observed = observedSettings(agent);
+  record.runtimeMatch = runtimeMatch(agent, selection);
+}
 
+async function recoverDirectStatus(record: ArmRecord, state: ArmState) {
+  if (record.arm !== "direct" || !record.workspaceId) return;
+  const { requestId } = record;
+  try {
+    const status = (await dc.invokePluginRpc("jev-orchestrator", "direct.status", {
+      workspaceId: record.workspaceId,
+      requestId,
+    })) as { records: DirectRecord[] };
+    record.directStatus = status.records;
+    const directRecord = status.records.find((entry) => entry.requestId === requestId);
+    state.directRecord = directRecord;
+    if (!directRecord) return;
+    record.routingMs ??= directRecord.routingMs ?? null;
+    record.selection ??= directRecord.selection;
+    if (directRecord.agentId && !state.agent) {
+      const agent = api.agents.ref(directRecord.agentId);
+      state.agent = agent;
+      ownedAgents.add(agent.id);
+      record.agentId = agent.id;
+    }
+  } catch (statusError) {
+    record.directStatusFailure = errorMessage(statusError);
+  }
+}
+
+async function runFinalChecks(record: ArmRecord, check: string, expectedCheckHash: string) {
   try {
     record.finalChecks = await runChecks(
       repo,
@@ -318,41 +340,89 @@ async function runArm(
     record.checkUnchanged = false;
   }
   if (record.executionStartedAt) record.executionWallMs = Date.now() - record.executionStartedAt;
+}
 
-  let agentUsage: TokenUsage;
-  if (!agent) {
-    agentUsage = missingUsage(
+async function archiveAndReadUsage(record: ArmRecord, agent: PaseoAgentHandle | undefined) {
+  if (!agent)
+    return missingUsage("native-session", "Agent was not created or returned to the harness.");
+  try {
+    await agent.refresh();
+    if (!agent.archivedAt) await agent.archive();
+    await agent.refresh();
+    record.archivedBeforeAccounting = Boolean(agent.archivedAt);
+    return await readAgentUsage(agent.current());
+  } catch (error) {
+    record.archiveOrAccountingFailure = errorMessage(error);
+    return missingUsage(
       "native-session",
-      "Agent was not created or returned to the harness.",
+      "Agent archival or post-archive native accounting failed.",
     );
-  } else {
-    try {
-      await agent.refresh();
-      if (!agent.archivedAt) await agent.archive();
-      await agent.refresh();
-      record.archivedBeforeAccounting = Boolean(agent.archivedAt);
-      agentUsage = await readAgentUsage(agent.current());
-    } catch (error) {
-      record.archiveOrAccountingFailure = errorMessage(error);
-      agentUsage = missingUsage(
-        "native-session",
-        "Agent archival or post-archive native accounting failed.",
-      );
-    }
   }
+}
 
-  const components = [{ id: agent?.id ?? `${requestId}:agent`, role: "agent", usage: agentUsage }];
-  if (arm === "direct") {
+function usageComponents(record: ArmRecord, state: ArmState, agentUsage: TokenUsage) {
+  const { requestId } = record;
+  const components = [
+    { id: state.agent?.id ?? `${requestId}:agent`, role: "agent", usage: agentUsage },
+  ];
+  if (record.arm === "direct") {
     components.push({
       id: `${requestId}:jev-route`,
       role: "jev-route",
       usage:
-        direct?.usage ??
-        directRecord?.usage ??
+        state.direct?.usage ??
+        state.directRecord?.usage ??
         missingUsage("ai-sdk-evaluate-response", "Direct routing response was unavailable."),
     });
   }
-  record.workflowUsage = summarizeUsage(components);
+  return components;
+}
+
+async function runArm(
+  testCase: TestCase,
+  repetition: number,
+  arm: Arm,
+  target: string,
+  check: string,
+  prompt: string,
+  expectedCheckHash: string,
+  baseline: Profile,
+  allowed: Profile[],
+) {
+  const harnessStartedAt = Date.now();
+  const requestId = randomUUID();
+  const record: ArmRecord = {
+    case: testCase.id,
+    repetition,
+    arm,
+    requestId,
+    harnessStartedAt,
+    prompt,
+    promptHash: createHash("sha256").update(prompt).digest("hex"),
+    target: path.relative(repo, target),
+    invariants: {
+      parentAgent: false,
+      delegationProhibitedByPrompt: true,
+      orchestratorMcpInjectionDisabled: true,
+      workspaceKind: "directory",
+    },
+  };
+  results.push(record);
+  await save();
+
+  const state: ArmState = {};
+  try {
+    await verifyFixture(record, testCase, target, check, expectedCheckHash);
+    await executeArm(record, state, testCase, repetition, prompt, baseline, allowed);
+  } catch (error) {
+    record.failure ??= errorMessage(error);
+    await recoverDirectStatus(record, state);
+  }
+
+  await runFinalChecks(record, check, expectedCheckHash);
+  const { agent } = state;
+  const agentUsage = await archiveAndReadUsage(record, agent);
+  record.workflowUsage = summarizeUsage(usageComponents(record, state, agentUsage));
   record.accountingCollectedAfterArchive = Boolean(agent && record.archivedBeforeAccounting);
   try {
     record.source = await readFile(target, "utf8");
@@ -385,6 +455,60 @@ async function runArm(
   );
 }
 
+async function runPair(
+  testCase: TestCase,
+  repetition: number,
+  baseline: Profile,
+  allowed: Profile[],
+) {
+  const pairFolder = path.join(folder, `${testCase.id}-pair-${repetition}`);
+  await mkdir(pairFolder);
+  const target = path.join(pairFolder, "solution.mjs");
+  const check = path.join(pairFolder, "check.mjs");
+  await writeFile(
+    check,
+    `import assert from 'node:assert/strict';import {${testCase.name} as fn} from ${JSON.stringify(target)};${testCase.test}\nconsole.log(${JSON.stringify(`${testCase.id}: independent checks passed`)});\n`,
+  );
+  const expectedCheckHash = await fileHash(check);
+  const relative = path.relative(repo, target);
+  const prompt = `${testCase.brief}\nEdit only ${relative}. This is a synthetic fixture; do not inspect unrelated repositories or files.\nThe independent external validation command must pass. Do not edit any test or other path.\nStay in the current workspace. Do not delegate or create subagents. Do not commit, push, publish, deploy or create a worktree. Implement the fix; do not stop at a plan.`;
+  const order: Arm[] = repetition % 2 === 1 ? ["baseline", "direct"] : ["direct", "baseline"];
+  for (const arm of order) {
+    try {
+      await runArm(
+        testCase,
+        repetition,
+        arm,
+        target,
+        check,
+        prompt,
+        expectedCheckHash,
+        baseline,
+        allowed,
+      );
+    } catch (error) {
+      results.push({
+        case: testCase.id,
+        repetition,
+        arm,
+        harnessArmFailure: errorMessage(error),
+      });
+      process.exitCode = 1;
+      await save();
+    }
+  }
+}
+
+async function archiveOwnedAgent(id: string) {
+  try {
+    const agent = api.agents.ref(id);
+    await agent.refresh();
+    if (!agent.archivedAt) await agent.archive();
+  } catch (error) {
+    cleanup.push({ agentId: id, error: errorMessage(error) });
+  }
+}
+
 try {
   await dc.connect();
   const profiles = await createDriver(() => api).profiles(repo);
@@ -409,42 +533,7 @@ try {
 
   for (const testCase of cases) {
     for (let repetition = 1; repetition <= repetitions; repetition += 1) {
-      const pairFolder = path.join(folder, `${testCase.id}-pair-${repetition}`);
-      await mkdir(pairFolder);
-      const target = path.join(pairFolder, "solution.mjs");
-      const check = path.join(pairFolder, "check.mjs");
-      await writeFile(
-        check,
-        `import assert from 'node:assert/strict';import {${testCase.name} as fn} from ${JSON.stringify(target)};${testCase.test}\nconsole.log(${JSON.stringify(`${testCase.id}: independent checks passed`)});\n`,
-      );
-      const expectedCheckHash = await fileHash(check);
-      const relative = path.relative(repo, target);
-      const prompt = `${testCase.brief}\nEdit only ${relative}. This is a synthetic fixture; do not inspect unrelated repositories or files.\nThe independent external validation command must pass. Do not edit any test or other path.\nStay in the current workspace. Do not delegate or create subagents. Do not commit, push, publish, deploy or create a worktree. Implement the fix; do not stop at a plan.`;
-      const order: Arm[] = repetition % 2 === 1 ? ["baseline", "direct"] : ["direct", "baseline"];
-      for (const arm of order) {
-        try {
-          await runArm(
-            testCase,
-            repetition,
-            arm,
-            target,
-            check,
-            prompt,
-            expectedCheckHash,
-            baseline,
-            allowed,
-          );
-        } catch (error) {
-          results.push({
-            case: testCase.id,
-            repetition,
-            arm,
-            harnessArmFailure: errorMessage(error),
-          });
-          process.exitCode = 1;
-          await save();
-        }
-      }
+      await runPair(testCase, repetition, baseline, allowed);
     }
   }
 } catch (error) {
@@ -452,15 +541,7 @@ try {
   process.exitCode = 1;
 } finally {
   try {
-    for (const id of ownedAgents) {
-      try {
-        const agent = api.agents.ref(id);
-        await agent.refresh();
-        if (!agent.archivedAt) await agent.archive();
-      } catch (error) {
-        cleanup.push({ agentId: id, error: errorMessage(error) });
-      }
-    }
+    for (const id of ownedAgents) await archiveOwnedAgent(id);
 
     const agents = [];
     let cursor: string | undefined;
@@ -492,7 +573,7 @@ try {
   }
   if (
     results.some(
-      (record: Record<string, any>) =>
+      (record) =>
         record.harnessFailure ||
         record.harnessArmFailure ||
         record.failure ||

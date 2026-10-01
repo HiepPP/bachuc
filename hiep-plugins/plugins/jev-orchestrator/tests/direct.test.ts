@@ -57,7 +57,7 @@ const parsedInput = (overrides: Partial<DirectInput> = {}) =>
     ...overrides,
   });
 
-type AgentCreateInput = {
+interface AgentCreateInput {
   config: {
     provider: string;
     modeId?: string;
@@ -70,7 +70,7 @@ type AgentCreateInput = {
   labels: Record<string, string>;
   requestId: string;
   parent?: string;
-};
+}
 
 function harness(root: string) {
   const state = {

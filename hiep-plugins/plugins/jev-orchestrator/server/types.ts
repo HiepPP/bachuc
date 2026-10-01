@@ -1,7 +1,7 @@
 import type { Task } from "../shared/contracts";
 import type { TokenUsage } from "./usage";
 
-export type Profile = {
+export interface Profile {
   id: string;
   name: string;
   provider: string;
@@ -10,16 +10,16 @@ export type Profile = {
   thinkingOptionId?: string;
   featureValues?: Record<string, unknown>;
   notes?: string;
-};
+}
 export type Phase = "discovery" | "implementation" | "review";
-export type Check = {
+export interface Check {
   argv: string[];
   exitCode: number | null;
   output: string;
   durationMs: number;
   timedOut: boolean;
-};
-export type Attempt = {
+}
+export interface Attempt {
   childId: string;
   phase: Phase;
   profile: Profile;
@@ -37,8 +37,8 @@ export type Attempt = {
     thinkingOptionId?: string | null;
     modeId?: string | null;
   };
-};
-export type Decision = {
+}
+export interface Decision {
   profileId: string;
   discovery: boolean;
   risk: "low" | "high";
@@ -47,8 +47,8 @@ export type Decision = {
   reviewPassed?: boolean;
   probabilities?: Record<string, number>;
   usage?: TokenUsage;
-};
-export type Job = {
+}
+export interface Job {
   key: string;
   parentId: string;
   cwd: string;
@@ -78,8 +78,8 @@ export type Job = {
   message: string;
   notifyError?: string;
   notificationCompleteAt?: number;
-};
-export type Metric = {
+}
+export interface Metric {
   profileId: string;
   profileVersion: string;
   category: string;
@@ -89,8 +89,8 @@ export type Metric = {
   costUsd?: number;
   tokens?: number;
   at: number;
-};
-export type Driver = {
+}
+export interface Driver {
   profiles(cwd: string): Promise<Profile[]>;
   launch(job: Job, profile: Profile, phase: Phase, prompt: string): Promise<string>;
   wait(
@@ -106,7 +106,7 @@ export type Driver = {
   }>;
   archive(childId: string): Promise<void>;
   notify(job: Job): Promise<void>;
-};
+}
 export type Judge = (
   phase: "route" | "recovery" | "review" | "direct",
   state: Record<string, unknown>,

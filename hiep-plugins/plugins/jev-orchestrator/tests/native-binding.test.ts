@@ -29,9 +29,10 @@ test("native preparation waits for ready bridge and valid lease", async () => {
       return true;
     },
   };
-  const pending = requireNativeBinding(env, bridge, "parent", "/workspace").then(() => {
+  const pending = (async () => {
+    await requireNativeBinding(env, bridge, "parent", "/workspace");
     prepared = true;
-  });
+  })();
   await Promise.resolve();
   assert.equal(bound, false);
   assert.equal(prepared, false);

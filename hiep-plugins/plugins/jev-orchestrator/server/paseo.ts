@@ -22,7 +22,7 @@ export function createDriver(getApi: () => PaseoApi): Driver {
           api.providers.listModes(provider, { cwd }),
         ]);
         if (models.error || modes.error) continue;
-        for (const p of configured.filter((p) => p.provider === provider)) {
+        for (const p of configured.filter((item) => item.provider === provider)) {
           const model = models.models?.find(
             (m) => m.id === p.model || m.aliases?.includes(p.model!),
           );

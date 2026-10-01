@@ -2,7 +2,32 @@ import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { DirectPanel } from "./client/direct-panel";
 import { JobsPanel } from "./client/panel";
 import { z } from "zod";
+import { useMemo } from "react";
 import { Text, View } from "react-native";
+
+const jobItemStyle = { padding: 12, gap: 6 };
+
+interface JobTimelineItemProps {
+  item: { data: { id: string; status: string; message: string } };
+  theme: { colors: { foreground: string; foregroundMuted: string } };
+}
+
+function JobTimelineItem({ item, theme }: JobTimelineItemProps) {
+  const { foreground, foregroundMuted } = theme.colors;
+  const titleStyle = useMemo(
+    () => ({ color: foreground, fontWeight: "600" as const }),
+    [foreground],
+  );
+  const messageStyle = useMemo(() => ({ color: foregroundMuted }), [foregroundMuted]);
+  return (
+    <View style={jobItemStyle}>
+      <Text style={titleStyle}>
+        {item.data.id} · {item.data.status}
+      </Text>
+      <Text style={messageStyle}>{item.data.message}</Text>
+    </View>
+  );
+}
 
 export default function contribute(client: PluginClientContext) {
   const jobsPanel = client.addWorkspacePanel({
@@ -56,14 +81,7 @@ export default function contribute(client: PluginClientContext) {
       message: z.string(),
       children: z.array(z.string()),
     }),
-    Component: ({ item, theme }) => (
-      <View style={{ padding: 12, gap: 6 }}>
-        <Text style={{ color: theme.colors.foreground, fontWeight: "600" }}>
-          {item.data.id} · {item.data.status}
-        </Text>
-        <Text style={{ color: theme.colors.foregroundMuted }}>{item.data.message}</Text>
-      </View>
-    ),
+    Component: JobTimelineItem,
   });
   return () => {
     renderer();

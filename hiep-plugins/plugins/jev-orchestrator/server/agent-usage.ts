@@ -5,45 +5,55 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { missingUsage, tokenCount, type TokenUsage } from "./usage";
 
-type Snapshot = {
+interface Snapshot {
   provider: string;
   cwd: string;
   status?: string;
   runtimeInfo?: { sessionId?: string | null } | null;
   persistence?: { sessionId?: string; nativeHandle?: string } | null;
-};
-export function parseCodexUsage(rows: Record<string, any>[]): TokenUsage {
-  let total: Record<string, unknown> | undefined;
+}
+type Json = Record<string, unknown>;
+const record = (value: unknown): Json | undefined =>
+  value && typeof value === "object" ? (value as Json) : undefined;
+
+function codexTotal(row: Json, canonical: boolean): unknown {
+  const payload = record(row.payload);
+  if (canonical) return row.type === "token_usage_record" ? payload?.thread_token_usage : undefined;
+  if (row.type !== "event_msg" || payload?.type !== "token_count") return undefined;
+  return record(payload.info)?.total_token_usage;
+}
+function scanCodexRows(rows: Json[], canonical: boolean) {
+  let total: unknown;
   let previous = -1,
     regressed = false,
     terminal = false;
-  const canonical = rows.filter((row) => row.type === "token_usage_record");
-  const requests = new Set(canonical.map((row) => row.payload?.response_id).filter(Boolean));
   for (const row of rows) {
-    const payload = row.payload;
     if (row.type === "event_msg") {
-      if (payload?.type === "task_started") terminal = false;
-      if (payload?.type === "task_complete") terminal = true;
+      const type = record(row.payload)?.type;
+      if (type === "task_started") terminal = false;
+      if (type === "task_complete") terminal = true;
     }
-    if (canonical.length) {
-      if (row.type !== "token_usage_record" || !payload?.thread_token_usage) continue;
-      total = payload.thread_token_usage;
-    } else {
-      if (
-        row.type !== "event_msg" ||
-        payload?.type !== "token_count" ||
-        !payload.info?.total_token_usage
-      )
-        continue;
-      total = payload.info.total_token_usage;
-    }
-    const count = tokenCount(total!.total_tokens);
+    const next = codexTotal(row, canonical);
+    if (!next) continue;
+    total = next;
+    const count = tokenCount(record(total)?.total_tokens);
     if (count !== null) {
       if (count < previous) regressed = true;
       previous = count;
     }
   }
-  if (!total) return missingUsage("codex-native-cumulative", "No cumulative token_count record.");
+  return { total, regressed, terminal };
+}
+export function parseCodexUsage(rows: Json[]): TokenUsage {
+  const canonical = rows.filter((row) => row.type === "token_usage_record");
+  const requests = new Set(
+    canonical.map((row) => record(row.payload)?.response_id).filter(Boolean),
+  );
+  const scan = scanCodexRows(rows, canonical.length > 0);
+  if (!scan.total)
+    return missingUsage("codex-native-cumulative", "No cumulative token_count record.");
+  const { regressed, terminal } = scan;
+  const total = record(scan.total) ?? {};
   const inputTokens = tokenCount(total.input_tokens),
     outputTokens = tokenCount(total.output_tokens);
   const totalTokens = tokenCount(total.total_tokens);
@@ -70,34 +80,33 @@ export function parseCodexUsage(rows: Record<string, any>[]): TokenUsage {
     ],
   };
 }
-export function parseClaudeUsage(rows: Record<string, any>[], idle: boolean): TokenUsage {
-  const requests = new Map<string, Record<string, any>>();
-  const messageKeys = new Map<string, string>();
+const outputCount = (usage: unknown) => tokenCount(record(usage)?.output_tokens) ?? -1;
+function collectClaudeRequests(rows: Json[]) {
+  const requests = new Map<unknown, unknown>();
+  const messageKeys = new Map<unknown, unknown>();
   let malformed = false;
   let terminal = false;
   for (const row of rows) {
     if (row.type !== "assistant") continue;
+    const message = record(row.message);
     terminal = ["end_turn", "max_tokens", "stop_sequence", "refusal"].includes(
-      row.message?.stop_reason,
+      message?.stop_reason as string,
     );
-    const messageId = row.message?.id;
+    const messageId = message?.id;
     const key = (messageId && messageKeys.get(messageId)) || row.requestId || messageId;
-    if (!key || !row.message?.usage) {
+    const usage = message?.usage;
+    if (!key || !usage) {
       malformed = true;
       continue;
     }
     if (messageId) messageKeys.set(messageId, key);
     const prior = requests.get(key);
-    const usage = row.message.usage;
     // Streaming snapshots of one request can repeat; keep the greatest output count.
-    if (
-      !prior ||
-      (tokenCount(usage.output_tokens) ?? -1) >= (tokenCount(prior.output_tokens) ?? -1)
-    )
-      requests.set(key, usage);
+    if (!prior || outputCount(usage) >= outputCount(prior)) requests.set(key, usage);
   }
-  if (!requests.size)
-    return missingUsage("claude-native-requests", "No keyed assistant usage records.");
+  return { requests, malformed, terminal };
+}
+function sumClaudeRequests(requests: Iterable<unknown>) {
   const sums = {
     inputTokens: 0,
     cachedInputTokens: 0,
@@ -105,8 +114,10 @@ export function parseClaudeUsage(rows: Record<string, any>[], idle: boolean): To
     outputTokens: 0,
     reasoningTokens: 0,
   };
+  let malformed = false;
   let reasoningKnown = true;
-  for (const usage of requests.values()) {
+  for (const item of requests) {
+    const usage = record(item) ?? {};
     const input = tokenCount(usage.input_tokens),
       cached = tokenCount(usage.cache_read_input_tokens),
       write = tokenCount(usage.cache_creation_input_tokens),
@@ -119,14 +130,21 @@ export function parseClaudeUsage(rows: Record<string, any>[], idle: boolean): To
     sums.cachedInputTokens += cached;
     sums.cacheWriteTokens += write;
     sums.outputTokens += output;
+    const details = record(usage.output_tokens_details);
     const reasoning = tokenCount(
-      usage.output_tokens_details?.thinking_tokens ??
-        usage.output_tokens_details?.reasoning_tokens ??
-        usage.output_tokens_details?.reasoning,
+      details?.thinking_tokens ?? details?.reasoning_tokens ?? details?.reasoning,
     );
     if (reasoning === null) reasoningKnown = false;
     else sums.reasoningTokens += reasoning;
   }
+  return { sums, malformed, reasoningKnown };
+}
+export function parseClaudeUsage(rows: Json[], idle: boolean): TokenUsage {
+  const { requests, terminal, ...collected } = collectClaudeRequests(rows);
+  if (!requests.size)
+    return missingUsage("claude-native-requests", "No keyed assistant usage records.");
+  const { sums, reasoningKnown, ...summed } = sumClaudeRequests(requests.values());
+  const malformed = collected.malformed || summed.malformed;
   return {
     source: "claude-native-requests",
     complete: idle && terminal && !malformed,
@@ -148,7 +166,7 @@ export function parseClaudeUsage(rows: Record<string, any>[], idle: boolean): To
   };
 }
 async function readUsageRows(file: string) {
-  const rows: Record<string, any>[] = [];
+  const rows: Json[] = [];
   const lines = createInterface({ input: createReadStream(file), crlfDelay: Infinity });
   for await (const line of lines) {
     if (!line.trim()) continue;
@@ -206,6 +224,28 @@ async function findCodexLog(home: string, sessionId: string) {
   }
   throw Error("Native session log unavailable.");
 }
+async function readCodexUsage(snapshot: Snapshot, sessionId: string, codexHome?: string) {
+  const file = await findCodexLog(
+    codexHome ?? process.env.CODEX_HOME ?? path.join(homedir(), ".codex"),
+    sessionId,
+  );
+  const rows = await readUsageRows(file);
+  const meta = record(rows.find((row) => row.type === "session_meta")?.payload);
+  if (
+    meta?.id !== sessionId ||
+    path.resolve((meta?.cwd ?? "") as string) !== path.resolve(snapshot.cwd)
+  )
+    throw Error("Session identity mismatch.");
+  return parseCodexUsage(rows);
+}
+async function readClaudeUsage(snapshot: Snapshot, sessionId: string, claudeHome?: string) {
+  const home = claudeHome ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), ".claude");
+  const project = snapshot.cwd.replace(/[^a-zA-Z0-9]/g, "-");
+  const rows = await readUsageRows(path.join(home, "projects", project, sessionId + ".jsonl"));
+  if (rows.some((row) => row.type === "assistant" && row.sessionId !== sessionId))
+    throw Error("Session identity mismatch.");
+  return parseClaudeUsage(rows, snapshot.status === "idle" || snapshot.status === "closed");
+}
 export async function readAgentUsage(
   snapshot: Snapshot | null,
   roots: { codexHome?: string; claudeHome?: string } = {},
@@ -218,26 +258,10 @@ export async function readAgentUsage(
   if (!sessionId || !/^[a-zA-Z0-9-]{10,100}$/.test(sessionId))
     return missingUsage("native-session", "Native session ID unavailable.");
   try {
-    if (snapshot.provider === "codex") {
-      const file = await findCodexLog(
-        roots.codexHome ?? process.env.CODEX_HOME ?? path.join(homedir(), ".codex"),
-        sessionId,
-      );
-      const rows = await readUsageRows(file);
-      const meta = rows.find((row) => row.type === "session_meta")?.payload;
-      if (meta?.id !== sessionId || path.resolve(meta?.cwd ?? "") !== path.resolve(snapshot.cwd))
-        throw Error("Session identity mismatch.");
-      return parseCodexUsage(rows);
-    }
-    if (snapshot.provider === "claude") {
-      const home =
-        roots.claudeHome ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(homedir(), ".claude");
-      const project = snapshot.cwd.replace(/[^a-zA-Z0-9]/g, "-");
-      const rows = await readUsageRows(path.join(home, "projects", project, sessionId + ".jsonl"));
-      if (rows.some((row) => row.type === "assistant" && row.sessionId !== sessionId))
-        throw Error("Session identity mismatch.");
-      return parseClaudeUsage(rows, snapshot.status === "idle" || snapshot.status === "closed");
-    }
+    if (snapshot.provider === "codex")
+      return await readCodexUsage(snapshot, sessionId, roots.codexHome);
+    if (snapshot.provider === "claude")
+      return await readClaudeUsage(snapshot, sessionId, roots.claudeHome);
     return missingUsage(
       snapshot.provider + "-native-session",
       "Provider accounting adapter unavailable.",

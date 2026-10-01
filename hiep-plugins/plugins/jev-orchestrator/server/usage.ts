@@ -1,5 +1,5 @@
 /** Input includes cache reads/writes; output includes reasoning where the provider reports it. */
-export type TokenUsage = {
+export interface TokenUsage {
   source: string;
   complete: boolean;
   inputTokens: number | null;
@@ -10,7 +10,7 @@ export type TokenUsage = {
   totalTokens: number | null;
   requests: number | null;
   notes: string[];
-};
+}
 export function missingUsage(source: string, note: string): TokenUsage {
   return {
     source,

@@ -1,4 +1,7 @@
-type BindingEnv = { PASEO_ORCH_URL?: string; PASEO_ORCH_TOKEN?: string };
+interface BindingEnv {
+  PASEO_ORCH_URL?: string;
+  PASEO_ORCH_TOKEN?: string;
+}
 const fresh = "Create a fresh Paseo agent.";
 
 export function nativeBindingError(env: BindingEnv): string | undefined {

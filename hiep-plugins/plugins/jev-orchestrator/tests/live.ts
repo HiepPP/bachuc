@@ -60,6 +60,205 @@ const config = (p: Profile) => ({
   thinkingOptionId: p.thinkingOptionId,
   featureValues: p.featureValues,
 });
+interface LiveCase {
+  id: string;
+  brief: string;
+  test: string;
+  name: string;
+  discovery: string;
+  review: string;
+}
+interface UsageComponent {
+  id: string;
+  role: string;
+  usage: TokenUsage;
+}
+async function awaitJob(
+  c: LiveCase,
+  arm: string,
+  parentId: string,
+  startedAt: number,
+  record: Record<string, unknown>,
+) {
+  while (Date.now() - startedAt < 520000) {
+    await delay(5000);
+    const data = (await dc.invokePluginRpc("jev-orchestrator", "jobs.list", {
+      parentId,
+    })) as { jobs: Job[] };
+    const job = data.jobs.find((j) => j.task.id === c.id);
+    record.job = job;
+    await save();
+    if (
+      job &&
+      !["queued", "running"].includes(job.status) &&
+      (job.notificationCompleteAt || job.notifyError)
+    ) {
+      console.log(
+        JSON.stringify({
+          case: c.id,
+          arm,
+          status: job.status,
+          message: job.message,
+          attempts: job.attempts.map((a) => ({
+            phase: a.phase,
+            profile: a.profile.name,
+            status: a.status,
+          })),
+        }),
+      );
+      break;
+    }
+  }
+}
+async function refreshUsageAfterArchive(components: UsageComponent[]) {
+  for (const component of components) {
+    if (component.role.startsWith("jev-") || component.id === "missing-job") continue;
+    const actor = api.agents.ref(component.id);
+    await actor.refresh();
+    if (!actor.archivedAt) await actor.archive();
+    await actor.refresh();
+    component.usage = await readAgentUsage(actor.current());
+  }
+}
+async function runCase(c: LiveCase, arm: string, baseline: Profile, allowed: Profile[]) {
+  const dir = path.join(folder, `${c.id}-${arm}`);
+  await mkdir(dir);
+  const target = path.join(dir, "solution.mjs");
+  await writeFile(
+    target,
+    c.id === "cache"
+      ? "export function createCache(now){const m=new Map();let lifetime=0;return {set(k,v,ttl){lifetime=ttl;m.set(k,{v,start:now()});},get(k){const e=m.get(k);return e&&now()-e.start<=lifetime?e.v:undefined},has(k){return this.get(k)!==undefined}}}\n"
+      : `export function ${c.name}(){throw new Error("Not implemented");}\n`,
+  );
+  const check = path.join(folder, `${c.id}-${arm}-check.mjs`);
+  await writeFile(
+    check,
+    `import assert from 'node:assert/strict';import {${c.name} as fn} from ${JSON.stringify(target)};${c.test}\nconsole.log("${c.id}: independent checks passed");\n`,
+  );
+  const before = await runChecks(
+    repo,
+    [{ argv: [process.execPath, check], timeoutMs: 5000 }],
+    new AbortController().signal,
+  );
+  if (before[0].exitCode === 0) throw new Error("Fixture must fail before work");
+  const relative = path.relative(repo, target);
+  const goal = `${c.brief}\nEdit only ${relative}. This is a synthetic fixture; do not inspect unrelated repositories or files.`;
+  const acceptance =
+    "The independent external validation command must pass. Do not edit any test or other path.";
+  const startedAt = Date.now();
+  const parent = await api.agents.create({
+    cwd: repo,
+    config: config(baseline),
+    title: `Jev measured ${c.id} ${arm}`,
+    env: arm === "baseline" ? { PASEO_ORCH_CHILD: "1" } : undefined,
+  });
+  parents.push(parent.id);
+  if (parent.workspaceId) testWorkspaces.add(parent.workspaceId);
+  const record: Record<string, unknown> = {
+    case: c.id,
+    arm,
+    parentId: parent.id,
+    startedAt,
+    beforeExit: before[0].exitCode,
+  };
+  results.push(record);
+  await save();
+  console.log(JSON.stringify({ case: c.id, arm, parentId: parent.id, status: "started" }));
+  if (arm === "baseline") {
+    const result = await parent.run(
+      `${goal}\n${acceptance}\nStay in the current workspace. No delegation, commit, push or worktree. Implement the fix, do not stop at a plan.`,
+      { timeoutMs: 300000 },
+    );
+    record.result = result;
+    record.profile = baseline;
+    record.latestUsage = parent.lastUsage;
+    record.observed = parent.runtimeInfo;
+  } else {
+    const delegation = {
+      tasks: [
+        {
+          id: c.id,
+          goal,
+          acceptance,
+          kind: "implementation",
+          files: [relative],
+          allowedProfileIds: allowed.map((p) => p.id),
+          checks: [{ argv: [process.execPath, check], timeoutMs: 10000 }],
+          shareWithJev: true,
+          discovery: c.discovery,
+          review: c.review,
+          maxAttempts: 2,
+          maxDurationMs: 480000,
+        },
+      ],
+    };
+    const submission = await parent.run(
+      `Call the injected delegate_task MCP tool exactly once with this JSON: ${JSON.stringify(delegation)}. Do not implement or run shell commands. After submission return only the task ID and stop. On a later completion notification, call orchestrator_status once and report its result without doing more work.`,
+      { timeoutMs: 120000 },
+    );
+    record.submissionStatus = submission.status;
+    await awaitJob(c, arm, parent.id, startedAt, record);
+  }
+  // The job becomes terminal before notify() has submitted the parent's completion turn.
+  // Above we wait for notificationCompleteAt; now include that parent turn before measuring.
+  if (arm === "routed") {
+    const completion = await parent.waitForFinish(120000);
+    record.parentCompletionStatus = completion.status;
+  }
+  await parent.refresh();
+  const components: UsageComponent[] = [
+    { id: parent.id, role: "parent", usage: await readAgentUsage(parent.current()) },
+  ];
+  const job = record.job as Job | undefined;
+  if (arm === "routed" && !job) {
+    components.push({
+      id: "missing-job",
+      role: "orchestrator",
+      usage: missingUsage("harness", "Parent did not submit a job."),
+    });
+  }
+  for (const attempt of job?.attempts ?? []) {
+    const child = api.agents.ref(attempt.childId);
+    await child.refresh();
+    components.push({
+      id: child.id,
+      role: attempt.phase,
+      usage: await readAgentUsage(child.current()),
+    });
+  }
+  for (const [i, evaluation] of (job?.evaluations ?? []).entries()) {
+    components.push({
+      id: `${job!.key}:jev:${i}`,
+      role: `jev-${evaluation.phase}`,
+      usage: evaluation.usage,
+    });
+  }
+  record.workflowUsage = summarizeUsage(components);
+  record.wallMs = Date.now() - startedAt;
+  record.checks = await runChecks(
+    repo,
+    [{ argv: [process.execPath, check], timeoutMs: 10000 }],
+    new AbortController().signal,
+  );
+  record.source = await readFile(target, "utf8");
+  await save();
+  // Reconcile after closure: provider logs can flush the final request after idle is emitted.
+  record.workflowUsageBeforeArchive = structuredClone(record.workflowUsage);
+  await parent.archive();
+  await refreshUsageAfterArchive(components);
+  record.workflowUsage = summarizeUsage(components);
+  record.accountingCollectedAfterArchive = true;
+  await save();
+  console.log(
+    JSON.stringify({
+      case: c.id,
+      arm,
+      wallMs: record.wallMs,
+      exitCode: (record.checks as { exitCode: number }[])[0].exitCode,
+      workflowUsage: record.workflowUsage,
+    }),
+  );
+}
 try {
   await dc.connect();
   const profiles = await createDriver(() => api).profiles(repo);
@@ -102,180 +301,8 @@ try {
     },
   ];
   for (const [index, c] of cases.entries())
-    for (const arm of index === 0 ? ["baseline", "routed"] : ["routed", "baseline"]) {
-      const dir = path.join(folder, `${c.id}-${arm}`);
-      await mkdir(dir);
-      const target = path.join(dir, "solution.mjs");
-      await writeFile(
-        target,
-        c.id === "cache"
-          ? "export function createCache(now){const m=new Map();let lifetime=0;return {set(k,v,ttl){lifetime=ttl;m.set(k,{v,start:now()});},get(k){const e=m.get(k);return e&&now()-e.start<=lifetime?e.v:undefined},has(k){return this.get(k)!==undefined}}}\n"
-          : `export function ${c.name}(){throw new Error("Not implemented");}\n`,
-      );
-      const check = path.join(folder, `${c.id}-${arm}-check.mjs`);
-      await writeFile(
-        check,
-        `import assert from 'node:assert/strict';import {${c.name} as fn} from ${JSON.stringify(target)};${c.test}\nconsole.log("${c.id}: independent checks passed");\n`,
-      );
-      const before = await runChecks(
-        repo,
-        [{ argv: [process.execPath, check], timeoutMs: 5000 }],
-        new AbortController().signal,
-      );
-      if (before[0].exitCode === 0) throw new Error("Fixture must fail before work");
-      const relative = path.relative(repo, target);
-      const goal = `${c.brief}\nEdit only ${relative}. This is a synthetic fixture; do not inspect unrelated repositories or files.`;
-      const acceptance =
-        "The independent external validation command must pass. Do not edit any test or other path.";
-      const startedAt = Date.now();
-      const parent = await api.agents.create({
-        cwd: repo,
-        config: config(baseline),
-        title: `Jev measured ${c.id} ${arm}`,
-        env: arm === "baseline" ? { PASEO_ORCH_CHILD: "1" } : undefined,
-      });
-      parents.push(parent.id);
-      if (parent.workspaceId) testWorkspaces.add(parent.workspaceId);
-      const record: Record<string, unknown> = {
-        case: c.id,
-        arm,
-        parentId: parent.id,
-        startedAt,
-        beforeExit: before[0].exitCode,
-      };
-      results.push(record);
-      await save();
-      console.log(JSON.stringify({ case: c.id, arm, parentId: parent.id, status: "started" }));
-      if (arm === "baseline") {
-        const result = await parent.run(
-          `${goal}\n${acceptance}\nStay in the current workspace. No delegation, commit, push or worktree. Implement the fix, do not stop at a plan.`,
-          { timeoutMs: 300000 },
-        );
-        record.result = result;
-        record.profile = baseline;
-        record.latestUsage = parent.lastUsage;
-        record.observed = parent.runtimeInfo;
-      } else {
-        const delegation = {
-          tasks: [
-            {
-              id: c.id,
-              goal,
-              acceptance,
-              kind: "implementation",
-              files: [relative],
-              allowedProfileIds: allowed.map((p) => p.id),
-              checks: [{ argv: [process.execPath, check], timeoutMs: 10000 }],
-              shareWithJev: true,
-              discovery: c.discovery,
-              review: c.review,
-              maxAttempts: 2,
-              maxDurationMs: 480000,
-            },
-          ],
-        };
-        const submission = await parent.run(
-          `Call the injected delegate_task MCP tool exactly once with this JSON: ${JSON.stringify(delegation)}. Do not implement or run shell commands. After submission return only the task ID and stop. On a later completion notification, call orchestrator_status once and report its result without doing more work.`,
-          { timeoutMs: 120000 },
-        );
-        record.submissionStatus = submission.status;
-        while (Date.now() - startedAt < 520000) {
-          await delay(5000);
-          const data = (await dc.invokePluginRpc("jev-orchestrator", "jobs.list", {
-            parentId: parent.id,
-          })) as { jobs: Job[] };
-          const job = data.jobs.find((j) => j.task.id === c.id);
-          record.job = job;
-          await save();
-          if (
-            job &&
-            !["queued", "running"].includes(job.status) &&
-            (job.notificationCompleteAt || job.notifyError)
-          ) {
-            console.log(
-              JSON.stringify({
-                case: c.id,
-                arm,
-                status: job.status,
-                message: job.message,
-                attempts: job.attempts.map((a) => ({
-                  phase: a.phase,
-                  profile: a.profile.name,
-                  status: a.status,
-                })),
-              }),
-            );
-            break;
-          }
-        }
-      }
-      // The job becomes terminal before notify() has submitted the parent's completion turn.
-      // Above we wait for notificationCompleteAt; now include that parent turn before measuring.
-      if (arm === "routed") {
-        const completion = await parent.waitForFinish(120000);
-        record.parentCompletionStatus = completion.status;
-      }
-      await parent.refresh();
-      const components: { id: string; role: string; usage: TokenUsage }[] = [
-        { id: parent.id, role: "parent", usage: await readAgentUsage(parent.current()) },
-      ];
-      const job = record.job as Job | undefined;
-      if (arm === "routed" && !job) {
-        components.push({
-          id: "missing-job",
-          role: "orchestrator",
-          usage: missingUsage("harness", "Parent did not submit a job."),
-        });
-      }
-      for (const attempt of job?.attempts ?? []) {
-        const child = api.agents.ref(attempt.childId);
-        await child.refresh();
-        components.push({
-          id: child.id,
-          role: attempt.phase,
-          usage: await readAgentUsage(child.current()),
-        });
-      }
-      for (const [i, evaluation] of (job?.evaluations ?? []).entries()) {
-        components.push({
-          id: `${job!.key}:jev:${i}`,
-          role: `jev-${evaluation.phase}`,
-          usage: evaluation.usage,
-        });
-      }
-      record.workflowUsage = summarizeUsage(components);
-      record.wallMs = Date.now() - startedAt;
-      record.checks = await runChecks(
-        repo,
-        [{ argv: [process.execPath, check], timeoutMs: 10000 }],
-        new AbortController().signal,
-      );
-      record.source = await readFile(target, "utf8");
-      await save();
-      // Reconcile after closure: provider logs can flush the final request after idle is emitted.
-      record.workflowUsageBeforeArchive = structuredClone(record.workflowUsage);
-      await parent.archive();
-      for (const component of components) {
-        if (component.role.startsWith("jev-") || component.id === "missing-job") continue;
-        const actor = api.agents.ref(component.id);
-        await actor.refresh();
-        if (!actor.archivedAt) await actor.archive();
-        await actor.refresh();
-        component.usage = await readAgentUsage(actor.current());
-      }
-      record.workflowUsage = summarizeUsage(components);
-      record.accountingCollectedAfterArchive = true;
-      await save();
-      console.log(
-        JSON.stringify({
-          case: c.id,
-          arm,
-          wallMs: record.wallMs,
-          exitCode: (record.checks as { exitCode: number }[])[0].exitCode,
-          workflowUsage: record.workflowUsage,
-        }),
-      );
-    }
+    for (const arm of index === 0 ? ["baseline", "routed"] : ["routed", "baseline"])
+      await runCase(c, arm, baseline, allowed);
 } catch (error) {
   results.push({ error: error instanceof Error ? error.message : "Live harness failed" });
   await save();
