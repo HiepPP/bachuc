@@ -1,56 +1,49 @@
-import { useRpc, type PluginButtonContentProps } from "@getpaseo/plugin/client";
-import { SettingsCard, SettingsSelect, SettingsSwitch } from "@getpaseo/plugin/client/ui";
-import { useEffect, useState } from "react";
+import type { PluginButtonContentProps, PluginButtonLabelProps } from "@getpaseo/plugin/client";
 import { Text, View } from "react-native";
-import { modeReadRpc, modeWriteRpc } from "../shared/contracts";
-import { cavemanModeSchema } from "../shared/settings";
-import { modes, type Mode } from "./modes";
+import { MenuRow } from "./menu-row";
+import { modes } from "./modes";
+import { usePromptPrefs } from "./prefs";
 
-type Prefs = { mode: Mode; rewrite: boolean };
+/** The pill names the Caveman mode of its own composer. */
+export function PromptPillLabel(props: PluginButtonLabelProps) {
+  const { prefs } = usePromptPrefs(props);
+  const mode = modes.find((candidate) => candidate.value === prefs?.mode);
+  return mode ? `Caveman: ${mode.label}` : "Caveman";
+}
 
 // Opened from the shared composer pill; the button context names the composer's agent.
-export function PromptPrefsPopover(props: PluginButtonContentProps) {
-  const agentId = props.context === "agent" ? props.agentId : undefined;
-  const read = useRpc(modeReadRpc);
-  const write = useRpc(modeWriteRpc);
-  const [prefs, setPrefs] = useState<Prefs | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!agentId) return;
-    let active = true;
-    read({ agentId })
-      .then((value) => active && setPrefs(value))
-      .catch((failure: unknown) => active && setError(String(failure)));
-    return () => {
-      active = false;
-    };
-  }, [agentId, read]);
-  const save = (patch: Partial<Prefs>) => {
-    if (!agentId || !prefs) return;
-    setPrefs({ ...prefs, ...patch });
-    write({ agentId, ...patch })
-      .then(setPrefs)
-      .catch((failure: unknown) => setError(String(failure)));
-  };
+export function CavemanModeMenu(props: PluginButtonContentProps) {
+  const { theme, layout, close } = props;
+  const { prefs, error, save } = usePromptPrefs(props);
   return (
-    <View style={{ padding: 8, minWidth: 280 }}>
-      {error ? <Text style={{ color: props.theme.colors.foregroundMuted }}>{error}</Text> : null}
-      <SettingsCard>
-        <SettingsSwitch
-          label="Rewrite Vietnamese to English"
-          hint="Sends a Vietnamese draft as a clear English prompt."
-          value={prefs?.rewrite ?? false}
+    <View accessibilityRole="menu" style={{ paddingVertical: 4 }}>
+      {error ? (
+        <Text
+          style={{
+            paddingHorizontal: 13,
+            paddingVertical: 4,
+            color: theme.colors.statusDanger,
+            fontSize: 12,
+            lineHeight: 16,
+          }}
+        >
+          {error}
+        </Text>
+      ) : null}
+      {modes.map((mode) => (
+        <MenuRow
+          key={mode.value}
+          theme={theme}
+          compact={layout.compact}
+          label={mode.label}
+          selected={prefs?.mode === mode.value}
           disabled={!prefs}
-          onValueChange={(rewrite) => save({ rewrite })}
+          onPress={() => {
+            save({ mode: mode.value });
+            close();
+          }}
         />
-        <SettingsSelect
-          label="Caveman mode"
-          value={prefs?.mode ?? "follow-agent"}
-          options={modes.map(({ label, value }) => ({ label, value }))}
-          disabled={!prefs}
-          onValueChange={(mode) => save({ mode: cavemanModeSchema.parse(mode) })}
-        />
-      </SettingsCard>
+      ))}
     </View>
   );
 }

@@ -91,7 +91,9 @@ import type { AutocompleteOption } from "@/components/ui/autocomplete";
 import { useAgentAutocomplete } from "@/hooks/use-agent-autocomplete";
 import { usePluginClientSlashCommands } from "@/plugins/client-slash-commands";
 import { createPluginClientStateSource } from "@/plugins/client-state/source";
+import { PluginComposerToolbarPills } from "@/plugins/buttons/view";
 import { registerComposerHandle, runComposerInterceptors } from "@/plugins/composer";
+import type { PluginComposerDraftState } from "@/plugins/composer/draft";
 import { pluginRegistry } from "@/plugins/registry";
 import {
   executePluginClientSlashCommand,
@@ -319,26 +321,43 @@ function resolveContextWindowPlacement(
 
 interface RenderLeftContentArgs {
   agentControls: DraftAgentControlsProps | undefined;
+  pluginDraft: PluginComposerDraftState | undefined;
   agentId: string;
   serverId: string;
+  workspaceId: string | null | undefined;
   focusInput: () => void;
   isCompactLayout: boolean;
   showAgentControls: boolean;
 }
 
 function renderLeftContent(args: RenderLeftContentArgs): ReactElement | null {
-  const { agentControls, agentId, serverId, focusInput, isCompactLayout } = args;
+  const { agentControls, pluginDraft, agentId, serverId, focusInput, isCompactLayout } = args;
   if (!args.showAgentControls) return null;
   if (resolveAgentControlsMode(agentControls) === "draft" && agentControls) {
-    return <DraftAgentControls {...agentControls} isCompactLayout={isCompactLayout} />;
+    return (
+      <>
+        {/* A draft without plugin preferences has no agent for a pill to address. */}
+        {pluginDraft ? (
+          <PluginComposerToolbarPills serverId={serverId} draft={pluginDraft} />
+        ) : null}
+        <DraftAgentControls {...agentControls} isCompactLayout={isCompactLayout} />
+      </>
+    );
   }
   return (
-    <AgentControls
-      agentId={agentId}
-      serverId={serverId}
-      onDropdownClose={focusInput}
-      isCompactLayout={isCompactLayout}
-    />
+    <>
+      <PluginComposerToolbarPills
+        serverId={serverId}
+        workspaceId={args.workspaceId}
+        agentId={agentId}
+      />
+      <AgentControls
+        agentId={agentId}
+        serverId={serverId}
+        onDropdownClose={focusInput}
+        isCompactLayout={isCompactLayout}
+      />
+    </>
   );
 }
 
@@ -941,6 +960,8 @@ function GithubPickerOption({
 }
 
 interface ComposerProps {
+  /** New workspace preferences that plugin pills edit before the agent exists. */
+  pluginDraft?: PluginComposerDraftState;
   agentId: string;
   serverId: string;
   workspaceId?: string | null;
@@ -1243,6 +1264,7 @@ const ComposerContent = memo(ComposerContentImpl);
 
 // oxlint-disable-next-line complexity
 function ComposerContentImpl({
+  pluginDraft,
   agentId,
   serverId,
   workspaceId,
@@ -1442,6 +1464,7 @@ function ComposerContentImpl({
         serverId,
         workspaceId: workspaceId ?? null,
         agentId: isAgent ? agentId : null,
+        draftValues: isAgent ? undefined : pluginDraft?.snapshot(),
       };
       setIsProcessing(true);
       try {
@@ -1454,7 +1477,7 @@ function ComposerContentImpl({
         setIsProcessing(false);
       }
     },
-    [agentId, inputMode, serverId, workspaceId],
+    [agentId, inputMode, serverId, workspaceId, pluginDraft],
   );
 
   const runClientSlashCommand = useCallback(
@@ -2274,13 +2297,24 @@ function ComposerContentImpl({
     () =>
       renderLeftContent({
         agentControls,
+        pluginDraft,
         agentId,
         serverId,
+        workspaceId,
         focusInput,
         isCompactLayout,
         showAgentControls: mode.showAgentControls,
       }),
-    [agentControls, agentId, focusInput, isCompactLayout, mode.showAgentControls, serverId],
+    [
+      agentControls,
+      pluginDraft,
+      agentId,
+      focusInput,
+      isCompactLayout,
+      mode.showAgentControls,
+      serverId,
+      workspaceId,
+    ],
   );
 
   const handleAttachButtonRef = useCallback((node: View | null) => {

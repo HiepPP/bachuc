@@ -1,3 +1,6 @@
+import { seedDraftSkills } from "../server/draft";
+import { draftEnvKey } from "../shared/draft";
+import type { PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readdir } from "node:fs/promises";
@@ -71,4 +74,28 @@ test("seed writes the initial set only when no selection exists", async () => {
   await pins.set(id, []);
   await pins.seed(id, ["sequential-thinking"]);
   assert.deepEqual(await pins.get(id), { skills: [] });
+});
+
+test("New workspace keeps explicit empty skills and strips bootstrap env before provider launch", async () => {
+  const { pins } = await fixture();
+  const initial: PluginSessionOpenRequest = {
+    agentId: A,
+    workspaceId: null,
+    provider: "codex",
+    cwd: "/tmp",
+    reason: "create",
+    purpose: "interactive",
+    env: { KEEP: "1", [draftEnvKey]: JSON.stringify({ skills: [] }) },
+  };
+  const defaults = async () => ["watchtower"] as const;
+  const opened = await seedDraftSkills(initial, pins, async () => [...(await defaults())]);
+  assert.deepEqual(await pins.get(A), { skills: [] });
+  assert.deepEqual(opened.env, { KEEP: "1" });
+  await pins.set(A, ["sequential-thinking"]);
+  await seedDraftSkills(initial, pins, async () => ["watchtower"]);
+  await seedDraftSkills({ ...initial, reason: "resume" }, pins, async () => ["watchtower"]);
+  assert.deepEqual(await pins.get(A), { skills: ["sequential-thinking"] });
+  const second = { ...initial, agentId: "00000000-0000-4000-8000-000000000002", env: {} };
+  await seedDraftSkills(second, pins, async () => ["watchtower"]);
+  assert.deepEqual(await pins.get(second.agentId), { skills: ["watchtower"] });
 });

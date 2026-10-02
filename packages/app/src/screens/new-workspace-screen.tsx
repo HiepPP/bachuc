@@ -61,6 +61,8 @@ import {
 } from "@/stores/navigation-active-workspace-store";
 import { normalizeWorkspaceDescriptor, type WorkspaceDescriptor } from "@/stores/session-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
+import { PluginDraftComposerPills } from "@/plugins/buttons/view";
+import { usePluginComposerDraft } from "@/plugins/composer/draft";
 import { buildNewWorkspaceDraftKey, generateDraftId } from "@/stores/draft-keys";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { isActiveCreateFlowForDraft, useCreateFlowStore } from "@/stores/create-flow-store";
@@ -857,6 +859,7 @@ async function createMultiplicityWorkspace(input: {
 }
 
 interface CreateChatAgentInput {
+  pluginEnvironment?: Record<string, string>;
   payload: MessagePayload;
   composerState: ReturnType<typeof useAgentInputDraft>["composerState"];
   forkDraftSetup?: PendingWorkspaceDraftSetup | null;
@@ -975,6 +978,7 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
       thinkingOptionId: composerState.effectiveThinkingOptionId || undefined,
       featureValues: composerState.featureValues,
     },
+    env: input.pluginEnvironment,
     initialPrompt: text,
     clientMessageId: `${input.draftId}:initial-message`,
     images: images?.length ? images : undefined,
@@ -1761,6 +1765,7 @@ export function NewWorkspaceScreen({
     projects: projectIconTargets,
   });
   const draftKey = buildNewWorkspaceDraftKey(draftId);
+  const pluginDraft = usePluginComposerDraft(selectedServerId, draftKey);
   const forkDraftSetup = usePendingWorkspaceDraftSetup(draftId);
   const draftContextScopeKey = useDraftWorkspaceAttachmentScopeKey(draftId);
   const visibleDraftContextScopeKeys = useMemo(
@@ -2134,6 +2139,7 @@ export function NewWorkspaceScreen({
 
         setPendingAction("chat");
         const outcome = await runCreateChatAgent({
+          pluginEnvironment: pluginDraft.environment(),
           payload,
           composerState,
           forkDraftSetup,
@@ -2163,6 +2169,7 @@ export function NewWorkspaceScreen({
     },
     [
       composerState,
+      pluginDraft,
       draftContextScopeKey,
       creationIdentity,
       chatDraft.clear,
@@ -2399,6 +2406,7 @@ export function NewWorkspaceScreen({
   ) : (
     <Composer
       key="chat"
+      pluginDraft={pluginDraft}
       agentId={draftKey}
       serverId={selectedServerId}
       isPaneFocused={true}
@@ -2437,6 +2445,12 @@ export function NewWorkspaceScreen({
           title={t("newWorkspace.title")}
           formStack={formStack}
         >
+          <PluginDraftComposerPills
+            serverId={selectedServerId}
+            draft={pluginDraft}
+            compact={isCompact}
+            hidden={isTerminalLaunch}
+          />
           {composer}
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
         </NewWorkspaceLayout>

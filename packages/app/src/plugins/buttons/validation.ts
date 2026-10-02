@@ -1,4 +1,9 @@
-import type { PluginButton, PluginButtonBehavior, PluginButtonIcon } from "@getpaseo/plugin/client";
+import type {
+  PluginButton,
+  PluginButtonBehavior,
+  PluginButtonIcon,
+  PluginComposerPillButton,
+} from "@getpaseo/plugin/client";
 
 export interface ButtonValidation {
   validateIconName(name: string): void;
@@ -73,21 +78,30 @@ function validateBehavior(
   }
 }
 
-export type ResolvedPluginButton = PluginButton & {
+function validateLabel(label: PluginButton["label"]): PluginButton["label"] {
+  if (label === undefined) return undefined;
+  if (typeof label === "string") return requireText(label, "label");
+  if (!isComponent(label)) throw new Error("Plugin button label must be text or a component");
+  return label;
+}
+
+export type ResolvedPluginButton = PluginComposerPillButton & {
   visible: boolean;
   disabled: boolean;
-  label: string | undefined;
 };
 
+/** Header buttons collapse to their icon, so they need one. Composer pills always show text. */
 export function validateButton(
-  button: PluginButton,
+  button: PluginComposerPillButton,
   validation: ButtonValidation,
+  requireIcon: boolean,
 ): ResolvedPluginButton {
-  validateIcon(button.icon, validation);
+  if (button.icon !== undefined) validateIcon(button.icon, validation);
+  else if (requireIcon) throw new Error("Plugin button needs icon");
   return {
     ...button,
     title: requireText(button.title, "title"),
-    label: button.label === undefined ? undefined : requireText(button.label, "label"),
+    label: validateLabel(button.label),
     visible: optionalBoolean(button.visible, true),
     disabled: optionalBoolean(button.disabled, false),
     behavior: validateBehavior(button.behavior, validation),

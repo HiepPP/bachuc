@@ -1,54 +1,58 @@
-import { useRpc, type PluginButtonContentProps } from "@getpaseo/plugin/client";
-import { SettingsCard, SettingsSwitch } from "@getpaseo/plugin/client/ui";
-import { useCallback, useEffect, useState } from "react";
+import type { PluginButtonContentProps, PluginButtonLabelProps } from "@getpaseo/plugin/client";
 import { Text, View } from "react-native";
-import { catalog, type SkillId } from "../shared/catalog";
-import { skillsReadRpc, skillsWriteRpc } from "../shared/contracts";
+import { catalog, pillLabel } from "../shared/catalog";
+import { MenuRow } from "./menu-row";
+import { useSkillPins } from "./pins";
 
-// Shown from the shared composer pill; `agentId` is the composer the pill belongs to.
-export function SkillsPopover(props: PluginButtonContentProps) {
-  const { theme } = props;
-  const id = props.context === "agent" ? props.agentId : undefined;
-  const read = useRpc(skillsReadRpc);
-  const write = useRpc(skillsWriteRpc);
-  const [skills, setSkills] = useState<SkillId[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!id) return;
-    let active = true;
-    read({ agentId: id })
-      .then((value) => active && setSkills(value.skills))
-      .catch((failure: unknown) => active && setError(String(failure)));
-    return () => {
-      active = false;
-    };
-  }, [id, read]);
-  const toggle = useCallback(
-    (skill: SkillId, on: boolean) => {
-      if (!id || !skills) return;
-      const next = on ? [...skills, skill] : skills.filter((value) => value !== skill);
-      setSkills(next);
-      write({ agentId: id, skills: next })
-        .then((saved) => setSkills(saved.skills))
-        .catch((failure: unknown) => setError(String(failure)));
-    },
-    [id, skills, write],
-  );
+/** The pill names the skills pinned on its own composer. */
+export function SkillsPillLabel(props: PluginButtonLabelProps) {
+  return pillLabel(useSkillPins(props).skills ?? []);
+}
+
+// Shown from the shared composer pill; the button context names the composer it belongs to.
+export function SkillsMenu(props: PluginButtonContentProps) {
+  const { theme, layout } = props;
+  const { skills, error, save } = useSkillPins(props);
+  const pinned = skills ?? [];
+  const note = { paddingHorizontal: 13, fontSize: 12, lineHeight: 16 } as const;
   return (
-    <View style={{ padding: 8, minWidth: 260 }}>
-      {error ? <Text style={{ color: theme.colors.foregroundMuted }}>{error}</Text> : null}
-      <SettingsCard>
-        {catalog.map((skill) => (
-          <SettingsSwitch
+    <View accessibilityRole="menu" style={{ paddingVertical: 4 }}>
+      <Text
+        style={{ ...note, paddingTop: 8, paddingBottom: 4, color: theme.colors.foregroundMuted }}
+      >
+        Pinned for this chat
+      </Text>
+      {error ? (
+        <Text style={{ ...note, paddingBottom: 4, color: theme.colors.statusDanger }}>{error}</Text>
+      ) : null}
+      {catalog.map((skill) => {
+        const selected = pinned.includes(skill.id);
+        return (
+          // Toggling keeps the menu open so several skills can be picked in a row.
+          <MenuRow
             key={skill.id}
+            theme={theme}
+            compact={layout.compact}
             label={skill.label}
-            hint={"warn" in skill ? skill.warn : skill.description}
-            value={skills?.includes(skill.id) ?? false}
+            description={skill.description}
+            warn={"warn" in skill ? skill.warn : undefined}
+            selected={selected}
             disabled={!skills}
-            onValueChange={(on) => toggle(skill.id, on)}
+            onPress={() =>
+              save(selected ? pinned.filter((id) => id !== skill.id) : [...pinned, skill.id])
+            }
           />
-        ))}
-      </SettingsCard>
+        );
+      })}
+      <View style={{ height: 1, marginVertical: 4, backgroundColor: theme.colors.border }} />
+      <MenuRow
+        theme={theme}
+        compact={layout.compact}
+        label="Bỏ chọn tất cả"
+        muted
+        disabled={pinned.length === 0}
+        onPress={() => save([])}
+      />
     </View>
   );
 }

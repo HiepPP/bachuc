@@ -31,6 +31,12 @@ export const catalog = [
 
 export type SkillId = (typeof catalog)[number]["id"];
 
+/** Pill text: the pinned skills' short names in catalog order, or "Skills" when none are pinned. */
+export function pillLabel(skills: readonly SkillId[]) {
+  const pinned = catalog.filter((skill) => skills.includes(skill.id));
+  return pinned.length ? pinned.map((skill) => skill.short).join(" · ") : "Skills";
+}
+
 const ids = catalog.map((skill) => skill.id) as [SkillId, ...SkillId[]];
 export const skillIdSchema = z.enum(ids);
 // Stored and sent in catalog order without duplicates, so equal selections compare equal.

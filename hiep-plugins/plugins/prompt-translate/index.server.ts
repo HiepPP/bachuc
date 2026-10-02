@@ -13,6 +13,7 @@ import { translateSettings } from "./shared/settings";
 import { resolveEndpoint } from "./server/credentials";
 import { createCompleter } from "./server/llm";
 import { createService } from "./server/service";
+import { seedDraftPrefs } from "./server/draft";
 import { AgentModes } from "./server/modes";
 import { Store } from "./server/store";
 import { withBridgeCavemanEnv } from "./server/session-env";
@@ -52,10 +53,8 @@ export default function contribute(server: PluginServerContext) {
   server.handle(enhanceRpc, (input) => service.enhance(input));
   server.handle(originalRpc, (input) => service.original(input));
   const sessionOpen = server.before("agent.session_open", async ({ request }) => {
-    // New agents start with the host's new-thread mode; later changes stay per agent.
-    if (request.reason === "create" && (await modes.find(request.agentId)) === null)
-      await modes.update(request.agentId, { mode: (await readSettings()).cavemanMode });
-    return withBridgeCavemanEnv(request, dataDir);
+    const seeded = await seedDraftPrefs(request, modes, readSettings);
+    return withBridgeCavemanEnv(seeded, dataDir) ?? seeded;
   });
   const prompt = server.before("agent.prompt", async ({ request }) => {
     if (request.kind !== "turn") return;

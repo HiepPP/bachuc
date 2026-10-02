@@ -14,11 +14,14 @@ flowchart LR
   C -->|appended context| D[Provider turn]
 ```
 
-- A shared composer pill, `Skills`, shows on every agent composer on desktop and mobile. Its
-  popover toggles each catalog skill for that agent and saves at once.
+- A shared composer pill shows on every agent composer: in the toolbar beside the model
+  selector on desktop, in the track above the composer on mobile. Its label is `Skills`, or the
+  pinned skills' short names (`Watch · Seq`). Its menu toggles each catalog skill for that agent
+  and saves at once; **Bỏ chọn tất cả** clears them.
 - The daemon `agent.prompt` hook appends the pin context to each turn of Claude and Codex agents.
   Steers get no context. A skill named in the prompt (`/id` or `$id`) is left out for that turn.
-- New agents start with the host defaults from **Settings → Skill pins**.
+- New workspace also shows **Skills**. Draft choices, including an empty selection, transfer
+  before the first prompt. Untouched drafts use **Settings → Skill pins** defaults.
 - Queued prompts use the selection at send time.
 - State lives in `$PASEO_HOME/plugin-data/skill-pins/v2/agents/<id>/skills.json`. Archiving an
   agent deletes its folder.

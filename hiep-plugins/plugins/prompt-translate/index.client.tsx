@@ -1,11 +1,11 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { settingsRpc } from "@getpaseo/plugin";
-import { enhanceRpc, modeReadRpc, originalRpc, translateRpc } from "./shared/contracts";
+import { enhanceRpc, originalRpc, translateRpc } from "./shared/contracts";
 import { translateSettings } from "./shared/settings";
 import { hasVietnamese } from "./shared/vietnamese";
 import { createNoteCache } from "./client/notes";
 import { createNoteView, noteSchema } from "./client/note-view";
-import { PromptPrefsPopover } from "./client/prompt-pill";
+import { CavemanModeMenu, PromptPillLabel } from "./client/prompt-pill";
 import { TranslateSettingsScreen } from "./client/settings";
 import { current } from "./client/state";
 
@@ -41,22 +41,20 @@ export default function contribute(client: PluginClientContext) {
   });
   const interceptor = client.addComposerInterceptor({
     id: "rewrite-english",
-    async intercept({ target, text }) {
-      if (!hasVietnamese(text)) return undefined;
-      const rewrite = target.agentId
-        ? (await client.rpc(modeReadRpc, { agentId: target.agentId })).rewrite
-        : current.values.enhanceShortcut;
-      if (!rewrite) return undefined;
+    async intercept({ text }) {
+      // The host setting decides; the pill only picks the Caveman mode.
+      if (!current.values.enhanceShortcut || !hasVietnamese(text)) return undefined;
       return { text: (await client.rpc(enhanceRpc, { text, deferCaveman: true })).prompt };
     },
   });
   const pill = client.addComposerPill({
     id: "prompt-prefs",
+    showOnDraft: true,
+    placement: "toolbar",
     button: {
-      title: "Prompt language and Caveman mode",
-      icon: "Languages",
-      label: "Prompt",
-      behavior: { kind: "popover", Content: PromptPrefsPopover },
+      title: "Caveman mode",
+      label: PromptPillLabel,
+      behavior: { kind: "popover", Content: CavemanModeMenu, flush: true },
     },
   });
   const settings = client.addSettingsScreen({

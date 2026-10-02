@@ -4,6 +4,7 @@ import path from "node:path";
 import { skillsReadRpc, skillsWriteRpc } from "./shared/contracts";
 import { pinSettings } from "./shared/settings";
 import { appendContext, promptText, requested, skillContext } from "./server/context";
+import { seedDraftSkills } from "./server/draft";
 import { SkillPins } from "./server/state";
 
 export default function contribute(server: PluginServerContext) {
@@ -20,11 +21,7 @@ export default function contribute(server: PluginServerContext) {
   };
   // New agents start with the host defaults. Existing selections are never replaced.
   const open = server.before("agent.session_open", async ({ request }) => {
-    if (request.reason === "create" && request.purpose === "interactive")
-      await pins
-        .seed(request.agentId, await defaults())
-        .catch((error) => console.warn("[skill-pins] Initial pins failed", error));
-    return request;
+    return seedDraftSkills(request, pins, defaults);
   });
   const prompt = server.before("agent.prompt", async ({ request }) => {
     if (request.kind !== "turn") return;

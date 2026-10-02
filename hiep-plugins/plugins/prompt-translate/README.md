@@ -5,17 +5,19 @@ Requires the Paseo fork `>=0.10.2-beta.900`; the stable 0.10.1 host refuses the 
 
 - Each Vietnamese prompt shows its English translation under the user bubble, labeled `EN`.
   Prompts sent before translation was turned on use cached translations only.
-- The composer's **Prompt** pill has two per-conversation choices: **Rewrite Vietnamese to
-  English** and **Caveman mode**. With rewrite on, a Vietnamese draft is rewritten as a clear
-  English prompt before it is sent or queued. The bubble then shows your original, labeled
+- The composer toolbar's **Caveman: <mode>** pill, beside the model selector, opens a menu of
+  Caveman modes for that conversation. Its label names the chosen mode. Compact layouts show
+  the pill in the track above the composer.
+- With **Rewrite Vietnamese to English** on in the plugin settings, a Vietnamese draft is
+  rewritten as a clear English prompt before it is sent or queued. The bubble then shows your original, labeled
   `VI gốc`. A failed rewrite keeps the draft and shows the error.
 - **Match original language** asks the agent to answer in Vietnamese for Vietnamese drafts,
   including rewritten ones, unless you asked for another language or a mode sets one.
 - Caveman mode and the reply-language line are added by the daemon `agent.prompt` hook to each
   turn of Claude and Codex agents. The timeline keeps the text you sent. Explicit `/caveman` or
   `$caveman` commands in the draft take priority for that turn.
-- New agents start with the host's **New-thread Caveman mode**. Composers without an agent use
-  the host's **Rewrite Vietnamese drafts to English** default.
+- New workspace shows the same pill. The draft's mode overrides the host default and
+  transfers to the created thread before its first prompt. It stays local until creation.
 - Per-agent choices live in `$PASEO_HOME/plugin-data/prompt-translate/v2/agents/<id>/mode.json`.
   The `v2` folder keeps an old native hook from another checkout silent for this host's agents.
 

@@ -2,6 +2,7 @@ import { PluginClientStateProvider } from "@getpaseo/plugin/client/host";
 import type {
   PluginButtonBehavior,
   PluginButtonIcon,
+  PluginButtonLabel,
   PluginButtonMenuEntry,
   PluginHostProps,
 } from "@getpaseo/plugin/client";
@@ -38,8 +39,14 @@ import { Icon } from "../icons";
 import { PluginRuntimeBoundary } from "../runtime-boundary";
 import { SurfaceErrorBoundary } from "../surface-error-boundary";
 import { toPluginTheme } from "../theme";
-import { buttonMatches, resolveButtonForContext, type RegisteredPluginButton } from "./model";
+import {
+  buttonInToolbar,
+  buttonMatches,
+  resolveButtonForContext,
+  type RegisteredPluginButton,
+} from "./model";
 import { pluginButtonStore } from "./store";
+import type { PluginComposerDraftState } from "../composer/draft";
 
 interface ButtonView {
   entry: RegisteredPluginButton;
@@ -114,6 +121,10 @@ function renderCustomIcon(
   return <CustomIcon {...view.props} size={size} color={color} />;
 }
 
+function renderCustomLabel(CustomLabel: Exclude<PluginButtonLabel, string>, view: ButtonView) {
+  return <CustomLabel {...view.props} />;
+}
+
 function pressButton(view: ButtonView, path: readonly string[]) {
   void pluginButtonStore.run(view.entry.key, path, view.entry.context).catch((error: unknown) => {
     view.toast.error(error instanceof Error ? error.message : String(error));
@@ -184,7 +195,7 @@ function ButtonBody({
   if (behavior.kind === "popover") {
     const Content = behavior.Content;
     return (
-      <View style={styles.content}>
+      <View style={behavior.flush ? undefined : styles.content}>
         <Content {...view.props} close={close} />
       </View>
     );
@@ -252,18 +263,35 @@ function buttonPages(
   });
 }
 
+function renderButtonIcon(view: ButtonView) {
+  const { icon } = view.entry.button;
+  return icon === undefined ? null : <ButtonIcon view={view} icon={icon} />;
+}
+
+function resolveLabel(view: ButtonView, composer: boolean): PluginButtonLabel | undefined {
+  const { label, title } = view.entry.button;
+  if (composer) return label ?? title;
+  return view.props.layout.compact ? undefined : label;
+}
+
+function resolveLabelStyle(composer: boolean, toolbar: boolean) {
+  if (toolbar) return styles.toolbarLabel;
+  return composer ? styles.composerLabel : styles.label;
+}
+
 function ButtonControl({ view }: { view: ButtonView }) {
   const { entry, props } = view;
   const { button } = entry;
   const composer = entry.placement === "composer";
+  const toolbar = buttonInToolbar(entry, props.layout.compact);
   const disabled = button.disabled || entry.pending;
   const expanded = button.behavior.kind !== "action";
-  const chevron = !composer && !props.layout.compact && expanded;
-  let label = button.label;
-  if (composer) label = button.label ?? button.title;
-  else if (props.layout.compact) label = undefined;
+  const chevron = (toolbar || !composer) && !props.layout.compact && expanded;
+  const label = resolveLabel(view, composer);
   const press = useCallback(() => pressButton(view, []), [view]);
-  const contextKey = entry.context.context === "agent" ? entry.context.agentId : undefined;
+  let contextKey: string | undefined;
+  if (entry.context.context === "agent") contextKey = entry.context.agentId;
+  if (entry.context.context === "draft") contextKey = entry.context.draft.id;
   const setOpen = useCallback(
     (open: boolean) => pluginButtonStore.setOpen(entry.key, open, contextKey),
     [contextKey, entry.key],
@@ -272,14 +300,14 @@ function ButtonControl({ view }: { view: ButtonView }) {
     ({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) =>
       composer
         ? [
-            composerPillStyles.body,
-            styles.button,
+            toolbar ? styles.toolbarButton : [composerPillStyles.body, styles.button],
             (hovered || pressed || entry.open) && styles.active,
             disabled && styles.disabled,
           ]
         : headerButtonStyle(props.layout.compact, { hovered, pressed, open: entry.open }, disabled),
-    [composer, disabled, entry.open, props.layout.compact],
+    [composer, toolbar, disabled, entry.open, props.layout.compact],
   );
+  const labelStyle = resolveLabelStyle(composer, toolbar);
   const contents = (
     <>
       {entry.pending ? (
@@ -287,11 +315,11 @@ function ButtonControl({ view }: { view: ButtonView }) {
           <LoadingSpinner size={14} color={props.theme.colors.foregroundMuted} />
         </View>
       ) : (
-        <ButtonIcon view={view} icon={button.icon} />
+        renderButtonIcon(view)
       )}
       {label ? (
-        <Text numberOfLines={1} style={composer ? styles.composerLabel : styles.label}>
-          {label}
+        <Text numberOfLines={1} style={labelStyle}>
+          {typeof label === "string" ? label : renderCustomLabel(label, view)}
         </Text>
       ) : null}
       {chevron ? (
@@ -528,18 +556,28 @@ function OverflowPages({
 
 const ThemedOverflowPages = withUnistyles(OverflowPages);
 
-function useButtons(serverId: string, workspaceId: string, agentId: string | null) {
+function useButtons(
+  serverId: string,
+  workspaceId: string,
+  agentId: string | null,
+  toolbar = false,
+) {
   const entries = useSyncExternalStore(
     pluginButtonStore.subscribe,
     pluginButtonStore.getSnapshot,
     pluginButtonStore.getSnapshot,
   );
+  const compact = useIsCompactFormFactor();
   return useMemo(
     () =>
       entries
-        .filter((entry) => buttonMatches(entry, serverId, workspaceId, agentId))
+        .filter(
+          (entry) =>
+            buttonMatches(entry, serverId, workspaceId, agentId) &&
+            buttonInToolbar(entry, compact) === toolbar,
+        )
         .map((entry) => resolveButtonForContext(entry, workspaceId, agentId)),
-    [entries, serverId, workspaceId, agentId],
+    [entries, serverId, workspaceId, agentId, compact, toolbar],
   );
 }
 
@@ -551,18 +589,21 @@ export function useHasPluginComposerPills(
   return useButtons(serverId, workspaceId, agentId).length > 0;
 }
 
+/** `toolbar` selects the pills that sit beside the model selector instead of the track bar. */
 export function PluginComposerPills({
   serverId,
   workspaceId,
   agentId,
   compact,
+  toolbar = false,
 }: {
   serverId: string;
   workspaceId: string;
   agentId: string;
   compact: boolean;
+  toolbar?: boolean;
 }) {
-  const entries = useButtons(serverId, workspaceId, agentId);
+  const entries = useButtons(serverId, workspaceId, agentId, toolbar);
   const hosts = useHosts();
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
   return entries.map((entry) => (
@@ -574,6 +615,91 @@ export function PluginComposerPills({
       uniProps={pluginThemeMapping}
     />
   ));
+}
+
+export function PluginDraftComposerPills({
+  serverId,
+  draft,
+  compact,
+  hidden = false,
+  toolbar = false,
+}: {
+  serverId: string;
+  draft: PluginComposerDraftState;
+  compact: boolean;
+  hidden?: boolean;
+  toolbar?: boolean;
+}) {
+  const entries = useSyncExternalStore(pluginButtonStore.subscribe, pluginButtonStore.getSnapshot);
+  const hosts = useHosts();
+  const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
+  const pills = useMemo(
+    () =>
+      entries
+        .filter(
+          (entry) =>
+            entry.installation.serverId === serverId &&
+            entry.placement === "composer" &&
+            entry.showOnDraft &&
+            entry.button.visible &&
+            buttonInToolbar(entry, compact) === toolbar &&
+            entry.context.context === "agent" &&
+            !entry.context.workspaceId &&
+            !entry.context.agentId,
+        )
+        // Each composer needs its own context; keep the shared registration unchanged.
+        // oxlint-disable-next-line no-map-spread
+        .map(
+          (entry): RegisteredPluginButton => ({
+            ...entry,
+            context: {
+              context: "draft",
+              workspaceId: "",
+              draft: draft.forPlugin(entry.installation.id),
+            },
+            open: entry.open && entry.openContextKey === draft.id,
+          }),
+        ),
+    [entries, serverId, draft, compact, toolbar],
+  );
+  if (hidden || !pills.length) return null;
+  const buttons = pills.map((entry) => (
+    <ThemedPluginButton
+      key={`${entry.key}:${draft.id}`}
+      entry={entry}
+      compact={compact}
+      hostLabel={hostLabel}
+      uniProps={pluginThemeMapping}
+    />
+  ));
+  return toolbar ? buttons : <View style={styles.draftPills}>{buttons}</View>;
+}
+
+/** The pills beside the model selector, for an agent composer or a New workspace draft. */
+export function PluginComposerToolbarPills({
+  serverId,
+  workspaceId,
+  agentId,
+  draft,
+}: {
+  serverId: string;
+  workspaceId?: string | null;
+  agentId?: string;
+  draft?: PluginComposerDraftState;
+}) {
+  if (useIsCompactFormFactor()) return null;
+  if (draft)
+    return <PluginDraftComposerPills serverId={serverId} draft={draft} compact={false} toolbar />;
+  if (!agentId) return null;
+  return (
+    <PluginComposerPills
+      serverId={serverId}
+      workspaceId={workspaceId ?? ""}
+      agentId={agentId}
+      compact={false}
+      toolbar
+    />
+  );
 }
 
 export function PluginHeaderButtons({
@@ -634,6 +760,7 @@ export function PluginHeaderButtons({
 }
 
 const styles = StyleSheet.create((theme) => ({
+  draftPills: { flexDirection: "row", gap: theme.spacing[1], paddingBottom: theme.spacing[2] },
   headerButtons: {
     flexDirection: "row",
     alignItems: "center",
@@ -652,6 +779,24 @@ const styles = StyleSheet.create((theme) => ({
     borderColor: theme.colors.borderAccent,
   },
   button: { flexShrink: 1, minWidth: 0, maxWidth: 160 },
+  // Matches the agent controls' badges so plugin pills read as part of the same toolbar. The pill
+  // keeps its width; the agent controls beside it already collapse to fit what is left.
+  toolbarButton: {
+    height: 28,
+    flexShrink: 0,
+    maxWidth: 240,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    marginRight: theme.spacing[1],
+    borderRadius: theme.borderRadius["2xl"],
+  },
+  toolbarLabel: {
+    fontSize: theme.fontSize.base,
+    color: theme.colors.foregroundMuted,
+    flexShrink: 1,
+  },
   active: { backgroundColor: theme.colors.surface2 },
   disabled: { opacity: theme.opacity[50] },
   tooltipLabel: { fontSize: theme.fontSize.sm, color: theme.colors.foreground },

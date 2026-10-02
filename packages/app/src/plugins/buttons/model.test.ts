@@ -2,7 +2,12 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import type { PluginButton } from "@getpaseo/plugin/client";
 import type { InstalledPlugin } from "../types";
-import { PluginButtonStore, buttonMatches, resolveButtonForContext } from "./model";
+import {
+  PluginButtonStore,
+  buttonInToolbar,
+  buttonMatches,
+  resolveButtonForContext,
+} from "./model";
 
 function installation(): InstalledPlugin {
   return {
@@ -213,5 +218,50 @@ describe("plugin buttons", () => {
     const shared = buttons.getSnapshot()[0];
     expect(resolveButtonForContext(shared, "workspace", "agent-1").open).toBe(true);
     expect(resolveButtonForContext(shared, "workspace", "agent-2").open).toBe(false);
+  });
+
+  it("keeps a toolbar pill in the toolbar on wide layouts and in the track bar on compact", () => {
+    const buttons = store();
+    const plugin = installation();
+    buttons.addComposerPill(plugin, { id: "skills", placement: "toolbar", button: button() });
+    buttons.addComposerPill(plugin, { id: "review", button: button() });
+    const [toolbar, track] = buttons.getSnapshot();
+    expect(buttonInToolbar(toolbar, false)).toBe(true);
+    expect(buttonInToolbar(toolbar, true)).toBe(false);
+    expect(buttonInToolbar(track, false)).toBe(false);
+  });
+
+  it("lets a composer pill omit its icon and keeps it required for a header button", () => {
+    const buttons = store();
+    const plugin = installation();
+    const { icon: _icon, ...iconless } = button();
+    const pill = buttons.addComposerPill(plugin, { id: "mode", button: iconless });
+    expect(buttons.getSnapshot()[0].button.icon).toBeUndefined();
+    pill.update({ label: "Caveman: Ultra" });
+    expect(buttons.getSnapshot()[0].button.label).toBe("Caveman: Ultra");
+    expect(() =>
+      buttons.addHeaderButton(plugin, {
+        id: "review",
+        workspaceId: "workspace",
+        button: iconless as PluginButton,
+      }),
+    ).toThrow("Plugin button needs icon");
+  });
+
+  it("accepts a component label and rejects an empty or invalid one", () => {
+    const buttons = store();
+    const plugin = installation();
+    const Label = () => "Caveman: Ultra";
+    buttons.addComposerPill(plugin, { id: "mode", button: { ...button(), label: Label } });
+    expect(buttons.getSnapshot()[0].button.label).toBe(Label);
+    expect(() =>
+      buttons.addComposerPill(plugin, { id: "empty", button: { ...button(), label: " " } }),
+    ).toThrow("Plugin button needs label");
+    expect(() =>
+      buttons.addComposerPill(plugin, {
+        id: "invalid",
+        button: { ...button(), label: 3 as unknown as string },
+      }),
+    ).toThrow("Plugin button label must be text or a component");
   });
 });

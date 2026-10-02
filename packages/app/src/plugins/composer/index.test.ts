@@ -1,3 +1,4 @@
+import { PluginComposerDraftState } from "./draft";
 import { describe, expect, it, vi } from "vitest";
 import { registerComposerHandle, runComposerInterceptors, setPluginComposerText } from "./index";
 
@@ -67,5 +68,44 @@ describe("plugin composer text", () => {
     expect(other).not.toHaveBeenCalled();
     remove();
     removeOther();
+  });
+});
+
+describe("new workspace plugin preferences", () => {
+  it("snapshots synchronous choices for first-send interception and creation, isolated by draft", async () => {
+    const draft = new PluginComposerDraftState("host-1:draft-1");
+    const otherHost = new PluginComposerDraftState("host-2:draft-1");
+    const otherDraft = new PluginComposerDraftState("host-1:draft-2");
+    draft.forPlugin("prompt-translate").set({ mode: "ultra", rewrite: false });
+    draft.forPlugin("skill-pins").set({ skills: [] });
+    const snapshot = draft.snapshot();
+    const outcome = await runComposerInterceptors(
+      [
+        {
+          id: "rewrite",
+          intercept: ({ target: draftTarget, text }) => ({
+            text: (
+              draftTarget.draftValues?.["prompt-translate"] as { rewrite: boolean } | undefined
+            )?.rewrite
+              ? "rewritten"
+              : text,
+          }),
+        },
+      ],
+      {
+        target: { serverId: "host-1", workspaceId: null, agentId: null, draftValues: snapshot },
+        text: "Tiếng Việt",
+        action: "send",
+      },
+    );
+    expect(outcome).toEqual({ kind: "send", text: "Tiếng Việt" });
+    expect(draft.environment()).toEqual({
+      "PASEO_PLUGIN_COMPOSER_prompt-translate": '{"mode":"ultra","rewrite":false}',
+      "PASEO_PLUGIN_COMPOSER_skill-pins": '{"skills":[]}',
+    });
+    draft.forPlugin("prompt-translate").set({ mode: "lite", rewrite: true });
+    expect(snapshot["prompt-translate"]).toEqual({ mode: "ultra", rewrite: false });
+    expect(otherHost.environment()).toEqual({});
+    expect(otherDraft.environment()).toEqual({});
   });
 });

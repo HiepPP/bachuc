@@ -199,6 +199,8 @@ export interface PluginWorkspaceHeaderSubtitleContribution {
 
 /** `agentId` is null for composers that create a new agent. */
 export interface PluginComposerTarget {
+  /** New workspace preferences, keyed by plugin ID. Absent on existing agents. */
+  draftValues?: Readonly<Record<string, unknown>>;
   serverId: string;
   workspaceId: string | null;
   agentId: string | null;

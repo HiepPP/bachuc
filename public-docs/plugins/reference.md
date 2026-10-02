@@ -1517,8 +1517,27 @@ into a shared overflow menu. Placement and overflow are host decisions.
 and returns the same registration. It targets one agent's composer track alongside Tasks and
 Subagents. Omit `agentId` to show the pill on every agent composer on the plugin's host; omit
 `workspaceId` too for every workspace. Action callbacks receive the composer's
-`{ context: "agent", workspaceId, agentId }`, and icon and popover components get the same fields. Composer pills always show the icon and `label` (or `title` when `label` is omitted).
+`{ context: "agent", workspaceId, agentId }`, and icon and popover components get the same fields. Composer pills always show `label` (or `title` when `label` is omitted), so their `icon` is optional.
 They never show a chevron, including for menus and popovers.
+
+Set `placement: "toolbar"` to put the pill in the composer toolbar beside the model selector.
+There it matches the agent controls and shows a chevron for menus and popovers. Compact layouts
+have no room in the toolbar, so the pill stays in the track. The default is `"track"`.
+
+Set `showOnDraft: true` on an unscoped pill to also show it in New workspace's chat composer.
+Its content receives `{ context: "draft", workspaceId: "", draft }`, without an agent ID.
+`draft.get()` reads this plugin's JSON preferences; `draft.set(value)` saves them synchronously.
+Values are isolated by host and New workspace draft for the lifetime of that screen.
+Composer interceptors receive the same choices in `target.draftValues[pluginId]`.
+When creating the first thread, the host sends each value as JSON in
+`env["PASEO_PLUGIN_COMPOSER_<plugin-id>"]`. Consume and remove that variable in
+`agent.session_open`, validate the value, and persist preferences for `request.agentId`
+before returning. This applies choices before the initial prompt without inheriting them into child processes.
+Existing threads continue to receive the agent context. Terminal launchers do not show draft pills.
+
+A `label` component receives the same context as the icon and returns a string. Use it when one
+shared pill names a different value on each composer; `update({ label })` changes every composer
+at once.
 
 ```tsx
 const pill = client.addComposerPill({
@@ -1569,20 +1588,20 @@ client.addComposerInterceptor({
 
 These contracts are exported from `@getpaseo/plugin/client`.
 
-| Field      | Required | Meaning                                                                 |
-| ---------- | -------- | ----------------------------------------------------------------------- |
-| `title`    | Yes      | Non-empty accessible label, tooltip, and sheet title.                   |
-| `icon`     | Yes      | Lucide name or `ComponentType<PluginButtonIconProps>`.                  |
-| `label`    | No       | Non-empty display text. Omit to use the placement's default.            |
-| `visible`  | No       | Defaults to `true`. False removes the trigger and its layout space.     |
-| `disabled` | No       | Defaults to `false`. Keeps the button visible and prevents interaction. |
-| `behavior` | Yes      | One of the three shapes below.                                          |
+| Field      | Required | Meaning                                                                             |
+| ---------- | -------- | ----------------------------------------------------------------------------------- |
+| `title`    | Yes      | Non-empty accessible label, tooltip, and sheet title.                               |
+| `icon`     | Yes      | Lucide name or `ComponentType<PluginButtonIconProps>`. Optional on a composer pill. |
+| `label`    | No       | Non-empty text, or `ComponentType<PluginButtonLabelProps>` returning it.            |
+| `visible`  | No       | Defaults to `true`. False removes the trigger and its layout space.                 |
+| `disabled` | No       | Defaults to `false`. Keeps the button visible and prevents interaction.             |
+| `behavior` | Yes      | One of the three shapes below.                                                      |
 
 ```tsx
 type PluginButtonBehavior =
   | { kind: "action"; onPress(): void | Promise<void> }
   | { kind: "menu"; items: readonly PluginButtonMenuEntry[] }
-  | { kind: "popover"; Content: React.ComponentType<PluginButtonContentProps> };
+  | { kind: "popover"; Content: React.ComponentType<PluginButtonContentProps>; flush?: boolean };
 ```
 
 An action runs on the client. Paseo marks the button busy until its promise settles, blocks repeated
@@ -1590,7 +1609,8 @@ presses, and shows failures in a toast. A failed action can be retried. Use the 
 ordinary operations and `rpc` for plugin-specific backend work.
 
 Menus and popovers open anchored surfaces on wide layouts and bottom sheets on compact layouts.
-The whole trigger opens the surface; there is no split-button behavior.
+The whole trigger opens the surface; there is no split-button behavior. A popover's `Content` sits
+in padded space; set `flush: true` when it draws its own rows edge to edge, like a menu.
 
 ### Menu entries
 

@@ -46,8 +46,11 @@ export type {
   PluginButtonContext,
   PluginButtonIcon,
   PluginButtonIconProps,
+  PluginButtonLabel,
+  PluginButtonLabelProps,
   PluginButtonMenuEntry,
   PluginButtonRegistration,
+  PluginComposerPillButton,
   PluginComposerPillContribution,
   PluginHeaderButtonContribution,
 } from "./buttons.js";

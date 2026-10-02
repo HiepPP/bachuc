@@ -20,6 +20,9 @@ export interface RegisteredPluginButton {
   id: string;
   installation: InstalledPlugin;
   placement: ButtonPlacement;
+  showOnDraft?: boolean;
+  /** A composer pill that asked for the toolbar beside the model selector. */
+  toolbar: boolean;
   context: PluginButtonContext;
   button: ResolvedPluginButton;
   pending: boolean;
@@ -81,7 +84,7 @@ export class PluginButtonStore {
 
   private add(
     installation: InstalledPlugin,
-    input: Pick<PluginHeaderButtonContribution, "id" | "button">,
+    input: Pick<PluginComposerPillContribution, "id" | "button" | "showOnDraft" | "placement">,
     placement: ButtonPlacement,
     context: PluginButtonContext,
   ): PluginButtonRegistration {
@@ -95,11 +98,14 @@ export class PluginButtonStore {
         entry.id === id &&
         entry.context.workspaceId === context.workspaceId &&
         (entry.context.context === "workspace" ||
-          (context.context === "agent" && entry.context.agentId === context.agentId)),
+          (entry.context.context === "agent" &&
+            context.context === "agent" &&
+            entry.context.agentId === context.agentId)),
     );
     if (duplicate) throw new Error(`Duplicate plugin button: ${id}`);
     const key = this.nextKey++;
-    const initialButton = validateButton(input.button, this.validation);
+    const requireIcon = placement === "header";
+    const initialButton = validateButton(input.button, this.validation, requireIcon);
     this.publish([
       ...this.entries,
       {
@@ -107,6 +113,8 @@ export class PluginButtonStore {
         id,
         installation,
         placement,
+        showOnDraft: input.showOnDraft,
+        toolbar: input.placement === "toolbar",
         context,
         button: initialButton,
         pending: false,
@@ -117,7 +125,7 @@ export class PluginButtonStore {
       update: (patch) => {
         const entry = this.entries.find((candidate) => candidate.key === key);
         if (!entry) return;
-        const button = validateButton({ ...entry.button, ...patch }, this.validation);
+        const button = validateButton({ ...entry.button, ...patch }, this.validation, requireIcon);
         const close = !button.visible || button.disabled || patch.behavior !== undefined;
         this.replace(key, { button, open: close ? false : entry.open });
       },
@@ -180,6 +188,11 @@ export function buttonMatches(
     entry.context.context === "agent" &&
     (entry.context.agentId === ANY || entry.context.agentId === agentId)
   );
+}
+
+/** Compact layouts have no toolbar room, so a toolbar pill falls back to the track bar there. */
+export function buttonInToolbar(entry: RegisteredPluginButton, compact: boolean): boolean {
+  return entry.toolbar && !compact;
 }
 
 /** Gives a shared composer pill the context of the composer that renders it. */

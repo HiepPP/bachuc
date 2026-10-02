@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { catalog, skillsSchema } from "../shared/catalog";
+import { catalog, pillLabel, skillsSchema } from "../shared/catalog";
 import { skillsReadRpc, skillsWriteRpc } from "../shared/contracts";
 
 test("catalog holds the three pinned skills in menu order", () => {
@@ -16,6 +16,12 @@ test("skills are returned in catalog order without duplicates", () => {
     "watchtower",
     "sequential-thinking",
   ]);
+});
+
+test("the pill names pinned skills by short name in catalog order", () => {
+  assert.equal(pillLabel([]), "Skills");
+  assert.equal(pillLabel(["sequential-thinking"]), "Seq");
+  assert.equal(pillLabel(["sequential-thinking", "watchtower"]), "Watch · Seq");
 });
 
 test("unknown skill IDs are rejected", () => {

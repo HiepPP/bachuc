@@ -1,3 +1,7 @@
+import { seedDraftPrefs } from "../server/draft";
+import { AgentModes } from "../server/modes";
+import { translateSettings } from "../shared/settings";
+import { draftEnvKey } from "../shared/draft";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
@@ -35,4 +39,23 @@ test("silences native Claude Caveman only when the bridge hook is installed", as
     withBridgeCavemanEnv(request("claude"), dir, {})?.env.PROMPT_TRANSLATE_CAVEMAN_DEFAULT_MODE,
     "",
   );
+});
+
+test("New workspace preferences seed before the first turn and do not reset later selections", async () => {
+  const modes = new AgentModes(await mkdtemp(path.join(tmpdir(), "pt-draft-")));
+  const defaults = async () => translateSettings.schema.parse({ cavemanMode: "full" });
+  const initial = request("codex", {
+    KEEP: "1",
+    [draftEnvKey]: JSON.stringify({ mode: "ultra", rewrite: false }),
+  });
+  const opened = await seedDraftPrefs(initial, modes, defaults);
+  assert.deepEqual(await modes.prefs(initial.agentId, true), { mode: "ultra", rewrite: false });
+  assert.deepEqual(opened.env, { KEEP: "1" });
+  await modes.update(initial.agentId, { mode: "lite", rewrite: true });
+  await seedDraftPrefs(initial, modes, defaults);
+  await seedDraftPrefs({ ...initial, reason: "resume" }, modes, defaults);
+  assert.deepEqual(await modes.prefs(initial.agentId, false), { mode: "lite", rewrite: true });
+  const second = { ...request("codex"), agentId: "00000000-0000-4000-8000-000000000002" };
+  await seedDraftPrefs(second, modes, defaults);
+  assert.deepEqual(await modes.prefs(second.agentId, true), { mode: "full", rewrite: true });
 });
