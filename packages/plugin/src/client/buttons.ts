@@ -59,7 +59,7 @@ export interface PluginButton {
 
 export interface PluginButtonRegistration {
   /** Updates presentation in place. Supply a complete behavior to replace it. */
-  update(patch: Partial<PluginButton>): void;
+  update(patch: Partial<PluginComposerPillButton>): void;
   /** Idempotent. Updates after removal do nothing. */
   remove(): void;
 }
@@ -71,7 +71,11 @@ export interface PluginHeaderButtonContribution {
 }
 
 /** A pill always shows its label or title, so its icon is optional. */
-export type PluginComposerPillButton = Omit<PluginButton, "icon"> & { icon?: PluginButtonIcon };
+export type PluginComposerPillButton = Omit<PluginButton, "icon"> & {
+  icon?: PluginButtonIcon;
+  /** Hex color for the pill's icon, label, and border. Omit for the host's muted tone. */
+  color?: string;
+};
 
 /** Omit `agentId` or `workspaceId` to show the pill on every matching agent composer. */
 export interface PluginComposerPillContribution {
@@ -79,10 +83,11 @@ export interface PluginComposerPillContribution {
   /** Opt in to New workspace. Only unscoped pills can appear there. */
   showOnDraft?: boolean;
   /**
-   * "toolbar" puts the pill beside the model selector. Compact layouts have no room there, so the
-   * pill stays in the track bar. Defaults to "track".
+   * "toolbar" puts the pill beside the model selector. "corner" stacks it at the top-right corner
+   * of the agent's pane. Compact layouts have room for neither, so the pill stays in the track bar.
+   * Defaults to "track".
    */
-  placement?: "track" | "toolbar";
+  placement?: "track" | "toolbar" | "corner";
   workspaceId?: string;
   agentId?: string;
   button: PluginComposerPillButton;

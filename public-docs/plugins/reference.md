@@ -1535,6 +1535,11 @@ Set `placement: "toolbar"` to put the pill in the composer toolbar beside the mo
 There it matches the agent controls and shows a chevron for menus and popovers. Compact layouts
 have no room in the toolbar, so the pill stays in the track. The default is `"track"`.
 
+Set `placement: "corner"` to stack the pill at the top-right corner of the agent's pane, above the
+transcript. Corner pills stack downward in registration order and look like track pills. Use it for
+actions on the whole thread that should stay out of the composer. Compact layouts and New
+workspace have no pane corner, so the pill stays in the track there.
+
 Set `showOnDraft: true` on an unscoped pill to also show it in New workspace's chat composer.
 Its content receives `{ context: "draft", workspaceId: "", draft }`, without an agent ID.
 `draft.get()` reads this plugin's JSON preferences; `draft.set(value)` saves them synchronously.
@@ -1604,6 +1609,7 @@ These contracts are exported from `@getpaseo/plugin/client`.
 | `title`    | Yes      | Non-empty accessible label, tooltip, and sheet title.                               |
 | `icon`     | Yes      | Lucide name or `ComponentType<PluginButtonIconProps>`. Optional on a composer pill. |
 | `label`    | No       | Non-empty text, or `ComponentType<PluginButtonLabelProps>` returning it.            |
+| `color`    | No       | Composer pills only. Hex color for the pill's icon, label, and border.              |
 | `visible`  | No       | Defaults to `true`. False removes the trigger and its layout space.                 |
 | `disabled` | No       | Defaults to `false`. Keeps the button visible and prevents interaction.             |
 | `behavior` | Yes      | One of the three shapes below.                                                      |

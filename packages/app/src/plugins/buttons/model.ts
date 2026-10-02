@@ -14,6 +14,7 @@ import {
 } from "./validation";
 
 export type ButtonPlacement = "header" | "composer";
+export type ComposerPillSlot = NonNullable<PluginComposerPillContribution["placement"]>;
 
 export interface RegisteredPluginButton {
   key: number;
@@ -21,8 +22,8 @@ export interface RegisteredPluginButton {
   installation: InstalledPlugin;
   placement: ButtonPlacement;
   showOnDraft?: boolean;
-  /** A composer pill that asked for the toolbar beside the model selector. */
-  toolbar: boolean;
+  /** Where a composer pill asked to sit. Header buttons keep "track". */
+  slot: ComposerPillSlot;
   context: PluginButtonContext;
   button: ResolvedPluginButton;
   pending: boolean;
@@ -114,7 +115,8 @@ export class PluginButtonStore {
         installation,
         placement,
         showOnDraft: input.showOnDraft,
-        toolbar: input.placement === "toolbar",
+        slot:
+          input.placement === "toolbar" || input.placement === "corner" ? input.placement : "track",
         context,
         button: initialButton,
         pending: false,
@@ -190,9 +192,13 @@ export function buttonMatches(
   );
 }
 
-/** Compact layouts have no toolbar room, so a toolbar pill falls back to the track bar there. */
+/** Compact layouts have room for the track bar only, so every pill falls back to it there. */
+export function buttonSlot(entry: RegisteredPluginButton, compact: boolean): ComposerPillSlot {
+  return compact ? "track" : entry.slot;
+}
+
 export function buttonInToolbar(entry: RegisteredPluginButton, compact: boolean): boolean {
-  return entry.toolbar && !compact;
+  return buttonSlot(entry, compact) === "toolbar";
 }
 
 /** Gives a shared composer pill the context of the composer that renders it. */

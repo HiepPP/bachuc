@@ -5,6 +5,7 @@ import type { InstalledPlugin } from "../types";
 import {
   PluginButtonStore,
   buttonInToolbar,
+  buttonSlot,
   buttonMatches,
   resolveButtonForContext,
 } from "./model";
@@ -229,6 +230,43 @@ describe("plugin buttons", () => {
     expect(buttonInToolbar(toolbar, false)).toBe(true);
     expect(buttonInToolbar(toolbar, true)).toBe(false);
     expect(buttonInToolbar(track, false)).toBe(false);
+  });
+
+  it("keeps a corner pill in the pane corner on wide layouts and in the track bar on compact", () => {
+    const buttons = store();
+    const plugin = installation();
+    buttons.addComposerPill(plugin, { id: "remove", placement: "corner", button: button() });
+    buttons.addComposerPill(plugin, { id: "review", button: button() });
+    buttons.addComposerPill(plugin, {
+      id: "stray",
+      placement: "side" as never,
+      button: button(),
+    });
+    buttons.addHeaderButton(plugin, { id: "open", workspaceId: "workspace", button: button() });
+    const [corner, track, stray, header] = buttons.getSnapshot();
+    expect(buttonSlot(corner, false)).toBe("corner");
+    expect(buttonSlot(corner, true)).toBe("track");
+    expect(buttonInToolbar(corner, false)).toBe(false);
+    expect(buttonSlot(track, false)).toBe("track");
+    expect(buttonSlot(stray, false)).toBe("track");
+    expect(buttonSlot(header, false)).toBe("track");
+  });
+
+  it("keeps a pill's hex color across updates and rejects any other color", () => {
+    const buttons = store();
+    const plugin = installation();
+    const pill = buttons.addComposerPill(plugin, {
+      id: "parent",
+      button: { ...button(), color: "#f97316" },
+    });
+    pill.update({ label: "Jump" });
+    expect(buttons.getSnapshot()[0].button.color).toBe("#f97316");
+    pill.update({ color: undefined });
+    expect(buttons.getSnapshot()[0].button.color).toBeUndefined();
+    for (const color of ["orange", "f97316", "#f9731", "rgb(249,115,22)", ""])
+      expect(() =>
+        buttons.addComposerPill(plugin, { id: "bad", button: { ...button(), color } }),
+      ).toThrow("hex color");
   });
 
   it("lets a composer pill omit its icon and keeps it required for a header button", () => {

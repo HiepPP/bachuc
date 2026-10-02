@@ -85,6 +85,13 @@ function validateLabel(label: PluginButton["label"]): PluginButton["label"] {
   return label;
 }
 
+function validateColor(color: string | undefined): string | undefined {
+  if (color === undefined) return undefined;
+  if (typeof color !== "string" || !/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(color))
+    throw new Error("Plugin button color must be a hex color");
+  return color;
+}
+
 export type ResolvedPluginButton = PluginComposerPillButton & {
   visible: boolean;
   disabled: boolean;
@@ -102,6 +109,7 @@ export function validateButton(
     ...button,
     title: requireText(button.title, "title"),
     label: validateLabel(button.label),
+    color: validateColor(button.color),
     visible: optionalBoolean(button.visible, true),
     disabled: optionalBoolean(button.disabled, false),
     behavior: validateBehavior(button.behavior, validation),

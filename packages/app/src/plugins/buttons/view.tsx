@@ -41,6 +41,8 @@ import { SurfaceErrorBoundary } from "../surface-error-boundary";
 import { toPluginTheme } from "../theme";
 import {
   buttonInToolbar,
+  buttonSlot,
+  type ComposerPillSlot,
   buttonMatches,
   resolveButtonForContext,
   type RegisteredPluginButton,
@@ -92,8 +94,15 @@ function ButtonEnvironment({ view, children }: { view: ButtonView; children: Rea
   );
 }
 
-function ButtonIcon({ view, icon }: { view: ButtonView; icon: PluginButtonIcon }) {
-  const color = view.props.theme.colors.foregroundMuted;
+function ButtonIcon({
+  view,
+  icon,
+  color = view.props.theme.colors.foregroundMuted,
+}: {
+  view: ButtonView;
+  icon: PluginButtonIcon;
+  color?: string;
+}) {
   const size = view.entry.placement === "composer" ? 14 : 16;
   return (
     <View
@@ -265,13 +274,18 @@ function buttonPages(
 
 function renderButtonIcon(view: ButtonView) {
   const { icon } = view.entry.button;
-  return icon === undefined ? null : <ButtonIcon view={view} icon={icon} />;
+  return icon === undefined ? null : <ButtonIcon view={view} icon={icon} color={pillColor(view)} />;
 }
 
 function resolveLabel(view: ButtonView, composer: boolean): PluginButtonLabel | undefined {
   const { label, title } = view.entry.button;
   if (composer) return label ?? title;
   return view.props.layout.compact ? undefined : label;
+}
+
+/** Only a composer pill takes its plugin's color; header buttons keep the host tone. */
+function pillColor(view: ButtonView): string | undefined {
+  return view.entry.placement === "composer" ? view.entry.button.color : undefined;
 }
 
 function resolveLabelStyle(composer: boolean, toolbar: boolean) {
@@ -284,6 +298,8 @@ function ButtonControl({ view }: { view: ButtonView }) {
   const { button } = entry;
   const composer = entry.placement === "composer";
   const toolbar = buttonInToolbar(entry, props.layout.compact);
+  const corner = buttonSlot(entry, props.layout.compact) === "corner";
+  const color = pillColor(view);
   const disabled = button.disabled || entry.pending;
   const expanded = button.behavior.kind !== "action";
   const chevron = (toolbar || !composer) && !props.layout.compact && expanded;
@@ -300,14 +316,20 @@ function ButtonControl({ view }: { view: ButtonView }) {
     ({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) =>
       composer
         ? [
-            toolbar ? styles.toolbarButton : [composerPillStyles.body, styles.button],
+            toolbar
+              ? styles.toolbarButton
+              : [composerPillStyles.body, corner ? styles.cornerButton : styles.button],
             (hovered || pressed || entry.open) && styles.active,
             disabled && styles.disabled,
+            color !== undefined && { borderColor: color },
           ]
         : headerButtonStyle(props.layout.compact, { hovered, pressed, open: entry.open }, disabled),
-    [composer, toolbar, disabled, entry.open, props.layout.compact],
+    [composer, toolbar, corner, color, disabled, entry.open, props.layout.compact],
   );
-  const labelStyle = resolveLabelStyle(composer, toolbar);
+  const labelStyle = useMemo(
+    () => [resolveLabelStyle(composer, toolbar), color !== undefined && { color }],
+    [composer, toolbar, color],
+  );
   const contents = (
     <>
       {entry.pending ? (
@@ -560,7 +582,7 @@ function useButtons(
   serverId: string,
   workspaceId: string,
   agentId: string | null,
-  toolbar = false,
+  slot: ComposerPillSlot = "track",
 ) {
   const entries = useSyncExternalStore(
     pluginButtonStore.subscribe,
@@ -574,10 +596,10 @@ function useButtons(
         .filter(
           (entry) =>
             buttonMatches(entry, serverId, workspaceId, agentId) &&
-            buttonInToolbar(entry, compact) === toolbar,
+            buttonSlot(entry, compact) === slot,
         )
         .map((entry) => resolveButtonForContext(entry, workspaceId, agentId)),
-    [entries, serverId, workspaceId, agentId, compact, toolbar],
+    [entries, serverId, workspaceId, agentId, compact, slot],
   );
 }
 
@@ -603,7 +625,7 @@ export function PluginComposerPills({
   compact: boolean;
   toolbar?: boolean;
 }) {
-  const entries = useButtons(serverId, workspaceId, agentId, toolbar);
+  const entries = useButtons(serverId, workspaceId, agentId, toolbar ? "toolbar" : "track");
   const hosts = useHosts();
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
   return entries.map((entry) => (
@@ -615,6 +637,38 @@ export function PluginComposerPills({
       uniProps={pluginThemeMapping}
     />
   ));
+}
+
+/**
+ * The pills stacked at the top-right corner of an agent's pane, in registration order. Compact
+ * layouts render nothing here; those pills stay in the track bar.
+ */
+export function PluginComposerCornerPills({
+  serverId,
+  workspaceId,
+  agentId,
+}: {
+  serverId: string;
+  workspaceId: string;
+  agentId: string;
+}) {
+  const entries = useButtons(serverId, workspaceId, agentId, "corner");
+  const hosts = useHosts();
+  if (!entries.length) return null;
+  const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
+  return (
+    <View style={styles.cornerPills} pointerEvents="box-none" testID="plugin-composer-corner-pills">
+      {entries.map((entry) => (
+        <ThemedPluginButton
+          key={entry.key}
+          entry={entry}
+          compact={false}
+          hostLabel={hostLabel}
+          uniProps={pluginThemeMapping}
+        />
+      ))}
+    </View>
+  );
 }
 
 export function PluginDraftComposerPills({
@@ -761,6 +815,14 @@ export function PluginHeaderButtons({
 
 const styles = StyleSheet.create((theme) => ({
   draftPills: { flexDirection: "row", gap: theme.spacing[1], paddingBottom: theme.spacing[2] },
+  cornerPills: {
+    position: "absolute",
+    top: theme.spacing[3],
+    right: theme.spacing[3],
+    zIndex: 10,
+    alignItems: "flex-end",
+    gap: theme.spacing[2],
+  },
   headerButtons: {
     flexDirection: "row",
     alignItems: "center",
@@ -779,6 +841,8 @@ const styles = StyleSheet.create((theme) => ({
     borderColor: theme.colors.borderAccent,
   },
   button: { flexShrink: 1, minWidth: 0, maxWidth: 160 },
+  // The corner has no neighbours to make room for, so a label keeps more of its width.
+  cornerButton: { maxWidth: 240 },
   // Matches the agent controls' badges so plugin pills read as part of the same toolbar. The pill
   // keeps its width; the agent controls beside it already collapse to fit what is left.
   toolbarButton: {
