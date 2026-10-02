@@ -54,34 +54,38 @@ export class Engine {
     // Only the last assistant response can offer a continuation, never tool output.
     const row = current.rows.findLast((r, i) => i > user && r.type === "assistant_message");
     if (!row?.text) return [];
-    return parsePrompts(row.text).flatMap(({ block, prompts, whys, threads, declaration }, b) =>
-      prompts.map((text, p) => {
-        const identity = [scope.agentId, current.epoch, row.id, b, p, text];
-        if (declaration) identity.push(block);
-        const key = hash(JSON.stringify(identity));
-        return {
-          key,
-          block,
-          text,
-          why: whys[p] || undefined,
-          source: row.text!,
-          timestamp: row.timestamp,
-          after: current.rows[user].timestamp,
-          state: this.store.get(scope.agentId).handled[key] ?? "ready",
-          ...(threads[p] ? { thread: "new" as const } : {}),
-          ...(declaration?.goal ? { goal: declaration.goal } : {}),
-          ...(declaration
-            ? {
-                selection: {
-                  id: declaration.prompts[p].id,
-                  blockKey: hash(JSON.stringify([scope.agentId, current.epoch, row.id, b, block])),
-                  exclusiveGroups: declaration.exclusiveGroups,
-                  allowedCombinations: declaration.allowedCombinations,
-                },
-              }
-            : {}),
-        };
-      }),
+    return parsePrompts(row.text).flatMap(
+      ({ block, prompts, whys, threads, suggestions, declaration }, b) =>
+        prompts.map((text, p) => {
+          const identity = [scope.agentId, current.epoch, row.id, b, p, text];
+          if (declaration) identity.push(block);
+          const key = hash(JSON.stringify(identity));
+          return {
+            key,
+            block,
+            text,
+            why: whys[p] || undefined,
+            source: row.text!,
+            timestamp: row.timestamp,
+            after: current.rows[user].timestamp,
+            state: this.store.get(scope.agentId).handled[key] ?? "ready",
+            ...(threads[p] ? { thread: "new" as const } : {}),
+            ...(suggestions?.[p] ? { suggestion: true } : {}),
+            ...(declaration?.goal ? { goal: declaration.goal } : {}),
+            ...(declaration
+              ? {
+                  selection: {
+                    id: declaration.prompts[p].id,
+                    blockKey: hash(
+                      JSON.stringify([scope.agentId, current.epoch, row.id, b, block]),
+                    ),
+                    exclusiveGroups: declaration.exclusiveGroups,
+                    allowedCombinations: declaration.allowedCombinations,
+                  },
+                }
+              : {}),
+          };
+        }),
     );
   }
 

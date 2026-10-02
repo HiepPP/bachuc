@@ -35,6 +35,9 @@ const declarationSchema = z
           why: nonempty(2000).optional(),
           // Unrelated to the current goal: offered only as a separate new thread.
           thread: z.literal("new").optional(),
+          // Display only: the agent recommends doing this next. Any non-boolean value counts as
+          // not suggested instead of rejecting the block.
+          suggestion: z.boolean().catch(false).optional(),
         }),
       )
       .min(1)

@@ -224,6 +224,43 @@ test("a thread: new line marks only its own prompt as unrelated work", () => {
   assert.deepEqual(parsed.whys, ["", "Separate issue."]);
   assert.deepEqual(parsed.threads, [false, true]);
 });
+test("a suggestion: line marks only its own prompt and is never prompt text", () => {
+  const [parsed] = parsePrompts(
+    [
+      "## What Next",
+      "```text",
+      "prompt: Verify the layout.",
+      "suggestion: true",
+      "prompt: Review spacing.",
+      "Suggestion: FALSE",
+      "prompt: Audit the logs.",
+      "why: Separate issue.",
+      "thread: new",
+      "SUGGESTION: True",
+      "prompt: Check docs.",
+      "suggestion: false",
+      "suggestion: true",
+      "```",
+    ].join("\n"),
+  );
+  assert.deepEqual(parsed.prompts, [
+    "Verify the layout.",
+    "Review spacing.",
+    "Audit the logs.",
+    "Check docs.",
+  ]);
+  assert.deepEqual(parsed.suggestions, [true, false, true, false], "first occurrence wins");
+  assert.deepEqual(parsed.whys, ["", "", "Separate issue.", ""]);
+  assert.deepEqual(parsed.threads, [false, false, true, false]);
+});
+test("an unrecognised suggestion: value is not a flag and the line stays prompt text", () => {
+  const [parsed] = parsePrompts(
+    "## What Next\n```\nprompt: Verify.\nsuggestion: maybe\nprompt: Review.\nsuggestion: true\n```",
+  );
+  assert.deepEqual(parsed.prompts, ["Verify.\nsuggestion: maybe", "Review."]);
+  assert.deepEqual(parsed.suggestions, [false, true]);
+  assert.deepEqual(parsePrompts("## What Next\n```\nsuggestion: true\nprompt: Test.\n```"), []);
+});
 test("ignore incomplete streams, ordinary code, quotes, empty entries, and other sections", () => {
   for (const text of [
     "```\nprompt: Test\n```",

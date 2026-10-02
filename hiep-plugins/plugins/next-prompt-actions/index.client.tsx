@@ -4,7 +4,7 @@ import { SendSettingsScreen } from "./client/settings";
 import { backToBoard } from "./client/back-to-board";
 import { createNextPromptPanel, panelSchema } from "./client/panel";
 import { hostRpc, inspectRpc, toggleRpc } from "./shared/contracts";
-import { sectionIntro, splitNextSection } from "./shared/section";
+import { sectionIntro, splitNextSection, splitRecap } from "./shared/section";
 import { sendSettings } from "./shared/settings";
 
 export default function contribute(client: PluginClientContext) {
@@ -36,14 +36,20 @@ export default function contribute(client: PluginClientContext) {
       if (phase !== "complete") return undefined;
       const split = splitNextSection(item.text);
       if (!split) return undefined;
+      const recap = splitRecap(split.before);
       const panel = {
         type: "plugin" as const,
         kind: "next-prompt-panel",
         version: 1,
-        data: { title: split.title, intro: sectionIntro(split.section), section: split.section },
+        data: {
+          title: split.title,
+          intro: sectionIntro(split.section),
+          section: split.section,
+          ...(recap.recap ? { recap: recap.recap } : {}),
+        },
       };
-      return split.before
-        ? { items: [panel], source: { placement: "first" as const, text: split.before } }
+      return recap.before
+        ? { items: [panel], source: { placement: "first" as const, text: recap.before } }
         : { items: [panel] };
     },
   });

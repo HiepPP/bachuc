@@ -2,11 +2,14 @@ import { parseNextPrompts, type NextPromptsV1 } from "./next-prompts";
 
 // `whys[i]` is the optional reason shown under `prompts[i]`; it is never sent.
 // `threads[i]` marks a suggestion unrelated to the current goal, started only in a new thread.
+// `suggestions[i]` marks a prompt the agent recommends; it is display only, never sent or selected on.
+// The array exists only when at least one prompt is marked.
 export type PromptBlock = {
   block: string;
   prompts: string[];
   whys: string[];
   threads: boolean[];
+  suggestions?: boolean[];
   declaration?: NextPromptsV1;
 };
 
@@ -139,20 +142,26 @@ export function parsePrompts(markdown: string): PromptBlock[] {
           const block = fence.lines.join("\n").replace(/\n+$/, "");
           if (fence.structured) {
             const declaration = parseNextPrompts(block);
-            if (declaration)
+            if (declaration) {
+              const suggestions = declaration.prompts.map((p) => p.suggestion === true);
               result.push({
                 block,
                 prompts: declaration.prompts.map((p) => p.prompt),
                 whys: declaration.prompts.map((p) => p.why ?? ""),
                 threads: declaration.prompts.map((p) => p.thread === "new"),
+                ...(suggestions.some(Boolean) ? { suggestions } : {}),
                 declaration,
               });
+            }
             fence = null;
             continue;
           }
           const prompts: string[] = [];
           const whys: string[] = [];
           const threads: boolean[] = [];
+          const suggestions: boolean[] = [];
+          // The first `suggestion:` line of a prompt decides; later ones are dropped, not sent.
+          const flagged: boolean[] = [];
           let current: string[] | null = null;
           let valid = true;
           for (const bodyLine of block.split("\n")) {
@@ -161,6 +170,8 @@ export function parsePrompts(markdown: string): PromptBlock[] {
               current = [bodyLine.replace(/^prompt:[ \t]?/i, "")];
               whys.push("");
               threads.push(false);
+              suggestions.push(false);
+              flagged.push(false);
             } else if (current && /^why:/i.test(bodyLine) && !whys[whys.length - 1])
               whys[whys.length - 1] = bodyLine.replace(/^why:/i, "").trim();
             else if (
@@ -169,12 +180,22 @@ export function parsePrompts(markdown: string): PromptBlock[] {
               !threads[threads.length - 1]
             )
               threads[threads.length - 1] = true;
-            else if (current) current.push(bodyLine);
+            else if (current && /^suggestion:[ \t]*(?:true|false)[ \t]*$/i.test(bodyLine)) {
+              const last = flagged.length - 1;
+              if (!flagged[last]) suggestions[last] = /true/i.test(bodyLine);
+              flagged[last] = true;
+            } else if (current) current.push(bodyLine);
             else if (bodyLine.trim()) valid = false;
           }
           if (current) prompts.push(current.join("\n").replace(/\n+$/, ""));
           if (valid && prompts.length && prompts.every((p) => p.trim() && p.length <= 16000))
-            result.push({ block, prompts, whys, threads });
+            result.push({
+              block,
+              prompts,
+              whys,
+              threads,
+              ...(suggestions.some(Boolean) ? { suggestions } : {}),
+            });
         }
         fence = null;
         continue;

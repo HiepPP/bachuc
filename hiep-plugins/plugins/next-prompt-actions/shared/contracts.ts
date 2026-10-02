@@ -20,6 +20,8 @@ export const candidateSchema = z.object({
   after: z.number().optional(),
   state: z.enum(["ready", "sending", "sent", "unknown"]),
   thread: z.literal("new").optional(),
+  // Display only: the agent recommends this prompt. Set only when true.
+  suggestion: z.boolean().optional(),
   goal: z.literal("done").optional(),
   selection: selectionSchema.optional(),
 });

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parsePrompts } from "../shared/prompts";
+import { candidateSchema } from "../shared/contracts";
 import { Engine, type Current } from "../server/engine";
 import { Store } from "../server/store";
 
@@ -222,6 +223,85 @@ test("v1 metadata never bypasses individual Git actions", async () => {
     await f.engine.send(scope, c[0].key);
     assert.match(f.sent[0], /^\/commit --no-push\nCommit the layout\. Do not push\./);
     assert.doesNotMatch(f.sent[0], /exclusiveGroups|allowedCombinations|Apply the design/);
+  } finally {
+    f.engine.close();
+  }
+});
+
+test("v1 suggestion flag marks prompts for display and never rejects a block", () => {
+  const value = {
+    ...declaration(),
+    prompts: [
+      { id: "implement", prompt: "Implement the layout.", suggestion: true },
+      { id: "review", prompt: "Review only.", suggestion: false },
+      { id: "risks", prompt: "List remaining risks." },
+      { id: "audit", prompt: "Audit logs.", thread: "new", suggestion: true },
+      { id: "text", prompt: "Not a boolean.", suggestion: "yes" },
+      { id: "number", prompt: "Also not a boolean.", suggestion: 1 },
+      { id: "nil", prompt: "Null.", suggestion: null },
+    ],
+    exclusiveGroups: [["implement", "review"]],
+    allowedCombinations: [["implement", "risks"]],
+  };
+  const [parsed] = parsePrompts(markdown(value));
+  assert.ok(parsed, "a stray suggestion value must not hide the block");
+  assert.deepEqual(parsed.suggestions, [true, false, false, true, false, false, false]);
+  assert.deepEqual(
+    parsed.prompts,
+    value.prompts.map((p) => p.prompt),
+  );
+  assert.deepEqual(parsed.declaration?.exclusiveGroups, [["implement", "review"]]);
+  assert.deepEqual(parsed.declaration?.allowedCombinations, [["implement", "risks"]]);
+});
+
+test("v1 suggestion flag reaches candidates but never changes sending or selection rules", async () => {
+  const plain = declaration();
+  const value = {
+    ...plain,
+    prompts: plain.prompts.map((p, index) => ({ ...p, suggestion: index !== 1 })),
+  };
+  const f = fixture(markdown(value));
+  try {
+    const c = (await f.engine.inspect(scope)).candidates;
+    assert.deepEqual(
+      c.map((candidate) => candidate.suggestion),
+      [true, undefined, true],
+    );
+    assert.equal(candidateSchema.parse(c[0]).suggestion, true);
+    assert.equal(candidateSchema.parse(c[1]).suggestion, undefined);
+    assert.deepEqual(
+      c.map((candidate) => candidate.text),
+      plain.prompts.map((p) => p.prompt),
+    );
+    await assert.rejects(f.engine.send(scope, [c[0].key, c[1].key]), /combination/i);
+    await f.engine.send(scope, [c[2].key, c[0].key]);
+    assert.deepEqual(f.sent, [
+      "1. Implement the layout.\n   Preserve other files.\n2. List remaining risks.",
+    ]);
+  } finally {
+    f.engine.close();
+  }
+});
+
+test("v1 suggestion flag never bypasses individual Git actions", async () => {
+  const value = declaration();
+  value.prompts[0].prompt = "Commit the layout. Do not push.";
+  const flagged = {
+    ...value,
+    prompts: value.prompts.map((p) => ({ ...p, suggestion: true })),
+  };
+  const f = fixture(markdown(flagged));
+  try {
+    const c = (await f.engine.inspect(scope)).candidates;
+    assert.equal(c.length, 3);
+    await assert.rejects(f.engine.send(scope, [c[0].key, c[2].key]), /individual manual send/);
+    await assert.rejects(
+      f.engine.send(scope, c[0].key, { automatic: true }),
+      /individual manual send/,
+    );
+    await f.engine.send(scope, c[0].key);
+    assert.match(f.sent[0], /^\/commit --no-push\nCommit the layout\. Do not push\./);
+    assert.doesNotMatch(f.sent[0], /suggestion/);
   } finally {
     f.engine.close();
   }

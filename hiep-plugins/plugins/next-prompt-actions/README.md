@@ -3,11 +3,14 @@
 Send suggestions under `What Next`, `What's Next`, or `Next Steps` directly from the reply, on
 every Paseo client. Requires the Paseo fork `>=0.10.2-beta.900`; the stable 0.10.1 host refuses it.
 
-- The reply keeps its native Markdown up to the What Next heading. The rest becomes one panel
-  with the heading, its intro text, and the suggestions. The raw fences are not shown.
+- The panel follows the stable layout: a compact Recap, next-step heading, Markdown reasons,
+  bordered suggestion rows, and neutral Send controls. A complete preceding Recap folds into
+  the panel (see [Recap](#recap)); unrecognized prose stays in the native reply.
 - Each suggestion has **Edit**, which fills this conversation's composer, and **Send**.
-  **New thread** starts the prompt in a separate conversation. A `thread: new` suggestion shows
-  **Start in new thread** instead of Send.
+  Hover the action and hold Command (Control off macOS) to swap Send with New thread.
+  Both labels reserve their width, so swapping never moves adjacent controls. Native clients
+  show a visible New thread action. A `thread: new` suggestion offers Start in new thread only;
+  the modifier swaps it back to Send in the current conversation.
 - Structured `next-prompts` v1 blocks with several suggestions use radio and checkbox rows that
   follow `exclusiveGroups` and `allowedCombinations`, with **Edit selected** and **Send selected**.
   No alternatives or default selections are invented.
@@ -16,9 +19,12 @@ every Paseo client. Requires the Paseo fork `>=0.10.2-beta.900`; the stable 0.10
   original push-only suggestion. Git actions have no New thread button, and Jev never auto-runs
   them.
 - An optional `why:` line shows as the suggestion's reason and is never sent.
+- An optional `suggestion: true` or `suggestion: false` line marks whether the agent recommends
+  the prompt (see [Suggested badge](#suggested-badge)).
 - Only the latest reply offers buttons. Earlier panels stay readable without them.
-- The panel is a timeline plugin row. Recap sections and other text before the What Next
-  heading keep their native rendering.
+- Layout ports the original `client/web.ts` rules: two columns, non-shrinking actions,
+  a separate selection footer, and stacked rows only below the 600px available-width breakpoint.
+- The panel uses host-owned Markdown and Button components through the plugin UI API; no DOM patching.
 
 ## Structured suggestions
 
@@ -41,8 +47,8 @@ Use one JSON fence with the language `next-prompts`. The first suggestion is the
 ```
 ````
 
-- `version` must be `1`. Each prompt has a unique lowercase ID, exact `prompt` text, an optional `why`, and an optional
-  `"thread": "new"`. The block may set `"goal": "done"`.
+- `version` must be `1`. Each prompt has a unique lowercase ID, exact `prompt` text, an optional `why`, an optional
+  `"thread": "new"`, and an optional `"suggestion": true` or `false`. The block may set `"goal": "done"`.
 - `exclusiveGroups` declare disjoint radio groups. Each group permits at most one selection, not a required selection.
 - Other suggestions use checkboxes. Nothing is selected automatically. Clear selection resets all controls.
 - `allowedCombinations` lists exact permitted sets of IDs. Subsets, supersets, and transitive combinations are not inferred.
@@ -62,6 +68,67 @@ Malformed, partial, or unsupported blocks remain visible as plain code without p
 Limits: 64 KiB per JSON block, 1–20 prompts, 16,000 characters per prompt, 2,000 per reason,
 64 characters per ID (`[a-z][a-z0-9-]*`), 20 exclusive groups, and 64 allowed combinations.
 Each group or combination contains 2–20 distinct IDs. Legacy blocks retain their existing parser limits.
+
+## Suggested badge
+
+The agent marks each prompt it recommends doing next. Several prompts, including new-thread prompts, may be suggested.
+
+- Structured fence: `"suggestion": true` or `"suggestion": false` on a prompt. Absent means `false`.
+  A value that is not a boolean counts as `false`; it never rejects the block.
+- Legacy fence: a `suggestion: true` or `suggestion: false` line under a prompt, matched without regard to case like `thread: new`.
+  The first such line of a prompt decides. These lines are never part of the prompt text. Other values, such as `suggestion: maybe`, stay in the prompt text.
+- A suggested prompt shows a `Suggested` badge at the top right of its card: the direct Edit and Send card, the checkbox and radio row,
+  the read-only card of an earlier reply, and the Other work card. The badge has its own row above the text, reason, buttons, and choice state.
+  It uses the fixed fill `#0f7b5f` with white text in both themes. It is plain text that assistive tech reads. A checkbox or radio row is
+  described by it: `aria-describedby` on web, an accessibility hint on native clients.
+- The panel reads the flag from the reply's own fence, so earlier replies keep their badge; the server sets `suggestion` on a candidate only when true.
+- The flag is display only. It never changes the sent prompt text, selection rules, relationship validation, or Git-action detection. Cards without it render as before.
+
+## Recap
+
+A Recap directly before What Next or Next Steps folds into the panel. Two field sets are recognised.
+Any other field set or order, a missing label, an extra unlabeled block, or a quoted or fenced Recap keeps its native rendering.
+A Recap with no suggestion panel after it is not folded.
+
+- Five fields, in this order: `Branch`, `Commit/push`, `Did`, `Not yet`, `Need from you`.
+  `Commit/push` is `no`, or `yes` followed by detail such as `yes, committed abc1234`.
+  `Did`, `Not yet`, and `Need from you` may each hold a list. Write `nothing` for a field with nothing to report.
+- Legacy three fields: `Branch`, `Did`, `Commit/push`. Its body stays one unlabeled Did block.
+
+Accepted shapes of the five-field Recap:
+
+- One top-level bullet list with exactly five items, one per label. Nested lists are allowed only inside Did, Not yet, and Need from you.
+- Labeled lines, one field per line. A label line may be followed by a top-level bullet or numbered list that belongs to that field.
+  The list may follow Did, Not yet, or Need from you only. A label with an empty value, such as `Not yet:`, is valid only when a list follows it.
+
+```markdown
+## Recap
+
+Branch: main
+Commit/push: no
+Did: Rewrote the section. +12/-8.
+Not yet:
+
+- Item one.
+- Item two.
+
+Need from you: Open a new session and check the chip.
+```
+
+The header shows a Branch chip and a Commit chip. The Commit chip maps its value like this; its accessibility label keeps the full value (`Commit/push: <value>`).
+
+| Value                                                    | Chip text                                                               | Icon   |
+| -------------------------------------------------------- | ----------------------------------------------------------------------- | ------ |
+| `no`, or legacy `none`, with an optional trailing period | No commit                                                               | commit |
+| `yes` alone                                              | Committed                                                               | check  |
+| `yes` plus detail, such as `yes, committed abc1234`      | the detail without `yes` and its separator, such as `committed abc1234` | check  |
+| legacy `committed ...` or `pushed ...`                   | the value as written                                                    | check  |
+| anything else                                            | the value as written                                                    | commit |
+
+The body of a five-field Recap is three sections: Did, Not yet, and Need from you. Each has its label above its value, with a divider between sections; lists, inline code, and links are kept.
+A Not yet or Need from you section whose value is `nothing`, in any case and with an optional trailing period, is omitted. Did always shows, and a field that holds a list is never treated as nothing.
+
+The parser reads the reply's Markdown text (`shared/section.ts`), not rendered nodes, so it works on every client.
 
 ## Goal and new-thread suggestions
 
