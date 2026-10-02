@@ -17,7 +17,6 @@ import {
   BrowserWindow,
   ClipboardItem,
   clipboard,
-  dialog,
   Menu,
   ipcMain,
   nativeImage,
@@ -100,7 +99,6 @@ import {
   stopDesktopManagedDaemonOnQuitIfNeeded,
 } from "./daemon/quit-lifecycle.js";
 import { runDesktopStartup } from "./desktop-startup.js";
-import { findNonForkData } from "./stable-fork-data.js";
 import { registerBrowserAutomationIpc } from "./features/browser-automation/ipc.js";
 import { BrowserKeyboard } from "./features/browser-keyboard/index.js";
 import { installAppUpdateOnQuit } from "./features/auto-updater.js";
@@ -118,37 +116,18 @@ const DISABLE_SINGLE_INSTANCE_LOCK = process.env.PASEO_DISABLE_SINGLE_INSTANCE_L
 const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || "Paseo Dev";
 const PASEO_DEV_HOME = path.join(os.homedir(), ".paseo-dev");
 const PASEO_DEV_LISTEN = "127.0.0.1:6770";
-// scripts/paseo-switch.sh installs a release as "Paseo Fork.app" to serve the stable home. That
-// copy keeps ~/.paseo and its port, and shares the stock app's userData so the single-instance
-// lock keeps the two apps from fighting over one daemon.
-const IS_STABLE_FORK = app.isPackaged && process.execPath.includes("/Paseo Fork.app/");
-const STABLE_USER_DATA = path.join(app.getPath("appData"), "Paseo");
+// scripts/paseo-release.sh installs a release as "Paseo Fork.app". That copy keeps ~/.paseo and
+// its port, with the userData folder that belongs to them.
+const IS_RELEASE_APP = app.isPackaged && process.execPath.includes("/Paseo Fork.app/");
+const RELEASE_USER_DATA = path.join(app.getPath("appData"), "Paseo");
 const FORCED_USER_DATA = process.env.PASEO_ELECTRON_USER_DATA_DIR?.trim();
-// Opened by hand while ~/.paseo holds the release data, the fork app would rewrite the release's
-// plugin list and restart its daemon at the fork version. The switch script labels the fork data
-// before it starts this app, so a missing label means the app was not started by the script. The
-// userData folder is checked too: the script moves it after the home.
-const STABLE_FORK_NON_FORK_DATA =
-  IS_STABLE_FORK && resolvePaseoHome(process.env) === resolvePaseoHome({})
-    ? findNonForkData([resolvePaseoHome({}), ...(FORCED_USER_DATA ? [] : [STABLE_USER_DATA])])
-    : [];
-const STABLE_FORK_BLOCKED = STABLE_FORK_NON_FORK_DATA.length > 0;
-// Any other packaged Paseo Dev app must never adopt the stable app's daemon (~/.paseo on
-// 6767): a version mismatch would restart it. An inherited stable home counts as
-// unset; an explicit other home (e.g. packaged smoke) wins. Managed launches strip
-// PASEO_LISTEN, so the port lives in the dev home's config.json.
-if (STABLE_FORK_BLOCKED) {
-  dialog.showErrorBox(
-    "Paseo Fork cannot start",
-    `These folders do not hold fork data:\n${STABLE_FORK_NON_FORK_DATA.join("\n")}\n\nRun scripts/paseo-switch.sh fork from Terminal: it brings in the fork data, then starts this app.`,
-  );
-  // exit skips before-quit, so a running release daemon is left alone.
-  app.exit(1);
-} else if (app.isPackaged && resolvePaseoHome(process.env) === resolvePaseoHome({})) {
-  if (!IS_STABLE_FORK) {
-    process.env.PASEO_HOME = PASEO_DEV_HOME;
-    seedPaseoDevListen();
-  }
+// Any other packaged build must never adopt the release's daemon (~/.paseo on 6767): a version
+// mismatch would restart it. An inherited release home counts as unset; an explicit other home
+// (e.g. packaged smoke) wins. Managed launches strip PASEO_LISTEN, so the port lives in the dev
+// home's config.json.
+if (app.isPackaged && !IS_RELEASE_APP && resolvePaseoHome(process.env) === resolvePaseoHome({})) {
+  process.env.PASEO_HOME = PASEO_DEV_HOME;
+  seedPaseoDevListen();
 }
 
 interface PaseoHomeConfig {
@@ -366,15 +345,11 @@ function installBrowserWindowOpenHandler(input: {
 // In dev mode, detect git worktrees and isolate each instance so multiple
 // Electron windows can run side-by-side (separate userData = separate lock).
 let devWorktreeName: string | null = null;
-if (STABLE_FORK_BLOCKED) {
-  // The process is on its way out. Until it is gone, Chromium must not open the release's
-  // profile, nor the build's, which is the default for this bundle.
-  app.setPath("userData", path.join(os.tmpdir(), "paseo-fork-blocked"));
-} else if (FORCED_USER_DATA) {
+if (FORCED_USER_DATA) {
   app.setPath("userData", FORCED_USER_DATA);
   log.info("[dev-user-data] forced userData dir:", FORCED_USER_DATA);
-} else if (IS_STABLE_FORK) {
-  app.setPath("userData", STABLE_USER_DATA);
+} else if (IS_RELEASE_APP) {
+  app.setPath("userData", RELEASE_USER_DATA);
 } else if (!app.isPackaged) {
   try {
     const topLevel = execFileSync("git", ["rev-parse", "--show-toplevel"], {
@@ -1084,19 +1059,16 @@ async function bootstrap(): Promise<void> {
   });
 }
 
-// app.exit returns before the process ends once the message loop runs, so startup is gated too.
-if (!STABLE_FORK_BLOCKED) {
-  void runDesktopStartup({
-    hasPendingGuiLaunchRequest: Boolean(pendingOpenProjectPath || pendingAgentNavigation),
-    runCliPassthroughIfRequested,
-    inheritLoginShellEnv,
-    bootstrapGui: bootstrap,
-  }).catch((error) => {
-    const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
-    process.stderr.write(`${message}\n`);
-    process.exit(1);
-  });
-}
+void runDesktopStartup({
+  hasPendingGuiLaunchRequest: Boolean(pendingOpenProjectPath || pendingAgentNavigation),
+  runCliPassthroughIfRequested,
+  inheritLoginShellEnv,
+  bootstrapGui: bootstrap,
+}).catch((error) => {
+  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  process.stderr.write(`${message}\n`);
+  process.exit(1);
+});
 
 function showDaemonShutdownDialog(): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -1131,16 +1103,13 @@ const quitLifecycle = createQuitLifecycle({
   },
 });
 
-// A blocked fork app owns no daemon: a quit that reached the lifecycle would stop the release's.
-if (!STABLE_FORK_BLOCKED) {
-  // electron-updater forwards this event through Electron's built-in autoUpdater.
-  electronAutoUpdater.on("before-quit-for-update", () => {
-    log.info("[auto-updater] before-quit-for-update", { currentVersion: app.getVersion() });
-    quitLifecycle.handleBeforeQuitForUpdate();
-  });
-  app.on("before-quit", quitLifecycle.handleBeforeQuit);
-  registerExternalQuitSignals({ signals: process, quit: () => app.quit() });
-}
+// electron-updater forwards this event through Electron's built-in autoUpdater.
+electronAutoUpdater.on("before-quit-for-update", () => {
+  log.info("[auto-updater] before-quit-for-update", { currentVersion: app.getVersion() });
+  quitLifecycle.handleBeforeQuitForUpdate();
+});
+app.on("before-quit", quitLifecycle.handleBeforeQuit);
+registerExternalQuitSignals({ signals: process, quit: () => app.quit() });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
