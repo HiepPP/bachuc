@@ -47,7 +47,7 @@ export type MarkdownStyles = Record<string, TextStyle & ViewStyle & { [key: stri
 
 interface MarkdownWithStableRendererProps {
   children: ReactNode;
-  style: ReturnType<typeof createMarkdownStyles> | ReturnType<typeof createCompactMarkdownStyles>;
+  style: MarkdownStyles;
   rules?: RenderRules;
   markdownit?: ReturnType<typeof MarkdownIt>;
   onLinkPress?: (url: string) => boolean;
@@ -74,6 +74,8 @@ const MARKDOWN_LIST_ITEM_CONTENT_FLEX: ViewStyle = { flex: 1, flexShrink: 1, min
 export interface MarkdownRendererProps {
   text: string;
   compact?: boolean;
+  /** Optional prose typography for embedded panels; other Markdown surfaces keep their defaults. */
+  textStyle?: Pick<TextStyle, "color" | "fontSize" | "lineHeight">;
   rules?: RenderRules;
   markdownit?: ReturnType<typeof MarkdownIt>;
   onLinkPress?: (url: string) => boolean;
@@ -85,6 +87,7 @@ export interface MarkdownRendererProps {
 export function MarkdownRenderer({
   text,
   compact = false,
+  textStyle,
   rules,
   markdownit = defaultMarkdownParser,
   onLinkPress,
@@ -100,6 +103,7 @@ export function MarkdownRenderer({
   const rendererProps = useMemo(
     () => ({
       compact,
+      textStyle,
       rules: markdownRules,
       markdownit,
       onLinkPress,
@@ -109,6 +113,7 @@ export function MarkdownRenderer({
     [
       allowedImageHandlers,
       compact,
+      textStyle,
       markdownRules,
       markdownit,
       onLinkPress,
@@ -175,13 +180,27 @@ function MarkdownPart({
 function MarkdownFragment({
   text,
   compact,
+  textStyle,
   rules,
   markdownit,
   onLinkPress,
   allowedImageHandlers,
   topLevelMaxExceededItem,
 }: MarkdownRendererProps & { rules: RenderRules }) {
-  const uniProps = compact ? compactMarkdownStyleMapping : markdownStyleMapping;
+  const uniProps = useCallback(
+    (theme: Theme): Partial<MarkdownWithStableRendererProps> => {
+      const mapped = compact ? compactMarkdownStyleMapping(theme) : markdownStyleMapping(theme);
+      if (!textStyle || !mapped.style) return mapped;
+      return {
+        style: {
+          ...mapped.style,
+          body: { ...mapped.style.body, ...textStyle },
+          text: { ...mapped.style.text, ...textStyle },
+        },
+      };
+    },
+    [compact, textStyle],
+  );
   return (
     <ThemedMarkdown
       uniProps={uniProps}

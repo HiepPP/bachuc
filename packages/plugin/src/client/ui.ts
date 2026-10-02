@@ -63,3 +63,30 @@ export interface ExternalLinkProps {
   onError?: (error: unknown) => void;
 }
 export declare const ExternalLink: ComponentType<ExternalLinkProps>;
+
+/** Host controls for plugin-owned panels. */
+export interface ButtonProps {
+  children?: ReactNode;
+  onPress(): void;
+  disabled?: boolean;
+  loading?: boolean;
+  accessibilityLabel?: string;
+  variant?: "default" | "secondary" | "outline" | "ghost" | "destructive";
+  size?: "xs" | "sm" | "md" | "lg";
+  leftIcon?: ReactNode;
+  trailing?: ReactNode;
+  onHoverIn?: import("react-native").PressableProps["onHoverIn"];
+  onHoverOut?: import("react-native").PressableProps["onHoverOut"];
+  style?: import("react-native").StyleProp<import("react-native").ViewStyle>;
+  textStyle?: import("react-native").StyleProp<import("react-native").TextStyle>;
+}
+export declare const Button: ComponentType<ButtonProps>;
+/** The host's Markdown renderer, including its link handling and text wrapping. */
+export declare const Markdown: ComponentType<{
+  text: string;
+  compact?: boolean;
+  enableHtmlish?: boolean;
+  textStyle?: Pick<import("react-native").TextStyle, "color" | "fontSize" | "lineHeight">;
+}>;
+/** Command on macOS, Control elsewhere; false on touch-only clients. */
+export declare function usePrimaryModifier(): boolean;

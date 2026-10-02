@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { runPluginClientBundle, type PluginClientRuntime } from "./evaluate";
+
+// This suite checks module registration, not Markdown rendering. The native dependency ships JSX in .js.
+vi.mock("@/components/markdown/renderer", () => ({ MarkdownRenderer: () => null }));
 
 const runtime = {
   paseo: {},
@@ -564,8 +567,10 @@ describe("evaluatePluginClientBundle", () => {
         `(function(require) {
       const shared = require("@getpaseo/plugin");
       const client = require("@getpaseo/plugin/client");
-      const { ExternalLink } = require("@getpaseo/plugin/client/ui");
-      if (typeof ExternalLink !== "function") throw new Error("ExternalLink");
+      const ui = require("@getpaseo/plugin/client/ui");
+      for (const name of ["ExternalLink", "Button", "Markdown", "usePrimaryModifier"]) {
+        if (typeof ui[name] !== "function") throw new Error(name);
+      }
       for (const name of ["usePaseo", "useRpc", "useSettings", "useAgent", "useWorkspace", "openExternalUrl"]) {
         if (name in shared || typeof client[name] !== "function") throw new Error(name);
       }

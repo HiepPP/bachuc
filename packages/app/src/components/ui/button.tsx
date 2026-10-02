@@ -171,6 +171,8 @@ export function Button({
   loading = false,
   accessibilityRole,
   accessibilityState: accessibilityStateProp,
+  onHoverIn,
+  onHoverOut,
   ...props
 }: PropsWithChildren<
   Omit<PressableProps, "style"> & {
@@ -211,8 +213,20 @@ export function Button({
   }
   const isGhostHovered = hovered && variant === "ghost";
 
-  const handleHoverIn = useCallback(() => setHovered(true), []);
-  const handleHoverOut = useCallback(() => setHovered(false), []);
+  const handleHoverIn: NonNullable<PressableProps["onHoverIn"]> = useCallback(
+    (event) => {
+      setHovered(true);
+      onHoverIn?.(event);
+    },
+    [onHoverIn],
+  );
+  const handleHoverOut: NonNullable<PressableProps["onHoverOut"]> = useCallback(
+    (event) => {
+      setHovered(false);
+      onHoverOut?.(event);
+    },
+    [onHoverOut],
+  );
 
   const pressableStyle = useCallback(
     ({ pressed }: PressableStateCallbackType): StyleProp<ViewStyle> => [

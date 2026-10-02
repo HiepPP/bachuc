@@ -150,6 +150,17 @@ These exact module specifiers use the host's runtime instances. A client bundle 
 
 Do not import `lucide-react-native`, `react-native-svg`, or DOM libraries. Set contribution `icon` fields to a [Lucide icon name](https://lucide.dev/icons/); Paseo validates the name and renders the icon.
 
+### Panel controls
+
+`@getpaseo/plugin/client/ui` also exports `Button`, `Markdown`, and `usePrimaryModifier`.
+Use these in plugin panels to retain the host's button behavior, Markdown formatting, and link handling.
+`Button` accepts children, `onPress`, `disabled`, `loading`, `variant`, `size`, `leftIcon`,
+`trailing`, `onHoverIn`, `onHoverOut`, `style`, and `textStyle`. `trailing` can hold a custom
+button face; hover callbacks run alongside the host hover state. `Markdown` accepts `text`, `compact`, `enableHtmlish`, and
+`textStyle` (`color`, `fontSize`, `lineHeight`) for prose in embedded panels.
+`usePrimaryModifier()` reports Command on macOS and Control elsewhere, resetting on window blur.
+It returns false on native clients; always provide a visible touch action for the alternate operation.
+
 ### Cross-platform rules
 
 Client code runs on iOS, Android, and in browsers through React Native Web. A component that works
