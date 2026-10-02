@@ -300,6 +300,8 @@ export interface PluginCommandCapabilities {
   rpc<InputSchema extends ZodType, OutputSchema extends ZodType>(
     contract: PluginRpcContract<InputSchema, OutputSchema>,
     input: ZodInput<InputSchema>,
+    /** Calls this plugin's installation on another configured, connected host. */
+    options?: { serverId: string },
   ): Promise<ZodOutput<OutputSchema>>;
   /** Opens a surface. `pluginId` opens another plugin's surface; `serverId` picks its host. */
   openSurface(id: string, options?: { pluginId?: string; serverId?: string }): void;

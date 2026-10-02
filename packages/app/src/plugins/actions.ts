@@ -11,6 +11,7 @@ import type { PluginSurfaceRuntime } from "./surface-runtime";
 import type { InstalledPlugin } from "./types";
 import { createPluginNavigation } from "./navigation";
 import { useActiveHostStore } from "@/stores/active-host-store";
+import { getHostRuntimeStore } from "@/runtime/host-runtime";
 
 export interface PluginNavigation {
   openSettings(pluginId: string, screenId: string): void;
@@ -31,7 +32,25 @@ export function createPluginCapabilities(
 ): PluginCommandCapabilities {
   return {
     paseo: runtime.paseo,
-    rpc: (contract, input) => callPluginRpc(contract, runtime.invoke, input),
+    rpc: (contract, input, options) =>
+      callPluginRpc(
+        contract,
+        async (method, value) => {
+          if (plugin.lifetime.signal.aborted) throw new Error("Plugin has stopped");
+          const serverId = options?.serverId ?? plugin.serverId;
+          if (serverId === plugin.serverId) return runtime.invoke(method, value);
+          const hosts = getHostRuntimeStore();
+          if (!hosts.getHosts().some((host) => host.serverId === serverId)) {
+            throw new Error(`Unknown Paseo host: ${serverId}`);
+          }
+          const target = hosts.getSnapshot(serverId);
+          if (target?.connectionStatus !== "online" || !target.client) {
+            throw new Error(`Paseo host is disconnected: ${serverId}`);
+          }
+          return target.client.invokePluginRpc(plugin.id, method, value);
+        },
+        input,
+      ),
     openSettings(screenId) {
       if (!plugin.settingsScreens.some((screen) => screen.id === screenId))
         throw new Error(`Plugin settings screen is unavailable: ${screenId}`);
