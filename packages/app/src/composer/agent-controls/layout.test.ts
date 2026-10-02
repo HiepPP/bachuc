@@ -7,7 +7,7 @@ import {
 } from "./layout";
 
 describe("composer control layout", () => {
-  it("removes labels in priority order as the toolbar narrows", () => {
+  it("keeps effort visible while removing other labels as the toolbar narrows", () => {
     expect(resolveComposerControlPresentation("full")).toEqual({
       showCarets: true,
       showThinkingLabel: true,
@@ -16,13 +16,13 @@ describe("composer control layout", () => {
     });
     expect(resolveComposerControlPresentation("condensed")).toEqual({
       showCarets: false,
-      showThinkingLabel: false,
+      showThinkingLabel: true,
       showModeLabel: true,
       aggregateFeatures: true,
     });
     expect(resolveComposerControlPresentation("tight")).toEqual({
       showCarets: false,
-      showThinkingLabel: false,
+      showThinkingLabel: true,
       showModeLabel: false,
       aggregateFeatures: true,
     });
@@ -53,28 +53,28 @@ describe("composer control layout", () => {
     ).toBe("condensed");
     expect(
       resolveComposerControlDensity({
-        availableWidth: 290,
+        availableWidth: 346,
         currentDensity: "condensed",
         controls,
       }),
     ).toBe("condensed");
     expect(
       resolveComposerControlDensity({
-        availableWidth: 280,
+        availableWidth: 336,
         currentDensity: "condensed",
         controls,
       }),
     ).toBe("tight");
     expect(
       resolveComposerControlDensity({
-        availableWidth: 300,
+        availableWidth: 356,
         currentDensity: "tight",
         controls,
       }),
     ).toBe("tight");
     expect(
       resolveComposerControlDensity({
-        availableWidth: 312,
+        availableWidth: 368,
         currentDensity: "tight",
         controls,
       }),

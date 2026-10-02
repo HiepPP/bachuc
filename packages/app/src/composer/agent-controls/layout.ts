@@ -60,7 +60,7 @@ function resolveCondensedFloor(controls: ComposerControlPresence): number {
   const fontScale = normalizedFontScale(controls.fontScale);
   const widths: number[] = [];
   if (controls.hasModel) widths.push(36 + 60 * fontScale);
-  if (controls.hasThinking) widths.push(COMPOSER_TOOLBAR_GEOMETRY.controlSize);
+  if (controls.hasThinking) widths.push(36 + 48 * fontScale);
   if (controls.hasMode) widths.push(36 + 96 * fontScale);
   if (controls.features.length > 0) widths.push(COMPOSER_TOOLBAR_GEOMETRY.controlSize);
   return sumControlWidths(widths);
@@ -116,14 +116,14 @@ export function resolveComposerControlPresentation(
   if (density === "condensed") {
     return {
       showCarets: false,
-      showThinkingLabel: false,
+      showThinkingLabel: true,
       showModeLabel: true,
       aggregateFeatures: true,
     };
   }
   return {
     showCarets: false,
-    showThinkingLabel: false,
+    showThinkingLabel: true,
     showModeLabel: false,
     aggregateFeatures: true,
   };

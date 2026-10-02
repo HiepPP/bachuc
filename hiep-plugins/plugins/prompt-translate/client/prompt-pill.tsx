@@ -8,7 +8,7 @@ import { usePromptPrefs } from "./prefs";
 export function PromptPillLabel(props: PluginButtonLabelProps) {
   const { prefs } = usePromptPrefs(props);
   const mode = modes.find((candidate) => candidate.value === prefs?.mode);
-  return mode ? `Caveman: ${mode.label}` : "Caveman";
+  return mode?.label ?? "Default";
 }
 
 // Opened from the shared composer pill; the button context names the composer's agent.
@@ -17,6 +17,18 @@ export function CavemanModeMenu(props: PluginButtonContentProps) {
   const { prefs, error, save } = usePromptPrefs(props);
   return (
     <View accessibilityRole="menu" style={{ paddingVertical: 4 }}>
+      <Text
+        accessibilityRole="header"
+        style={{
+          paddingHorizontal: 13,
+          paddingVertical: 4,
+          color: theme.colors.foregroundMuted,
+          fontSize: 12,
+          lineHeight: 16,
+        }}
+      >
+        Caveman
+      </Text>
       {error ? (
         <Text
           style={{

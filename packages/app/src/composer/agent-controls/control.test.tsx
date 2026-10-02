@@ -5,6 +5,7 @@ import React from "react";
 import { fireEvent, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentControlTrigger } from "./control";
+import { resolveComposerControlPresentation } from "./layout";
 
 beforeEach(() => vi.stubGlobal("React", React));
 
@@ -13,6 +14,30 @@ function TestIcon() {
 }
 
 describe("AgentControlTrigger", () => {
+  it.each(["full", "condensed", "tight"] as const)(
+    "shows the selected effort in a %s toolbar",
+    (density) => {
+      const presentation = resolveComposerControlPresentation(density);
+      const view = render(
+        <AgentControlTrigger
+          icon={TestIcon}
+          surface="toolbar"
+          label="Thinking mode"
+          value="Max"
+          showToolbarLabel={presentation.showThinkingLabel}
+          showCaret={presentation.showCarets}
+          onPress={vi.fn()}
+          accessibilityLabel="Select thinking mode: Max"
+        />,
+      );
+
+      expect(view.getByRole("button", { name: "Select thinking mode: Max" }).textContent).toBe(
+        "Max",
+      );
+      view.unmount();
+    },
+  );
+
   it("forwards interaction handlers to the rendered trigger", () => {
     const onPointerEnter = vi.fn();
     const onFocus = vi.fn();
