@@ -23,14 +23,14 @@ export const originalRpc = defineRpc({
 });
 
 const agentId = z.string().uuid();
-const prefs = z.object({ mode: cavemanModeSchema, rewrite: z.boolean() });
+const saved = z.object({ mode: cavemanModeSchema });
 export const modeReadRpc = defineRpc({
   name: "translate.mode.read",
   input: z.object({ agentId }),
-  output: prefs,
+  output: saved,
 });
 export const modeWriteRpc = defineRpc({
   name: "translate.mode.write",
-  input: z.object({ agentId, mode: cavemanModeSchema.optional(), rewrite: z.boolean().optional() }),
-  output: prefs,
+  input: z.object({ agentId, mode: cavemanModeSchema }),
+  output: saved,
 });

@@ -37,13 +37,8 @@ export default function contribute(server: PluginServerContext) {
     const value = await settings.read();
     return value.status === "ready" ? value.values : translateSettings.schema.parse({});
   };
-  server.handle(modeReadRpc, async ({ agentId }) =>
-    modes.prefs(agentId, (await readSettings()).enhanceShortcut),
-  );
-  server.handle(modeWriteRpc, async ({ agentId, mode, rewrite }) => {
-    await modes.update(agentId, { mode, rewrite });
-    return modes.prefs(agentId, (await readSettings()).enhanceShortcut);
-  });
+  server.handle(modeReadRpc, ({ agentId }) => modes.get(agentId));
+  server.handle(modeWriteRpc, ({ agentId, mode }) => modes.set(agentId, mode));
   const service = createService({
     store,
     complete: createCompleter((provider) => resolveEndpoint(provider, configFile)),

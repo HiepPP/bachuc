@@ -34,29 +34,13 @@ export class AgentModes {
     const saved = await this.read(agentId);
     return saved ? cavemanModeSchema.parse(saved.mode) : null;
   }
-  async prefs(agentId: string, defaultRewrite: boolean): Promise<{ mode: Mode; rewrite: boolean }> {
-    const saved = await this.read(agentId);
-    return {
-      mode: saved ? cavemanModeSchema.parse(saved.mode) : "follow-agent",
-      rewrite: typeof saved?.rewrite === "boolean" ? saved.rewrite : defaultRewrite,
-    };
-  }
-  // Merges so a mode change keeps the rewrite choice and the reverse.
-  async update(agentId: string, patch: { mode?: Mode; rewrite?: boolean }) {
-    const saved = (await this.read(agentId)) ?? { mode: "follow-agent" };
-    const next = {
-      ...saved,
-      ...(patch.mode ? { mode: cavemanModeSchema.parse(patch.mode) } : {}),
-      ...(patch.rewrite === undefined ? {} : { rewrite: patch.rewrite }),
-    };
-    await this.write(path.join(this.dir(agentId), "mode.json"), next);
-    return next;
-  }
   async set(agentId: string, mode: Mode) {
-    await this.update(agentId, { mode });
-    return { mode };
+    const saved = { mode: cavemanModeSchema.parse(mode) };
+    await this.write(path.join(this.dir(agentId), "mode.json"), saved);
+    return saved;
   }
-  private async read(agentId: string): Promise<{ mode: unknown; rewrite?: unknown } | null> {
+  // Files written while the pill had a rewrite switch also hold `rewrite`; only `mode` is read.
+  private async read(agentId: string): Promise<{ mode: unknown } | null> {
     try {
       return JSON.parse(await readFile(path.join(this.dir(agentId), "mode.json"), "utf8"));
     } catch (error) {

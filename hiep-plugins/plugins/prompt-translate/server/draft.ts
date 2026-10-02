@@ -16,11 +16,11 @@ export async function seedDraftPrefs(
     request.purpose === "interactive" &&
     (await modes.find(request.agentId)) === null
   ) {
-    const prefs =
+    const mode =
       raw === undefined
-        ? { mode: (await defaults()).cavemanMode }
-        : draftPrefsSchema.parse(JSON.parse(raw));
-    await modes.update(request.agentId, prefs);
+        ? (await defaults()).cavemanMode
+        : draftPrefsSchema.parse(JSON.parse(raw)).mode;
+    await modes.set(request.agentId, mode);
   }
   return { ...request, env };
 }

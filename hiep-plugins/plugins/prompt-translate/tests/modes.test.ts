@@ -234,13 +234,16 @@ test("the daemon context uses the given choice and a separate state folder", asy
   assert.match(plain, /Normal mode\. Stop caveman/);
 });
 
-test("agent prefs merge mode and rewrite and fall back to the default rewrite", async () => {
+test("a mode file that still holds the retired rewrite choice reads as its mode", async () => {
   const { root } = await fixture();
   const modes = new AgentModes(root);
   assert.equal(await modes.find(A), null);
-  assert.deepEqual(await modes.prefs(A, true), { mode: "follow-agent", rewrite: true });
-  await modes.update(A, { rewrite: false });
-  await modes.update(A, { mode: "lite" });
-  assert.deepEqual(await modes.prefs(A, true), { mode: "lite", rewrite: false });
+  assert.deepEqual(await modes.get(A), { mode: "follow-agent" });
+  const file = path.join(root, "agents", A, "mode.json");
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify({ mode: "lite", rewrite: false }));
   assert.equal(await modes.find(A), "lite");
+  assert.deepEqual(await modes.get(A), { mode: "lite" });
+  assert.deepEqual(await modes.set(A, "ultra"), { mode: "ultra" });
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { mode: "ultra" });
 });

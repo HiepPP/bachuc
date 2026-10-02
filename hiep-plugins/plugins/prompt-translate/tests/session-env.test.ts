@@ -49,13 +49,13 @@ test("New workspace preferences seed before the first turn and do not reset late
     [draftEnvKey]: JSON.stringify({ mode: "ultra", rewrite: false }),
   });
   const opened = await seedDraftPrefs(initial, modes, defaults);
-  assert.deepEqual(await modes.prefs(initial.agentId, true), { mode: "ultra", rewrite: false });
+  assert.deepEqual(await modes.get(initial.agentId), { mode: "ultra" });
   assert.deepEqual(opened.env, { KEEP: "1" });
-  await modes.update(initial.agentId, { mode: "lite", rewrite: true });
+  await modes.set(initial.agentId, "lite");
   await seedDraftPrefs(initial, modes, defaults);
   await seedDraftPrefs({ ...initial, reason: "resume" }, modes, defaults);
-  assert.deepEqual(await modes.prefs(initial.agentId, false), { mode: "lite", rewrite: true });
+  assert.deepEqual(await modes.get(initial.agentId), { mode: "lite" });
   const second = { ...request("codex"), agentId: "00000000-0000-4000-8000-000000000002" };
   await seedDraftPrefs(second, modes, defaults);
-  assert.deepEqual(await modes.prefs(second.agentId, true), { mode: "full", rewrite: true });
+  assert.deepEqual(await modes.get(second.agentId), { mode: "full" });
 });

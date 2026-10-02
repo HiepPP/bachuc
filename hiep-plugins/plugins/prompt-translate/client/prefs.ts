@@ -5,7 +5,7 @@ import { draftPrefsSchema } from "../shared/draft";
 import { translateSettings } from "../shared/settings";
 import type { Mode } from "./modes";
 
-export type Prefs = { mode: Mode; rewrite: boolean };
+export type Prefs = { mode: Mode };
 
 // The pill label and its popover are separate components; this keeps them on the same value.
 const known = new Map<string, Prefs>();
@@ -35,13 +35,11 @@ export function usePromptPrefs(context: PluginButtonContext) {
   const prefs = useSyncExternalStore(subscribe, () => (key ? known.get(key) : undefined)) ?? null;
   const [error, setError] = useState<string | null>(null);
   const defaultMode = defaults?.cavemanMode;
-  const defaultRewrite = defaults?.enhanceShortcut;
   useEffect(() => {
     if (draft) {
       const saved = draftPrefsSchema.safeParse(draft.get());
       if (saved.success) publish(draft.id, saved.data);
-      else if (defaultMode !== undefined && defaultRewrite !== undefined)
-        publish(draft.id, { mode: defaultMode, rewrite: defaultRewrite });
+      else if (defaultMode !== undefined) publish(draft.id, { mode: defaultMode });
       return;
     }
     if (!agentId) return;
@@ -52,18 +50,16 @@ export function usePromptPrefs(context: PluginButtonContext) {
     return () => {
       active = false;
     };
-  }, [agentId, draft, defaultMode, defaultRewrite, read]);
+  }, [agentId, draft, defaultMode, read]);
   const save = useCallback(
-    (patch: Partial<Prefs>) => {
-      const current = key ? known.get(key) : undefined;
-      if (!key || !current) return;
-      const next = { ...current, ...patch };
+    (next: Prefs) => {
+      if (!key || !known.has(key)) return;
       publish(key, next);
       if (draft) {
         draft.set(next);
         return;
       }
-      write({ agentId: key, ...patch })
+      write({ agentId: key, ...next })
         .then((saved) => publish(key, saved))
         .catch((failure: unknown) => setError(String(failure)));
     },
