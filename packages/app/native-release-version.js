@@ -1,4 +1,6 @@
-const versionPattern = /^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/;
+// `-hiep` marks this fork's builds, so they cannot be mistaken for an upstream release with the
+// same numbers. It takes the stable build slot: the fork publishes to no store.
+const versionPattern = /^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+)|-hiep)?$/;
 const stableIosBuildSlot = 999;
 const FDROID_ABI_VERSION_CODE_SUFFIXES = {
   "armeabi-v7a": 1,

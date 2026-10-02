@@ -23,6 +23,18 @@ describe("native release version", () => {
     });
   });
 
+  it("accepts the fork's -hiep version and gives it the stable build slot", () => {
+    expect(getNativeReleaseVersion("1.0.0-hiep")).toEqual({
+      appVersion: "1.0.0",
+      androidVersionCode: 1000000,
+      iosBuildNumber: "1000000999",
+    });
+  });
+
+  it("rejects any other prerelease label", () => {
+    expect(() => getNativeReleaseVersion("1.0.0-rc.1")).toThrow("unsupported version");
+  });
+
   it("rejects beta numbers that consume the stable iOS build slot", () => {
     expect(() => getNativeReleaseVersion("0.2.6-beta.999")).toThrow(
       "iOS beta number must be between 1 and 998",

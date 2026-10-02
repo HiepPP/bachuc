@@ -179,10 +179,20 @@ export function isVersionMismatch(
   return app !== daemon;
 }
 
+// This fork's builds are versioned `X.Y.Z-hiep`: npm, Electron, and the plugin requirement check
+// all reject a version that does not start with numbers. They are shown as `hiep-X.Y.Z`, the
+// name the fork goes by, so they cannot be mistaken for an upstream release.
+const FORK_VERSION_PATTERN = /^v?(\d+\.\d+\.\d+)-hiep$/;
+
 export function formatVersionWithPrefix(version: string | null | undefined): string {
   const value = version?.trim();
   if (!value) {
     return "\u2014";
+  }
+
+  const forkVersion = FORK_VERSION_PATTERN.exec(value);
+  if (forkVersion) {
+    return `hiep-${forkVersion[1]}`;
   }
 
   return value.startsWith("v") ? value : `v${value}`;

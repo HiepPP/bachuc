@@ -37,6 +37,14 @@ describe("desktop-updates helpers", () => {
     expect(formatVersionWithPrefix(null)).toBe("\u2014");
   });
 
+  it("shows this fork's -hiep version as hiep-X.Y.Z", async () => {
+    const { formatVersionWithPrefix } = await loadModuleForPlatform("web");
+
+    expect(formatVersionWithPrefix("1.0.0-hiep")).toBe("hiep-1.0.0");
+    expect(formatVersionWithPrefix("v1.0.0-hiep")).toBe("hiep-1.0.0");
+    expect(formatVersionWithPrefix("0.10.2-beta.900")).toBe("v0.10.2-beta.900");
+  });
+
   it("parses valid local daemon version result", async () => {
     const { parseLocalDaemonVersionResult } = await loadModuleForPlatform("web");
 
