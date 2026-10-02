@@ -25,6 +25,8 @@ function fixture() {
     error: null as string | null,
   };
   const created: unknown[] = [];
+  const sent: string[] = [];
+  const agent = { status: "idle", reads: 0 };
   const api = {
     agents: {
       create: async (options: unknown) => {
@@ -32,6 +34,9 @@ function fixture() {
       },
       ref: () => ({
         refresh: async () => {},
+        send: async (text: string) => {
+          sent.push(text);
+        },
         workspaceId: "workspace",
         cwd: "/repo",
         archivedAt: null,
@@ -41,14 +46,23 @@ function fixture() {
           currentModeId: "bypassPermissions",
           thinkingOptionId: null,
         }),
-        status: "idle",
-        timeline: { refetch: async () => page },
+        get status() {
+          return agent.status;
+        },
+        timeline: {
+          refetch: async () => {
+            agent.reads += 1;
+            return page;
+          },
+        },
       }),
     },
   } as unknown as PaseoApi;
   return {
     page,
     created,
+    sent,
+    agent,
     driver: createDriver(() => api, "host"),
     engine: new Engine(
       new Store(),
@@ -84,4 +98,41 @@ test("new-thread start copies directory, provider, model and mode into one creat
       idempotencyKey: "next-prompt-key",
     },
   ]);
+});
+test("a closed thread keeps its suggestions without a timeline read, which would resume it", async () => {
+  const { engine, driver, agent, sent } = fixture();
+  const open = await engine.inspect(scope);
+  assert.equal(agent.reads, 1);
+  agent.status = "closed";
+  for (let poll = 0; poll < 3; poll++) {
+    const closed = await engine.inspect(scope);
+    assert.deepEqual(closed.candidates, open.candidates);
+    assert.equal(closed.busy, false, "a closed thread is at rest; sending resumes it");
+  }
+  assert.equal(agent.reads, 1);
+  await engine.send(scope, open.candidates[0].key);
+  assert.deepEqual(sent, ["Verify the result."]);
+  assert.equal(agent.reads, 1);
+  // Only the latest turn is kept, and each driver keeps its own.
+  agent.status = "idle";
+  assert.equal((await driver.read(scope)).rows.length, 1000);
+  agent.status = "closed";
+  assert.deepEqual(
+    (await driver.read(scope)).rows.map((row) => row.type),
+    ["user_message", "assistant_message"],
+  );
+});
+test("a closed thread never read before is read once, and a reopened thread is read fresh", async () => {
+  const { engine, agent } = fixture();
+  agent.status = "closed";
+  assert.equal((await engine.inspect(scope)).busy, true);
+  assert.equal(agent.reads, 1);
+  assert.equal((await engine.inspect(scope)).busy, false);
+  assert.equal(agent.reads, 1);
+  agent.status = "idle";
+  await engine.inspect(scope);
+  assert.equal(agent.reads, 2);
+  agent.status = "running";
+  assert.equal((await engine.inspect(scope)).busy, true);
+  assert.equal(agent.reads, 3);
 });

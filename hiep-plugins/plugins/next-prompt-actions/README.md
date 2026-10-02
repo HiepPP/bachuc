@@ -22,6 +22,10 @@ every Paseo client. Requires the Paseo fork `>=0.10.2-beta.900`; the stable 0.10
 - An optional `suggestion: true` or `suggestion: false` line marks whether the agent recommends
   the prompt (see [Suggested badge](#suggested-badge)).
 - Only the latest reply offers buttons. Earlier panels stay readable without them.
+- The panel never resumes a closed thread. Reading a timeline resumes its runtime, so a thread
+  whose runtime was closed (by `idle-runtime-closer`, or by Remove in `board`) is served from the
+  last read of its latest turn. Its buttons stay enabled; Send resumes the thread. A closed thread
+  the daemon plugin has not read since it loaded is read once.
 - Layout ports the original `client/web.ts` rules: two columns, non-shrinking actions,
   a separate selection footer, and stacked rows only below the 600px available-width breakpoint.
 - The panel uses host-owned Markdown and Button components through the plugin UI API; no DOM patching.
