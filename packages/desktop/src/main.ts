@@ -125,8 +125,8 @@ const DISABLE_SINGLE_INSTANCE_LOCK = process.env.PASEO_DISABLE_SINGLE_INSTANCE_L
 const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || "Paseo Dev";
 const PASEO_DEV_HOME = path.join(os.homedir(), ".paseo-dev");
 const PASEO_DEV_LISTEN = "127.0.0.1:6770";
-// scripts/paseo-switch.sh installs a build as "Paseo Fork.app" to serve the stable home. That
-// copy keeps ~/.paseo and its port, and shares the release app's userData so the single-instance
+// scripts/paseo-switch.sh installs a release as "Paseo Fork.app" to serve the stable home. That
+// copy keeps ~/.paseo and its port, and shares the stock app's userData so the single-instance
 // lock keeps the two apps from fighting over one daemon.
 const IS_STABLE_FORK = app.isPackaged && process.execPath.includes("/Paseo Fork.app/");
 const STABLE_USER_DATA = path.join(app.getPath("appData"), "Paseo");

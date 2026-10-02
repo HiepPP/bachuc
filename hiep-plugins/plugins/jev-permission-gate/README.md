@@ -3,7 +3,7 @@
 Answers shell permission requests for Paseo agents before they reach the user.
 Regex handles the certain cases; Jev classifies the rest; anything uncertain stays with the user.
 It uses the `agent.permission` before hook, so an answered request never shows a prompt or sends a
-push notification. Requires the Paseo fork `>=0.10.2-beta.900`; the stable 0.10.1 host refuses it.
+push notification. Requires the Paseo fork `>=0.10.2-beta.900`; the stock 0.10.1 host refuses it.
 While the gate decides, other events of that agent wait, up to the 25-second budget.
 
 Order per `agent.permission` request with a shell command:

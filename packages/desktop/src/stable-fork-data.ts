@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 // scripts/paseo-switch.sh writes this file into fork data only. Data without it belongs to the
-// release app.
+// stock app.
 const SWITCH_SIDE_LABEL = ".paseo-switch-side";
 
 export function isForkDataLive(dataDir: string): boolean {

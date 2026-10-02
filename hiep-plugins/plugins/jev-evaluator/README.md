@@ -22,7 +22,7 @@ npm ci
 npm run typecheck
 npm run lint
 npm test
-PASEO_HOME=~/.paseo-dev paseo plugin install "$PWD" --id jev-evaluator   # build
+PASEO_HOME=~/.paseo-dev paseo plugin install "$PWD" --id jev-evaluator   # release
 PASEO_HOME=~/.paseo-dev paseo plugin ls jev-evaluator --json
 ```
 
@@ -76,7 +76,7 @@ Only send state you intend to share with Vercel. The wrapper sends no workspace 
 
 ## Update or disable
 
-After source edits, run the checks above and `PASEO_HOME=~/.paseo-dev paseo plugin reload jev-evaluator` (build), then `npm run cli -- plugin reload jev-evaluator` from the repo root (live).
+After source edits, run the checks above and `PASEO_HOME=~/.paseo-dev paseo plugin reload jev-evaluator` (release), then `npm run cli -- plugin reload jev-evaluator` from the repo root (live).
 Run `PASEO_HOME=~/.paseo-dev paseo plugin disable jev-evaluator` to stop injecting the tool into new agents.
 Previously created agents retain their stored MCP entry; archive them when no longer needed.
 No daemon restart is required.

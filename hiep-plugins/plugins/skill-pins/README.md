@@ -3,7 +3,7 @@
 Pin skills to a Paseo conversation from the composer. Each turn, the agent is told to load the
 pinned skills before it answers. The user bubble and the timeline keep the typed text.
 
-Requires the Paseo fork `>=0.10.2-beta.900`. The stable 0.10.1 host refuses the plugin.
+Requires the Paseo fork `>=0.10.2-beta.900`. The stock 0.10.1 host refuses the plugin.
 
 ## How it works
 

@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 # Switches which app serves the stable home (~/.paseo on 127.0.0.1:6767).
 #
-#   scripts/paseo-switch.sh fork      install the current build as "Paseo Fork.app" and start it
-#   scripts/paseo-switch.sh release   go back to /Applications/Paseo.app
+#   scripts/paseo-switch.sh fork      install the current release as "Paseo Fork.app" and start it
+#   scripts/paseo-switch.sh stock     go back to stock, /Applications/Paseo.app
 #   scripts/paseo-switch.sh status    show which side is live and what a switch would use
+#
+# The release is this repo packaged; stock is the upstream app. "release" is still accepted as
+# the older name of the stock subcommand.
 #
 # Options:
 #   --dry-run  print every change without making it
 #   --force    switch while agents are mid-turn
 #
-# While the fork is live the release app is parked outside /Applications, so it cannot be opened
+# While the fork is live the stock app is parked outside /Applications, so it cannot be opened
 # on the fork data. Going back puts it in /Applications again.
 #
 # Each side keeps its own data. A switch renames the live ~/.paseo and userData into the slot of
 # the side that was running, then renames the other side's slot into place. Nothing is deleted or
 # merged, so each side comes back exactly as it was left. The first fork starts from a clone of
-# the release data.
+# the stock data.
 #
 # A switch that fails after the daemon stopped rolls back by itself to the side that ran before.
 # Real runs append their output to ~/.paseo-switch/switch-output.log; the terminal only mirrors
@@ -30,20 +33,23 @@ STABLE_HOME="$HOME/.paseo"
 STABLE_PORT=6767
 STABLE_LISTEN="127.0.0.1:$STABLE_PORT"
 USER_DATA="$HOME/Library/Application Support/Paseo"
-RELEASE_APP="/Applications/Paseo.app"
+STOCK_APP="/Applications/Paseo.app"
 # packages/desktop/src/main.ts keys the stable role on this bundle name.
 FORK_APP="/Applications/Paseo Fork.app"
 BUILD_APP="$REPO_ROOT/packages/desktop/release/mac-arm64/Paseo.app"
 BUILD_BUNDLE_ID="sh.paseo.desktop.dev"
 CLI_LINKS=("$HOME/.local/bin/paseo" "/opt/homebrew/bin/paseo")
 STATE_DIR="$HOME/.paseo-switch"
-# Where the release bundle waits while the fork is live. Opened then, it would restart the fork's
-# daemon at the release version and rewrite the fork data. The name does not end in .app because
+# Where the stock bundle waits while the fork is live. Opened then, it would restart the fork's
+# daemon at the stock version and rewrite the fork data. The name does not end in .app because
 # a moved bundle can still be reached through the Dock or a bookmark.
-RELEASE_PARKED="$STATE_DIR/apps/Paseo.app.parked"
+STOCK_PARKED="$STATE_DIR/apps/Paseo.app.parked"
 SLOTS="$STATE_DIR/slots"
-# Written into fork data only. Data without it belongs to the release, so the release data is
-# never modified by this script.
+# The stock side was named "release" before, so stock data stashed then sits in this folder. It
+# is read from here and never renamed; the next stash goes to $SLOTS/stock.
+LEGACY_STOCK_SLOT="$SLOTS/release"
+# Written into fork data only. Data without it belongs to stock, so the stock data is never
+# modified by this script.
 SIDE_LABEL=".paseo-switch-side"
 OUTPUT_LOG="$STATE_DIR/switch-output.log"
 # Seconds the daemon gets to close its agents before the switch gives up.
@@ -148,15 +154,15 @@ electron_version() {
     CFBundleVersion
 }
 
-# The release bundle, wherever it is right now.
-release_bundle() {
-  if [ ! -d "$RELEASE_APP" ] && [ -d "$RELEASE_PARKED" ]; then
-    printf '%s' "$RELEASE_PARKED"
+# The stock bundle, wherever it is right now.
+stock_bundle() {
+  if [ ! -d "$STOCK_APP" ] && [ -d "$STOCK_PARKED" ]; then
+    printf '%s' "$STOCK_PARKED"
   else
-    printf '%s' "$RELEASE_APP"
+    printf '%s' "$STOCK_APP"
   fi
 }
-release_version() { app_version "$(release_bundle)"; }
+stock_version() { app_version "$(stock_bundle)"; }
 
 listener_pid() { lsof -nP -t -iTCP:"$STABLE_PORT" -sTCP:LISTEN 2>/dev/null | head -1 || true; }
 port_free() { [ -z "$(listener_pid)" ]; }
@@ -168,29 +174,53 @@ stable_cli() { env -u PASEO_LISTEN -u PASEO_HOST PASEO_HOME="$STABLE_HOME" "$@";
 active_app() {
   if ! app_stopped "$FORK_APP"; then
     printf 'fork'
-  elif ! app_stopped "$RELEASE_APP" || ! app_stopped "$RELEASE_PARKED"; then
-    printf 'release'
+  elif ! app_stopped "$STOCK_APP" || ! app_stopped "$STOCK_PARKED"; then
+    printf 'stock'
   else
     printf 'none'
   fi
 }
 
 cli_for() {
-  if [ "$1" = fork ]; then app_cli "$FORK_APP"; else app_cli "$(release_bundle)"; fi
+  if [ "$1" = fork ]; then app_cli "$FORK_APP"; else app_cli "$(stock_bundle)"; fi
 }
 
 live_path() {
   if [ "$1" = home ]; then printf '%s' "$STABLE_HOME"; else printf '%s' "$USER_DATA"; fi
 }
 
-# The side that owns a data folder: its label, "release" when unlabelled, "none" when absent.
+# The side that owns a data folder: its label, "stock" when unlabelled, "none" when absent.
 data_side() {
   if [ ! -d "$1" ]; then
     printf 'none'
   elif [ -f "$1/$SIDE_LABEL" ]; then
     cat "$1/$SIDE_LABEL"
   else
-    printf 'release'
+    printf 'stock'
+  fi
+}
+
+# slot_path <side> <home|userData>
+# Where a side's idle data sits. Resolved per folder, so an interrupted switch that left home and
+# userData in different stock folders still finds both.
+slot_path() {
+  if [ "$1" = stock ] && [ ! -e "$SLOTS/stock/$2" ] && [ -e "$LEGACY_STOCK_SLOT/$2" ]; then
+    printf '%s' "$LEGACY_STOCK_SLOT/$2"
+  else
+    printf '%s' "$SLOTS/$1/$2"
+  fi
+}
+
+# stock_slot_twice <home|userData>
+# Stock data in both stock folders: nothing says which copy is current, so no switch may pick one.
+stock_slot_twice() { [ -e "$SLOTS/stock/$1" ] && [ -e "$LEGACY_STOCK_SLOT/$1" ]; }
+
+# The folder shown for the stock slot: the old one while it still holds data.
+stock_slot_dir() {
+  if [ -e "$LEGACY_STOCK_SLOT/home" ] || [ -e "$LEGACY_STOCK_SLOT/userData" ]; then
+    printf '%s' "$LEGACY_STOCK_SLOT"
+  else
+    printf '%s' "$SLOTS/stock"
   fi
 }
 
@@ -201,7 +231,7 @@ guard_outside_paseo() {
   if [ -n "${PASEO_AGENT_ID:-}" ]; then
     reason="PASEO_AGENT_ID is set, so this shell belongs to a Paseo agent"
   else
-    owners="$(app_pid "$RELEASE_APP") $(app_pid "$RELEASE_PARKED") $(app_pid "$FORK_APP") $(supervisor_pid) $(listener_pid)"
+    owners="$(app_pid "$STOCK_APP") $(app_pid "$STOCK_PARKED") $(app_pid "$FORK_APP") $(supervisor_pid) $(listener_pid)"
     pid=$$
     while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
       for owner in $owners; do
@@ -220,13 +250,13 @@ guard_outside_paseo() {
 
 preflight_common() {
   command -v jq >/dev/null 2>&1 || problem "jq is not on PATH"
-  if [ -d "$RELEASE_APP" ] && [ -d "$RELEASE_PARKED" ]; then
-    problem "release app exists twice: $RELEASE_APP and $RELEASE_PARKED"
-  elif [ ! -d "$RELEASE_APP" ] && [ ! -d "$RELEASE_PARKED" ]; then
-    problem "release app missing: neither $RELEASE_APP nor $RELEASE_PARKED exists"
+  if [ -d "$STOCK_APP" ] && [ -d "$STOCK_PARKED" ]; then
+    problem "stock app exists twice: $STOCK_APP and $STOCK_PARKED"
+  elif [ ! -d "$STOCK_APP" ] && [ ! -d "$STOCK_PARKED" ]; then
+    problem "stock app missing: neither $STOCK_APP nor $STOCK_PARKED exists"
   fi
-  [ "$(stat -f %d "$HOME")" = "$(stat -f %d "$(dirname "$RELEASE_APP")")" ] ||
-    problem "$HOME and $(dirname "$RELEASE_APP") are on different volumes"
+  [ "$(stat -f %d "$HOME")" = "$(stat -f %d "$(dirname "$STOCK_APP")")" ] ||
+    problem "$HOME and $(dirname "$STOCK_APP") are on different volumes"
   # A rename is atomic only inside one volume.
   [ "$(stat -f %d "$HOME")" = "$(stat -f %d "$(dirname "$USER_DATA")")" ] ||
     problem "$HOME and $(dirname "$USER_DATA") are on different volumes"
@@ -239,18 +269,20 @@ preflight_data() {
     live="$(live_path "$name")"
     side="$(data_side "$live")"
     case "$side" in
-      release | fork | none) ;;
+      stock | fork | none) ;;
       *)
         problem "unknown side label '$side' in $live"
         continue
         ;;
     esac
-    [ "$side" = none ] || [ ! -e "$SLOTS/$side/$name" ] ||
-      problem "$side $name exists twice: $live and $SLOTS/$side/$name"
+    [ "$side" = none ] || [ ! -e "$(slot_path "$side" "$name")" ] ||
+      problem "$side $name exists twice: $live and $(slot_path "$side" "$name")"
+    ! stock_slot_twice "$name" ||
+      problem "stock $name exists twice: $SLOTS/stock/$name and $LEGACY_STOCK_SLOT/$name"
     [ ! -e "$live.cloning" ] || warn "$live.cloning is left from an interrupted fork; it moves to $STATE_DIR/leftover"
-    # The first fork clones the release data, so the release data is enough for either target.
-    for other in "$target" release; do
-      if [ "$side" = "$other" ] || [ -d "$SLOTS/$other/$name" ]; then continue 2; fi
+    # The first fork clones the stock data, so the stock data is enough for either target.
+    for other in "$target" stock; do
+      if [ "$side" = "$other" ] || [ -d "$(slot_path "$other" "$name")" ]; then continue 2; fi
     done
     problem "no $name data for $target: $live is $side and $SLOTS holds none"
   done
@@ -259,20 +291,20 @@ preflight_data() {
 preflight_build() {
   local resources="$BUILD_APP/Contents/Resources"
   if [ ! -d "$BUILD_APP" ]; then
-    problem "no build at $BUILD_APP"
+    problem "no release at $BUILD_APP"
     return 0
   fi
   [ "$(plist "$BUILD_APP/Contents/Info.plist" CFBundleIdentifier)" = "$BUILD_BUNDLE_ID" ] ||
-    problem "build bundle ID is not $BUILD_BUNDLE_ID"
-  [ -x "$(app_cli "$BUILD_APP")" ] || problem "build has no CLI at $(app_cli "$BUILD_APP")"
+    problem "release bundle ID is not $BUILD_BUNDLE_ID"
+  [ -x "$(app_cli "$BUILD_APP")" ] || problem "release has no CLI at $(app_cli "$BUILD_APP")"
   # The asar is an uncompressed archive, so the compiled main process is searchable.
   grep -q "Paseo Fork.app" "$resources/app.asar" 2>/dev/null ||
-    problem "build predates the stable-fork role in main.ts; rebuild it"
+    problem "release predates the stable-fork role in main.ts; rebuild it"
   [ "$(bundled_plugin_count "$BUILD_APP")" -gt 0 ] ||
-    problem "build has no bundled plugins under Resources/plugins; rebuild with npm run build:desktop"
+    problem "release has no bundled plugins under Resources/plugins; rebuild with npm run build:desktop"
   [ -w "$(dirname "$FORK_APP")" ] || problem "$(dirname "$FORK_APP") is not writable"
-  [ "$(electron_version "$BUILD_APP")" = "$(electron_version "$(release_bundle)")" ] ||
-    warn "Electron differs: build $(electron_version "$BUILD_APP"), release $(electron_version "$(release_bundle)")."
+  [ "$(electron_version "$BUILD_APP")" = "$(electron_version "$(stock_bundle)")" ] ||
+    warn "Electron differs: release $(electron_version "$BUILD_APP"), stock $(electron_version "$(stock_bundle)")."
 }
 
 bundled_plugin_count() {
@@ -301,7 +333,7 @@ check_running_agents() {
 
 stop_stable() {
   local cli="$1" app pid
-  for app in "$FORK_APP" "$RELEASE_APP" "$RELEASE_PARKED"; do
+  for app in "$FORK_APP" "$STOCK_APP" "$STOCK_PARKED"; do
     pid="$(app_pid "$app")"
     [ -n "$pid" ] || continue
     log "    quitting $app (PID $pid)"
@@ -332,27 +364,29 @@ swap_dir() {
   live="$(live_path "$name")"
   side="$(data_side "$live")"
   [ "$side" != "$target" ] || return 0
+  ! stock_slot_twice "$name" ||
+    die "stock $name exists twice: $SLOTS/stock/$name and $LEGACY_STOCK_SLOT/$name"
   if [ "$side" != none ]; then
-    slot="$SLOTS/$side/$name"
+    slot="$(slot_path "$side" "$name")"
     [ ! -e "$slot" ] || die "$side $name exists twice: $live and $slot"
-    run mkdir -p "$SLOTS/$side"
+    run mkdir -p "$(dirname "$slot")"
     move "$live" "$slot"
     stashed="$side"
   fi
-  slot="$SLOTS/$target/$name"
+  slot="$(slot_path "$target" "$name")"
   if [ -d "$slot" ]; then
     move "$slot" "$live"
     return 0
   fi
-  [ "$target" = fork ] || die "no release $name at $slot"
-  [ -d "$SLOTS/release/$name" ] || [ "$stashed" = release ] || die "no release $name to clone for the fork"
+  [ "$target" = fork ] || die "no stock $name at $slot"
+  [ -d "$(slot_path stock "$name")" ] || [ "$stashed" = stock ] || die "no stock $name to clone for the fork"
   # First fork. The clone is labelled before it is renamed into place, so an interrupted copy is
-  # never mistaken for release data. -c clones on APFS: no space is used until the sides diverge.
+  # never mistaken for stock data. -c clones on APFS: no space is used until the sides diverge.
   if [ -e "$live.cloning" ]; then
     run mkdir -p "$STATE_DIR/leftover"
     move "$live.cloning" "$STATE_DIR/leftover/$STAMP-$name"
   fi
-  run cp -Rcp "$SLOTS/release/$name" "$live.cloning"
+  run cp -Rcp "$(slot_path stock "$name")" "$live.cloning"
   run label_fork "$live.cloning"
   move "$live.cloning" "$live"
 }
@@ -369,18 +403,18 @@ activate_data() {
 }
 
 # Renames only: the bundle is never copied or deleted. Both are safe to repeat.
-park_release() {
-  [ -d "$RELEASE_APP" ] || return 0
-  [ ! -e "$RELEASE_PARKED" ] || die "release app exists twice: $RELEASE_APP and $RELEASE_PARKED"
-  run mkdir -p "$(dirname "$RELEASE_PARKED")"
-  move "$RELEASE_APP" "$RELEASE_PARKED"
+park_stock() {
+  [ -d "$STOCK_APP" ] || return 0
+  [ ! -e "$STOCK_PARKED" ] || die "stock app exists twice: $STOCK_APP and $STOCK_PARKED"
+  run mkdir -p "$(dirname "$STOCK_PARKED")"
+  move "$STOCK_APP" "$STOCK_PARKED"
   DRY_RUN_PARKED="$DRY_RUN"
 }
 
-unpark_release() {
-  if [ -d "$RELEASE_APP" ] && [ "$DRY_RUN_PARKED" = 0 ]; then return 0; fi
-  [ -d "$RELEASE_PARKED" ] || [ "$DRY_RUN_PARKED" = 1 ] || die "release app missing: neither $RELEASE_APP nor $RELEASE_PARKED exists"
-  move "$RELEASE_PARKED" "$RELEASE_APP"
+unpark_stock() {
+  if [ -d "$STOCK_APP" ] && [ "$DRY_RUN_PARKED" = 0 ]; then return 0; fi
+  [ -d "$STOCK_PARKED" ] || [ "$DRY_RUN_PARKED" = 1 ] || die "stock app missing: neither $STOCK_APP nor $STOCK_PARKED exists"
+  move "$STOCK_PARKED" "$STOCK_APP"
 }
 
 # Repoints every paseo link that already points into one of the apps.
@@ -389,7 +423,7 @@ point_cli() {
   for link in "${CLI_LINKS[@]}"; do
     target="$(readlink "$link" 2>/dev/null || true)"
     case "$target" in
-      "$RELEASE_APP"/* | "$RELEASE_PARKED"/* | "$FORK_APP"/*)
+      "$STOCK_APP"/* | "$STOCK_PARKED"/* | "$FORK_APP"/*)
         if [ -w "$(dirname "$link")" ]; then
           run ln -sfn "$(app_cli "$1")" "$link"
         else
@@ -436,24 +470,24 @@ record() {
   printf '%s\t%s\n' "$STAMP" "$*" >>"$STATE_DIR/switch.log"
 }
 
-# Shared by release and by the rollback of a failed fork.
-finish_release() {
-  step "put the fork data in its slot and bring the release data back"
-  activate_data release
-  # Only now: the release app is launchable again once its own data is live.
-  step "bring the release app back to $RELEASE_APP"
-  unpark_release
-  step "point the paseo CLI links at the release"
-  point_cli "$RELEASE_APP"
-  step "start the release and wait for daemon $(release_version)"
-  start_and_verify "$RELEASE_APP"
+# Shared by the stock switch and by the rollback of a failed fork.
+finish_stock() {
+  step "put the fork data in its slot and bring the stock data back"
+  activate_data stock
+  # Only now: the stock app is launchable again once its own data is live.
+  step "bring the stock app back to $STOCK_APP"
+  unpark_stock
+  step "point the paseo CLI links at stock"
+  point_cli "$STOCK_APP"
+  step "start stock and wait for daemon $(stock_version)"
+  start_and_verify "$STOCK_APP"
 }
 
-# enter_fork and finish_fork are shared by fork and by the rollback of a failed release.
+# enter_fork and finish_fork are shared by fork and by the rollback of a failed switch to stock.
 enter_fork() {
-  step "park the release app in $RELEASE_PARKED"
-  park_release
-  step "put the release data in its slot and bring the fork data in"
+  step "park the stock app in $STOCK_PARKED"
+  park_stock
+  step "put the stock data in its slot and bring the fork data in"
   activate_data fork
 }
 
@@ -468,12 +502,12 @@ finish_fork() {
 # rollback_to <side>
 rollback_to() {
   local cli
-  cli="$(app_cli "$(release_bundle)")"
+  cli="$(app_cli "$(stock_bundle)")"
   [ ! -x "$(app_cli "$FORK_APP")" ] || cli="$(app_cli "$FORK_APP")"
   step "rollback: stop whatever the failed switch started"
   stop_stable "$cli"
-  if [ "$1" = release ]; then
-    finish_release
+  if [ "$1" = stock ]; then
+    finish_stock
   else
     enter_fork
     finish_fork "$(app_version "$FORK_APP")"
@@ -525,7 +559,7 @@ on_exit() {
       if [ "$rolled" = 0 ]; then
         log "Rolled back. Stable home runs the $target side on its own data."
       else
-        printf 'error: rollback did not finish, so the stable home may have no daemon. No data was deleted. Run: scripts/paseo-switch.sh release\n' >&2
+        printf 'error: rollback did not finish, so the stable home may have no daemon. No data was deleted. Run: scripts/paseo-switch.sh stock\n' >&2
       fi
     elif [ "$STOPPED" = 1 ]; then
       printf 'error: the stable home may have no daemon. No data was deleted. Run again: scripts/paseo-switch.sh %s\n' "$COMMAND" >&2
@@ -538,7 +572,7 @@ on_exit() {
 cmd_fork() {
   local active cli version staging="$FORK_APP.new"
   version="$(app_version "$BUILD_APP")"
-  step "check the build and both sides' data"
+  step "check the release and both sides' data"
   preflight_common
   preflight_build
   preflight_data fork
@@ -548,13 +582,13 @@ cmd_fork() {
   report_problems
   guard_outside_paseo
 
-  step "copy build $version to $staging"
+  step "copy release $version to $staging"
   [ ! -e "$staging" ] || move "$staging" "$HOME/.Trash/Paseo Fork staging $STAMP.app"
   run ditto "$BUILD_APP" "$staging"
 
   # From here the stable home has no daemon until a start succeeds, so a failure rolls back.
   STOPPED=1
-  ROLLBACK_TO=release
+  ROLLBACK_TO=stock
   step "stop the stable app and daemon"
   stop_stable "$cli"
   enter_fork
@@ -566,20 +600,20 @@ cmd_fork() {
   wait_for 120 "bundled plugins to run (scripts/paseo-switch.sh status)" fork_plugins_ready
   ROLLBACK_TO=""
   run record "fork $version"
-  log "Stable home now runs the fork build $version on the fork data."
+  log "Stable home now runs release $version on the fork data."
 }
 
-cmd_release() {
+cmd_stock() {
   local active cli previous
   step "check both sides' data"
   preflight_common
-  preflight_data release
+  preflight_data stock
   active="$(active_app)"
   cli="$(cli_for "$active")"
   previous="$(data_side "$STABLE_HOME")"
-  if [ -z "$PROBLEMS" ] && [ "$active" = release ] && [ -d "$RELEASE_APP" ] &&
-    [ "$previous" = release ] && [ "$(data_side "$USER_DATA")" = release ]; then
-    log "Stable home already runs the release $(release_version) on the release data."
+  if [ -z "$PROBLEMS" ] && [ "$active" = stock ] && [ -d "$STOCK_APP" ] &&
+    [ "$previous" = stock ] && [ "$(data_side "$USER_DATA")" = stock ]; then
+    log "Stable home already runs stock $(stock_version) on the stock data."
     return 0
   fi
   check_running_agents "$cli"
@@ -587,20 +621,20 @@ cmd_release() {
   guard_outside_paseo
 
   STOPPED=1
-  # A failed release goes back to the fork only when the fork is what ran before.
+  # A failed switch to stock goes back to the fork only when the fork is what ran before.
   if [ "$previous" = fork ] && [ -d "$FORK_APP" ]; then ROLLBACK_TO=fork; fi
   step "stop the stable app and daemon"
   stop_stable "$cli"
-  finish_release
+  finish_stock
   ROLLBACK_TO=""
-  run record "release $(release_version)"
-  log "Stable home now runs the release $(release_version) on the release data."
+  run record "stock $(stock_version)"
+  log "Stable home now runs stock $(stock_version) on the stock data."
 }
 
 slot_state() {
   local side="$1" name found=""
   for name in home userData; do
-    [ ! -d "$SLOTS/$side/$name" ] || found="$found $name"
+    [ ! -d "$(slot_path "$side" "$name")" ] || found="$found $name"
   done
   printf '%s' "${found:- empty}"
 }
@@ -618,16 +652,16 @@ cmd_status() {
   for link in "${CLI_LINKS[@]}"; do
     log "cli link      $link -> $(readlink "$link" 2>/dev/null || printf 'not a symlink')"
   done
-  log "release slot $(slot_state release)   ($SLOTS/release)"
+  log "stock slot   $(slot_state stock)   ($(stock_slot_dir))"
   log "fork slot    $(slot_state fork)   ($SLOTS/fork)"
-  log "release app   $(release_version) at $(release_bundle)"
-  [ "$home_side" != fork ] || [ ! -d "$RELEASE_APP" ] ||
-    log "WARNING       $RELEASE_APP is installed while fork data is live; opening it would run the release on fork data"
+  log "stock app     $(stock_version) at $(stock_bundle)"
+  [ "$home_side" != fork ] || [ ! -d "$STOCK_APP" ] ||
+    log "WARNING       $STOCK_APP is installed while fork data is live; opening it would run stock on fork data"
   log "fork app      $([ -d "$FORK_APP" ] && app_version "$FORK_APP" || printf 'not installed')"
   if [ -d "$BUILD_APP" ]; then
-    log "build         $(app_version "$BUILD_APP"), built $(date -r "$BUILD_APP/Contents/Resources/app.asar" '+%Y-%m-%d %H:%M'), $(bundled_plugin_count "$BUILD_APP") bundled plugins"
+    log "release       $(app_version "$BUILD_APP"), built $(date -r "$BUILD_APP/Contents/Resources/app.asar" '+%Y-%m-%d %H:%M'), $(bundled_plugin_count "$BUILD_APP") bundled plugins"
   else
-    log "build         none at $BUILD_APP"
+    log "release       none at $BUILD_APP"
   fi
   [ ! -f "$STATE_DIR/switch.log" ] || log "last switch   $(tail -1 "$STATE_DIR/switch.log")"
 }
@@ -638,8 +672,10 @@ main() {
     case "$arg" in
       --dry-run) DRY_RUN=1 ;;
       --force) FORCE=1 ;;
-      fork | release | status) COMMAND="$arg" ;;
-      *) die "unknown argument: $arg (expected fork, release, status, --dry-run, --force)" ;;
+      fork | stock | status) COMMAND="$arg" ;;
+      # The older name of the stock subcommand.
+      release) COMMAND=stock ;;
+      *) die "unknown argument: $arg (expected fork, stock, status, --dry-run, --force)" ;;
     esac
   done
 
@@ -648,12 +684,12 @@ main() {
   trap 'exit 130' INT TERM
 
   case "$COMMAND" in
-    fork | release)
+    fork | stock)
       [ "$DRY_RUN" = 1 ] || start_output_log "$@"
       "cmd_$COMMAND"
       ;;
     status) cmd_status ;;
-    *) die "usage: scripts/paseo-switch.sh <fork|release|status> [--dry-run] [--force]" ;;
+    *) die "usage: scripts/paseo-switch.sh <fork|stock|status> [--dry-run] [--force]" ;;
   esac
 }
 

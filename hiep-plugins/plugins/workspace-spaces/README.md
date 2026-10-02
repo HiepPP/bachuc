@@ -1,7 +1,7 @@
 # Workspace Spaces
 
 Numbered Spaces in Paseo's left sidebar, on desktop and mobile. Requires the Paseo fork
-`>=0.10.2-beta.900`; the stable 0.10.1 host refuses the plugin.
+`>=0.10.2-beta.900`; the stock 0.10.1 host refuses the plugin.
 
 - A strip of numbered tabs sits above the sidebar footer. The Workspaces heading shows the selected
   Space's name. Tap a tab to show only that Space's projects. Use **+** to create a Space and switch to it. An

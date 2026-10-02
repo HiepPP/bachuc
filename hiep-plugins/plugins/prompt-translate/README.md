@@ -1,7 +1,7 @@
 # Prompt translate
 
 Learn English prompting from your own Vietnamese prompts, on every Paseo client.
-Requires the Paseo fork `>=0.10.2-beta.900`; the stable 0.10.1 host refuses the plugin.
+Requires the Paseo fork `>=0.10.2-beta.900`; the stock 0.10.1 host refuses the plugin.
 
 - Each Vietnamese prompt shows its English translation under the user bubble, labeled `EN`.
   Prompts sent before translation was turned on use cached translations only.

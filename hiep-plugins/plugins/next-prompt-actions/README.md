@@ -1,7 +1,7 @@
 # Next prompt actions
 
 Send suggestions under `What Next`, `What's Next`, or `Next Steps` directly from the reply, on
-every Paseo client. Requires the Paseo fork `>=0.10.2-beta.900`; the stable 0.10.1 host refuses it.
+every Paseo client. Requires the Paseo fork `>=0.10.2-beta.900`; the stock 0.10.1 host refuses it.
 
 - The panel follows the stable layout: a compact Recap, next-step heading, Markdown reasons,
   bordered suggestion rows, and neutral Send controls. A complete preceding Recap folds into

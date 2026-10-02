@@ -21,7 +21,7 @@ This fork is dedicated to one user; it is not meant for other Paseo users. Exten
 - "Code a plugin" means editing `hiep-plugins/plugins/<plugin-id>`, not core plugin code in `packages/*` or `plugin-examples/`. Read `hiep-plugins/AGENTS.md` first. `hiep-plugins` is the only plugin source; the old repo `~/Projects/hiep-paseo-plugin` is frozen, so never edit it or install from it.
 - When a plugin cannot reach deep enough, add the smallest generic host API in `packages/*` that unblocks it, then build the feature in the plugin. Keep host changes thin (a hook, a contribution point, a context field), never the feature itself, so upstream merges stay cheap.
 - Plugins may require the fork version; supporting stock Paseo is not a goal.
-- Install these plugins into **build** (`PASEO_HOME=~/.paseo-dev paseo plugin ...`) and **live** (`npm run cli -- plugin ...`), never into **stable** (`~/.paseo`, `6767`).
+- Install these plugins into **release** (`PASEO_HOME=~/.paseo-dev paseo plugin ...`) and **live** (`npm run cli -- plugin ...`), never into **stable** (`~/.paseo`, `6767`).
 
 ## Docs
 
@@ -110,13 +110,13 @@ npm run format                       # Auto-format with Biome
 npm run format:check                 # Check formatting without writing
 ```
 
-Three Paseo instances run side by side on this machine. Prompts name them **stable**, **build**, and **live**; each name means exactly one daemon, home, and app:
+Three Paseo instances run side by side on this machine. Prompts name them **stable**, **release**, and **live**; each name means exactly one daemon, home, and app. "Release", "the release version", and "build" in a prompt all mean **release**: this repo packaged, at a fork version such as `hiep-1.0.0`. The upstream app, `/Applications/Paseo.app` at an upstream version such as `0.10.2`, is **stock**; it is not one of the three instances. Cutting a version is a separate subject, in [docs/release.md](docs/release.md).
 
-| Name       | What it is                                                         | Daemon listen    | `PASEO_HOME`      | Electron userData                         | Logs                                                           |
-| ---------- | ------------------------------------------------------------------ | ---------------- | ----------------- | ----------------------------------------- | -------------------------------------------------------------- |
-| **stable** | The installed release, `/Applications/Paseo.app`                   | `127.0.0.1:6767` | `~/.paseo`        | `~/Library/Application Support/Paseo`     | `~/.paseo/daemon.log`, `~/Library/Logs/Paseo/`                 |
-| **build**  | This repo packaged, `packages/desktop/release/mac-arm64/Paseo.app` | `127.0.0.1:6770` | `~/.paseo-dev`    | `~/Library/Application Support/Paseo Dev` | `~/.paseo-dev/daemon.log`, `~/Library/Logs/Paseo Dev/main.log` |
-| **live**   | This repo run from source, no build                                | `127.0.0.1:6768` | `.dev/paseo-home` | `.dev/user-data`                          | `.dev/paseo-home/daemon.log`                                   |
+| Name        | What it is                                                         | Daemon listen    | `PASEO_HOME`      | Electron userData                         | Logs                                                           |
+| ----------- | ------------------------------------------------------------------ | ---------------- | ----------------- | ----------------------------------------- | -------------------------------------------------------------- |
+| **stable**  | The installed app: stock, or a release as `Paseo Fork.app`         | `127.0.0.1:6767` | `~/.paseo`        | `~/Library/Application Support/Paseo`     | `~/.paseo/daemon.log`, `~/Library/Logs/Paseo/`                 |
+| **release** | This repo packaged, `packages/desktop/release/mac-arm64/Paseo.app` | `127.0.0.1:6770` | `~/.paseo-dev`    | `~/Library/Application Support/Paseo Dev` | `~/.paseo-dev/daemon.log`, `~/Library/Logs/Paseo Dev/main.log` |
+| **live**    | This repo run from source, no build                                | `127.0.0.1:6768` | `.dev/paseo-home` | `.dev/user-data`                          | `.dev/paseo-home/daemon.log`                                   |
 
 Commands per name:
 
@@ -125,10 +125,10 @@ Commands per name:
 # Only the user changes what serves it, with scripts/paseo-switch.sh from Terminal.app.
 PASEO_HOME=~/.paseo paseo daemon status
 
-# build — has hiep-plugins. Build it only when the prompt asks for a build.
-BUILD_CLI=packages/desktop/release/mac-arm64/Paseo.app/Contents/Resources/bin/paseo
+# release — has hiep-plugins. Build it only when the prompt asks for a release build.
+RELEASE_CLI=packages/desktop/release/mac-arm64/Paseo.app/Contents/Resources/bin/paseo
 PASEO_HOME=~/.paseo-dev paseo plugin reload <plugin-id>
-PASEO_HOME=~/.paseo-dev $BUILD_CLI daemon start   # never the `paseo` on PATH; see below
+PASEO_HOME=~/.paseo-dev $RELEASE_CLI daemon start   # never the `paseo` on PATH; see below
 npm run build:desktop -- --dir -c.mac.hardenedRuntime=false -c.mac.notarize=false
 
 # live — the default for testing a source change; also has hiep-plugins.
@@ -139,14 +139,14 @@ npm run cli -- plugin install "$PWD/hiep-plugins/plugins/<plugin-id>" --id <plug
 npm run cli -- plugin reload <plugin-id>
 ```
 
-- **Test source changes on live; do not build unless the prompt asks for a build.** App changes reach the live Electron window within seconds, and `protocol`/`client` rebuild through `tsc --watch`. The live daemon does not restart on a server change: restart `npm run dev` yourself, and restart `npm run dev:desktop` after a `packages/desktop/src` change. `npm run build:desktop` costs over a minute per run, and its clean steps delete the `dist` folders a running live instance uses.
+- **Test source changes on live; do not build a release unless the prompt asks for one.** App changes reach the live Electron window within seconds, and `protocol`/`client` rebuild through `tsc --watch`. The live daemon does not restart on a server change: restart `npm run dev` yourself, and restart `npm run dev:desktop` after a `packages/desktop/src` change. `npm run build:desktop` costs over a minute per run, and its clean steps delete the `dist` folders a running live instance uses.
 - An agent shell inside Paseo inherits `PASEO_HOME=~/.paseo`. `scripts/dev-home.sh` ignores that value, so `npm run dev`, `npm run dev:desktop`, and `npm run cli` use `.dev/paseo-home`; check that the startup banner shows `Home: …/.dev/paseo-home`. A bare `paseo ...` targets stable, so always prefix it with a `PASEO_HOME`.
-- The `paseo` on `PATH` is stable's CLI. It works as a client for build (`plugin`, `daemon status`), but `PASEO_HOME=~/.paseo-dev paseo daemon start` runs stable's daemon version on the build home, and fork-only plugins fail to load. Start the build daemon by opening the build app or with `$BUILD_CLI`.
-- The app loads only the active host's plugins. The live app has two hosts: **Live** (`localhost:6768`) and **Build** (`localhost:6770`). Both have hiep-plugins, so a plugin change needs `plugin reload` on the host you are looking at; reload both to keep them in step.
-- **stable is served by the release or by a build installed as `/Applications/Paseo Fork.app`.** `scripts/paseo-switch.sh fork|release|status` switches between them; see [Serving the stable home from a build](docs/development.md#serving-the-stable-home-from-a-build). Each side has its own data, swapped under `~/.paseo`; the idle side's data sits in `~/.paseo-switch/slots/` and, while the fork is live, the release app sits in `~/.paseo-switch/apps/`, so never touch `~/.paseo-switch` and do not assume `/Applications/Paseo.app` exists. Check `scripts/paseo-switch.sh status` before assuming stable's daemon version, data, plugins, or which CLI is on `PATH`. The script refuses to run inside an agent.
-- `packages/desktop/src/main.ts` switches a packaged build (bundle ID `sh.paseo.desktop.dev`) off the stable home and seeds `daemon.listen` 6770 in `~/.paseo-dev/config.json`, so build never adopts the `6767` daemon.
+- The `paseo` on `PATH` is stable's CLI. It works as a client for release (`plugin`, `daemon status`), but `PASEO_HOME=~/.paseo-dev paseo daemon start` runs stable's daemon version on the release home, and fork-only plugins fail to load. Start the release daemon by opening the release app or with `$RELEASE_CLI`.
+- The app loads only the active host's plugins. The live app has two hosts: **live** (`localhost:6768`) and **release** (`localhost:6770`). Both have hiep-plugins, so a plugin change needs `plugin reload` on the host you are looking at; reload both to keep them in step.
+- **stable is served by stock or by a release installed as `/Applications/Paseo Fork.app`.** `scripts/paseo-switch.sh fork|stock|status` switches between them: `fork` installs the release, and `stock` goes back to stock. See [Serving the stable home from a release](docs/development.md#serving-the-stable-home-from-a-release). Each side has its own data, swapped under `~/.paseo`; the idle side's data sits in `~/.paseo-switch/slots/` and, while the fork is live, the stock app sits in `~/.paseo-switch/apps/`, so never touch `~/.paseo-switch` and do not assume `/Applications/Paseo.app` exists. Check `scripts/paseo-switch.sh status` before assuming stable's daemon version, data, plugins, or which CLI is on `PATH`. The script refuses to run inside an agent.
+- `packages/desktop/src/main.ts` switches a release (bundle ID `sh.paseo.desktop.dev`) off the stable home and seeds `daemon.listen` 6770 in `~/.paseo-dev/config.json`, so release never adopts the `6767` daemon.
 - Daemon state inside a home: `config.json` (settings, profiles, plugin sources), `agents/`, `projects/`, `schedules/`, `plugin-data/`, `plugin-settings/`, `desktop-attachments/`, `models/`, plus identity files `server-id` and `daemon-keypair.json`.
-- `~/.paseo-dev` was cloned from `~/.paseo` on 2026-09-28, keeping its own `server-id` and keypair. Stable server IDs in `projects/`, `plugin-settings/`, and `plugin-data/` were rewritten to the build ID. The previous build home is at `~/.paseo-dev.bak-20260928-145243`. Electron Local Storage was not cloned, because its host registry points at `6767`.
+- `~/.paseo-dev` was cloned from `~/.paseo` on 2026-09-28, keeping its own `server-id` and keypair. Stable server IDs in `projects/`, `plugin-settings/`, and `plugin-data/` were rewritten to the release ID. The previous release home is at `~/.paseo-dev.bak-20260928-145243`. Electron Local Storage was not cloned, because its host registry points at `6767`.
 
 See [docs/development.md](docs/development.md) for full setup, build sync requirements, and debugging.
 

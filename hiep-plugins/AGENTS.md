@@ -64,7 +64,7 @@ host source is this repository (`packages/`, `public-docs/`, `docs/`). Host edit
 Paseo root `CLAUDE.md`: typecheck, lint, focused tests, and GitNexus impact before editing a
 symbol.
 
-1. Test against the running instances by name (build or live), not the stable release.
+1. Test against the running instances by name (release or live), not stable.
 2. Read docs: `public-docs/plugins/reference.md` (plus `index.md`, `providers.md`,
    `migration.md` there) and `docs/plugins.md`. Paseo's own `CLAUDE.md` and
    `docs/architecture.md` explain host structure.
@@ -131,17 +131,17 @@ PASEO_HOME=~/.paseo-dev paseo plugin ls <plugin-id> --json
 Document required configuration, commands, permissions, and provider limitations in the plugin README.
 Add the plugin to the root README catalog.
 
-Prompts name the three Paseo instances on this machine **stable**, **build**, and **live**
+Prompts name the three Paseo instances on this machine **stable**, **release**, and **live**
 (the Paseo repo's `CLAUDE.md` owns the full table):
 
-| Name       | Daemon | `PASEO_HOME`      | Plugins here                      |
-| ---------- | ------ | ----------------- | --------------------------------- |
-| **stable** | `6767` | `~/.paseo`        | Never. Read only.                 |
-| **build**  | `6770` | `~/.paseo-dev`    | Yes                               |
-| **live**   | `6768` | `.dev/paseo-home` | Yes. Run from the Paseo repo root |
+| Name        | Daemon | `PASEO_HOME`      | Plugins here                      |
+| ----------- | ------ | ----------------- | --------------------------------- |
+| **stable**  | `6767` | `~/.paseo`        | Never. Read only.                 |
+| **release** | `6770` | `~/.paseo-dev`    | Yes                               |
+| **live**    | `6768` | `.dev/paseo-home` | Yes. Run from the Paseo repo root |
 
 ```sh
-# build — install, reload, inspect
+# release — install, reload, inspect
 PASEO_HOME=~/.paseo-dev paseo daemon status --json   # home must be ~/.paseo-dev
 PASEO_HOME=~/.paseo-dev paseo plugin reload <plugin-id>
 # live — from the Paseo repo root
@@ -150,12 +150,12 @@ npm run cli -- plugin reload <plugin-id>
 # stable — never: a bare `paseo plugin ...` targets stable
 ```
 
-Install, reload, and remove these plugins in build and live, never in stable. For build, prefix
+Install, reload, and remove these plugins in release and live, never in stable. For release, prefix
 every `paseo plugin ...` and `paseo daemon ...` command with `PASEO_HOME=~/.paseo-dev`; a bare
 `paseo` targets stable. For live, use `npm run cli -- ...` from the Paseo repo root. After a plugin
 change, reload it in both. Confirm
 with `PASEO_HOME=~/.paseo-dev paseo daemon status --json` that `home` is `~/.paseo-dev` before
-installing. Start the build daemon by opening the build app, not with the `paseo` on `PATH`.
+installing. Start the release daemon by opening the release app, not with the `paseo` on `PATH`.
 If plugins are disabled, explain the unsandboxed access and obtain permission before enabling them. Never print the daemon config wholesale because it can contain secrets.
 
 ## Update and verify
