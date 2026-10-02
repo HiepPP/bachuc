@@ -64,7 +64,7 @@ host source is this repository (`packages/`, `public-docs/`, `docs/`). Host edit
 Paseo root `CLAUDE.md`: typecheck, lint, focused tests, and GitNexus impact before editing a
 symbol.
 
-1. Test against the running instances by name (release or live), not stable.
+1. Test against the running instances by name (release or live).
 2. Read docs: `public-docs/plugins/reference.md` (plus `index.md`, `providers.md`,
    `migration.md` there) and `docs/plugins.md`. Paseo's own `CLAUDE.md` and
    `docs/architecture.md` explain host structure.
@@ -123,39 +123,34 @@ cd plugins/<plugin-id>
 npm install
 npm run typecheck
 # Run the plugin's declared lint and focused test scripts, if present.
-PASEO_HOME=~/.paseo-dev paseo plugin install "$PWD" --id <plugin-id>
-PASEO_HOME=~/.paseo-dev paseo plugin ls <plugin-id> --json
+PASEO_HOME=~/.paseo paseo plugin install "$PWD" --id <plugin-id>
+PASEO_HOME=~/.paseo paseo plugin ls <plugin-id> --json
 ```
 
 `init` scaffolds files but does not install dependencies. Keep lockfiles committed.
 Document required configuration, commands, permissions, and provider limitations in the plugin README.
 Add the plugin to the root README catalog.
 
-Prompts name the three Paseo instances on this machine **stable**, **release**, and **live**
+Prompts name the two Paseo instances on this machine **release** and **live**
 (the Paseo repo's `CLAUDE.md` owns the full table):
 
 | Name        | Daemon | `PASEO_HOME`      | Plugins here                      |
 | ----------- | ------ | ----------------- | --------------------------------- |
-| **stable**  | `6767` | `~/.paseo`        | Never. Read only.                 |
-| **release** | `6770` | `~/.paseo-dev`    | Yes                               |
+| **release** | `6767` | `~/.paseo`        | Yes. Never restart its daemon     |
 | **live**    | `6768` | `.dev/paseo-home` | Yes. Run from the Paseo repo root |
 
 ```sh
 # release — install, reload, inspect
-PASEO_HOME=~/.paseo-dev paseo daemon status --json   # home must be ~/.paseo-dev
-PASEO_HOME=~/.paseo-dev paseo plugin reload <plugin-id>
+PASEO_HOME=~/.paseo paseo daemon status --json   # home must be ~/.paseo
+PASEO_HOME=~/.paseo paseo plugin reload <plugin-id>
 # live — from the Paseo repo root
 npm run cli -- plugin install "$PWD/hiep-plugins/plugins/<plugin-id>" --id <plugin-id>
 npm run cli -- plugin reload <plugin-id>
-# stable — never: a bare `paseo plugin ...` targets stable
 ```
 
-Install, reload, and remove these plugins in release and live, never in stable. For release, prefix
-every `paseo plugin ...` and `paseo daemon ...` command with `PASEO_HOME=~/.paseo-dev`; a bare
-`paseo` targets stable. For live, use `npm run cli -- ...` from the Paseo repo root. After a plugin
-change, reload it in both. Confirm
-with `PASEO_HOME=~/.paseo-dev paseo daemon status --json` that `home` is `~/.paseo-dev` before
-installing. Start the release daemon by opening the release app, not with the `paseo` on `PATH`.
+Install, reload, and remove these plugins in release and live. Release is the daily app and its
+daemon owns every running agent: reload plugins there, but never restart or stop that daemon. For
+live, use `npm run cli -- ...` from the Paseo repo root. After a plugin change, reload it in both.
 If plugins are disabled, explain the unsandboxed access and obtain permission before enabling them. Never print the daemon config wholesale because it can contain secrets.
 
 ## Update and verify
@@ -163,9 +158,9 @@ If plugins are disabled, explain the unsandboxed access and obtain permission be
 After edits, run the plugin's formatter, typecheck, lint, and affected tests. Then:
 
 ```sh
-PASEO_HOME=~/.paseo-dev paseo plugin reload <plugin-id>
-PASEO_HOME=~/.paseo-dev paseo plugin ls <plugin-id> --json
-PASEO_HOME=~/.paseo-dev paseo plugin logs <plugin-id>
+PASEO_HOME=~/.paseo paseo plugin reload <plugin-id>
+PASEO_HOME=~/.paseo paseo plugin ls <plugin-id> --json
+PASEO_HOME=~/.paseo paseo plugin logs <plugin-id>
 ```
 
 Require `running` with no load error and exercise the changed contribution. Reload recompiles

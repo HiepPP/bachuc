@@ -9,13 +9,13 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 ## Core Intent
 
 - This checkout is the user's own Paseo fork. The user's plugins live in `hiep-plugins/plugins/`.
-- Plugins install only into Paseo Dev (`PASEO_HOME=~/.paseo-dev`, port 6770), never into the stable daemon on port 6767.
+- Two instances exist: release, this repo built and installed as the daily app (`PASEO_HOME=~/.paseo`, port 6767), and live, run from source (port 6768). Stock Paseo from the upstream GitHub is no longer used. Plugins install into release and live.
 
 ## Planning Rules
 
-- The fork version must match `X.Y.Z` or `X.Y.Z-beta.N` (N below 999), because `packages/app/native-release-version.js` derives native build numbers from it. The fork uses `0.10.2-beta.900`; plugins require `>=0.10.2-beta.900`.
+- The fork version must match `X.Y.Z`, `X.Y.Z-beta.N` (N below 999), or `X.Y.Z-hiep`, because `packages/app/native-release-version.js` derives native build numbers from it; `-hiep` was added to that pattern on 2026-10-02. The fork uses `1.0.0-hiep`; plugins require `>=0.10.2-beta.900`, which `1.0.0-hiep` meets through its `1.0.0` core.
 
-- Build Paseo Dev with `hardenedRuntime=false`; ad-hoc signing with hardened runtime fails at launch.
+- Build the release with `hardenedRuntime=false`; ad-hoc signing with hardened runtime fails at launch.
 
 ## Source Anchors
 

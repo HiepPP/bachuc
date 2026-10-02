@@ -62,8 +62,8 @@ PASEO_DEV_RESET_HOME=1 npm run dev            # clear and reseed the derived wor
 
 ### Daemon endpoints
 
-- Stable daemon launched by the desktop app: `localhost:6767`.
-- Release daemon, the app packaged from this repo: `localhost:6770`, home `~/.paseo-dev` (set in `packages/desktop/src/main.ts`).
+- Release daemon, launched by the installed app (`/Applications/Paseo Fork.app`): `localhost:6767`.
+- A build opened in place from `packages/desktop/release`: `localhost:6770`, home `~/.paseo-dev` (set in `packages/desktop/src/main.ts`).
 - Root checkout dev daemon: `localhost:6768`.
 - Root checkout Expo: `http://localhost:8081`.
 - Root checkout desktop dev Expo: first free port from `8082` through `8089`.

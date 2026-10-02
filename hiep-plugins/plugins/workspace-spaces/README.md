@@ -42,10 +42,10 @@ npm run format
 npm run typecheck
 npm run lint
 npm test
-PASEO_HOME=~/.paseo-dev paseo plugin install "$PWD" --id workspace-spaces
-PASEO_HOME=~/.paseo-dev paseo plugin reload workspace-spaces
-PASEO_HOME=~/.paseo-dev paseo plugin ls workspace-spaces --json
-PASEO_HOME=~/.paseo-dev paseo plugin logs workspace-spaces
+PASEO_HOME=~/.paseo paseo plugin install "$PWD" --id workspace-spaces
+PASEO_HOME=~/.paseo paseo plugin reload workspace-spaces
+PASEO_HOME=~/.paseo paseo plugin ls workspace-spaces --json
+PASEO_HOME=~/.paseo paseo plugin logs workspace-spaces
 ```
 
 Tests cover the sidebar filter per host and Space, the Move to menu, errors that show every

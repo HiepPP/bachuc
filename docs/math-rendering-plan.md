@@ -76,7 +76,7 @@ Alternative for R2 if WebView count becomes a problem: MathJax (`mathjax-full`) 
 2. **Web.** R1 + R2 on web, C5. Acceptance: browser check in `npm run dev:app` against the dev daemon with a fixture message containing inline, display, prices and shell code; copy returns TeX.
 3. **Native inline.** R1 on iOS and Android. Acceptance: iOS selection still crosses spans; Android text stays selectable.
 4. **Native display.** R2 WebView host. Acceptance: a message with 20 display formulas scrolls without blank frames; height settles without jumps after streaming completes.
-5. **Package.** Build Paseo Dev (`packages/desktop`), test against the `6770` daemon. The stable app at `/Applications/Paseo.app` does not get this change.
+5. **Package.** Build a release (`packages/desktop`) and test it opened in place, on the `6770` daemon, before installing it.
 
 Each phase: run only the changed test files (`npx vitest run <file> --bail=1`), then `npm run typecheck` and `npm run lint`.
 
