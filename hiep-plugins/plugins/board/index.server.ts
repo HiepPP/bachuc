@@ -9,7 +9,8 @@ import { createRunStore } from "./server/store";
 import { createRunPersistence } from "./server/persistence";
 import { z } from "zod";
 import { listBoardAgents } from "./server/snapshot";
-import { boardHostRpc, boardRpc, removeRunRpc, starRunRpc } from "./shared/board";
+import { boardHostRpc, boardRpc, closeRuntimeRpc, removeRunRpc, starRunRpc } from "./shared/board";
+import { closeRuntimes } from "./server/runtime";
 import { createRecapStore, parseRecap, recapEntry } from "./server/recaps";
 import { recapsRpc } from "./shared/recaps";
 import { firstPromptTitle, isCommandTitle } from "./server/title";
@@ -141,6 +142,10 @@ export default function contribute(server: PluginServerContext) {
     const removed = store.removeFinished(id, observingSince, endedAt);
     if (removed) await persistence.save(store.exportState());
     return { removed };
+  });
+  server.handle(closeRuntimeRpc, ({ agentId }, { paseo }) => {
+    ensureActive();
+    return closeRuntimes(paseo, agentId, console.error);
   });
   server.handle(recapsRpc, async ({ days }, { paseo }) => {
     const [grouped, { projects }] = await Promise.all([recaps.list(days), paseo.projects.list()]);

@@ -1,5 +1,5 @@
 import type { PluginButtonRegistration, PluginClientContext } from "@getpaseo/plugin/client";
-import { boardRpc, removeRunRpc, type BoardRun } from "../shared/board";
+import { boardRpc, closeRuntimeRpc, removeRunRpc, type BoardRun } from "../shared/board";
 
 export async function removeFinishedRun(
   run: Pick<BoardRun, "id" | "endedAt">,
@@ -28,6 +28,19 @@ export async function removeFinishedRun(
 const CORNER = "corner" as const;
 // Navigation, not removal: orange sets it apart from the Remove actions above it.
 const PARENT_COLOR = "#f97316";
+
+/**
+ * Removing a thread also releases its processes and those of its subagents. The thread's own host
+ * decides which runtimes are at rest, so this works for a card on any connected host.
+ */
+export async function closeRemovedRuntimes(
+  client: Pick<PluginClientContext, "rpc">,
+  agentId: string,
+) {
+  const { failed } = await client.rpc(closeRuntimeRpc, { agentId });
+  if (failed)
+    throw new Error(`Could not close ${failed} thread process${failed === 1 ? "" : "es"}.`);
+}
 
 export function installRemoveButtons(
   client: PluginClientContext,
@@ -164,7 +177,10 @@ export function installRemoveButtons(
           behavior: {
             kind: "action" as const,
             async onPress() {
-              if (await remove()) client.openSurface("board");
+              if (!(await remove())) return;
+              // Leave first; a failed close reports itself and never undoes the removal.
+              client.openSurface("board");
+              await closeRemovedRuntimes(client, run.agentId);
             },
           },
         };
@@ -194,7 +210,9 @@ export function installRemoveButtons(
           behavior: {
             kind: "action" as const,
             async onPress() {
-              if (await remove()) startNewThread(run);
+              if (!(await remove())) return;
+              startNewThread(run);
+              await closeRemovedRuntimes(client, run.agentId);
             },
           },
         };

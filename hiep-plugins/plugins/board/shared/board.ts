@@ -26,6 +26,12 @@ export const removeRunRpc = defineRpc({
   input: z.object({ id: z.string(), observingSince: z.string(), endedAt: z.string().nullable() }),
   output: z.object({ removed: z.boolean() }),
 });
+// Releases the processes of a removed thread and all its subagents. Runs on the thread's host.
+export const closeRuntimeRpc = defineRpc({
+  name: "board.close-runtime",
+  input: z.object({ agentId: z.string().min(1) }),
+  output: z.object({ closed: z.number(), kept: z.number(), failed: z.number() }),
+});
 export const boardRpc = defineRpc({
   name: "board.snapshot",
   input: z.object({}),

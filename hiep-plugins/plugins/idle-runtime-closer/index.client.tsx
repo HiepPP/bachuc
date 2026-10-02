@@ -7,6 +7,8 @@ export default function contribute(client: PluginClientContext) {
       title: "Dọn process; giữ conversation. Công việc nền và trạng thái MCP trong RAM sẽ mất.",
       label: "Dọn process",
       icon: "Power",
+      // Hidden for now: Board's Remove actions close the runtime. Drop this line to show it again.
+      visible: false,
       behavior: {
         kind: "action",
         async onPress(context) {

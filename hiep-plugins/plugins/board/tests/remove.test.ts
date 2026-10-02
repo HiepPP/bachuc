@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PluginClientContext, PluginComposerPillContribution } from "@getpaseo/plugin/client";
-import { installRemoveButtons, removeFinishedRun } from "../client/remove";
-import { boardRpc } from "../shared/board";
+import { closeRemovedRuntimes, installRemoveButtons, removeFinishedRun } from "../client/remove";
+import { boardRpc, closeRuntimeRpc } from "../shared/board";
+
+const agents = { ref: () => ({ refresh: async () => ({ agent: { workspaceId: "workspace" } }) }) };
 
 test("Remove retries a stale plugin scope only for the same finished turn", async () => {
   const scopes: string[] = [];
@@ -34,6 +36,7 @@ test("only finished threads get Remove; navigate only after confirmed removal; c
   const calls: unknown[] = [];
   let removed = false;
   let opens = 0;
+  const closed: string[] = [];
   const client = {
     async rpc(contract: unknown, input: unknown) {
       if (contract === boardRpc)
@@ -44,12 +47,14 @@ test("only finished threads get Remove; navigate only after confirmed removal; c
             { id: "running", agentId: "running", status: "running", endedAt: null },
           ],
         };
+      if (contract === closeRuntimeRpc) {
+        closed.push((input as { agentId: string }).agentId);
+        return { closed: 1, kept: 0, failed: 0 };
+      }
       calls.push(input);
       return { removed };
     },
-    paseo: {
-      agents: { ref: () => ({ refresh: async () => ({ agent: { workspaceId: "workspace" } }) }) },
-    },
+    paseo: { agents },
     addComposerPill(pill: PluginComposerPillContribution) {
       pills.set(pill.agentId ?? "", pill);
       return {
@@ -74,10 +79,12 @@ test("only finished threads get Remove; navigate only after confirmed removal; c
     await assert.rejects(async () => behavior.onPress(), /Run changed/);
     assert.equal(opens, 0);
     assert.equal(pills.size, 1);
+    assert.deepEqual(closed, [], "a failed removal keeps the runtime");
     removed = true;
     await behavior.onPress();
     assert.equal(opens, 1);
     assert.equal(pills.size, 0);
+    assert.deepEqual(closed, ["finished"]);
     assert.deepEqual(calls, [
       { id: "finished", observingSince: "scope", endedAt: "end" },
       { id: "finished", observingSince: "scope", endedAt: "end" },
@@ -173,9 +180,10 @@ test("running and finished children jump to their direct parent without removing
 test("Remove & New Thread removes first, then opens the project; never on failure or without cwd", async () => {
   const pills = new Map<string, PluginComposerPillContribution>();
   const started: string[] = [];
+  const closed: string[] = [];
   let removed = false;
   const client = {
-    async rpc(contract: unknown) {
+    async rpc(contract: unknown, input: unknown) {
       if (contract === boardRpc)
         return {
           observingSince: "scope",
@@ -184,11 +192,13 @@ test("Remove & New Thread removes first, then opens the project; never on failur
             { id: "nocwd", agentId: "nocwd", status: "completed" },
           ],
         };
+      if (contract === closeRuntimeRpc) {
+        closed.push((input as { agentId: string }).agentId);
+        return { closed: 2, kept: 1, failed: 0 };
+      }
       return { removed };
     },
-    paseo: {
-      agents: { ref: () => ({ refresh: async () => ({ agent: { workspaceId: "workspace" } }) }) },
-    },
+    paseo: { agents },
     addComposerPill(pill: PluginComposerPillContribution) {
       pills.set(pill.id, pill);
       return {
@@ -220,9 +230,11 @@ test("Remove & New Thread removes first, then opens the project; never on failur
     if (behavior.kind !== "action") return assert.fail("expected action");
     await assert.rejects(async () => behavior.onPress(), /Run changed/);
     assert.deepEqual(started, []);
+    assert.deepEqual(closed, []);
     removed = true;
     await behavior.onPress();
     assert.deepEqual(started, ["finished"]);
+    assert.deepEqual(closed, ["finished"]);
     assert.deepEqual([...pills.keys()], ["remove-nocwd"]);
   } finally {
     cleanup();
@@ -281,4 +293,55 @@ test("thread actions sit in the corner, stacked Remove, Remove & New Thread, Jum
     cleanup();
   }
   assert.equal(stack.length, 0);
+});
+
+test("a failed runtime close reports after Remove has already returned to Board", async () => {
+  const pills = new Map<string, PluginComposerPillContribution>();
+  let opens = 0;
+  const client = {
+    async rpc(contract: unknown) {
+      if (contract === boardRpc)
+        return {
+          observingSince: "scope",
+          runs: [{ id: "finished", agentId: "finished", status: "completed" }],
+        };
+      if (contract === closeRuntimeRpc) return { closed: 1, kept: 0, failed: 2 };
+      return { removed: true };
+    },
+    paseo: { agents },
+    addComposerPill(pill: PluginComposerPillContribution) {
+      pills.set(pill.id, pill);
+      return { update() {}, remove() {} };
+    },
+    openSurface() {
+      opens++;
+    },
+  } as unknown as PluginClientContext;
+  const cleanup = installRemoveButtons(client, () => {});
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    const behavior = pills.get("remove-finished")!.button.behavior;
+    if (behavior.kind !== "action") return assert.fail("expected action");
+    await assert.rejects(async () => behavior.onPress(), /Could not close 2 thread processes/);
+    assert.equal(opens, 1, "the removal already happened, so the user still returns to Board");
+  } finally {
+    cleanup();
+  }
+});
+
+test("closing removed runtimes asks the thread's host and fails only on a failed close", async () => {
+  const asked: unknown[] = [];
+  const host = (failed: number) =>
+    ({
+      rpc: async (contract: unknown, input: unknown) => {
+        asked.push([contract === closeRuntimeRpc, input]);
+        return { closed: 3, kept: 2, failed };
+      },
+    }) as unknown as Pick<PluginClientContext, "rpc">;
+  await closeRemovedRuntimes(host(0), "parent");
+  assert.deepEqual(asked, [[true, { agentId: "parent" }]]);
+  await assert.rejects(
+    closeRemovedRuntimes(host(1), "parent"),
+    /Could not close 1 thread process\./,
+  );
 });

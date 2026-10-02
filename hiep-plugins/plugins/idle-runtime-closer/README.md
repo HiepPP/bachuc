@@ -10,11 +10,13 @@ Nothing is archived or deleted. To archive old threads, use
 
 ## What gets closed
 
-The **Dọn process** composer button closes only the selected thread's runtime through
-`closeRuntime()`. It keeps the conversation and does not archive the thread or its workspace.
-It rejects threads that are running, initializing, or waiting for permission. Background work
-and in-memory MCP state are lost when the runtime closes. Opening the thread again can resume
-its runtime. The button remains available when automatic cleanup is disabled.
+The **Dọn process** composer button is hidden for now (`visible: false` in `index.client.tsx`);
+the `board` plugin's Remove and Remove & New Thread actions close the removed thread's runtime
+instead. Drop that line to show the button again. It closes only the selected thread's runtime
+through `closeRuntime()`, keeps the conversation, and does not archive the thread or its
+workspace. It rejects threads that are running, initializing, or waiting for permission.
+Background work and in-memory MCP state are lost when the runtime closes. Opening the thread
+again can resume its runtime. The button works when automatic cleanup is disabled.
 
 An agent's runtime is closed when all of these are true:
 
