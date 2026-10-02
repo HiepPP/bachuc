@@ -70,6 +70,10 @@ if (typeof globalThis.cancelAnimationFrame !== "function") {
 // reaches every vitest project through the resolve.alias in vitest.config.ts —
 // no vi.mock here, so there is a single copy of the fixture theme.
 
+// The plugin UI runtime exports the Markdown renderer, so every test that loads the plugin
+// registry imports it. Its native dependencies ship JSX in .js and fail to parse in Vite.
+vi.mock("@/components/markdown/renderer", () => ({ MarkdownRenderer: () => null }));
+
 vi.mock("@xterm/addon-ligatures", () => ({
   LigaturesAddon: class LigaturesAddon {
     dispose(): void {}
