@@ -1,5 +1,5 @@
-import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
 import type { PaseoApi } from "@getpaseo/client";
+import { getParentAgentIdFromLabels } from "./agent-labels";
 import type { ActiveAgent } from "./store";
 
 export async function listBoardAgents(paseo: Pick<PaseoApi, "agents">, signal: AbortSignal) {

@@ -1,5 +1,5 @@
-import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
 import type { PaseoAgent, PaseoApi } from "@getpaseo/client";
+import { getParentAgentIdFromLabels } from "./agent-labels";
 
 type Agent = Pick<PaseoAgent, "id" | "status" | "pendingPermissions" | "labels">;
 type AgentsApi = Pick<PaseoApi, "agents">;
