@@ -38,6 +38,9 @@ STOCK_APP="/Applications/Paseo.app"
 FORK_APP="/Applications/Paseo Fork.app"
 BUILD_APP="$REPO_ROOT/packages/desktop/release/mac-arm64/Paseo.app"
 BUILD_BUNDLE_ID="sh.paseo.desktop.dev"
+# The fork side loads hiep-plugins from this folder, as directory installs. The daemon compiles a
+# plugin at load time and needs its type dependencies, which only a full checkout has.
+PLUGINS_DIR="$REPO_ROOT/hiep-plugins/plugins"
 CLI_LINKS=("$HOME/.local/bin/paseo" "/opt/homebrew/bin/paseo")
 STATE_DIR="$HOME/.paseo-switch"
 # Where the stock bundle waits while the fork is live. Opened then, it would restart the fork's
@@ -145,6 +148,9 @@ plist() {
   /usr/libexec/PlistBuddy -c "Print :$2" "$1" 2>/dev/null || true
 }
 app_version() { plist "$1/Contents/Info.plist" CFBundleShortVersionString; }
+# The fork's builds are versioned X.Y.Z-hiep and shown as hiep-X.Y.Z, as the app shows them.
+# Comparisons always use the raw version.
+show_version() { printf '%s' "$1" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+)-hiep$/hiep-\1/'; }
 app_cli() { printf '%s' "$1/Contents/Resources/bin/paseo"; }
 # -a: pgrep skips its own ancestors by default, which would hide the app from guard_outside_paseo.
 app_pid() { pgrep -a -f "^$1/Contents/MacOS/Paseo( |\$)" 2>/dev/null | head -1 || true; }
@@ -300,19 +306,39 @@ preflight_build() {
   # The asar is an uncompressed archive, so the compiled main process is searchable.
   grep -q "Paseo Fork.app" "$resources/app.asar" 2>/dev/null ||
     problem "release predates the stable-fork role in main.ts; rebuild it"
-  [ "$(bundled_plugin_count "$BUILD_APP")" -gt 0 ] ||
-    problem "release has no bundled plugins under Resources/plugins; rebuild with npm run build:desktop"
+  [ ! -d "$resources/plugins" ] ||
+    problem "release still bundles plugins and would register them over the repo's; rebuild it"
+  [ -n "$(repo_plugin_ids)" ] || problem "no plugins found in $PLUGINS_DIR"
   [ -w "$(dirname "$FORK_APP")" ] || problem "$(dirname "$FORK_APP") is not writable"
   [ "$(electron_version "$BUILD_APP")" = "$(electron_version "$(stock_bundle)")" ] ||
     warn "Electron differs: release $(electron_version "$BUILD_APP"), stock $(electron_version "$(stock_bundle)")."
 }
 
-bundled_plugin_count() {
-  local count=0 manifest
-  for manifest in "$1/Contents/Resources/plugins"/*/paseo-plugin.json; do
-    [ -f "$manifest" ] && count=$((count + 1))
+repo_plugin_ids() {
+  local manifest
+  for manifest in "$PLUGINS_DIR"/*/paseo-plugin.json; do
+    [ -f "$manifest" ] && basename "$(dirname "$manifest")"
   done
-  printf '%s' "$count"
+  return 0
+}
+
+# Points every repo plugin at its folder in the fork home's config. A plugin already listed
+# keeps its enabled flag; a new one starts enabled. Entries for other plugins are left alone.
+register_repo_plugins() {
+  local config="$STABLE_HOME/config.json" ids
+  [ "$(data_side "$STABLE_HOME")" = fork ] || die "$STABLE_HOME does not hold fork data; its plugin list is not rewritten"
+  ids="$(repo_plugin_ids | jq -R . | jq -s .)"
+  (umask 077 && jq --arg root "$PLUGINS_DIR" --argjson ids "$ids" '
+    .pluginsEnabled = true
+    | reduce $ids[] as $id (.;
+        (.plugins[$id].enabled) as $enabled
+        | .plugins[$id] = {
+            source: "directory",
+            path: ($root + "/" + $id),
+            enabled: (if $enabled == null then true else $enabled end)
+          })
+  ' "$config" >"$config.tmp")
+  mv "$config.tmp" "$config"
 }
 
 check_running_agents() {
@@ -446,13 +472,13 @@ daemon_matches() {
     >/dev/null 2>&1
 }
 
-# Every bundled plugin is registered from the fork app, and every enabled one is running.
+# Every repo plugin is registered from the repo, and every enabled one is running.
 fork_plugins_ready() {
   local plugins
   plugins="$(stable_cli "$(app_cli "$FORK_APP")" plugin ls --json 2>/dev/null || true)"
   [ -n "$plugins" ] || return 1
-  printf '%s' "$plugins" | jq -e --arg root "$FORK_APP/Contents/Resources/plugins/" \
-    --argjson expected "$(bundled_plugin_count "$FORK_APP")" \
+  printf '%s' "$plugins" | jq -e --arg root "$PLUGINS_DIR/" \
+    --argjson expected "$(repo_plugin_ids | grep -c . || true)" \
     '[.[] | select(.path | startswith($root))]
      | length == $expected and all(.[]; (.enabled | not) or .status == "running")' \
     >/dev/null 2>&1
@@ -592,15 +618,17 @@ cmd_fork() {
   step "stop the stable app and daemon"
   stop_stable "$cli"
   enter_fork
+  step "register the plugins in $PLUGINS_DIR in the fork home"
+  run register_repo_plugins
   step "install $FORK_APP"
   [ ! -e "$FORK_APP" ] || move "$FORK_APP" "$HOME/.Trash/Paseo Fork $STAMP.app"
   move "$staging" "$FORK_APP"
   finish_fork "$version"
-  step "wait for the bundled plugins to run"
-  wait_for 120 "bundled plugins to run (scripts/paseo-switch.sh status)" fork_plugins_ready
+  step "wait for the plugins to run"
+  wait_for 120 "plugins to run (check: paseo plugin ls, and $STABLE_HOME/daemon.log)" fork_plugins_ready
   ROLLBACK_TO=""
   run record "fork $version"
-  log "Stable home now runs release $version on the fork data."
+  log "Stable home now runs release $(show_version "$version") on the fork data."
 }
 
 cmd_stock() {
@@ -648,21 +676,22 @@ cmd_status() {
   log "active app    $active"
   [ "$active" = none ] || [ "$active" = "$home_side" ] ||
     log "MISMATCH      the $active app is running on $home_side data; run: scripts/paseo-switch.sh $home_side"
-  log "daemon        $(printf '%s' "$daemon" | jq -r '"\(.localDaemon) \(.daemonVersion // "?") on \(.listen // "?") (PID \(.pid // "?"))"' 2>/dev/null || printf 'unknown')"
+  log "daemon        $(printf '%s' "$daemon" | jq -r '"\(.localDaemon) \((.daemonVersion // "?") | sub("^(?<n>[0-9]+\\.[0-9]+\\.[0-9]+)-hiep$"; "hiep-\(.n)")) on \(.listen // "?") (PID \(.pid // "?"))"' 2>/dev/null || printf 'unknown')"
   for link in "${CLI_LINKS[@]}"; do
     log "cli link      $link -> $(readlink "$link" 2>/dev/null || printf 'not a symlink')"
   done
   log "stock slot   $(slot_state stock)   ($(stock_slot_dir))"
   log "fork slot    $(slot_state fork)   ($SLOTS/fork)"
-  log "stock app     $(stock_version) at $(stock_bundle)"
+  log "stock app     $(show_version "$(stock_version)") at $(stock_bundle)"
   [ "$home_side" != fork ] || [ ! -d "$STOCK_APP" ] ||
     log "WARNING       $STOCK_APP is installed while fork data is live; opening it would run stock on fork data"
-  log "fork app      $([ -d "$FORK_APP" ] && app_version "$FORK_APP" || printf 'not installed')"
+  log "fork app      $([ -d "$FORK_APP" ] && show_version "$(app_version "$FORK_APP")" || printf 'not installed')"
   if [ -d "$BUILD_APP" ]; then
-    log "release       $(app_version "$BUILD_APP"), built $(date -r "$BUILD_APP/Contents/Resources/app.asar" '+%Y-%m-%d %H:%M'), $(bundled_plugin_count "$BUILD_APP") bundled plugins"
+    log "release       $(show_version "$(app_version "$BUILD_APP")"), built $(date -r "$BUILD_APP/Contents/Resources/app.asar" '+%Y-%m-%d %H:%M')"
   else
     log "release       none at $BUILD_APP"
   fi
+  log "fork plugins  $(repo_plugin_ids | grep -c . || true) in $PLUGINS_DIR"
   [ ! -f "$STATE_DIR/switch.log" ] || log "last switch   $(tail -1 "$STATE_DIR/switch.log")"
 }
 

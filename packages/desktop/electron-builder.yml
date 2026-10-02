@@ -31,9 +31,6 @@ extraResources:
     to: app-dist
   - from: assets/editor-targets
     to: editor-target-icons
-  # Staged by hiep-plugins/scripts/stage-bundle.mjs; main.ts registers each folder at launch.
-  - from: ../../hiep-plugins/.bundle
-    to: plugins
 publish:
   provider: github
   owner: getpaseo

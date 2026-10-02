@@ -9,14 +9,7 @@ import { inheritLoginShellEnv } from "./login-shell-env.js";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import {
   app,
@@ -156,14 +149,11 @@ if (STABLE_FORK_BLOCKED) {
     process.env.PASEO_HOME = PASEO_DEV_HOME;
     seedPaseoDevListen();
   }
-  seedBundledPlugins(resolvePaseoHome(process.env));
 }
 
 interface PaseoHomeConfig {
   version?: number;
   daemon?: { listen?: unknown };
-  pluginsEnabled?: boolean;
-  plugins?: Record<string, { source?: string; path?: string; enabled?: boolean }>;
 }
 
 function readHomeConfig(home: string): PaseoHomeConfig | null {
@@ -174,8 +164,8 @@ function readHomeConfig(home: string): PaseoHomeConfig | null {
   }
 }
 
-// Written to a temporary file first: the stable home's config holds profiles and provider
-// settings that a torn write would lose.
+// Written to a temporary file first: the config holds profiles and provider settings that a
+// torn write would lose.
 function writeHomeConfig(home: string, config: PaseoHomeConfig): void {
   mkdirSync(home, { recursive: true });
   const configPath = path.join(home, "config.json");
@@ -192,36 +182,6 @@ function seedPaseoDevListen(): void {
   writeHomeConfig(PASEO_DEV_HOME, config);
 }
 
-// Registers the plugins packaged under Resources/plugins as directory sources, replacing any
-// entry with the same id. The path moves with the app, so it is rewritten on every launch. A
-// daemon that is already running keeps the plugins it loaded until it restarts.
-function seedBundledPlugins(home: string): void {
-  const bundledRoot = path.join(process.resourcesPath, "plugins");
-  let ids: string[];
-  try {
-    ids = readdirSync(bundledRoot).filter((id) =>
-      existsSync(path.join(bundledRoot, id, "paseo-plugin.json")),
-    );
-  } catch {
-    // Packaged without bundled plugins.
-    return;
-  }
-  if (ids.length === 0) return;
-  // An unreadable stable config is left alone: rebuilding it from defaults would drop its profiles.
-  const config = readHomeConfig(home) ?? (home === PASEO_DEV_HOME ? { version: 1 } : null);
-  if (!config) return;
-  const plugins = { ...config.plugins };
-  for (const id of ids) {
-    plugins[id] = {
-      source: "directory",
-      path: path.join(bundledRoot, id),
-      enabled: plugins[id]?.enabled ?? true,
-    };
-  }
-  const next: PaseoHomeConfig = { ...config, pluginsEnabled: true, plugins };
-  if (JSON.stringify(next) === JSON.stringify(config)) return;
-  writeHomeConfig(home, next);
-}
 const DESKTOP_WINDOW_CHROME_MODE = resolveDesktopWindowChromeMode({
   platform: process.platform,
   override: process.env.PASEO_DESKTOP_WINDOW_CONTROLS,

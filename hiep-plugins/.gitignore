@@ -1,6 +1,5 @@
 node_modules/
 artifacts/
-.bundle/
 .env
 .env.*
 !.env.example
