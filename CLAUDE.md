@@ -122,6 +122,7 @@ Commands per name:
 
 ```bash
 # stable — read only. Never install plugins, restart, stop, or build it.
+# Only the user changes what serves it, with scripts/paseo-switch.sh from Terminal.app.
 PASEO_HOME=~/.paseo paseo daemon status
 
 # build — has hiep-plugins. Build it only when the prompt asks for a build.
@@ -142,6 +143,7 @@ npm run cli -- plugin reload <plugin-id>
 - An agent shell inside Paseo inherits `PASEO_HOME=~/.paseo`. `scripts/dev-home.sh` ignores that value, so `npm run dev`, `npm run dev:desktop`, and `npm run cli` use `.dev/paseo-home`; check that the startup banner shows `Home: …/.dev/paseo-home`. A bare `paseo ...` targets stable, so always prefix it with a `PASEO_HOME`.
 - The `paseo` on `PATH` is stable's CLI. It works as a client for build (`plugin`, `daemon status`), but `PASEO_HOME=~/.paseo-dev paseo daemon start` runs stable's daemon version on the build home, and fork-only plugins fail to load. Start the build daemon by opening the build app or with `$BUILD_CLI`.
 - The app loads only the active host's plugins. The live app has two hosts: **Live** (`localhost:6768`) and **Build** (`localhost:6770`). Both have hiep-plugins, so a plugin change needs `plugin reload` on the host you are looking at; reload both to keep them in step.
+- **stable is served by the release or by a build installed as `/Applications/Paseo Fork.app`.** `scripts/paseo-switch.sh fork|release|status` switches between them; see [Serving the stable home from a build](docs/development.md#serving-the-stable-home-from-a-build). Each side has its own data, swapped under `~/.paseo`; the idle side's data sits in `~/.paseo-switch/slots/` and, while the fork is live, the release app sits in `~/.paseo-switch/apps/`, so never touch `~/.paseo-switch` and do not assume `/Applications/Paseo.app` exists. Check `scripts/paseo-switch.sh status` before assuming stable's daemon version, data, plugins, or which CLI is on `PATH`. The script refuses to run inside an agent.
 - `packages/desktop/src/main.ts` switches a packaged build (bundle ID `sh.paseo.desktop.dev`) off the stable home and seeds `daemon.listen` 6770 in `~/.paseo-dev/config.json`, so build never adopts the `6767` daemon.
 - Daemon state inside a home: `config.json` (settings, profiles, plugin sources), `agents/`, `projects/`, `schedules/`, `plugin-data/`, `plugin-settings/`, `desktop-attachments/`, `models/`, plus identity files `server-id` and `daemon-keypair.json`.
 - `~/.paseo-dev` was cloned from `~/.paseo` on 2026-09-28, keeping its own `server-id` and keypair. Stable server IDs in `projects/`, `plugin-settings/`, and `plugin-data/` were rewritten to the build ID. The previous build home is at `~/.paseo-dev.bak-20260928-145243`. Electron Local Storage was not cloned, because its host registry points at `6767`.

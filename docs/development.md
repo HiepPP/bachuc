@@ -71,6 +71,33 @@ PASEO_DEV_RESET_HOME=1 npm run dev            # clear and reseed the derived wor
 
 In Paseo-managed worktree services, use the injected service environment rather than hardcoded root checkout ports.
 
+### Serving the stable home from a build
+
+`scripts/paseo-switch.sh` changes which app serves the stable home (`~/.paseo`, `6767`): the release in `/Applications/Paseo.app`, or the current build installed as `/Applications/Paseo Fork.app`. The app, daemon version, plugins, data, and the `paseo` links on `PATH` switch together.
+
+```bash
+npm run build:desktop -- --dir -c.mac.hardenedRuntime=false -c.mac.notarize=false
+scripts/paseo-switch.sh fork --dry-run   # print every step, change nothing
+scripts/paseo-switch.sh fork             # install the build as "Paseo Fork.app" and start it
+scripts/paseo-switch.sh release          # go back to /Applications/Paseo.app
+scripts/paseo-switch.sh status
+```
+
+- Run it from Terminal.app. It stops the daemon that owns every Paseo agent and terminal, so it refuses to run inside one. It also refuses while an agent is mid-turn unless you pass `--force`.
+- Each side has its own data. A switch renames `~/.paseo` and `~/Library/Application Support/Paseo` into `~/.paseo-switch/slots/<side>/` and renames the other side's slot into place. Nothing is copied back, merged, or deleted, so each side returns exactly as it was left. Agents, schedules, and settings created on one side do not appear on the other.
+- The first `fork` starts the fork side from a clone of the release data, so it keeps the same `server-id`, pairings, and profiles. From then on the two sides diverge.
+- Fork data carries a `.paseo-switch-side` file; data without it is the release's. The script never writes into release data.
+- `fork` copies the build out of `packages/desktop/release`, because the next build deletes that folder. The copy carries its own plugins: `build:desktop` stages `hiep-plugins/plugins` into `Resources/plugins`, and the app registers them in the fork side's `config.json` at launch. Plugin edits in the repo reach the stable home only through the next `fork`.
+- `main.ts` keys the stable role on the bundle name `Paseo Fork.app`. A build under any other name keeps `~/.paseo-dev` and `6770`, so build and stable still run side by side.
+- A switch that fails after the daemon stopped rolls back by itself to the side that ran before: a failed `fork` restarts the release, a failed `release` restarts the fork. The output names the failed step. When there is nothing to go back to, or the rollback fails too, the last line names the command to run again; no data is deleted on any path. `PASEO_SWITCH_FAIL_STEP="8" scripts/paseo-switch.sh fork --dry-run` rehearses a failure at step 8.
+- A real run appends its output, with every command it ran, to `~/.paseo-switch/switch-output.log`; the terminal only mirrors that file. Closing the terminal mid-switch triggers the same rollback, and the log shows how it ended.
+- The daemon gets 120 seconds to close its agents (`STOP_TIMEOUT`). The switch does not force-kill it: past that, the switch fails and rolls back.
+- Every rename checks that the destination is free and that the destination is the same inode afterwards. `mv` onto an existing directory moves the source inside it without an error, which would leave a side starting on an empty home.
+- While the fork is live, `/Applications/Paseo.app` does not exist: `fork` renames it to `~/.paseo-switch/apps/Paseo.app.parked`, and `release` renames it back before starting it. The release app has no check of its own, and quitting the fork app leaves its daemon running when "keep running after quit" is on, so a release app opened then would restart that daemon at the release version and rewrite the fork data. The parked name does not end in `.app`, because a moved bundle can still be reached through the Dock. Anything that hardcodes `/Applications/Paseo.app` breaks while the fork is live; use the `paseo` on `PATH`.
+- `Paseo Fork.app` stays in `/Applications` while the release is live. Opened by hand then, it shows an error and exits before it writes the config or starts a daemon: `main.ts` checks the `.paseo-switch-side` label in `~/.paseo` and in the userData folder, so an interrupted switch that moved only one of them is refused too.
+- `scripts/paseo-switch.sh status` prints `MISMATCH` when an app runs on the other side's data and `WARNING` when the release app is installed while fork data is live; run the command it names.
+- The build is ad-hoc signed, so macOS asks again for file and microphone access after each `fork`.
+
 ### Expo Router
 
 Route ownership, startup restore, and native blank-screen gotchas live in
