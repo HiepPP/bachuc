@@ -23,6 +23,12 @@ export async function removeFinishedRun(
   return (await remove(fresh.observingSince)).removed;
 }
 
+// Thread actions stack at the top-right of the thread: Remove, Remove & New Thread, Jump To Parent.
+// Compact layouts keep them in the composer track.
+const CORNER = "corner" as const;
+// Navigation, not removal: orange sets it apart from the Remove actions above it.
+const PARENT_COLOR = "#f97316";
+
 export function installRemoveButtons(
   client: PluginClientContext,
   openParent: (agentId: string) => void,
@@ -96,11 +102,14 @@ export function installRemoveButtons(
       for (const { run, workspaceId } of entries) {
         if (!workspaceId) continue;
         workspaces.set(run.id, workspaceId);
-        if (childIds.has(run.id)) {
+        let added = false;
+        const stack = () => {
+          if (!childIds.has(run.id)) return;
           const parentButton = {
             title: "Jump To Parent",
             label: "Jump To Parent",
             icon: "CornerLeftUp",
+            color: PARENT_COLOR,
             behavior: {
               kind: "action" as const,
               onPress() {
@@ -109,19 +118,24 @@ export function installRemoveButtons(
             },
           };
           const existing = parentButtons.get(run.id);
-          if (existing) existing.update(parentButton);
-          else
-            parentButtons.set(
-              run.id,
-              client.addComposerPill({
-                id: `parent-${run.id}`,
-                workspaceId,
-                agentId: run.agentId,
-                button: parentButton,
-              }),
-            );
+          // Corner pills stack in registration order; re-add to keep this one below a new Remove.
+          if (existing && !added) return existing.update(parentButton);
+          existing?.remove();
+          parentButtons.set(
+            run.id,
+            client.addComposerPill({
+              id: `parent-${run.id}`,
+              placement: CORNER,
+              workspaceId,
+              agentId: run.agentId,
+              button: parentButton,
+            }),
+          );
+        };
+        if (run.status === "running") {
+          stack();
+          continue;
         }
-        if (run.status === "running") continue;
         const remove = async () => {
           const removed = await removeFinishedRun(
             run,
@@ -157,17 +171,22 @@ export function installRemoveButtons(
         const existing = buttons.get(run.id);
         if (existing) existing.update(button);
         else {
+          added = true;
           buttons.set(
             run.id,
             client.addComposerPill({
               id: `remove-${run.id}`,
+              placement: CORNER,
               workspaceId,
               agentId: run.agentId,
               button,
             }),
           );
         }
-        if (!startNewThread || run.cwd === undefined) continue;
+        if (!startNewThread || run.cwd === undefined) {
+          stack();
+          continue;
+        }
         const newThreadButton = {
           title: "Remove and Start New Thread",
           label: "Remove & New Thread",
@@ -181,16 +200,20 @@ export function installRemoveButtons(
         };
         const existingNewThread = newThreadButtons.get(run.id);
         if (existingNewThread) existingNewThread.update(newThreadButton);
-        else
+        else {
+          added = true;
           newThreadButtons.set(
             run.id,
             client.addComposerPill({
               id: `new-thread-${run.id}`,
+              placement: CORNER,
               workspaceId,
               agentId: run.agentId,
               button: newThreadButton,
             }),
           );
+        }
+        stack();
       }
     } catch {
       // Never offer Remove when the host cannot confirm finished Board membership.

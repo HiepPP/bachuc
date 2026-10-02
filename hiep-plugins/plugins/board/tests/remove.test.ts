@@ -157,6 +157,7 @@ test("running and finished children jump to their direct parent without removing
     for (const id of ["parent-child", "parent-leaf"]) {
       const pill = pills.get(id)!;
       assert.equal(pill.button.label, "Jump To Parent");
+      assert.equal(pill.button.color, "#f97316");
       assert.equal(pill.workspaceId, "workspace");
       assert.equal(pill.button.behavior.kind, "action");
       if (pill.button.behavior.kind === "action") await pill.button.behavior.onPress();
@@ -227,4 +228,57 @@ test("Remove & New Thread removes first, then opens the project; never on failur
     cleanup();
   }
   assert.equal(pills.size, 0);
+});
+
+test("thread actions sit in the corner, stacked Remove, Remove & New Thread, Jump To Parent", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const stack: PluginComposerPillContribution[] = [];
+  let status = "running";
+  const client = {
+    async rpc() {
+      return {
+        observingSince: "scope",
+        runs: [{ id: "child", agentId: "child", status, cwd: "/repo", parentAgentId: "root" }],
+      };
+    },
+    paseo: {
+      agents: { ref: () => ({ refresh: async () => ({ agent: { workspaceId: "workspace" } }) }) },
+    },
+    addComposerPill(pill: PluginComposerPillContribution) {
+      stack.push(pill);
+      return {
+        update() {},
+        remove() {
+          const index = stack.indexOf(pill);
+          if (index >= 0) stack.splice(index, 1);
+        },
+      };
+    },
+  } as unknown as PluginClientContext;
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const ids = () => stack.map((pill) => pill.id);
+  const cleanup = installRemoveButtons(
+    client,
+    () => {},
+    () => {},
+  );
+  try {
+    await settle();
+    assert.deepEqual(ids(), ["parent-child"]);
+    // The child finishes: Remove actions must land above the parent pill registered earlier.
+    status = "completed";
+    for (let pass = 0; pass < 2; pass++) {
+      t.mock.timers.tick(2_000);
+      await settle();
+      assert.deepEqual(ids(), ["remove-child", "new-thread-child", "parent-child"]);
+    }
+    assert.ok(stack.every((pill) => pill.placement === "corner"));
+    assert.deepEqual(
+      stack.map((pill) => pill.button.color),
+      [undefined, undefined, "#f97316"],
+    );
+  } finally {
+    cleanup();
+  }
+  assert.equal(stack.length, 0);
 });
