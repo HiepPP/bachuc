@@ -1,13 +1,15 @@
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { useRpc } from "@getpaseo/plugin/client";
+import type { BoardHostClient } from "./hosts";
 import { copyText } from "@getpaseo/plugin/client/react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { recapDayMarkdown, recapsRpc, type RecapDay, type RecapEntry } from "../shared/recaps";
+import { focusRing, keyboardFocus } from "./focus";
 
-const CARD_RADIUS = 12;
-const CONTROL_RADIUS = 8;
+// Same shape lock as the Runs view: cards 8, controls 6.
+const CARD_RADIUS = 8;
+const CONTROL_RADIUS = 6;
 
 export function BoardViewSwitch({
   view,
@@ -19,32 +21,39 @@ export function BoardViewSwitch({
   theme: PluginSurfaceProps["theme"];
 }) {
   const colors = theme.colors;
+  const [focused, setFocused] = useState<"runs" | "recaps" | null>(null);
   return (
+    // Quiet segmented control: the track is the only chrome, the selected segment lifts off it.
     <View
       accessibilityRole="tablist"
       style={{
         flexDirection: "row",
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: 10,
-        overflow: "hidden",
-        backgroundColor: colors.surface1,
+        padding: 2,
+        gap: 2,
+        borderRadius: CARD_RADIUS,
+        backgroundColor: colors.surface2,
       }}
     >
-      {(["runs", "recaps"] as const).map((item, index) => (
+      {(["runs", "recaps"] as const).map((item) => (
         <Pressable
           key={item}
           accessibilityRole="tab"
           accessibilityState={{ selected: view === item }}
           onPress={() => onChange(item)}
+          onFocus={(event) => setFocused(keyboardFocus(event) ? item : null)}
+          onBlur={() => setFocused(null)}
+          hitSlop={{ top: 8, bottom: 8 }}
           style={({ pressed }) => ({
-            height: 44,
-            paddingHorizontal: 14,
+            height: 28,
+            paddingHorizontal: 12,
             alignItems: "center",
             justifyContent: "center",
-            borderLeftWidth: index ? 1 : 0,
-            borderColor: colors.border,
-            backgroundColor: view === item || pressed ? colors.surface2 : colors.surface1,
+            borderRadius: CONTROL_RADIUS,
+            borderWidth: 1,
+            borderColor: view === item ? colors.border : "transparent",
+            backgroundColor: view === item ? colors.surface0 : "transparent",
+            opacity: pressed ? 0.7 : 1,
+            ...(focused === item ? focusRing(colors.accent) : null),
           })}
         >
           <Text
@@ -85,7 +94,7 @@ function RecapRow({
         gap: s(3),
         paddingVertical: s(8),
         paddingHorizontal: s(10),
-        borderRadius: s(CARD_RADIUS - 2),
+        borderRadius: s(CARD_RADIUS),
         borderWidth: 1,
         borderColor: colors.border,
         backgroundColor: pressed ? colors.surface2 : colors.surface1,
@@ -103,7 +112,7 @@ function RecapRow({
         {entry.title}
       </Text>
       {entry.did ? (
-        <Text style={{ color: colors.foreground, fontSize: s(13), lineHeight: s(18) }}>
+        <Text style={{ color: colors.foregroundMuted, fontSize: s(12.5), lineHeight: s(18) }}>
           {entry.did}
         </Text>
       ) : null}
@@ -146,14 +155,14 @@ function RecapDaySection({
           flexDirection: "row",
           alignItems: "center",
           gap: s(8),
-          paddingBottom: s(8),
+          paddingBottom: s(6),
           borderBottomWidth: 1,
           borderBottomColor: colors.border,
         }}
       >
         <Text
           accessibilityRole="header"
-          style={{ flex: 1, color: colors.foreground, fontSize: s(15), fontWeight: "600" }}
+          style={{ flex: 1, color: colors.foreground, fontSize: s(13), fontWeight: "600" }}
         >
           {day.day}
         </Text>
@@ -162,13 +171,13 @@ function RecapDaySection({
           accessibilityLabel={`Copy recaps for ${day.day} as markdown`}
           onPress={onCopy}
           style={({ pressed }) => ({
-            paddingHorizontal: s(12),
-            paddingVertical: s(6),
+            paddingHorizontal: s(10),
+            paddingVertical: s(4),
             borderRadius: s(CONTROL_RADIUS),
-            backgroundColor: pressed ? colors.surface1 : colors.surface2,
+            backgroundColor: pressed ? colors.surface2 : "transparent",
           })}
         >
-          <Text style={{ color: colors.foreground, fontSize: s(13), fontWeight: "600" }}>
+          <Text style={{ color: colors.foregroundMuted, fontSize: s(12), fontWeight: "600" }}>
             {copy === "copied" ? "Copied" : copy === "failed" ? "Copy failed" : "Copy"}
           </Text>
         </Pressable>
@@ -181,9 +190,9 @@ function RecapDaySection({
               <View
                 accessibilityElementsHidden
                 style={{
-                  width: s(12),
-                  height: s(12),
-                  borderRadius: s(4),
+                  width: s(10),
+                  height: s(10),
+                  borderRadius: s(3),
                   backgroundColor:
                     hue === undefined ? colors.foregroundMuted : `hsl(${hue}, 42%, 58%)`,
                 }}
@@ -191,7 +200,7 @@ function RecapDaySection({
               <Text
                 accessibilityRole="header"
                 numberOfLines={1}
-                style={{ color: colors.foreground, fontSize: s(13), fontWeight: "600" }}
+                style={{ color: colors.foregroundMuted, fontSize: s(12), fontWeight: "600" }}
               >
                 {project.name}
               </Text>
@@ -213,22 +222,27 @@ function RecapDaySection({
 }
 
 export function RecapsView({
+  rpc,
+  online,
   hostId,
   theme,
   scale,
   hues,
   onOpen,
 }: {
+  rpc: BoardHostClient["rpc"];
+  online: boolean;
   hostId: string;
   theme: PluginSurfaceProps["theme"];
   scale: number;
   hues: Record<string, number>;
   onOpen?: (agentId: string) => void;
 }) {
-  const readRecaps = useRpc(recapsRpc);
+  const readRecaps = (input: { days: number }) => rpc(recapsRpc, input);
   const recaps = useQuery({
     queryKey: ["board-recaps", hostId],
     queryFn: () => readRecaps({ days: 7 }),
+    enabled: online,
     retry: false,
     refetchInterval: 10_000,
     refetchOnWindowFocus: false,
@@ -236,28 +250,22 @@ export function RecapsView({
   const s = (value: number) => value * scale;
   const colors = theme.colors;
   const message = (text: string) => (
-    <View
+    <Text
       style={{
-        minHeight: s(88),
-        alignItems: "center",
-        justifyContent: "center",
-        padding: s(16),
-        borderRadius: s(CARD_RADIUS),
-        borderWidth: 1,
-        borderStyle: "dashed",
-        borderColor: colors.border,
+        color: colors.foregroundMuted,
+        fontSize: s(12),
+        lineHeight: s(16),
+        paddingHorizontal: s(2),
       }}
     >
-      <Text style={{ color: colors.foregroundMuted, fontSize: s(13), textAlign: "center" }}>
-        {text}
-      </Text>
-    </View>
+      {text}
+    </Text>
   );
   if (recaps.isPending) return <ActivityIndicator color={colors.accent} />;
   if (!recaps.data) return message("Could not load recaps. Retrying.");
   if (!recaps.data.days.length) return message("No recaps in the last 7 days.");
   return (
-    <View style={{ gap: s(24) }}>
+    <View style={{ gap: s(20) }}>
       {recaps.data.days.map((day) => (
         <RecapDaySection key={day.day} day={day} s={s} theme={theme} hues={hues} onOpen={onOpen} />
       ))}

@@ -21,6 +21,7 @@ runInNewContext(compiled, {
   require: (id: string) => {
     if (id === "react/jsx-runtime") return require(id);
     if (id === "../shared/effort") return require("../shared/effort");
+    if (id === "./focus" || id === "./repo-color") return require(id.replace("./", "../client/"));
     if (id === "./clock") return { useClock: (read: (now: number) => unknown) => read(Date.now()) };
     if (id === "react")
       return {
@@ -234,7 +235,8 @@ test("child grid responds to its own panel width and Board scale", () => {
   measuredPanelWidth = 0;
 });
 
-test("grouped cards omit the project and show model with effort", () => {
+test("a card names its project once in the repo row and shows model with effort", () => {
+  const opened: string[] = [];
   const [tree] = buildRunTrees([
     {
       ...base,
@@ -254,16 +256,62 @@ test("grouped cards omit the project and show model with effort", () => {
         collapsed: new Set(),
         scale: 1,
         theme,
-        inheritedProject: true,
+        onOpenProject: (run: BoardRun) => opened.push(run.id),
         onStar: async () => {},
         onToggle: () => {},
       }),
     ),
   );
   const text = (value: string) => nodes.filter((node) => node.props.children === value).length;
-  assert.equal(text("App"), 0);
+  // The parent card carries the repo label; a subagent in the same project does not repeat it.
+  assert.equal(text("App"), 1);
+  const repo = nodes.filter((node) => node.props.accessibilityLabel === "New conversation in App");
+  assert.equal(repo.length, 1);
+  assert.equal(repo[0].type, "Pressable");
+  assert.equal(repo[0].props.disabled, false);
+  repo[0].props.onPress();
+  assert.deepEqual(opened, ["parent"]);
+  // Open, repo, star, and toggle are sibling actions: no pressable sits inside another.
+  for (const node of nodes.filter((item) => item.type === "Pressable"))
+    assert.ok(!elements(node.props.children).some((child) => child.type === "Pressable"));
   assert.equal(text("Opus 5.5"), 1);
   assert.equal(text("High"), 1);
   // A subagent whose model is not read yet falls back to its provider.
   assert.equal(text("codex"), 1);
+});
+
+test("a subagent in another project keeps its project name; the repo label needs a handler", () => {
+  const [tree] = buildRunTrees([
+    { ...base, id: "parent", agentId: "parent", title: "Parent" },
+    {
+      ...base,
+      id: "child",
+      agentId: "child",
+      title: "Child",
+      parentAgentId: "parent",
+      project: "Docs",
+      projectKey: "docs",
+    },
+  ]);
+  const nodes = elements(
+    render(
+      exports.RunCluster!({
+        tree,
+        compact: false,
+        collapsed: new Set(),
+        scale: 1,
+        theme,
+        onStar: async () => {},
+        onToggle: () => {},
+      }),
+    ),
+  );
+  const text = (value: string) => nodes.filter((node) => node.props.children === value).length;
+  assert.equal(text("App"), 1);
+  assert.equal(text("Docs"), 1);
+  // Subagent rows carry the elbow; only the parent card has a repo button.
+  assert.equal(nodes.filter((node) => node.props.name === "CornerDownRight").length, 1);
+  assert.ok(!nodes.some((node) => node.props.accessibilityLabel === "New conversation in Docs"));
+  const repo = nodes.find((node) => node.props.accessibilityLabel === "New conversation in App")!;
+  assert.equal(repo.props.disabled, true);
 });

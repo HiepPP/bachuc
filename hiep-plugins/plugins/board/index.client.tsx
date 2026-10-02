@@ -1,4 +1,4 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { Platform } from "react-native";
 import { installNewThreadNavigation } from "./client/new-thread";
 import { installParentNavigation } from "./client/parent";
@@ -10,7 +10,9 @@ import { installBoardShortcut } from "./client/shortcut";
 import { ProjectHeaderChip } from "./client/project-header-chip";
 
 export default function contribute(client: PluginClientContext) {
-  const surface = client.addSurface("board", BoardPage);
+  const surface = client.addSurface("board", (props: PluginSurfaceProps) => (
+    <BoardPage {...props} client={client} />
+  ));
   const sidebar = client.addSidebarItem({
     id: "board",
     title: "Board",

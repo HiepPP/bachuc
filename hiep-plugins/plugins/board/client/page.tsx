@@ -1,5 +1,5 @@
-import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { useRpc, useSettings } from "@getpaseo/plugin/client";
+import type { PluginSurfaceProps, PluginHostSummary } from "@getpaseo/plugin/client";
+import { useHosts, useSettings } from "@getpaseo/plugin/client";
 import { Icon, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useQuery } from "@tanstack/react-query";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -11,6 +11,7 @@ import {
   Pressable,
   Text,
   View,
+  type TextStyle,
   type ViewStyle,
 } from "react-native";
 import { boardRpc, removeRunRpc, starRunRpc, groupRuns, type BoardRun } from "../shared/board";
@@ -18,21 +19,36 @@ import { boardColumns, type RunTree } from "../shared/tree";
 import { BoardSizeControl } from "./size-control";
 import { BoardViewSwitch, RecapsView } from "./recaps";
 import { BOARD_SIZE_DEFAULT, boardScale, boardSize, clampBoardSize } from "../shared/board-size";
+import { effortColor } from "../shared/effort";
 import { allocateColors, projectColors } from "../shared/project-colors";
 import { boardConnectionState } from "./connection";
-import { workspaceActions } from "./workspace";
+import { createBoardHostClient, type BoardHostClient } from "./hosts";
+import { useHostSettings } from "./host-settings";
 import { AgentAvatar } from "./avatar";
 import { Orb, OrbAvatar, orbSupported } from "./orb";
 import { orbSettings, type OrbSettings } from "../shared/orb";
-import { effortColor } from "../shared/effort";
 import { lastSettings } from "./warm";
 import { useClock } from "./clock";
-import { removeFinishedRun } from "./remove";
+import { closeRemovedRuntimes, removeFinishedRun } from "./remove";
+import { reducedMotion } from "./motion";
+import { focusRing, keyboardFocus } from "./focus";
+import { repoDivider, repoLabel, repoMark, repoSurface } from "./repo-color";
 
 const SECOND = 1_000;
-// Shape lock: cards 12, controls and chips 8.
-const CARD_RADIUS = 12;
-const CONTROL_RADIUS = 8;
+// Shape lock: cards and notices 8; controls and subagent rows 6.
+const CARD_RADIUS = 8;
+const CONTROL_RADIUS = 6;
+const COLUMN_GAP = 24;
+const RAIL_HEIGHT = 40;
+const SEPARATOR = " · ";
+// Counts and durations keep their width as digits change.
+const TABULAR = { fontVariant: ["tabular-nums"] } satisfies TextStyle;
+
+/** Web keeps each host rail in view while its lane scrolls. */
+const STICKY: ViewStyle | null =
+  Platform.OS === "web" ? ({ position: "sticky", top: 0 } as unknown as ViewStyle) : null;
+// The card draws the ring for its open action, so the browser's own outline stays off.
+const NO_OUTLINE = { outlineWidth: 0 } satisfies ViewStyle;
 
 function timeValue(value: string | null): number | null {
   if (!value) return null;
@@ -99,6 +115,7 @@ function AttentionPulse({
 }) {
   const [pulse] = useState(() => new Animated.Value(0));
   useEffect(() => {
+    if (reducedMotion()) return;
     const step = (toValue: number) =>
       Animated.timing(pulse, {
         toValue,
@@ -195,7 +212,7 @@ function ModelTags({
               paddingVertical: s(2),
               borderWidth: 1,
               borderColor: color === colors.foreground ? colors.border : color,
-              borderRadius: s(CONTROL_RADIUS - 2),
+              borderRadius: s(6),
               backgroundColor: colors.surface2,
             }),
       }}
@@ -252,12 +269,17 @@ function useStableCallback<Args extends unknown[], Result>(
   return useCallback((...args: Args) => latest.current(...args), []);
 }
 
+type CardPart = "card" | "repo" | "star" | "remove";
+
 function RunCard({
   run,
+  projectHue,
   theme,
   onRemove,
   onOpen,
+  onOpenProject,
   onStar,
+  onFocusChange,
   scale,
   embedded = false,
   subagent = false,
@@ -265,13 +287,14 @@ function RunCard({
   removeCount = 1,
   orb,
 }: {
+  projectHue?: number;
   /** Saved thinking-orb settings; null until loaded, which keeps the host spinner. */
   orb: OrbSettings | null;
   /** Rendered inside a cluster card: no own border. */
   embedded?: boolean;
   /** Compact two-line card inside the parent subagent panel. */
   subagent?: boolean;
-  /** Hide the project row when the parent card already shows the same project. */
+  /** Subagents omit the project when the parent card already names the same one. */
   inheritedProject?: boolean;
   /** Conversations hidden by Remove, including this one and its subagents. */
   removeCount?: number;
@@ -280,11 +303,16 @@ function RunCard({
   theme: PluginSurfaceProps["theme"];
   onRemove?: (id: string) => Promise<void>;
   onOpen?: (agentId: string) => void;
+  /** Starts a conversation in the card's project from its repo label. */
+  onOpenProject?: (run: BoardRun) => void;
   onStar: (id: string, starred: boolean) => Promise<void>;
+  /** Keyboard focus of the open action, for a cluster that draws the ring around all of it. */
+  onFocusChange?: (focused: boolean) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [starHovered, setStarHovered] = useState(false);
-  const [actionFocused, setActionFocused] = useState(false);
+  const [repoHovered, setRepoHovered] = useState(false);
+  const [focus, setFocus] = useState<{ part: CardPart; keyboard: boolean } | null>(null);
   const [removeHovered, setRemoveHovered] = useState(false);
   const [starring, setStarring] = useState(false);
   const [starError, setStarError] = useState(false);
@@ -320,10 +348,11 @@ function RunCard({
       ? `Remove all · ${removeCount}`
       : "Remove";
   const removeHint = others > 0 ? ` and ${others} ${others === 1 ? "subagent" : "subagents"}` : "";
-  const padX = s(subagent ? 8 : 16);
-  const padY = s(subagent ? 8 : 14);
-  const showStar = run.starred || hovered || starHovered || starring;
+  const padX = s(subagent ? 8 : 12);
+  const padY = s(subagent ? 10 : 16);
+  const showStar = run.starred || hovered || starHovered || repoHovered || starring;
   const hoverActions = HOVER_ACTIONS;
+  const actionFocused = focus?.part === "star" || focus?.part === "remove";
   const actionsVisible =
     !hoverActions ||
     showStar ||
@@ -332,6 +361,20 @@ function RunCard({
     removing ||
     starError ||
     removeError;
+  // The ring is for keyboard focus only; a click focuses the element without drawing it.
+  const ring = (part: CardPart, offset?: number) =>
+    focus?.part === part && focus.keyboard ? focusRing(colors.accent, offset) : null;
+  const focusProps = (part: CardPart) => ({
+    onFocus: (event: unknown) => {
+      const keyboard = keyboardFocus(event);
+      setFocus({ part, keyboard });
+      if (part === "card") onFocusChange?.(keyboard);
+    },
+    onBlur: () => {
+      setFocus(null);
+      if (part === "card") onFocusChange?.(false);
+    },
+  });
 
   const starButton = (
     <Pressable
@@ -339,8 +382,7 @@ function RunCard({
       accessibilityLabel={`${run.starred ? "Unstar" : "Star"} ${run.title}`}
       accessibilityState={{ selected: run.starred, disabled: starring }}
       disabled={starring}
-      onFocus={() => setActionFocused(true)}
-      onBlur={() => setActionFocused(false)}
+      {...focusProps("star")}
       onHoverIn={() => setStarHovered(true)}
       onHoverOut={() => setStarHovered(false)}
       onPress={async () => {
@@ -358,7 +400,8 @@ function RunCard({
       style={{
         width: s(subagent ? 24 : 28),
         height: s(subagent ? 24 : 28),
-        marginTop: subagent ? 0 : -s(4),
+        // Keeps the repo row one text line tall.
+        marginVertical: subagent ? 0 : -s(6),
         marginRight: subagent ? 0 : -s(6),
         alignItems: "center",
         justifyContent: "center",
@@ -366,6 +409,7 @@ function RunCard({
         backgroundColor: starHovered && !starring ? colors.surface2 : "transparent",
         // Unstarred stars stay quiet until the card is hovered; touch clients keep them visible.
         opacity: starring ? 0.5 : subagent || showStar || actionFocused || !hoverActions ? 1 : 0.35,
+        ...ring("star"),
       }}
     >
       {run.starred ? (
@@ -393,8 +437,7 @@ function RunCard({
       accessibilityRole="button"
       accessibilityLabel={`Remove ${run.title}${removeHint} from Board`}
       disabled={removing}
-      onFocus={() => setActionFocused(true)}
-      onBlur={() => setActionFocused(false)}
+      {...focusProps("remove")}
       onHoverIn={() => setRemoveHovered(true)}
       onHoverOut={() => setRemoveHovered(false)}
       onPress={async () => {
@@ -413,9 +456,11 @@ function RunCard({
         paddingHorizontal: s(subagent ? 5 : 8),
         paddingVertical: s(subagent ? 5 : 4),
         marginVertical: subagent ? 0 : -s(4),
-        borderRadius: s(CONTROL_RADIUS - 2),
+        marginRight: subagent ? 0 : -s(8),
+        borderRadius: s(CONTROL_RADIUS),
         backgroundColor: removeHovered && !removing ? colors.surface2 : "transparent",
         opacity: removing ? 0.5 : 1,
+        ...ring("remove"),
       }}
     >
       {subagent ? (
@@ -435,23 +480,38 @@ function RunCard({
     </Pressable>
   ) : null;
 
+  const label = run.needsInput ? "Needs input" : statusLabel(run.status);
+  // Only attention and non-success outcomes take a status color; the rest stays muted.
+  const labelColor =
+    run.needsInput || (!running && run.status !== "completed") ? tone : colors.foregroundMuted;
+  const metaStyle = {
+    color: colors.foregroundMuted,
+    fontSize: s(subagent ? 11.5 : 12),
+    lineHeight: s(subagent ? 15 : 16),
+    flex: 1,
+    ...TABULAR,
+  } satisfies TextStyle;
+
   return (
     <View
-      accessibilityLabel={`${run.title}, ${run.needsInput ? "Needs input" : statusLabel(run.status)}`}
+      accessibilityLabel={`${run.title}, ${label}`}
       style={{
-        borderRadius: embedded ? 0 : s(subagent ? CARD_RADIUS - 2 : CARD_RADIUS),
-        borderWidth: embedded ? 0 : 1,
-        borderColor: subagent && run.needsInput ? colors.statusWarning : colors.border,
-        backgroundColor: colors.surface1,
+        borderRadius: s(subagent ? CONTROL_RADIUS : embedded ? 0 : CARD_RADIUS),
+        borderWidth: embedded || subagent ? 0 : 1,
+        ...repoSurface(projectHue, theme),
+        ...(subagent || embedded ? { backgroundColor: "transparent" } : {}),
         overflow: "hidden",
+        // An embedded parent hands its ring to the cluster, whose clipping would hide it here.
+        ...(subagent ? ring("card", -2) : embedded ? null : ring("card", 2)),
       }}
     >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Open conversation ${run.title}`}
-        accessibilityHint={`${run.project}, ${modelLabel(run)}, ${run.needsInput ? "Needs input" : statusLabel(run.status)}, ${timing}${duration ? `, duration ${duration}` : ""}`}
+        accessibilityHint={`${run.project}, ${modelLabel(run)}, ${label}, ${timing}${duration ? `, duration ${duration}` : ""}`}
         disabled={!onOpen}
         onPress={() => onOpen?.(run.agentId)}
+        {...focusProps("card")}
         onHoverIn={() => setHovered(true)}
         onHoverOut={() => setHovered(false)}
         style={({ pressed }) => ({
@@ -459,25 +519,31 @@ function RunCard({
           inset: 0,
           backgroundColor: pressed ? colors.surface2 : hovered ? colors.surface2 : "transparent",
           opacity: pressed ? 1 : hovered ? 0.55 : 1,
+          ...NO_OUTLINE,
         })}
       />
       <View
         pointerEvents="box-none"
-        style={{
-          paddingHorizontal: padX,
-          paddingVertical: padY,
-          gap: s(subagent ? 6 : 8),
-        }}
+        style={{ paddingHorizontal: padX, paddingVertical: padY, gap: s(6) }}
       >
         {subagent ? (
           <View
             pointerEvents="box-none"
-            style={{ flexDirection: "row", alignItems: "center", gap: s(8), minHeight: s(42) }}
+            style={{ flexDirection: "row", alignItems: "center", gap: s(8), minHeight: s(32) }}
           >
-            <View pointerEvents="none">
-              <AgentAvatar agentId={run.agentId} size={s(32)} />
+            {/* The elbow marks the row as nested under the card above. */}
+            <View
+              pointerEvents="none"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              style={{ opacity: 0.6 }}
+            >
+              <Icon name="CornerDownRight" size={s(14)} color={colors.foregroundMuted} />
             </View>
-            <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: s(3) }}>
+            <View pointerEvents="none">
+              <AgentAvatar agentId={run.agentId} size={s(24)} />
+            </View>
+            <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: s(1) }}>
               <Text
                 numberOfLines={1}
                 style={{
@@ -489,16 +555,7 @@ function RunCard({
               >
                 {run.title}
               </Text>
-              {inheritedProject ? null : (
-                <Text
-                  numberOfLines={1}
-                  style={{ color: colors.foregroundMuted, fontSize: s(11), lineHeight: s(14) }}
-                >
-                  {run.project}
-                </Text>
-              )}
-              <ModelTags run={run} theme={theme} scale={scale} compact />
-              <View style={{ flexDirection: "row", alignItems: "center", gap: s(3), minWidth: 0 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: s(4), minWidth: 0 }}>
                 {run.needsInput ? (
                   <AttentionPulse grow={1.2}>
                     <Icon name="CircleAlert" size={s(12)} color={tone} />
@@ -525,22 +582,11 @@ function RunCard({
                     color={tone}
                   />
                 )}
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    color: running && !run.needsInput ? colors.foregroundMuted : tone,
-                    fontSize: s(11),
-                    lineHeight: s(15),
-                    fontWeight: "500",
-                    flexShrink: 1,
-                  }}
-                >
-                  {run.needsInput ? "Needs input" : statusLabel(run.status)}
-                  {duration ? (
-                    <Text style={{ color: colors.foregroundMuted, fontWeight: "400" }}>
-                      {` · ${duration}`}
-                    </Text>
-                  ) : null}
+                <Text numberOfLines={1} style={metaStyle}>
+                  <Text style={{ color: labelColor, fontWeight: "500" }}>{label}</Text>
+                  {duration ? `${SEPARATOR}${duration}` : null}
+                  {inheritedProject ? null : SEPARATOR}
+                  {inheritedProject ? null : <Text>{run.project}</Text>}
                 </Text>
               </View>
             </View>
@@ -548,10 +594,10 @@ function RunCard({
               pointerEvents={actionsVisible ? "box-none" : "none"}
               style={{
                 position: hoverActions ? "absolute" : "relative",
-                right: -s(4),
-                top: -s(4),
+                right: -s(2),
+                top: s(2),
                 flexDirection: "row",
-                borderRadius: s(6),
+                borderRadius: s(CONTROL_RADIUS),
                 backgroundColor: colors.surface1,
                 opacity: actionsVisible ? 1 : 0,
               }}
@@ -562,137 +608,153 @@ function RunCard({
           </View>
         ) : (
           <>
-            <View
-              pointerEvents="box-none"
-              style={{ flexDirection: "row", alignItems: "flex-start", gap: s(10) }}
-            >
-              <View pointerEvents="none">
-                {thinking ? (
-                  <OrbAvatar
-                    agentId={run.agentId}
-                    size={s(40)}
-                    state={thinking.state}
-                    opacity={thinking.avatarOpacity / 100}
-                    theme={theme}
-                  />
-                ) : (
-                  <AgentAvatar agentId={run.agentId} size={s(40)} />
-                )}
-              </View>
-              <View pointerEvents="none" style={{ flex: 1, gap: s(6) }}>
-                <Text
-                  numberOfLines={2}
-                  style={{
-                    color: colors.foreground,
-                    fontSize: s(15),
-                    lineHeight: s(21),
-                    fontWeight: "600",
-                  }}
-                >
-                  {run.title}
-                </Text>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: s(6),
-                    flexWrap: "wrap",
-                  }}
-                >
-                  {inheritedProject ? null : (
-                    <Text
-                      numberOfLines={1}
-                      style={{
-                        color: colors.foregroundMuted,
-                        fontSize: s(12),
-                        lineHeight: s(16),
-                        fontWeight: "500",
-                        flexShrink: 1,
-                      }}
-                    >
-                      {run.project}
-                    </Text>
-                  )}
-                  <ModelTags run={run} theme={theme} scale={scale} />
-                </View>
-              </View>
-              {starButton}
-            </View>
+            {/* Repo row: the project in its own hue, with Star at the card's right edge. */}
             <View
               pointerEvents="box-none"
               style={{
                 flexDirection: "row",
                 alignItems: "center",
                 justifyContent: "space-between",
-                flexWrap: "wrap",
                 gap: s(8),
+                marginBottom: s(2),
               }}
             >
-              <View
-                pointerEvents="none"
-                style={{ flexDirection: "row", alignItems: "center", gap: s(7), flexShrink: 1 }}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`New conversation in ${run.project}`}
+                disabled={!onOpenProject}
+                onPress={() => onOpenProject?.(run)}
+                {...focusProps("repo")}
+                onHoverIn={() => setRepoHovered(true)}
+                onHoverOut={() => setRepoHovered(false)}
+                hitSlop={s(6)}
+                style={({ pressed }) => ({
+                  flexShrink: 1,
+                  minWidth: 0,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: s(7),
+                  paddingHorizontal: s(2),
+                  borderRadius: s(CONTROL_RADIUS),
+                  opacity: pressed ? 0.6 : 1,
+                  ...ring("repo"),
+                })}
               >
-                {run.needsInput ? (
-                  <AttentionPulse>
-                    <Text
-                      style={{
-                        color: colors.surface1,
-                        backgroundColor: colors.statusWarning,
-                        fontSize: s(11.5),
-                        lineHeight: s(15),
-                        fontWeight: "700",
-                        paddingHorizontal: s(7),
-                        paddingVertical: s(2),
-                        borderRadius: s(CONTROL_RADIUS - 2),
-                        overflow: "hidden",
-                      }}
-                    >
-                      Needs input
-                    </Text>
-                  </AttentionPulse>
-                ) : thinking ? null : running ? (
-                  <Spinner color={tone} size={s(14)} />
-                ) : (
-                  <View
-                    accessibilityElementsHidden
-                    style={{ width: s(7), height: s(7), borderRadius: s(4), backgroundColor: tone }}
-                  />
-                )}
+                <ProjectMark
+                  name={run.project}
+                  color={repoMark(projectHue, theme)}
+                  size={s(14)}
+                  theme={theme}
+                />
                 <Text
                   numberOfLines={1}
                   style={{
-                    color: run.needsInput ? colors.foregroundMuted : tone,
-                    fontSize: s(12.5),
-                    lineHeight: s(17),
+                    color: repoLabel(projectHue, theme),
+                    fontSize: s(12),
+                    lineHeight: s(16),
                     fontWeight: "600",
                     flexShrink: 1,
+                    textDecorationLine: repoHovered && onOpenProject ? "underline" : "none",
                   }}
                 >
-                  {run.needsInput ? timing : statusLabel(run.status)}
-                  {run.needsInput ? null : (
-                    <Text style={{ color: colors.foregroundMuted, fontWeight: "400" }}>
-                      {"  "}
-                      {timing}
-                    </Text>
-                  )}
+                  {run.project}
                 </Text>
-              </View>
-              {running ? null : (
-                <View
-                  pointerEvents="box-none"
-                  style={{ flexDirection: "row", alignItems: "center", gap: s(10) }}
-                >
-                  <Text
-                    style={{ color: colors.foregroundMuted, fontSize: s(12), lineHeight: s(16) }}
-                  >
-                    {duration ? `Ran ${duration}` : "Duration unavailable"}
-                  </Text>
-                  {removeButton}
-                </View>
+              </Pressable>
+              {starButton}
+            </View>
+            <View
+              pointerEvents="none"
+              style={{ flexDirection: "row", alignItems: "flex-start", gap: s(10) }}
+            >
+              {thinking ? (
+                <OrbAvatar
+                  agentId={run.agentId}
+                  size={s(36)}
+                  state={thinking.state}
+                  opacity={thinking.avatarOpacity / 100}
+                  theme={theme}
+                />
+              ) : (
+                <AgentAvatar agentId={run.agentId} size={s(36)} />
               )}
+              <View style={{ flex: 1, minWidth: 0, gap: s(3) }}>
+                <Text
+                  numberOfLines={2}
+                  style={{
+                    color: colors.foreground,
+                    fontSize: s(14),
+                    lineHeight: s(19),
+                    fontWeight: "600",
+                  }}
+                >
+                  {run.title}
+                </Text>
+                <View
+                  style={{ minWidth: 0, flexDirection: "row", alignItems: "center", gap: s(6) }}
+                >
+                  {run.needsInput ? (
+                    <AttentionPulse>
+                      <Text
+                        style={{
+                          color: colors.surface1,
+                          backgroundColor: colors.statusWarning,
+                          fontSize: s(11.5),
+                          lineHeight: s(15),
+                          fontWeight: "700",
+                          paddingHorizontal: s(7),
+                          paddingVertical: s(1),
+                          borderRadius: s(CONTROL_RADIUS),
+                          overflow: "hidden",
+                        }}
+                      >
+                        Needs input
+                      </Text>
+                    </AttentionPulse>
+                  ) : thinking ? null : running ? (
+                    <Spinner color={tone} size={s(14)} />
+                  ) : (
+                    <View
+                      accessibilityElementsHidden
+                      style={{
+                        width: s(6),
+                        height: s(6),
+                        borderRadius: s(3),
+                        backgroundColor: tone,
+                      }}
+                    />
+                  )}
+                  <Text numberOfLines={1} style={metaStyle}>
+                    {running ? null : <Text style={{ color: labelColor }}>{label}</Text>}
+                    {running ? null : SEPARATOR}
+                    {timing}
+                    {!running && duration ? `${SEPARATOR}ran ${duration}` : null}
+                  </Text>
+                </View>
+              </View>
             </View>
           </>
         )}
+        {/* Badges row: model and effort under the text column, Remove at the right edge. */}
+        <View
+          pointerEvents="box-none"
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: s(8),
+            // Subagent badges clear the elbow and avatar; card badges clear the avatar.
+            paddingLeft: s(subagent ? 54 : 46),
+            marginTop: s(2),
+            minHeight: subagent ? 0 : s(23),
+          }}
+        >
+          <View
+            pointerEvents="none"
+            style={{ flex: 1, minWidth: 0, flexDirection: "row", overflow: "hidden" }}
+          >
+            <ModelTags run={run} theme={theme} scale={scale} compact={subagent} />
+          </View>
+          {subagent || running ? null : removeButton}
+        </View>
         {starError ? (
           <Text
             pointerEvents="none"
@@ -720,7 +782,7 @@ function RunCard({
             inset: 0,
             borderWidth: 2,
             borderColor: colors.statusWarning,
-            borderRadius: embedded ? 0 : s(subagent ? CARD_RADIUS - 3 : CARD_RADIUS - 1),
+            borderRadius: s(subagent ? CONTROL_RADIUS : embedded ? 0 : CARD_RADIUS - 1),
           }}
         />
       ) : null}
@@ -741,7 +803,7 @@ function clusterSummary(tree: RunTree): { running: number; needsInput: number } 
 
 type ClusterProps = Omit<
   React.ComponentProps<typeof RunCard>,
-  "run" | "embedded" | "subagent" | "removeCount"
+  "run" | "embedded" | "subagent" | "removeCount" | "onFocusChange"
 > & {
   tree: RunTree;
   compact: boolean;
@@ -750,12 +812,14 @@ type ClusterProps = Omit<
   depth?: number;
 };
 
-function RunCluster({ tree, compact, collapsed, onToggle, depth = 0, ...card }: ClusterProps) {
+function RunCluster({ tree, collapsed, onToggle, depth = 0, ...card }: ClusterProps) {
   const { theme, scale } = card;
   const colors = theme.colors;
   const s = (value: number) => value * scale;
   const expanded = !collapsed.has(tree.run.agentId);
   const [toggleHovered, setToggleHovered] = useState(false);
+  const [toggleFocused, setToggleFocused] = useState(false);
+  const [rootFocused, setRootFocused] = useState(false);
   const [panelWidth, setPanelWidth] = useState(0);
   // Remove cascades to subagents, so it waits until the whole cluster has finished.
   const onRemove = tree.running ? undefined : card.onRemove;
@@ -767,28 +831,36 @@ function RunCluster({ tree, compact, collapsed, onToggle, depth = 0, ...card }: 
     : summary.running
       ? colors.accent
       : null;
+  const nested = depth > 0;
   // Measure this panel so nested clusters and Board zoom use their actual available width.
-  const edge = s(depth > 0 || compact ? 6 : 8);
-  const pad = s(8);
-  const gap = s(6);
-  const twoColumns = panelWidth >= s(406);
+  const edge = s(6);
+  const gap = s(2);
+  // A lone subagent keeps the full row so its title is not cut for an empty second column.
+  const twoColumns = tree.children.length > 1 && panelWidth >= s(406);
   return (
+    // The parent card is the only surface; subagents are rows inside it, not boxes in boxes.
     <View
-      style={{
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: s(depth > 0 ? CARD_RADIUS - 2 : CARD_RADIUS),
-        backgroundColor: colors.surface1,
-        overflow: "hidden",
-      }}
+      style={
+        nested
+          ? null
+          : {
+              borderWidth: 1,
+              ...repoSurface(card.projectHue, theme),
+              borderRadius: s(CARD_RADIUS),
+              overflow: "hidden",
+              // One ring around the whole card when its open action has keyboard focus.
+              ...(rootFocused ? focusRing(colors.accent, 2) : null),
+            }
+      }
     >
       <RunCard
         {...card}
         run={tree.run}
         embedded
-        subagent={depth > 0}
+        subagent={nested}
         onRemove={onRemove}
         removeCount={tree.count}
+        onFocusChange={nested ? undefined : setRootFocused}
       />
       <Pressable
         accessibilityRole="button"
@@ -796,19 +868,23 @@ function RunCluster({ tree, compact, collapsed, onToggle, depth = 0, ...card }: 
         accessibilityState={{ expanded }}
         accessibilityHint={expanded ? "Hides the subagent cards" : "Shows the subagent cards"}
         onPress={() => onToggle(tree.run.agentId)}
+        onFocus={(event) => setToggleFocused(keyboardFocus(event))}
+        onBlur={() => setToggleFocused(false)}
         onHoverIn={() => setToggleHovered(true)}
         onHoverOut={() => setToggleHovered(false)}
         style={({ pressed }) => ({
-          minHeight: 36,
-          paddingVertical: s(7),
-          paddingHorizontal: edge,
+          minHeight: 32,
+          paddingVertical: s(6),
+          paddingHorizontal: s(nested ? 6 : 12),
           flexDirection: "row",
           alignItems: "center",
           gap: s(8),
-          borderTopWidth: 1,
-          borderTopColor: colors.border,
+          borderTopWidth: nested ? 0 : 1,
+          borderTopColor: repoDivider(card.projectHue, theme),
+          borderRadius: nested ? s(CONTROL_RADIUS) : 0,
           backgroundColor: toggleHovered ? colors.surface2 : "transparent",
           opacity: pressed ? 0.7 : 1,
+          ...(toggleFocused ? focusRing(colors.accent, -2) : null),
         })}
       >
         <View
@@ -830,10 +906,11 @@ function RunCluster({ tree, compact, collapsed, onToggle, depth = 0, ...card }: 
         <Text
           style={{
             color: toggleHovered ? colors.foreground : colors.foregroundMuted,
-            fontSize: s(12.5),
-            lineHeight: s(17),
+            fontSize: s(12),
+            lineHeight: s(16),
             fontWeight: "600",
             flexGrow: 1,
+            ...TABULAR,
           }}
         >
           {tree.count - 1} {tree.count === 2 ? "subagent" : "subagents"}
@@ -856,10 +933,10 @@ function RunCluster({ tree, compact, collapsed, onToggle, depth = 0, ...card }: 
             )}
             <Text
               style={{
-                color: summaryColor,
+                color: summary.needsInput ? summaryColor : colors.foregroundMuted,
                 fontSize: s(12),
                 lineHeight: s(16),
-                fontWeight: "600",
+                fontWeight: "500",
               }}
             >
               {summary.needsInput
@@ -873,31 +950,29 @@ function RunCluster({ tree, compact, collapsed, onToggle, depth = 0, ...card }: 
         <View
           onLayout={({ nativeEvent }) => setPanelWidth(nativeEvent.layout.width)}
           style={{
-            marginHorizontal: edge,
-            marginBottom: edge,
-            padding: pad,
-            gap,
+            paddingHorizontal: edge,
+            paddingBottom: nested ? 0 : edge,
+            marginLeft: nested ? s(11) : 0,
+            borderLeftWidth: nested ? 1 : 0,
+            borderLeftColor: colors.border,
+            columnGap: edge,
+            rowGap: gap,
             flexDirection: "row",
             flexWrap: "wrap",
             alignItems: "flex-start",
-            borderRadius: s(CARD_RADIUS - 2),
-            borderWidth: 1,
-            borderColor: colors.border,
-            backgroundColor: colors.surface2,
           }}
         >
           {tree.children.map((child) => (
             <View
               key={child.run.id}
               style={{
-                width: twoColumns ? (panelWidth - pad * 2 - gap - 2) / 2 : "100%",
+                width: twoColumns ? (panelWidth - edge * 3 - (nested ? 1 : 0)) / 2 : "100%",
                 minWidth: 0,
               }}
             >
               <RunCluster
                 {...card}
                 tree={child}
-                compact={compact}
                 collapsed={collapsed}
                 onToggle={onToggle}
                 depth={depth + 1}
@@ -948,241 +1023,218 @@ const RunColumn = memo(function RunColumn({
   const runs = trees.map((tree) => ({ ...tree.run, starred: tree.starred }));
   const byId = new Map(trees.map((tree) => [tree.run.id, tree]));
   const count = trees.reduce((total, tree) => total + tree.count, 0);
-  const sections = groupRuns(runs);
-  const renderCard = (run: BoardRun) => (
-    <RunCluster
-      key={run.id}
-      tree={byId.get(run.id)!}
-      compact={compact}
-      collapsed={collapsed}
-      onToggle={onToggle}
-      scale={scale}
-      theme={theme}
-      onRemove={onRemove}
-      onOpen={onOpen}
-      onStar={onStar}
-      orb={orb}
-      // The project group heading already names the project.
-      inheritedProject
-    />
-  );
-  const hueOf = (project: { runs: BoardRun[] }) => {
-    const id = project.runs[0].projectId;
-    return id === undefined ? undefined : projectPalette[id];
-  };
-  const tint = (project: { runs: BoardRun[] }) => {
-    const hue = hueOf(project);
-    return hue === undefined ? colors.border : `hsl(${hue}, 60%, 72%)`;
-  };
-  const mark = (project: { runs: BoardRun[] }) => {
-    const hue = hueOf(project);
-    return hue === undefined ? colors.foregroundMuted : `hsl(${hue}, 42%, 58%)`;
-  };
-  const groupCount = (project: { runs: BoardRun[] }) =>
-    project.runs.reduce((total, run) => total + byId.get(run.id)!.count, 0);
-  const heading = (label: string, meta: string | null, color = colors.foregroundMuted) => (
-    <View
-      style={{ flexDirection: "row", alignItems: "baseline", gap: s(8), paddingHorizontal: s(2) }}
-    >
-      <Text
-        accessibilityRole="header"
-        numberOfLines={1}
-        style={{
-          color,
-          fontSize: s(12.5),
-          lineHeight: s(17),
-          fontWeight: "600",
-          flexShrink: 1,
-        }}
-      >
-        {label}
-      </Text>
-      {meta ? (
-        <Text style={{ color: colors.foregroundMuted, fontSize: s(12), lineHeight: s(16) }}>
-          {meta}
-        </Text>
-      ) : null}
-    </View>
-  );
+  // Cards keep the project grouping order; each card names its own project.
+  const cards = groupRuns(runs).projects.flatMap((project) => project.runs);
+  const labelStyle = {
+    color: colors.foregroundMuted,
+    fontSize: s(12),
+    lineHeight: s(16),
+    fontWeight: "600",
+  } satisfies TextStyle;
   return (
-    <View style={{ flex: 1, minWidth: 0, gap: s(14) }}>
+    <View
+      accessibilityLabel={`${title}, ${count} conversations`}
+      style={{ flex: 1, minWidth: 0, gap: s(10) }}
+    >
+      {/* Every host lane names its two status columns, with their counts. */}
       <View
         style={{
           flexDirection: "row",
-          alignItems: "center",
-          gap: s(8),
-          paddingBottom: s(10),
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border,
+          alignItems: "baseline",
+          gap: s(6),
+          paddingHorizontal: s(2),
+          marginBottom: s(2),
         }}
       >
-        <Text
-          accessibilityRole="header"
-          style={{
-            color: colors.foreground,
-            fontSize: s(15),
-            lineHeight: s(20),
-            fontWeight: "600",
-          }}
-        >
+        <Text accessibilityRole="header" style={labelStyle}>
           {title}
         </Text>
+        <Text style={{ ...labelStyle, fontWeight: "400", ...TABULAR }}>{count}</Text>
+      </View>
+      {cards.length ? (
+        cards.map((run) => (
+          <RunCluster
+            key={run.id}
+            projectHue={run.projectId ? projectPalette[run.projectId] : undefined}
+            tree={byId.get(run.id)!}
+            compact={compact}
+            collapsed={collapsed}
+            onToggle={onToggle}
+            scale={scale}
+            theme={theme}
+            onRemove={onRemove}
+            onOpen={onOpen}
+            onOpenProject={onOpenProject}
+            onStar={onStar}
+            orb={orb}
+          />
+        ))
+      ) : (
         <Text
-          accessibilityLabel={`${count} conversations`}
           style={{
             color: colors.foregroundMuted,
-            fontSize: s(13),
-            lineHeight: s(18),
-            fontWeight: "500",
+            fontSize: s(12),
+            lineHeight: s(16),
+            paddingHorizontal: s(2),
           }}
         >
-          {count}
+          {emptyMessage}
         </Text>
-      </View>
-      {runs.length ? (
-        <>
-          {sections.projects.map((project) => (
-            <View
-              key={project.key}
-              style={{
-                gap: s(8),
-                padding: s(8),
-                borderRadius: s(CARD_RADIUS + 4),
-                borderWidth: 1,
-                borderColor: tint(project),
-                backgroundColor: colors.surface1,
-              }}
-            >
-              <View
-                pointerEvents="none"
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  borderRadius: s(CARD_RADIUS + 4),
-                  backgroundColor: tint(project),
-                  opacity: 0.14,
-                }}
-              />
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: s(8),
-                  paddingHorizontal: s(4),
-                  paddingTop: s(2),
-                }}
-              >
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`New conversation in ${project.name}`}
-                  disabled={!onOpenProject}
-                  onPress={() => onOpenProject?.(project.runs[0])}
-                  style={({ pressed }) => ({
-                    flex: 1,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: s(8),
-                    borderRadius: s(CONTROL_RADIUS),
-                    opacity: pressed ? 0.6 : 1,
-                  })}
-                >
-                  <ProjectMark
-                    name={project.name}
-                    color={mark(project)}
-                    size={s(20)}
-                    theme={theme}
-                  />
-                  <View style={{ flex: 1 }}>
-                    {heading(
-                      project.name,
-                      groupCount(project) > 1 ? String(groupCount(project)) : null,
-                      colors.foreground,
-                    )}
-                  </View>
-                </Pressable>
-              </View>
-              {project.runs.map(renderCard)}
-            </View>
-          ))}
-        </>
-      ) : (
-        <View
-          style={{
-            minHeight: s(88),
-            alignItems: "center",
-            justifyContent: "center",
-            padding: s(16),
-            borderRadius: s(CARD_RADIUS),
-            borderWidth: 1,
-            borderStyle: "dashed",
-            borderColor: colors.border,
-          }}
-        >
-          <Text
-            style={{
-              color: colors.foregroundMuted,
-              fontSize: s(13),
-              lineHeight: s(18),
-              textAlign: "center",
-            }}
-          >
-            {emptyMessage}
-          </Text>
-        </View>
       )}
     </View>
   );
 });
 
+/** Device glyph from the host name; names that say nothing get the generic machine glyph. */
+function deviceIcon(label: string) {
+  return /macbook|laptop|notebook/i.test(label) ? "Laptop" : "HardDrive";
+}
+
+/** Hosts usually report an mDNS name; the lane shows it without the suffix. */
+function hostName(label: string) {
+  return label.replace(/\.local$/i, "");
+}
+
+/** Host rail: device, name, connection, a hairline, then the lane's counts. */
+function laneHeader({
+  label,
+  meta,
+  figures,
+  connection,
+  tone,
+  live = false,
+  theme,
+  scale,
+}: {
+  label: string;
+  /** Plain summary shown when the lane has no figures. */
+  meta: string | null;
+  figures: { running: number; finished: number } | null;
+  connection: string;
+  /** Connection status color: the dot always carries it, the text only when not live. */
+  tone: string;
+  live?: boolean;
+  theme: PluginSurfaceProps["theme"];
+  scale: number;
+}) {
+  const s = (value: number) => value * scale;
+  const colors = theme.colors;
+  const metaStyle = {
+    color: colors.foregroundMuted,
+    fontSize: s(12),
+    lineHeight: s(16),
+    ...TABULAR,
+  } satisfies TextStyle;
+  return (
+    // Opaque, so cards do not show through the rail while it sticks.
+    <View
+      style={[
+        {
+          zIndex: 1,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: s(10),
+          height: s(RAIL_HEIGHT),
+          backgroundColor: colors.surface0,
+        },
+        STICKY,
+      ]}
+    >
+      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        <Icon name={deviceIcon(label)} size={s(18)} color={colors.foreground} />
+      </View>
+      <Text
+        accessibilityRole="header"
+        numberOfLines={1}
+        style={{
+          color: colors.foreground,
+          fontSize: s(15),
+          lineHeight: s(20),
+          fontWeight: "600",
+          letterSpacing: s(-0.15),
+          flexShrink: 1,
+        }}
+      >
+        {hostName(label)}
+      </Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: s(6) }}>
+        <View
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={{ width: s(6), height: s(6), borderRadius: s(3), backgroundColor: tone }}
+        />
+        <Text
+          accessibilityLabel={`Connection ${connection}`}
+          numberOfLines={1}
+          style={{ ...metaStyle, color: live ? colors.foregroundMuted : tone }}
+        >
+          {connection}
+        </Text>
+      </View>
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={{ flex: 1, minWidth: s(12), height: 1, backgroundColor: colors.border }}
+      />
+      {figures ? (
+        <Text
+          accessibilityLabel={`${figures.running} running, ${figures.finished} finished`}
+          numberOfLines={1}
+          style={metaStyle}
+        >
+          {`${figures.running} running${SEPARATOR}${figures.finished} finished`}
+        </Text>
+      ) : meta ? (
+        <Text numberOfLines={1} style={{ ...metaStyle, flexShrink: 1 }}>
+          {meta}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** One host lane: its rail, then the lane body. */
+function lane(scale: number, header: ReactNode, children: ReactNode) {
+  return (
+    <View style={{ flexShrink: 0, minWidth: 0 }}>
+      {header}
+      <View style={{ minWidth: 0, gap: scale * 10, marginTop: scale * 4 }}>{children}</View>
+    </View>
+  );
+}
+
 const NO_RUNS: BoardRun[] = [];
 const NO_HUES: Record<string, number> = {};
 
-export function BoardPage({ host, theme, layout, navigation }: PluginSurfaceProps) {
-  const palette = useSettings(projectColors);
+function HostBoard({
+  host,
+  theme,
+  layout,
+  navigation,
+  client,
+  status,
+  scale,
+  view,
+}: PluginSurfaceProps & {
+  client: BoardHostClient;
+  status: PluginHostSummary["status"];
+  scale: number;
+  view: "runs" | "recaps";
+}) {
+  const online = status === "online";
+  const palette = useHostSettings(projectColors, host.id, client, online);
   const savingPalette = useRef(false);
-  // Host settings keep the size across plugin reloads and restarts without changing host appearance.
-  const sizeSettings = useSettings(boardSize);
-  const orbConfig = useSettings(orbSettings);
-  if (orbConfig.status === "ready") lastSettings.orb = orbConfig.values;
-  const orb = orbConfig.status === "ready" ? orbConfig.values : (lastSettings.orb ?? null);
-  const [view, setView] = useState<"runs" | "recaps">("runs");
-  const savingSize = useRef(false);
-  const failedSize = useRef<number | null>(null);
-  // Latest unsaved choice; saved one write at a time so rapid clicks never reuse a stale revision.
-  const [pendingSize, setPendingSize] = useState<number | null>(null);
-  if (sizeSettings.status === "ready") lastSettings.size = sizeSettings.values.size;
-  const storedSize =
-    sizeSettings.status === "ready" ? sizeSettings.values.size : (lastSettings.size ?? null);
-  const size = pendingSize ?? storedSize ?? BOARD_SIZE_DEFAULT;
-  const scale = boardScale(size);
-  const changeSize = (value: number) => {
-    failedSize.current = null;
-    setPendingSize(clampBoardSize(value));
-  };
-  useEffect(() => {
-    if (pendingSize === null || sizeSettings.status !== "ready") return;
-    if (sizeSettings.saving || savingSize.current) return;
-    if (pendingSize === storedSize) return setPendingSize(null);
-    // Retry a failed value only after the user picks a size again.
-    if (failedSize.current === pendingSize) return;
-    savingSize.current = true;
-    void sizeSettings
-      .save({ size: pendingSize }, sizeSettings.revision)
-      .then((saved) => {
-        failedSize.current = saved ? null : pendingSize;
-      })
-      .finally(() => {
-        savingSize.current = false;
-      });
-  }, [pendingSize, sizeSettings]);
-  const readBoard = useRpc(boardRpc);
-  const removeRun = useRpc(removeRunRpc);
-  const setStarred = useRpc(starRunRpc);
+  const orbConfig = useHostSettings(orbSettings, host.id, client, online);
+  const orb = orbConfig.values ?? null;
+  const readBoard = () => client.rpc(boardRpc, {});
+  const removeRun = (input: { id: string; observingSince: string; endedAt: string | null }) =>
+    client.rpc(removeRunRpc, input);
+  const setStarred = (input: { id: string; observingSince: string; starred: boolean }) =>
+    client.rpc(starRunRpc, input);
   const board = useQuery({
     queryKey: ["board", host.id],
-    queryFn: () => readBoard({}),
+    queryFn: readBoard,
+    enabled: online,
     retry: false,
     refetchInterval: 2_000,
     refetchOnWindowFocus: false,
@@ -1191,27 +1243,32 @@ export function BoardPage({ host, theme, layout, navigation }: PluginSurfaceProp
     gcTime: 0,
   });
   const onStar = useStableCallback(async (id: string, starred: boolean) => {
+    if (!online) throw new Error("Host is offline. Reconnect and retry.");
     const result = await setStarred({ id, starred, observingSince: board.data!.observingSince });
     if (!result.updated) throw new Error("Run changed. Refresh and retry.");
     await board.refetch({ throwOnError: true });
   });
   const runs = board.data?.runs ?? NO_RUNS;
   useEffect(() => {
-    if (palette.status !== "ready" || palette.saving || palette.saveError || savingPalette.current)
+    if (
+      !online ||
+      palette.status !== "ready" ||
+      palette.saving ||
+      palette.saveError ||
+      savingPalette.current
+    )
       return;
     const next = allocateColors(
-      palette.values.hues,
+      palette.values!.hues,
       runs.flatMap((run) => (run.projectId ? [run.projectId] : [])),
     );
-    if (next === palette.values.hues) return;
+    if (next === palette.values!.hues) return;
     savingPalette.current = true;
     void palette.save({ hues: next }, palette.revision).finally(() => {
       savingPalette.current = false;
     });
   }, [palette, board.dataUpdatedAt]);
-  if (palette.status === "ready") lastSettings.hues = palette.values.hues;
-  const projectPalette =
-    palette.status === "ready" ? palette.values.hues : (lastSettings.hues ?? NO_HUES);
+  const projectPalette = palette.values?.hues ?? NO_HUES;
 
   const { running, finished } = useMemo(() => boardColumns(runs), [runs]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -1229,19 +1286,21 @@ export function BoardPage({ host, theme, layout, navigation }: PluginSurfaceProp
   const [projectError, setProjectError] = useState<string | null>(null);
   const onOpenProject = useStableCallback((run: BoardRun) => {
     setProjectError(null);
-    if (run.cwd === undefined || !workspaceActions.open) {
-      setProjectError("This project has no folder to start a conversation in.");
-      return;
+    try {
+      if (!run.cwd) throw new Error("Project directory is unavailable.");
+      const input = {
+        serverId: host.id,
+        cwd: run.cwd,
+        name: run.project,
+        projectId: run.projectId,
+      };
+      client.openNewWorkspace(input);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : String(error));
     }
-    workspaceActions.open({
-      serverId: host.id,
-      cwd: run.cwd,
-      name: run.project,
-      projectId: run.projectId,
-    });
   });
   const openAgentStable = useStableCallback((agentId: string) => {
-    navigation?.openAgent({ agentId, anchor: "latest-prompt" });
+    navigation?.openAgent({ agentId, serverId: host.id, anchor: "latest-prompt" });
   });
   const openAgent = navigation ? openAgentStable : undefined;
   const onRemove = useStableCallback(async (id: string) => {
@@ -1251,9 +1310,13 @@ export function BoardPage({ host, theme, layout, navigation }: PluginSurfaceProp
       run,
       board.data!.observingSince,
       (scope) => removeRun({ id, observingSince: scope, endedAt: run.endedAt }),
-      () => readBoard({}),
+      readBoard,
     );
     if (!removed) throw new Error("Run changed. Refresh and retry.");
+    // The card is gone once the Board refreshes, so a failed close reports on the page.
+    void closeRemovedRuntimes(client, run.agentId).catch((error: unknown) =>
+      setProjectError(error instanceof Error ? error.message : String(error)),
+    );
     await board.refetch({ throwOnError: true });
   });
   const s = (value: number) => value * scale;
@@ -1262,7 +1325,7 @@ export function BoardPage({ host, theme, layout, navigation }: PluginSurfaceProp
     boardConnectionState({
       hasData: Boolean(board.data),
       isError: board.isError,
-      isPaused: board.isPaused,
+      isPaused: !online || board.isPaused,
       dataUpdatedAt: board.dataUpdatedAt,
       now,
     }),
@@ -1293,291 +1356,292 @@ export function BoardPage({ host, theme, layout, navigation }: PluginSurfaceProp
         : connection === "stale"
           ? "Updates are delayed. Showing a snapshot older than 10 seconds."
           : null;
-  const pagePad = layout.compact ? 16 : 32;
 
+  const total = (trees: RunTree[]) => trees.reduce((sum, tree) => sum + tree.count, 0);
+  const retryLabel = board.isFetching ? "Retrying…" : "Retry";
+  const [retryFocused, setRetryFocused] = useState(false);
+  // The rail already carries the connection color; the notice stays neutral.
+  const notice = (message: string) => (
+    <View
+      accessibilityRole="alert"
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: s(10),
+        paddingVertical: s(4),
+        paddingLeft: s(10),
+        paddingRight: s(4),
+        borderRadius: s(CARD_RADIUS),
+        backgroundColor: colors.surface2,
+      }}
+    >
+      <Text
+        style={{ flex: 1, color: colors.foregroundMuted, fontSize: s(12.5), lineHeight: s(17) }}
+      >
+        {message}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Retry loading Board"
+        disabled={board.isFetching}
+        onPress={() => void board.refetch()}
+        onFocus={(event) => setRetryFocused(keyboardFocus(event))}
+        onBlur={() => setRetryFocused(false)}
+        hitSlop={s(8)}
+        style={({ pressed }) => ({
+          paddingHorizontal: s(10),
+          paddingVertical: s(4),
+          alignItems: "center",
+          borderRadius: s(CONTROL_RADIUS),
+          borderWidth: 1,
+          borderColor: colors.border,
+          backgroundColor: colors.surface0,
+          opacity: pressed ? 0.7 : 1,
+          ...(retryFocused ? focusRing(colors.accent) : null),
+        })}
+      >
+        <Text
+          style={{
+            color: colors.foreground,
+            fontSize: s(12.5),
+            lineHeight: s(17),
+            fontWeight: "600",
+          }}
+        >
+          {retryLabel}
+        </Text>
+      </Pressable>
+    </View>
+  );
+  return lane(
+    scale,
+    laneHeader({
+      label: host.label,
+      meta: view === "recaps" ? "Last 7 days" : null,
+      figures:
+        view === "runs" && board.data
+          ? { running: total(running), finished: total(finished) }
+          : null,
+      connection: connectionLabel,
+      tone: connectionColor,
+      live: connection === "live",
+      theme,
+      scale,
+    }),
+    <>
+      {palette.status === "error" || palette.saveError ? (
+        <Pressable accessibilityRole="button" onPress={() => void palette.reload()}>
+          <Text style={{ color: colors.statusWarning, fontSize: s(12.5), lineHeight: s(17) }}>
+            Could not save project colors. Tap to retry.
+          </Text>
+        </Pressable>
+      ) : null}
+      {view === "recaps" ? (
+        <RecapsView
+          hostId={host.id}
+          rpc={client.rpc}
+          online={online}
+          theme={theme}
+          scale={scale}
+          hues={projectPalette}
+          onOpen={openAgent}
+        />
+      ) : initialLoading ? (
+        <View
+          style={{
+            minHeight: s(72),
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: s(10),
+          }}
+        >
+          <ActivityIndicator color={colors.accent} />
+          <Text style={{ color: colors.foregroundMuted, fontSize: s(13), lineHeight: s(18) }}>
+            Loading runs…
+          </Text>
+        </View>
+      ) : unavailable ? (
+        notice(
+          connection === "offline"
+            ? "Board is offline. Reconnect to the host, then retry."
+            : "Board is unavailable. Check the host connection, then retry.",
+        )
+      ) : (
+        <>
+          {projectError ? (
+            <Text
+              accessibilityRole="alert"
+              style={{ color: colors.statusDanger, fontSize: s(12.5), lineHeight: s(17) }}
+            >
+              {projectError}
+            </Text>
+          ) : null}
+          {snapshotWarning ? notice(snapshotWarning) : null}
+          <View
+            style={{
+              flexDirection: layout.compact ? "column" : "row",
+              alignItems: "stretch",
+              gap: s(layout.compact ? 16 : COLUMN_GAP),
+            }}
+          >
+            <RunColumn
+              orb={orb}
+              projectPalette={projectPalette}
+              scale={scale}
+              title="Running"
+              trees={running}
+              compact={layout.compact}
+              collapsed={collapsed}
+              onToggle={onToggle}
+              onRemove={online ? onRemove : undefined}
+              onStar={onStar}
+              emptyMessage="No conversations are running."
+              theme={theme}
+              onOpen={openAgent}
+              onOpenProject={onOpenProject}
+            />
+            <RunColumn
+              orb={orb}
+              projectPalette={projectPalette}
+              scale={scale}
+              title="Just finished"
+              trees={finished}
+              compact={layout.compact}
+              collapsed={collapsed}
+              onToggle={onToggle}
+              onStar={onStar}
+              emptyMessage="No finished conversations observed yet."
+              theme={theme}
+              onOpen={openAgent}
+              onOpenProject={onOpenProject}
+              onRemove={online ? onRemove : undefined}
+            />
+          </View>
+        </>
+      )}
+    </>,
+  );
+}
+
+export function BoardPage(props: PluginSurfaceProps & { client: BoardHostClient }) {
+  const { theme, layout } = props;
+  const hosts = useHosts();
+  const clients = useMemo(
+    () =>
+      new Map(
+        hosts.map((target) => [
+          target.serverId,
+          createBoardHostClient(props.client, target.serverId),
+        ]),
+      ),
+    [hosts, props.client],
+  );
+  // Host settings keep the size across plugin reloads and restarts without changing host appearance.
+  const sizeSettings = useSettings(boardSize);
+  const [view, setView] = useState<"runs" | "recaps">("runs");
+  const savingSize = useRef(false);
+  const failedSize = useRef<number | null>(null);
+  // Latest unsaved choice; saved one write at a time so rapid clicks never reuse a stale revision.
+  const [pendingSize, setPendingSize] = useState<number | null>(null);
+  if (sizeSettings.status === "ready") lastSettings.size = sizeSettings.values.size;
+  const storedSize =
+    sizeSettings.status === "ready" ? sizeSettings.values.size : (lastSettings.size ?? null);
+  const size = pendingSize ?? storedSize ?? BOARD_SIZE_DEFAULT;
+  const scale = boardScale(size);
+  const changeSize = (value: number) => {
+    failedSize.current = null;
+    setPendingSize(clampBoardSize(value));
+  };
+  useEffect(() => {
+    if (pendingSize === null || sizeSettings.status !== "ready") return;
+    if (sizeSettings.saving || savingSize.current) return;
+    if (pendingSize === storedSize) return setPendingSize(null);
+    // Retry a failed value only after the user picks a size again.
+    if (failedSize.current === pendingSize) return;
+    savingSize.current = true;
+    void sizeSettings
+      .save({ size: pendingSize }, sizeSettings.revision)
+      .then((saved) => {
+        failedSize.current = saved ? null : pendingSize;
+      })
+      .finally(() => {
+        savingSize.current = false;
+      });
+  }, [pendingSize, sizeSettings]);
+
+  const colors = theme.colors;
+  const s = (value: number) => value * scale;
+  const gutter = layout.compact ? 12 : 24;
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface0 }}>
-      {/* Outside scaled scroll content so repeated clicks keep the same target. */}
       <View
         style={{
           flexDirection: "row",
           flexWrap: "wrap",
-          justifyContent: "flex-end",
           alignItems: "center",
+          justifyContent: "space-between",
           gap: 12,
-          paddingHorizontal: pagePad,
+          paddingHorizontal: gutter,
           paddingTop: 12,
-          paddingBottom: 4,
+          paddingBottom: 6,
         }}
       >
         <BoardViewSwitch view={view} onChange={setView} theme={theme} />
         <BoardSizeControl size={size} onChange={changeSize} theme={theme} />
       </View>
       <ScrollView
-        style={{ flex: 1, backgroundColor: colors.surface0 }}
-        contentContainerStyle={{
-          flexGrow: 1,
-          paddingHorizontal: s(pagePad),
-          paddingTop: s(8),
-          paddingBottom: s(40),
-          gap: s(layout.compact ? 20 : 28),
-          maxWidth: 1440,
-          width: "100%",
-          alignSelf: "center",
-        }}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: gutter, paddingBottom: 40, flexGrow: 1 }}
       >
         <View
           style={{
-            flexDirection: "row",
-            alignItems: "flex-end",
-            justifyContent: "space-between",
-            gap: s(12),
+            flexDirection: "column",
+            alignItems: "stretch",
+            gap: s(layout.compact ? 24 : 28),
+            paddingTop: s(8),
           }}
         >
-          <View style={{ flexShrink: 1, gap: s(2) }}>
-            <Text
-              accessibilityRole="header"
-              style={{
-                color: colors.foreground,
-                fontSize: s(layout.compact ? 22 : 24),
-                lineHeight: s(layout.compact ? 28 : 30),
-                fontWeight: "700",
-                letterSpacing: -0.4,
-              }}
-            >
-              Board
-            </Text>
-            <Text style={{ color: colors.foregroundMuted, fontSize: s(13), lineHeight: s(18) }}>
-              {view === "recaps"
-                ? "Recaps from the last 7 days, by project"
-                : "Running and recently finished conversations"}
-            </Text>
-          </View>
-          <View
-            accessibilityLabel={`Connection ${connectionLabel}`}
-            style={{ flexDirection: "row", alignItems: "center", gap: s(6), paddingBottom: s(2) }}
-          >
-            <View
-              accessibilityElementsHidden
-              style={{
-                width: s(6),
-                height: s(6),
-                borderRadius: s(3),
-                backgroundColor: connectionColor,
-              }}
-            />
-            <Text
-              style={{
-                color: connection === "error" ? colors.statusDanger : colors.foregroundMuted,
-                fontSize: s(12.5),
-                lineHeight: s(16),
-                fontWeight: "500",
-              }}
-            >
-              {connectionLabel}
-            </Text>
-          </View>
-        </View>
-
-        {palette.status === "error" || palette.status === "invalid" || palette.saveError ? (
-          <Pressable accessibilityRole="button" onPress={() => void palette.reload()}>
-            <Text style={{ color: colors.statusWarning, fontSize: s(13), lineHeight: s(18) }}>
-              Could not save project colors. Tap to retry.
-            </Text>
-          </Pressable>
-        ) : null}
-        {view === "recaps" ? (
-          <RecapsView
-            hostId={host.id}
-            theme={theme}
-            scale={scale}
-            hues={projectPalette}
-            onOpen={openAgent}
-          />
-        ) : initialLoading ? (
-          <View
-            style={{
-              flex: 1,
-              minHeight: s(220),
-              alignItems: "center",
-              justifyContent: "center",
-              gap: s(12),
-            }}
-          >
-            <ActivityIndicator color={colors.accent} />
-            <Text style={{ color: colors.foregroundMuted, fontSize: s(13), lineHeight: s(18) }}>
-              Loading runs…
-            </Text>
-          </View>
-        ) : unavailable ? (
-          <View
-            accessibilityRole="alert"
-            style={{
-              minHeight: s(220),
-              alignItems: "center",
-              justifyContent: "center",
-              gap: s(12),
-              padding: s(24),
-              borderRadius: s(CARD_RADIUS),
-              borderWidth: 1,
-              borderColor: colors.border,
-              backgroundColor: colors.surface1,
-            }}
-          >
-            <Text
-              style={{
-                color: colors.foreground,
-                fontSize: s(16),
-                lineHeight: s(22),
-                fontWeight: "600",
-              }}
-            >
-              {connection === "offline" ? "Board is offline" : "Board is unavailable"}
-            </Text>
-            <Text
-              style={{
-                color: colors.foregroundMuted,
-                fontSize: s(13),
-                textAlign: "center",
-                lineHeight: s(19),
-              }}
-            >
-              {connection === "offline"
-                ? "Reconnect to the host, then retry."
-                : "Check the host connection, then retry."}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Retry loading Board"
-              disabled={board.isFetching}
-              onPress={() => void board.refetch()}
-              style={{
-                paddingHorizontal: s(16),
-                paddingVertical: s(9),
-                borderRadius: s(CONTROL_RADIUS),
-                backgroundColor: colors.accent,
-              }}
-            >
-              <Text
-                style={{
-                  color: colors.accentForeground,
-                  fontSize: s(13),
-                  lineHeight: s(18),
-                  fontWeight: "600",
-                }}
-              >
-                {board.isFetching ? "Retrying…" : "Retry"}
-              </Text>
-            </Pressable>
-          </View>
-        ) : (
-          <>
-            {projectError ? (
-              <Text
-                accessibilityRole="alert"
-                style={{ color: colors.statusDanger, fontSize: s(13), lineHeight: s(18) }}
-              >
-                {projectError}
-              </Text>
-            ) : null}
-            {snapshotWarning ? (
-              <View
-                accessibilityRole="alert"
-                style={{
-                  flexDirection: layout.compact ? "column" : "row",
-                  alignItems: layout.compact ? "stretch" : "center",
-                  justifyContent: "space-between",
-                  gap: s(10),
-                  paddingVertical: s(10),
-                  paddingHorizontal: s(14),
-                  borderRadius: s(CARD_RADIUS),
-                  borderWidth: 1,
-                  borderColor: connectionColor,
-                  backgroundColor: colors.surface1,
-                }}
-              >
-                <Text
-                  style={{ flex: 1, color: connectionColor, fontSize: s(13), lineHeight: s(18) }}
-                >
-                  {snapshotWarning}
-                </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  disabled={board.isFetching}
-                  onPress={() => void board.refetch()}
-                  style={{
-                    paddingHorizontal: s(12),
-                    paddingVertical: s(6),
-                    borderRadius: s(CONTROL_RADIUS),
-                    backgroundColor: colors.surface2,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: colors.foreground,
-                      fontSize: s(13),
-                      lineHeight: s(18),
-                      fontWeight: "600",
-                    }}
-                  >
-                    {board.isFetching ? "Retrying…" : "Retry"}
-                  </Text>
-                </Pressable>
+          {hosts.map((target) => {
+            const client = clients.get(target.serverId);
+            return client ? (
+              <HostBoard
+                {...props}
+                key={target.serverId}
+                client={client}
+                host={{ id: target.serverId, label: target.label }}
+                layout={layout}
+                status={target.status}
+                scale={scale}
+                view={view}
+              />
+            ) : (
+              <View key={target.serverId}>
+                {lane(
+                  scale,
+                  laneHeader({
+                    label: target.label,
+                    meta:
+                      target.status === "online"
+                        ? "Board unavailable. Update or reload Board on this host."
+                        : "Host offline. Reconnect to see its Board.",
+                    figures: null,
+                    connection: target.status === "online" ? "Unavailable" : "Offline",
+                    tone: colors.statusWarning,
+                    theme,
+                    scale,
+                  }),
+                  null,
+                )}
               </View>
-            ) : null}
-            <View
-              style={{
-                flexGrow: layout.compact ? 0 : 1,
-                flexDirection: layout.compact ? "column" : "row",
-                alignItems: "stretch",
-                gap: s(layout.compact ? 28 : 32),
-              }}
-            >
-              <RunColumn
-                orb={orb}
-                projectPalette={projectPalette}
-                scale={scale}
-                title="Running"
-                trees={running}
-                compact={layout.compact}
-                collapsed={collapsed}
-                onToggle={onToggle}
-                onRemove={onRemove}
-                onStar={onStar}
-                emptyMessage="No conversations are running."
-                theme={theme}
-                onOpen={openAgent}
-                onOpenProject={onOpenProject}
-              />
-              {layout.compact ? null : (
-                <View
-                  accessibilityElementsHidden
-                  importantForAccessibility="no-hide-descendants"
-                  style={{ width: 1, backgroundColor: colors.border }}
-                />
-              )}
-              <RunColumn
-                orb={orb}
-                projectPalette={projectPalette}
-                scale={scale}
-                title="Just finished"
-                trees={finished}
-                compact={layout.compact}
-                collapsed={collapsed}
-                onToggle={onToggle}
-                onStar={onStar}
-                emptyMessage="No finished conversations observed yet."
-                theme={theme}
-                onOpen={openAgent}
-                onOpenProject={onOpenProject}
-                onRemove={onRemove}
-              />
-            </View>
+            );
+          })}
+          {view === "runs" ? (
             <Text style={{ color: colors.foregroundMuted, fontSize: s(12), lineHeight: s(16) }}>
-              Last 50 finished conversations
+              Each host keeps its last 50 finished conversations.
             </Text>
-          </>
-        )}
+          ) : null}
+        </View>
       </ScrollView>
     </View>
   );

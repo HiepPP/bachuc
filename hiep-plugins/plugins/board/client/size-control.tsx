@@ -1,5 +1,7 @@
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
+import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
+import { focusRing, keyboardFocus } from "./focus";
 import {
   BOARD_SIZE_DEFAULT,
   BOARD_SIZE_MAX,
@@ -17,19 +19,15 @@ export function BoardSizeControl({
   theme: PluginSurfaceProps["theme"];
 }) {
   const colors = theme.colors;
+  // Index of the button holding keyboard focus; clicks do not draw the ring.
+  const [focused, setFocused] = useState<number | null>(null);
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-      <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>UI size</Text>
-      <View
-        style={{
-          flexDirection: "row",
-          borderWidth: 1,
-          borderColor: colors.border,
-          borderRadius: 10,
-          overflow: "hidden",
-          backgroundColor: colors.surface1,
-        }}
-      >
+    // Bare stepper: no frame or label, so the toolbar stays quieter than the Board content.
+    <View
+      accessibilityLabel="Board UI size"
+      style={{ flexDirection: "row", alignItems: "center", gap: 2 }}
+    >
+      <>
         {[
           {
             label: "Decrease Board UI size",
@@ -58,30 +56,35 @@ export function BoardSizeControl({
             accessibilityState={{ disabled: item.disabled }}
             disabled={item.disabled}
             onPress={() => onChange(item.value)}
+            onFocus={(event) => setFocused(keyboardFocus(event) ? index : null)}
+            onBlur={() => setFocused(null)}
+            hitSlop={{ top: 8, bottom: 8 }}
             style={({ pressed }) => ({
-              width: index === 1 ? 62 : 44,
-              height: 44,
+              width: index === 1 ? 48 : 28,
+              height: 28,
               flexShrink: 0,
               alignItems: "center",
               justifyContent: "center",
-              borderLeftWidth: index ? 1 : 0,
-              borderColor: colors.border,
-              backgroundColor: pressed ? colors.surface2 : colors.surface1,
+              borderRadius: 6,
+              backgroundColor: pressed ? colors.surface2 : "transparent",
               opacity: item.disabled ? 0.35 : 1,
+              ...(focused === index ? focusRing(colors.accent) : null),
             })}
           >
             <Text
               style={{
-                color: colors.foreground,
-                fontSize: index === 1 ? 13 : 21,
+                color: index === 1 ? colors.foreground : colors.foregroundMuted,
+                fontSize: index === 1 ? 12.5 : 17,
+                lineHeight: index === 1 ? 17 : 20,
                 fontWeight: "500",
+                fontVariant: ["tabular-nums"],
               }}
             >
               {item.text}
             </Text>
           </Pressable>
         ))}
-      </View>
+      </>
     </View>
   );
 }
