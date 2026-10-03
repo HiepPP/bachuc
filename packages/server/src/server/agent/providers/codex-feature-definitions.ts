@@ -3,6 +3,7 @@ import type { AgentFeature, AgentFeatureToggle } from "../agent-sdk-types.js";
 // Codex Fast is distinct from API Priority processing. Keep model support aligned with
 // https://developers.openai.com/codex/speed and https://developers.openai.com/codex/models.
 const CODEX_FAST_MODE_SUPPORTED_MODELS = new Set([
+  "gpt-6.1-sol",
   "gpt-6-astra",
   "gpt-6-sol",
   "gpt-6-luna",
