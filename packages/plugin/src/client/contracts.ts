@@ -158,6 +158,8 @@ export interface PluginSidebarProjectFilterContribution {
   onSwipe?(direction: 1 | -1, context: PluginSidebarContext): void;
   /** Replaces the sidebar's "Workspaces" heading while it returns a non-empty string. */
   getTitle?(context: PluginSidebarContext): string | null;
+  /** Runs after Add Project succeeds, before navigation. Reject to keep the flow open for retry. */
+  onProjectAdded?(project: PluginSidebarProject, context: PluginSidebarContext): Promise<void>;
 }
 
 export interface PluginSidebarProjectMenuItem {

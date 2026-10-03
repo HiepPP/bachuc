@@ -30,6 +30,18 @@ export function toPluginSidebarProject(project: SidebarProjectEntry): PluginSide
   };
 }
 
+export async function notifyProjectAdded(
+  plugins: readonly InstalledPlugin[],
+  project: PluginSidebarProject,
+  context: PluginSidebarContext,
+): Promise<void> {
+  for (const plugin of selectSidebarPlugins(plugins, context.activeServerId)) {
+    for (const filter of plugin.sidebarProjectFilters ?? []) {
+      await filter.onProjectAdded?.(project, context);
+    }
+  }
+}
+
 /** Returns the view keys that plugin filters hide. A throwing filter hides nothing. */
 export function hiddenProjectViewKeys(
   plugins: readonly InstalledPlugin[],

@@ -420,6 +420,11 @@ export function runPluginClientBundle(
         throw new Error(`Sidebar project filter ${filterId} onSwipe must be a function`);
       if (contribution.getTitle !== undefined && typeof contribution.getTitle !== "function")
         throw new Error(`Sidebar project filter ${filterId} getTitle must be a function`);
+      if (
+        contribution.onProjectAdded !== undefined &&
+        typeof contribution.onProjectAdded !== "function"
+      )
+        throw new Error(`Sidebar project filter ${filterId} onProjectAdded must be a function`);
       return register(
         sidebarProjectFilters,
         {
@@ -428,6 +433,7 @@ export function runPluginClientBundle(
           subscribe: contribution.subscribe,
           ...(contribution.onSwipe ? { onSwipe: contribution.onSwipe } : {}),
           ...(contribution.getTitle ? { getTitle: contribution.getTitle } : {}),
+          ...(contribution.onProjectAdded ? { onProjectAdded: contribution.onProjectAdded } : {}),
         },
         () => sidebarContributionIds.delete(`filter:${filterId}`),
       );

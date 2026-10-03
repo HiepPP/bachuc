@@ -91,6 +91,23 @@ export function createSpacesSidebar(controller: SidebarController) {
       const space = selectedSpace(context.activeServerId);
       return current.state.spaces.find((entry) => entry.id === space)?.name ?? null;
     },
+    async onProjectAdded(project: PluginSidebarProject, context: PluginSidebarContext) {
+      const host = context.activeServerId;
+      const current = snapshot();
+      if (current?.host !== host) throw new Error("Spaces unavailable. Refresh and try again.");
+      const target = selectedSpace(host)!;
+      const id = project.projectIds[0];
+      if (
+        !id ||
+        !(await controller.addProject(
+          { id, name: project.name, viewKey: project.viewKey, workspaces: [] },
+          target,
+          host,
+        ))
+      ) {
+        throw new Error(controller.get()?.error || "Unable to assign project to Space. Try again.");
+      }
+    },
     /** Every catalogued project with the Space it belongs to, for the Move projects page. */
     projects(host: string | null): { id: string; name: string; spaceId: string }[] {
       const current = snapshot();

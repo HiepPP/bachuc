@@ -82,11 +82,12 @@ export function createSidebarController(
   let revision = "",
     stopped = false,
     loading = false;
+  let refreshInFlight: Promise<void> | null = null;
   const listeners = new Set<() => void>();
   const emit = () => {
     if (!stopped) for (const listener of listeners) listener();
   };
-  async function refresh() {
+  async function load() {
     if (stopped || loading || saved?.busy) return;
     loading = true;
     try {
@@ -112,9 +113,17 @@ export function createSidebarController(
       emit();
     }
   }
-  async function save(change: (s: SpacesState) => SpacesState) {
+  function refresh(): Promise<void> {
+    if (!refreshInFlight) {
+      refreshInFlight = load().finally(() => {
+        refreshInFlight = null;
+      });
+    }
+    return refreshInFlight;
+  }
+  async function save(change: (s: SpacesState) => SpacesState, host = activeHost()) {
+    if (refreshInFlight) await refreshInFlight;
     if (!saved || saved.busy || loading || stopped) return false;
-    const host = activeHost();
     saved = { ...saved, busy: true, error: "" };
     emit();
     try {
@@ -153,6 +162,25 @@ export function createSidebarController(
     create: () => save(addSpace),
     rename: (id: string, name: string) => save((state) => renameSpace(state, id, name)),
     remove: (id: string) => save((state) => removeSpace(state, id)),
+    async addProject(project: SidebarProject, target: string, host: string | null) {
+      await refresh();
+      return save((state) => {
+        const sidebarKey = projectKey("sidebar", project.id);
+        const viewKey = project.viewKey ? projectKey("view", project.viewKey) : null;
+        // Reopening a project must preserve an existing explicit assignment, including legacy keys.
+        const assigned = Object.keys(state.members).some((key) => {
+          if (key === viewKey || key === sidebarKey) return true;
+          try {
+            return JSON.parse(key)?.[1] === project.id;
+          } catch {
+            return false;
+          }
+        });
+        if (assigned) return state;
+        const next = moveProject(state, sidebarKey, target);
+        return viewKey ? moveProject(next, viewKey, target) : next;
+      }, host);
+    },
     move: (id: string, target: string) =>
       save((state) => {
         if (!saved?.projects.some((p) => p.id === id))

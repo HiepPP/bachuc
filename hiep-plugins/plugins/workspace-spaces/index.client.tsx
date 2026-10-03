@@ -15,6 +15,7 @@ export default function contribute(client: PluginClientContext) {
     isVisible: sidebar.isVisible,
     onSwipe: sidebar.onSwipe,
     getTitle: sidebar.getTitle,
+    onProjectAdded: sidebar.onProjectAdded,
   });
   const menu = client.addSidebarProjectMenuItems({ id: "move", getItems: sidebar.menuItems });
   const section = client.addSidebarSection({

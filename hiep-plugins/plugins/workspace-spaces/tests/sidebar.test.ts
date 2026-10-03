@@ -7,7 +7,15 @@ import {
   type SidebarSnapshot,
 } from "../client/sidebar-state";
 import { createSpacesSidebar } from "../client/spaces-sidebar";
-import { addSpace, moveProject, projectKey, removeSpace, stateSchema } from "../shared/spaces";
+import {
+  addSpace,
+  moveProject,
+  preferencesSchema,
+  projectKey,
+  removeSpace,
+  stateSchema,
+  withHostState,
+} from "../shared/spaces";
 
 test("maps equivalence and placement IDs without project-name guessing", () => {
   const projects = [{ id: "p", name: "Same name", viewKey: "repo:p", workspaces: [] }];
@@ -127,7 +135,7 @@ test("the filter shows only the selected Space's projects for the active host", 
   sidebar.select("host-a", "space-2");
   assert.equal(sidebar.isVisible(project("repo:p"), context), true);
   assert.equal(sidebar.isVisible(project("repo:q"), context), false);
-  // A new project belongs to the first Space.
+  // Projects added outside the app keep the first-Space default.
   assert.equal(sidebar.isVisible(project("repo:new"), context), false);
 });
 
@@ -254,4 +262,130 @@ test("Move projects lists each project's Space and moves a project by its view k
   assert.equal(await sidebar.moveProject("host-a", "q", "space-2"), true);
   assert.deepEqual(moved, [["repo:q", "space-2"]]);
   assert.equal(await sidebar.moveProject("host-a", "missing", "space-2"), false);
+});
+
+function additionFixture(initialHost: string | null) {
+  const state = stateSchema.parse({
+    spaces: [
+      { id: "space-1", name: "Silentium" },
+      { id: "space-2", name: "Misc" },
+    ],
+  });
+  let prefs = withHostState(preferencesSchema.parse({}), initialHost, state);
+  let host = initialHost;
+  let conflict = false;
+  let readGate: Promise<void> | null = null;
+  const controller = createSidebarController(
+    {
+      rpc: async (contract: { name: string }, input: { values: typeof prefs }) => {
+        if (contract.name === "spaces.catalog") return { projects: [] };
+        if (contract.name.endsWith(".read")) {
+          await readGate;
+          return { status: "ready", revision: "r1", values: prefs };
+        }
+        if (conflict) return { status: "conflict", error: "Revision conflict" };
+        prefs = preferencesSchema.parse(input.values);
+        return { status: "saved", revision: "r1", values: prefs };
+      },
+    } as unknown as Parameters<typeof createSidebarController>[0],
+    () => host,
+  );
+  return {
+    controller,
+    sidebar: createSpacesSidebar(controller),
+    prefs: () => prefs,
+    setHost: (next: string | null) => {
+      host = next;
+    },
+    failSave: () => {
+      conflict = true;
+    },
+    holdRead: (gate: Promise<void>) => {
+      readGate = gate;
+    },
+  };
+}
+
+for (const host of ["host-a", null]) {
+  test(`Add Project persists Misc membership in ${host ?? "All hosts"}`, async () => {
+    const { controller, sidebar, prefs } = additionFixture(host);
+    try {
+      await controller.refresh();
+      sidebar.select(host, "space-2");
+      const added = {
+        viewKey: "directory:.claude",
+        name: ".claude",
+        serverIds: ["host-a"],
+        projectIds: ["claude"],
+      };
+      await sidebar.onProjectAdded(added, { activeServerId: host });
+      await controller.refresh();
+      assert.equal(sidebar.isVisible(added, { activeServerId: host }), true);
+      assert.equal(sidebarMembership(controller.get()!.state, "claude"), "space-2");
+      sidebar.select(host, "space-1");
+      assert.equal(sidebar.isVisible(added, { activeServerId: host }), false);
+      if (host) assert.deepEqual(prefs().members, {});
+      else assert.deepEqual(prefs().hosts, {});
+    } finally {
+      controller.stop();
+    }
+  });
+}
+
+test("Add Project preserves an existing assignment and reports save conflicts", async () => {
+  const { controller, sidebar, failSave } = additionFixture("host-a");
+  const added = {
+    viewKey: '["host-a","claude"]',
+    name: ".claude",
+    serverIds: ["host-a"],
+    projectIds: ["claude"],
+  };
+  try {
+    await controller.refresh();
+    sidebar.select("host-a", "space-2");
+    await sidebar.onProjectAdded(added, { activeServerId: "host-a" });
+    sidebar.select("host-a", "space-1");
+    await sidebar.onProjectAdded(added, { activeServerId: "host-a" });
+    assert.equal(sidebarMembership(controller.get()!.state, "claude"), "space-2");
+    failSave();
+    await assert.rejects(
+      sidebar.onProjectAdded(
+        { ...added, viewKey: "new", projectIds: ["new"] },
+        { activeServerId: "host-a" },
+      ),
+      /Revision conflict/,
+    );
+    assert.equal(
+      Object.hasOwn(controller.get()!.state.members, projectKey("sidebar", "new")),
+      false,
+    );
+  } finally {
+    controller.stop();
+  }
+});
+
+test("Add Project waits for an in-flight catalog refresh and saves the captured host", async () => {
+  const { controller, sidebar, setHost, holdRead, prefs } = additionFixture("host-a");
+  try {
+    await controller.refresh();
+    sidebar.select("host-a", "space-2");
+    let release!: () => void;
+    holdRead(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const refreshing = controller.refresh();
+    const adding = sidebar.onProjectAdded(
+      { viewKey: "new", name: "New", serverIds: ["host-a"], projectIds: ["new"] },
+      { activeServerId: "host-a" },
+    );
+    setHost("host-b");
+    release();
+    await Promise.all([refreshing, adding]);
+    assert.equal(prefs().hosts["host-a"].members[projectKey("sidebar", "new")], "space-2");
+    assert.equal(Object.hasOwn(prefs().hosts, "host-b"), false);
+  } finally {
+    controller.stop();
+  }
 });

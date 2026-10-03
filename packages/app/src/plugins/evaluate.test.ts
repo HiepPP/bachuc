@@ -31,6 +31,29 @@ function bundle(body: string): string {
 }
 
 describe("evaluatePluginClientBundle", () => {
+  it("retains the sidebar project addition hook", async () => {
+    const evaluated = evaluatePluginClientBundle(
+      "spaces",
+      bundle(`
+      plugin.addSidebarProjectFilter({
+        id: "spaces", subscribe() { return function() {}; }, isVisible() { return true; },
+        async onProjectAdded() { throw new Error("Assignment failed"); }
+      });
+    `),
+    );
+    await expect(
+      evaluated.sidebarProjectFilters![0].onProjectAdded!(
+        {
+          viewKey: "new",
+          name: "New",
+          serverIds: ["host"],
+          projectIds: ["p"],
+        },
+        { activeServerId: "host" },
+      ),
+    ).rejects.toThrow("Assignment failed");
+    await evaluated.cleanup();
+  });
   it("releases button registrations when client setup throws", () => {
     let active = 0;
     function addButton() {

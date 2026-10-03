@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { cp, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, expect } from "../support/fixtures";
@@ -28,6 +28,8 @@ import {
 import { expectOpenedProject } from "../support/helpers/project-picker-ui";
 import { connectSeedClient } from "../support/helpers/seed-client";
 import { getServerId } from "../support/helpers/server-id";
+import { connectNewWorkspaceDaemonClient } from "../support/helpers/new-workspace";
+import { pluginRequirements } from "../support/helpers/plugin-fixture";
 
 const SECONDARY_HOST_ID = "add-project-flow-secondary";
 const SECONDARY_HOST_LABEL = "Secondary Host";
@@ -65,6 +67,76 @@ async function expectProjectHasNoWorkspaces(projectId: string): Promise<void> {
 
 test.describe("Add Project command-center flow", () => {
   test.describe.configure({ timeout: 180_000 });
+
+  test("Add Project keeps a new project in the selected Space after reload", async ({
+    page,
+    projectPickerFixture,
+  }) => {
+    test.setTimeout(60_000);
+    const directory = await mkdtemp(path.join(tmpdir(), "paseo-spaces-add-project-"));
+    const client = await connectNewWorkspaceDaemonClient({ ownProjects: false });
+    const previousConfig = await client.getDaemonConfig();
+    try {
+      await cp(
+        path.resolve(__dirname, "../../../../hiep-plugins/plugins/workspace-spaces"),
+        directory,
+        {
+          recursive: true,
+          filter: (source) => !source.includes(`${path.sep}node_modules`),
+        },
+      );
+      await writeFile(
+        path.join(directory, "paseo-plugin.json"),
+        JSON.stringify({ id: "workspace-spaces", requirements: pluginRequirements }),
+      );
+      await symlink(
+        path.resolve(__dirname, "../../../../node_modules"),
+        path.join(directory, "node_modules"),
+        "dir",
+      );
+      await client.patchDaemonConfig({ pluginsEnabled: true });
+      await client.installDirectoryPlugin(directory);
+      await gotoAppShell(page);
+      await page.getByLabel("Create a Space", { exact: true }).click({ timeout: 15_000 });
+      const secondSpace = page.getByRole("tab", { name: "Workspace 2", exact: true });
+      await secondSpace.click();
+      await openAddProjectFlow(page);
+      await chooseAddProjectMethod(page, "directory-search");
+      await addProjectFlowInput(page).fill(projectPickerFixture.fuzzyQuery);
+      await expect(addProjectFlow(page)).toContainText(projectPickerFixture.projectName, {
+        timeout: 30_000,
+      });
+      await page.keyboard.press("Enter");
+      const projectId = await expectOpenedProject(page, projectPickerFixture.projectName);
+      projectPickerFixture.rememberProjectId(projectId);
+      const row = page
+        .locator('[data-testid^="sidebar-project-row-"]')
+        .filter({ hasText: projectPickerFixture.projectName });
+      await expect(row).toBeVisible();
+      await expect(page.locator('[data-testid^="sidebar-project-new-workspace-row-"]')).toHaveCount(
+        0,
+      );
+      await page.getByRole("tab", { name: "Workspace 1", exact: true }).click();
+      await expect(row).toHaveCount(0);
+      await secondSpace.click();
+      await expect(row).toBeVisible();
+      await page.reload();
+      await page.getByRole("tab", { name: "Workspace 2", exact: true }).click();
+      await expect(row).toBeVisible();
+      await expect(page.locator('[data-testid^="sidebar-project-new-workspace-row-"]')).toHaveCount(
+        0,
+      );
+      await row.hover();
+      await expect(page.locator('[data-testid^="sidebar-project-new-worktree-"]')).toBeVisible();
+    } finally {
+      await client.removePlugin("workspace-spaces");
+      await client.patchDaemonConfig({
+        pluginsEnabled: previousConfig.config.pluginsEnabled ?? false,
+      });
+      await client.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 
   test("method selection shows the daemon's available project sources without search", async ({
     page,

@@ -30,8 +30,10 @@ code. The host sends trackpad swipes to the filter's `onSwipe`, and `getTitle` n
 heading.
 
 Settings belong to the daemon where this plugin is installed, with revision-checked atomic saves.
-The sidebar uses one installation per plugin: the active host's, else the first. New projects
-belong to the first Space. Settings or catalog errors show every project instead of hiding any.
+The sidebar uses one installation per plugin: the active host's, else the first. Add Project
+saves new projects in the selected Space before opening the workspace form. Reopening an assigned
+project preserves its Space. Projects added outside the app default to the first Space.
+Settings or catalog errors show every project instead of hiding any.
 Space selection resets to the first Space on reload. Removing the registration deletes its settings.
 
 ## Checks and installation

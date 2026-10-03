@@ -1,5 +1,5 @@
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
-import { useVisibleHosts } from "@/hosts/use-visible-hosts";
+import { useActiveServerId, useVisibleHosts } from "@/hosts/use-visible-hosts";
 import { router } from "expo-router";
 import type { WorkspaceProjectDescriptorPayload } from "@getpaseo/protocol/messages";
 import {
@@ -93,6 +93,9 @@ import type { AddProjectFlowRequest } from "@/stores/add-project-flow-store";
 import type { Theme } from "@/styles/theme";
 import { shortenPath } from "@/utils/shorten-path";
 import { buildNewWorkspaceRoute, buildSettingsAddHostRoute } from "@/utils/host-routes";
+import { pluginRegistry } from "@/plugins/registry";
+import { notifyProjectAdded } from "@/plugins/sidebar/model";
+import { createProjectViewKey } from "@/projects/workspace-structure";
 
 interface AddProjectFlowProps {
   request: AddProjectFlowRequest;
@@ -313,6 +316,7 @@ function setPageStatus(
 // The product flow is intentionally one cohesive page-stack state machine.
 // eslint-disable-next-line complexity
 export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
+  const activeServerId = useActiveServerId();
   const hosts = useVisibleHosts();
   const hostIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
   const connectionStatuses = useHostRuntimeConnectionStatuses(hostIds);
@@ -454,7 +458,21 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
   }, [onClose]);
 
   const openNewWorkspaceForProject = useCallback(
-    (serverId: string, project: WorkspaceProjectDescriptorPayload) => {
+    async (serverId: string, project: WorkspaceProjectDescriptorPayload) => {
+      await notifyProjectAdded(
+        pluginRegistry.getSnapshot(),
+        {
+          viewKey: createProjectViewKey(
+            project.projectKey
+              ? { kind: "equivalence", projectKey: project.projectKey }
+              : { kind: "placement", serverId, projectId: project.projectId },
+          ),
+          name: project.projectDisplayName,
+          serverIds: [serverId],
+          projectIds: [project.projectId],
+        },
+        { activeServerId },
+      );
       onClose();
       router.push(
         buildNewWorkspaceRoute({
@@ -465,7 +483,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         }),
       );
     },
-    [onClose],
+    [activeServerId, onClose],
   );
 
   const openAddedProject = useCallback(
@@ -478,7 +496,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
       try {
         const result = await openProject(path);
         if (result.ok) {
-          openNewWorkspaceForProject(hostId, result.project);
+          await openNewWorkspaceForProject(hostId, result.project);
           return;
         }
         const reason = getOpenProjectFailureReason(result);
@@ -487,11 +505,11 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         setState((current) =>
           setPageStatus(current, sourceKind, { isSubmitting: false, error: message }),
         );
-      } catch {
+      } catch (error) {
         setState((current) =>
           setPageStatus(current, sourceKind, {
             isSubmitting: false,
-            error: "Unable to add project",
+            error: error instanceof Error ? error.message : "Unable to add project",
           }),
         );
       } finally {
@@ -560,7 +578,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         );
         if (result.ok) {
           lastCloneParentByHost.set(locationPage.hostId, parentPath);
-          openNewWorkspaceForProject(locationPage.hostId, result.project);
+          await openNewWorkspaceForProject(locationPage.hostId, result.project);
           return;
         }
         setState((current) =>
@@ -746,12 +764,12 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
         upsertProject,
         setHasHydratedWorkspaces,
       });
-      openNewWorkspaceForProject(page.hostId, payload.project);
-    } catch {
+      await openNewWorkspaceForProject(page.hostId, payload.project);
+    } catch (error) {
       setState((current) =>
         setPageStatus(current, "new-directory-name", {
           isSubmitting: false,
-          error: "Unable to create directory",
+          error: error instanceof Error ? error.message : "Unable to create directory",
         }),
       );
     } finally {

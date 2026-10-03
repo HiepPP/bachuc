@@ -4,6 +4,7 @@ import type { SidebarProjectEntry } from "@/hooks/use-sidebar-workspaces-list";
 import type { InstalledPlugin } from "../types";
 import {
   hiddenProjectViewKeys,
+  notifyProjectAdded,
   pluginProjectMenuItems,
   pluginSidebarTitle,
   selectSidebarPlugins,
@@ -50,6 +51,63 @@ function project(viewKey: string): SidebarProjectEntry {
 }
 
 describe("plugin sidebar", () => {
+  it("awaits the selected installation's project addition hook before returning", async () => {
+    const seen: unknown[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const filter = (host: string) => ({
+      id: "spaces",
+      subscribe: () => () => {},
+      isVisible: () => true,
+      async onProjectAdded(entry: unknown, context: unknown) {
+        seen.push([host, entry, context]);
+        await gate;
+      },
+    });
+    const entry = { viewKey: "claude", name: ".claude", serverIds: ["host-b"], projectIds: ["p"] };
+    let finished = false;
+    const added = notifyProjectAdded(
+      [
+        plugin("host-a", { sidebarProjectFilters: [filter("a")] }),
+        plugin("host-b", { sidebarProjectFilters: [filter("b")] }),
+      ],
+      entry,
+      { activeServerId: "host-b" },
+    ).then(() => {
+      finished = true;
+      return undefined;
+    });
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    expect(seen).toEqual([["b", entry, { activeServerId: "host-b" }]]);
+    release();
+    await added;
+    expect(finished).toBe(true);
+  });
+
+  it("propagates project assignment failures for the add flow to report", async () => {
+    const installed = plugin("host-a", {
+      sidebarProjectFilters: [
+        {
+          id: "spaces",
+          subscribe: () => () => {},
+          isVisible: () => true,
+          async onProjectAdded() {
+            throw new Error("Revision conflict");
+          },
+        },
+      ],
+    });
+    await expect(
+      notifyProjectAdded(
+        [installed],
+        { viewKey: "new", name: "New", serverIds: ["host-a"], projectIds: ["p"] },
+        { activeServerId: "host-a" },
+      ),
+    ).rejects.toThrow("Revision conflict");
+  });
   it("prefers the active host's installation of each plugin", () => {
     const a = plugin("host-a");
     const b = plugin("host-b");

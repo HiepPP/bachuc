@@ -781,6 +781,10 @@ Each plugin contributes to the sidebar through one installation: the active host
 `project` is `{ viewKey, name, serverIds, projectIds }`. `activeServerId` is `null` when the
 sidebar shows all hosts. Filters narrow the user's list; project pickers still see every project.
 
+Optional `onProjectAdded(project, context)` runs after Add Project succeeds and before the app
+opens the workspace form. Await any placement save there. Reject to show an error and keep the
+add flow open for retry. This callback does not run for projects added by CLI or another client.
+
 ## Host UI
 
 Import Paseo-owned UI from `@getpaseo/plugin/client/react-native` in client code. This example
