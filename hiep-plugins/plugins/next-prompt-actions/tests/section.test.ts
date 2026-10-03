@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  boldRuns,
   commitChip,
   recapSections,
   sectionIntro,
@@ -280,3 +281,12 @@ test("the legacy Recap has no sections and no five-field keys", () => {
 function swapNothing(lines: string[]) {
   return lines.map((line) => line.replace("Not yet: nothing", "Not yet: Nothing."));
 }
+
+test("boldRuns puts bold text at odd indexes", () => {
+  assert.deepEqual(boldRuns("Pick this to **verify**, because it is fast."), [
+    "Pick this to ",
+    "verify",
+    ", because it is fast.",
+  ]);
+  assert.deepEqual(boldRuns("No bold here."), ["No bold here."]);
+});

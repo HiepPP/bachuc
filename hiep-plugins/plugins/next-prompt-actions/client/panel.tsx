@@ -16,7 +16,7 @@ import {
 } from "../shared/contracts";
 import { selectionAllowed } from "../shared/next-prompts";
 import { gitAction, joinPrompts, parsePrompts, type PromptBlock } from "../shared/prompts";
-import { commitChip, recapSections } from "../shared/section";
+import { boldRuns, commitChip, recapSections } from "../shared/section";
 import { layout, reachable, type Group } from "../shared/selection";
 import { backToBoard } from "./back-to-board";
 
@@ -244,12 +244,21 @@ function PromptCard({
           {text}
         </Text>
         {why ? (
-          <Markdown
-            text={why}
-            compact
-            enableHtmlish={false}
-            textStyle={{ color: theme.colors.foregroundMuted, fontSize: 13, lineHeight: 20 }}
-          />
+          // Plain Text, not Markdown: host Markdown bold keeps the muted color and barely stands out.
+          <Text
+            selectable
+            style={{ color: theme.colors.foregroundMuted, fontSize: 13, lineHeight: 20 }}
+          >
+            {boldRuns(why).map((run, index) =>
+              index % 2 ? (
+                <Text key={index} style={{ color: theme.colors.foreground, fontWeight: "700" }}>
+                  {run}
+                </Text>
+              ) : (
+                run
+              ),
+            )}
+          </Text>
         ) : null}
       </View>
       {candidate ? (
@@ -652,6 +661,7 @@ export function createNextPromptPanel(client: Client) {
           overflow: "hidden",
         }}
       >
+        {/* Recap values use the host Markdown defaults, so they match the reply's size and color. */}
         {recap ? (
           <View
             style={{
@@ -709,13 +719,7 @@ export function createNextPromptPanel(client: Client) {
             {/* Five fields: each section has its label above its value, divided from the one before. */}
             {(sections ?? [{ label: "", text: recap.did }]).map((section, index) => {
               const value = (
-                <Markdown
-                  key={section.label}
-                  text={section.text}
-                  compact
-                  enableHtmlish={false}
-                  textStyle={{ color: theme.colors.foregroundMuted, fontSize: 14, lineHeight: 22 }}
-                />
+                <Markdown key={section.label} text={section.text} compact enableHtmlish={false} />
               );
               return sections ? (
                 <View
@@ -733,7 +737,7 @@ export function createNextPromptPanel(client: Client) {
                 >
                   <Text
                     style={{
-                      color: theme.colors.foregroundMuted,
+                      color: theme.colors.foreground,
                       fontSize: 12.5,
                       lineHeight: 20,
                       fontWeight: "600",

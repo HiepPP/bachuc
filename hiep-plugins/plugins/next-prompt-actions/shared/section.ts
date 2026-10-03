@@ -184,3 +184,8 @@ export function commitChip(value: string): { text: string; done: boolean; label:
     label: `Commit/push: ${said}`,
   };
 }
+
+/** Splits `**bold**` runs out of a one-line reason; odd indexes are bold. */
+export function boldRuns(text: string): string[] {
+  return text.split(/\*\*(.+?)\*\*/);
+}
