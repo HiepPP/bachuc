@@ -11,6 +11,7 @@ test("each distinct text is looked up once across renders", async () => {
     },
     original: async (text) => {
       calls.push(`original:${text}`);
+      if (text === "Fix the bug.") return "fix teh bug";
       return text === "Explain the bug" ? "Giải thích lỗi" : null;
     },
   });
@@ -20,11 +21,13 @@ test("each distinct text is looked up once across renders", async () => {
       label: "VI gốc",
       text: "Giải thích lỗi",
     });
+    assert.deepEqual(await lookup("Fix the bug.", false), { label: "EN gốc", text: "fix teh bug" });
     assert.equal(await lookup("Plain English", false), null);
   }
   assert.deepEqual(calls, [
     "translate:Giải thích",
     "original:Explain the bug",
+    "original:Fix the bug.",
     "original:Plain English",
   ]);
 });

@@ -8,9 +8,11 @@ Requires the Paseo fork `>=0.10.2-beta.900`; the stock 0.10.1 host refuses the p
 - The composer toolbar's **Caveman: <mode>** pill, beside the model selector, opens a menu of
   Caveman modes for that conversation. Its label names the chosen mode. Compact layouts show
   the pill in the track above the composer.
-- With **Rewrite Vietnamese to English** on in the plugin settings, a Vietnamese draft is
-  rewritten as a clear English prompt before it is sent or queued. The bubble then shows your original, labeled
-  `VI gốc`. A failed rewrite keeps the draft and shows the error.
+- With **Rewrite drafts as clear English** on in the plugin settings, every draft is rewritten
+  as a clear English prompt before it is sent or queued: Vietnamese is translated, and English
+  grammar, spelling, and wording are corrected. A one-line English command such as `/compact` is
+  sent as typed. When the rewrite changes the draft, the bubble shows your original, labeled
+  `VI gốc` or `EN gốc`. A failed rewrite keeps the draft and shows the error.
 - **Match original language** asks the agent to answer in Vietnamese for Vietnamese drafts,
   including rewritten ones, unless you asked for another language or a mode sets one.
 - Caveman mode and the reply-language line are added by the daemon `agent.prompt` hook to each

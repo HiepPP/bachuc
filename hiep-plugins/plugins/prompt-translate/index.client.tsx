@@ -43,7 +43,9 @@ export default function contribute(client: PluginClientContext) {
     id: "rewrite-english",
     async intercept({ text }) {
       // The host setting decides; the pill only picks the Caveman mode.
-      if (!current.values.enhanceShortcut || !hasVietnamese(text)) return undefined;
+      if (!current.values.enhanceShortcut || !text.trim()) return undefined;
+      // A one-line English command such as /compact or $caveman ultra reaches the agent as typed.
+      if (!hasVietnamese(text) && /^[/$][^\n]*$/.test(text.trim())) return undefined;
       return { text: (await client.rpc(enhanceRpc, { text, deferCaveman: true })).prompt };
     },
   });

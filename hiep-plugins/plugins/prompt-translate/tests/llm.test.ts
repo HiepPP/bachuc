@@ -71,6 +71,7 @@ test("enhance asks the model to preserve explicit reply modes and skill commands
   assert.match(system.content, /Preserve explicit response language, script, format, and style/);
   assert.match(system.content, /Keep skill commands and mode names exactly as written/);
   assert.match(system.content, /Keep instructions as instructions/);
+  assert.match(system.content, /correct grammar, spelling, and unclear wording/);
   assert.match(system.content, /negative constraints such as not reading or editing files/);
   assert.equal(user.content, `<message>\n${draft}\n</message>`);
 });

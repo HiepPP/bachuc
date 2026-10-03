@@ -71,7 +71,7 @@ export function TranslateSettingsScreen({ theme }: PluginSurfaceProps) {
             onValueChange={(translate) => void save({ ...values, translate })}
           />
           <SettingsSwitch
-            label="Rewrite Vietnamese drafts to English"
+            label="Rewrite drafts as clear English"
             hint="Default for composers that have not chosen yet. Change it per conversation in the composer's Prompt pill."
             value={values.enhanceShortcut}
             disabled={settings.saving}

@@ -64,6 +64,22 @@ test("enhance uses the enhance model and records the original", async () => {
   store.close();
 });
 
+test("enhance corrects English drafts and skips the original when nothing changed", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "pt-english-"));
+  const store = new Store(path.join(dir, "cache.json"), undefined, 5);
+  const service = createService({
+    store,
+    complete: async ({ text }) => (text === "fix teh bug" ? "Fix the bug." : text),
+    settings: async () => translateSettings.schema.parse({}),
+  });
+  const fixed = (await service.enhance({ text: "fix teh bug" })).prompt;
+  assert.equal(fixed, "Fix the bug.");
+  assert.deepEqual(await service.original({ text: fixed }), { original: "fix teh bug" });
+  assert.equal((await service.enhance({ text: "Run the tests." })).prompt, "Run the tests.");
+  assert.deepEqual(await service.original({ text: "Run the tests." }), { original: null });
+  store.close();
+});
+
 test("reply preference keeps mode commands and is skipped for English or when disabled", async () => {
   const { service, requests, store } = await setup();
   for (const mode of ["/caveman ultra", "/caveman wenyan-ultra", "tiếng Hoa giản thể"]) {

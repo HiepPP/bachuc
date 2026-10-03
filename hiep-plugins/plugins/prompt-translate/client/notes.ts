@@ -1,6 +1,6 @@
 import { hasVietnamese } from "../shared/vietnamese";
 
-export type Note = { label: "EN" | "VI gốc"; text: string } | null;
+export type Note = { label: "EN" | "VI gốc" | "EN gốc"; text: string } | null;
 
 type Lookups = {
   translate(text: string, cacheOnly: boolean): Promise<string | null>;
@@ -9,7 +9,7 @@ type Lookups = {
 
 /**
  * One lookup per distinct text and cache mode, shared by every render of that message.
- * Vietnamese text gets its English translation; an English rewrite gets its Vietnamese original.
+ * Vietnamese text gets its English translation; an English rewrite gets its original draft.
  */
 export function createNoteCache(lookups: Lookups) {
   const notes = new Map<string, Promise<Note>>();
@@ -24,7 +24,10 @@ export function createNoteCache(lookups: Lookups) {
               .then((value): Note => (value ? { label: "EN", text: value } : null))
           : lookups
               .original(text)
-              .then((value): Note => (value ? { label: "VI gốc", text: value } : null))
+              .then(
+                (value): Note =>
+                  value ? { label: hasVietnamese(value) ? "VI gốc" : "EN gốc", text: value } : null,
+              )
       ).catch((): Note => {
         notes.delete(key);
         return null;

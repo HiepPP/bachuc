@@ -4,8 +4,8 @@ import type { TranslateSettings } from "../shared/settings";
 import type { Complete } from "./llm";
 import { hash, type Store } from "./store";
 
-// Old rewrites may omit response-language requests; do not reuse them after changing ENHANCE.
-const ENHANCE_CACHE_MODE = "enhance-v2";
+// Do not reuse cached rewrites after changing ENHANCE.
+const ENHANCE_CACHE_MODE = "enhance-v3";
 export function createService(deps: {
   store: Store;
   complete: Complete;
@@ -31,7 +31,8 @@ export function createService(deps: {
         deps.complete({ mode: "enhance", provider, model, text }),
       );
       const prompt = preserveCavemanCommand(enhanced, text);
-      await deps.store.pair(prompt, text);
+      // An unchanged draft has no original worth showing under the bubble.
+      if (prompt !== text) await deps.store.pair(prompt, text);
       return { prompt };
     },
     async original({ text }: { text: string }) {
