@@ -25,7 +25,7 @@ export function createCompleter(
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS[mode]);
     let body: ChatBody | null;
     try {
-      const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+      const init = {
         method: "POST",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
         body: JSON.stringify({
@@ -36,6 +36,13 @@ export function createCompleter(
           stream: false,
         }),
         signal: controller.signal,
+      };
+      const url = `${baseUrl}/chat/completions`;
+      // A pooled keep-alive socket can be closed by the provider between prompts; undici then
+      // rejects with "fetch failed" before any response, so one retry on a fresh socket is safe.
+      const response = await fetchImpl(url, init).catch((error: unknown) => {
+        if (controller.signal.aborted) throw error;
+        return fetchImpl(url, init);
       });
       body = (await response.json().catch(() => null)) as ChatBody | null;
       if (!response.ok) {
@@ -47,7 +54,7 @@ export function createCompleter(
     } catch (error) {
       if (controller.signal.aborted)
         throw new Error(`Model request timed out after ${TIMEOUT_MS[mode] / 1000} s`);
-      throw error;
+      throw withCause(error);
     } finally {
       clearTimeout(timer);
     }
@@ -56,6 +63,15 @@ export function createCompleter(
     if (!output) throw new Error("Model returned no text");
     return output;
   };
+}
+
+// The plugin RPC bridge forwards only error.message, so fold undici's cause code into it.
+function withCause(error: unknown): unknown {
+  if (!(error instanceof Error) || !(error.cause instanceof Error)) return error;
+  const cause = error.cause as Error & { code?: unknown };
+  return new Error(
+    `${error.message}: ${typeof cause.code === "string" ? cause.code : cause.message}`,
+  );
 }
 
 function unwrap(text: string): string {

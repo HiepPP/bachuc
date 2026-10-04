@@ -139,3 +139,33 @@ test("completer errors carry status and provider message, never the key", async 
     { message: "Model returned no text" },
   );
 });
+
+test("completer retries one network failure and reports its cause", async () => {
+  const dropped = () =>
+    new TypeError("fetch failed", {
+      cause: Object.assign(new Error("reset"), { code: "ECONNRESET" }),
+    });
+  let calls = 0;
+  const flaky: FetchLike = async () => {
+    calls += 1;
+    if (calls === 1) throw dropped();
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "Hi" } }] }),
+    };
+  };
+  const endpoint = async () => ({ baseUrl: "https://g", apiKey: "k" });
+  const request = { mode: "translate", provider: "vercel", model: "m", text: "x" } as const;
+  assert.equal(await createCompleter(endpoint, flaky)(request), "Hi");
+  assert.equal(calls, 2);
+  calls = 0;
+  const down: FetchLike = async () => {
+    calls += 1;
+    throw dropped();
+  };
+  await assert.rejects(createCompleter(endpoint, down)(request), {
+    message: "fetch failed: ECONNRESET",
+  });
+  assert.equal(calls, 2);
+});
