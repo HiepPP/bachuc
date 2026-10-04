@@ -18,6 +18,7 @@ import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet } from "react-native-unistyles";
 import { Autocomplete, type AutocompleteOption } from "@/components/ui/autocomplete";
+import { getRelativeAnchorRect, type RelativeAnchorRect } from "@/components/ui/autocomplete-utils";
 import {
   measureFloatingPanelPortalHost,
   useFloatingPanelPortalHostName,
@@ -33,13 +34,6 @@ interface Rect {
   y: number;
   width: number;
   height: number;
-}
-
-interface RelativeAnchorRect {
-  x: number;
-  y: number;
-  width: number;
-  hostHeight: number;
 }
 
 function measureElement(element: View): Promise<Rect> {
@@ -94,13 +88,9 @@ export function AutocompletePopover({
       measureFloatingPanelPortalHost(portalHostName),
     ]).then(([anchorRect, hostRect]) => {
       if (generation !== measurementGeneration.current || !hostRect) return undefined;
-      setRelativeAnchorRect({
-        x: anchorRect.x - hostRect.x,
-        y: anchorRect.y - hostRect.y,
-        width: anchorRect.width,
-        hostHeight: hostRect.height,
-      });
-      measuredShift.value = shift.value;
+      const nextRect = getRelativeAnchorRect(anchorRect, hostRect);
+      setRelativeAnchorRect(nextRect);
+      if (nextRect) measuredShift.value = shift.value;
       return undefined;
     });
   }, [anchorRef, canMeasure, measuredShift, portalHostName, shift]);

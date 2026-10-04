@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getAutocompleteFallbackIndex,
   getAutocompleteScrollOffset,
+  getRelativeAnchorRect,
   orderAutocompleteOptions,
 } from "./autocomplete-utils";
 
@@ -50,5 +51,28 @@ describe("getAutocompleteScrollOffset", () => {
         itemHeight: 24,
       }),
     ).toBe(74);
+  });
+});
+
+describe("getRelativeAnchorRect", () => {
+  const host = { x: 100, y: 0, width: 800, height: 600 };
+
+  it("positions the anchor relative to the portal host", () => {
+    expect(getRelativeAnchorRect({ x: 300, y: 450, width: 400, height: 80 }, host)).toEqual({
+      x: 200,
+      y: 450,
+      width: 400,
+      hostHeight: 600,
+    });
+  });
+
+  it("ignores an anchor hidden with display none", () => {
+    expect(getRelativeAnchorRect({ x: 0, y: 0, width: 0, height: 0 }, host)).toBeNull();
+    expect(getRelativeAnchorRect({ x: 300, y: 450, width: 400, height: 0 }, host)).toBeNull();
+  });
+
+  it("ignores a hidden portal host", () => {
+    const anchor = { x: 300, y: 450, width: 400, height: 80 };
+    expect(getRelativeAnchorRect(anchor, { x: 0, y: 0, width: 0, height: 0 })).toBeNull();
   });
 });

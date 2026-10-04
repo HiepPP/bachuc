@@ -54,3 +54,37 @@ export function getAutocompleteScrollOffset(args: {
 
   return args.currentOffset;
 }
+
+interface MeasuredRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface RelativeAnchorRect {
+  x: number;
+  y: number;
+  width: number;
+  hostHeight: number;
+}
+
+/**
+ * Returns null while the anchor or host is not rendered. A composer on a hidden
+ * retained screen measures as a zero rect, and placing its popover there paints a
+ * zero-width column of text at the window corner.
+ */
+export function getRelativeAnchorRect(
+  anchor: MeasuredRect,
+  host: MeasuredRect,
+): RelativeAnchorRect | null {
+  if (anchor.width <= 0 || anchor.height <= 0 || host.width <= 0 || host.height <= 0) {
+    return null;
+  }
+  return {
+    x: anchor.x - host.x,
+    y: anchor.y - host.y,
+    width: anchor.width,
+    hostHeight: host.height,
+  };
+}
