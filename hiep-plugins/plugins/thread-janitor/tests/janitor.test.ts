@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PaseoApi } from "@getpaseo/client";
-import { SWEEP_THROTTLE_MS, createJanitor, sweep } from "../server/janitor";
+import { RESUME_SETTLE_MS, SWEEP_THROTTLE_MS, createJanitor, sweep } from "../server/janitor";
 
 const HOUR_MS = 60 * 60 * 1000;
 const NOW = Date.parse("2026-09-23T12:00:00.000Z");
 const SECRET_TITLE = "private prompt title";
+const SETTINGS = { enabled: true, idleHours: 24 };
 
 function row(id: string, idleHours: number) {
   return {
@@ -44,27 +45,22 @@ type Workspace = ReturnType<typeof workspace>;
 
 function fakeApi(
   rows: Row[],
-  failIds: string[] = [],
-  fresh = (agent?: Row) => agent,
-  workspaces: Workspace[] = [],
-  terminalWorkspaceIds: string[] = [],
+  options: {
+    failIds?: string[];
+    workspaces?: Workspace[];
+    terminalWorkspaceIds?: string[];
+    beforeList?: (count: number) => void;
+  } = {},
 ) {
+  const closed: string[] = [];
   const archived: string[] = [];
   const archivedWorkspaces: string[] = [];
   let lists = 0;
-  // Model daemon cascading for closed child tabs in the same workspace.
-  const archiveTree = (id: string) => {
-    if (archived.includes(id)) return;
-    archived.push(id);
-    for (const child of rows) {
-      if (child.labels?.["paseo.parent-agent-id"] === id) archiveTree(child.id);
-    }
-  };
   const api = {
     workspaces: {
-      list: async () => ({ entries: workspaces, pageInfo: { hasMore: false } }),
+      list: async () => ({ entries: options.workspaces ?? [], pageInfo: { hasMore: false } }),
       ref: (id: string) => ({
-        refresh: async () => workspaces.find((entry) => entry.id === id) ?? null,
+        refresh: async () => options.workspaces?.find((entry) => entry.id === id) ?? null,
         archive: async () => {
           archivedWorkspaces.push(id);
           return {
@@ -79,31 +75,29 @@ function fakeApi(
     terminals: {
       list: async ({ workspaceId }: { workspaceId: string }) => ({
         requestId: "r",
-        entries: terminalWorkspaceIds.includes(workspaceId) ? [{ id: "t1" }] : [],
+        entries: options.terminalWorkspaceIds?.includes(workspaceId) ? [{ id: "t1" }] : [],
       }),
     },
     agents: {
       list: async () => {
         lists += 1;
-        return {
-          entries: rows.filter((agent) => !archived.includes(agent.id)).map((agent) => ({ agent })),
-          pageInfo: { hasMore: false },
-        };
+        options.beforeList?.(lists);
+        return { entries: rows.map((agent) => ({ agent })), pageInfo: { hasMore: false } };
       },
       ref: (id: string) => ({
-        refresh: async () => ({
-          agent: fresh(rows.find((agent) => agent.id === id)),
-          project: null,
-        }),
+        closeRuntime: async () => {
+          if (options.failIds?.includes(id)) throw new Error("daemon refused");
+          closed.push(id);
+          const agent = rows.find((entry) => entry.id === id);
+          if (agent) agent.status = "closed";
+        },
         archive: async () => {
-          if (failIds.includes(id)) throw new Error("daemon refused");
-          archiveTree(id);
-          return { archivedAt: new Date(NOW).toISOString() };
+          archived.push(id);
         },
       }),
     },
   } as unknown as PaseoApi;
-  return { api, archived, archivedWorkspaces, lists: () => lists };
+  return { api, closed, archived, archivedWorkspaces, lists: () => lists };
 }
 
 const ready =
@@ -111,61 +105,60 @@ const ready =
   async () => ({
     status: "ready" as const,
     revision: "r1",
-    values: { enabled, idleHours: 24, keepRecent: 0 },
+    values: { enabled, idleHours: 24 },
   });
 
-test("one failed archive does not stop the sweep and logs never contain titles", async () => {
-  const { api, archived } = fakeApi(
+const sweepOptions = (log: (line: string) => void = () => {}) => ({
+  now: () => new Date(NOW),
+  log,
+  signal: new AbortController().signal,
+});
+
+// Fake API calls resolve as microtasks, so a sweep finishes before the next macrotask.
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("closes stale runtimes without archiving, and one failure does not stop the sweep", async () => {
+  const { api, closed, archived } = fakeApi(
     [row("a", 30), row("b", 30), row("c", 30), row("new", 1)],
-    ["b"],
+    { failIds: ["b"] },
   );
   const lines: string[] = [];
   const result = await sweep(
     api,
-    { enabled: true, idleHours: 24, keepRecent: 0 },
-    {
-      now: () => new Date(NOW),
-      log: (line) => lines.push(line),
-      signal: new AbortController().signal,
-    },
+    SETTINGS,
+    sweepOptions((line) => lines.push(line)),
   );
-  assert.deepEqual(archived, ["a", "c"]);
+  assert.deepEqual(closed, ["a", "c"]);
+  assert.deepEqual(archived, []);
   assert.deepEqual(result, {
     checked: 4,
     stale: 3,
-    archived: 2,
+    closed: 2,
     failed: 1,
     workspacesStale: 0,
     workspacesArchived: 0,
     workspacesFailed: 0,
   });
-  assert.ok(lines.some((line) => line.includes(`titleLength=${SECRET_TITLE.length}`)));
+  assert.ok(lines.includes("closed a"));
+  assert.ok(lines.some((line) => line.startsWith("close failed b: daemon refused")));
   assert.ok(lines.every((line) => !line.includes(SECRET_TITLE)));
 });
 
-test("fresh snapshot that became active is skipped", async () => {
-  const { api, archived } = fakeApi([row("a", 30)], [], (agent) =>
-    agent ? { ...agent, status: "running" } : agent,
-  );
-  const result = await sweep(
-    api,
-    { enabled: true, idleHours: 24, keepRecent: 0 },
-    { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal },
-  );
-  assert.deepEqual(archived, []);
-  assert.deepEqual(result, {
-    checked: 1,
-    stale: 1,
-    archived: 0,
-    failed: 0,
-    workspacesStale: 0,
-    workspacesArchived: 0,
-    workspacesFailed: 0,
+test("an agent that became active before its close is skipped", async () => {
+  const rows = [row("a", 30)];
+  const { api, closed } = fakeApi(rows, {
+    beforeList: (count) => {
+      if (count === 2) rows[0].status = "running";
+    },
   });
+  const result = await sweep(api, SETTINGS, sweepOptions());
+  assert.deepEqual(closed, []);
+  assert.equal(result.stale, 1);
+  assert.equal(result.closed, 0);
 });
 
-test("timer waits for a hook API, then sweeps are throttled to one per 10 minutes", async () => {
-  const { api, archived, lists } = fakeApi([row("a", 30)]);
+test("timer waits for a hook API, then hook sweeps are throttled to one per 10 minutes", async () => {
+  const { api, closed, lists } = fakeApi([row("a", 30)]);
   let clock = NOW;
   const lines: string[] = [];
   const janitor = createJanitor({
@@ -176,13 +169,13 @@ test("timer waits for a hook API, then sweeps are throttled to one per 10 minute
   assert.equal(janitor.fromTimer(), undefined);
   assert.equal(lists(), 0);
   await janitor.fromHook(api, "turn_ended");
-  assert.deepEqual(archived, ["a"]);
-  assert.ok(lines.some((line) => line.startsWith("sweep (turn_ended): archived 1 of 1 stale")));
+  assert.deepEqual(closed, ["a"]);
+  assert.ok(lines.some((line) => line.startsWith("sweep (turn_ended): closed 1 of 1 stale")));
   clock += SWEEP_THROTTLE_MS - 1;
   assert.equal(janitor.fromHook(api, "created"), undefined);
   clock += 1;
   await janitor.fromTimer();
-  // Two lists per sweep plus one fresh list before the first archive.
+  // Two lists per sweep plus one fresh list before the first close.
   assert.equal(lists(), 5);
   janitor.stop();
   clock += SWEEP_THROTTLE_MS;
@@ -190,8 +183,45 @@ test("timer waits for a hook API, then sweeps are throttled to one per 10 minute
   assert.equal(lists(), 5);
 });
 
-test("disabled setting stops all archiving", async () => {
-  const { api, archived, lists } = fakeApi([row("a", 30)]);
+test("resumes schedule one sweep after the burst settles, even inside the throttle", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const rows = [row("a", 30)];
+  const { api, closed } = fakeApi(rows);
+  const lines: string[] = [];
+  const janitor = createJanitor({
+    readSettings: ready(),
+    log: (line) => lines.push(line),
+    now: () => NOW,
+  });
+  await janitor.fromHook(api, "turn_ended");
+  assert.deepEqual(closed, ["a"]);
+  // A reconnect resumes threads one after another.
+  rows.push(row("b", 30), row("c", 30));
+  janitor.afterResume(api);
+  t.mock.timers.tick(RESUME_SETTLE_MS - 1);
+  janitor.afterResume(api);
+  t.mock.timers.tick(RESUME_SETTLE_MS - 1);
+  await settle();
+  assert.deepEqual(closed, ["a"]);
+  t.mock.timers.tick(1);
+  await settle();
+  assert.deepEqual(closed, ["a", "b", "c"]);
+  assert.ok(lines.some((line) => line.startsWith("sweep (resume): closed 2 of 2 stale")));
+});
+
+test("stop cancels a pending resume sweep", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { api, lists } = fakeApi([row("a", 30)]);
+  const janitor = createJanitor({ readSettings: ready(), log: () => {}, now: () => NOW });
+  janitor.afterResume(api);
+  janitor.stop();
+  t.mock.timers.tick(RESUME_SETTLE_MS);
+  await settle();
+  assert.equal(lists(), 0);
+});
+
+test("disabled setting stops all closing", async () => {
+  const { api, closed, lists } = fakeApi([row("a", 30)]);
   const lines: string[] = [];
   const janitor = createJanitor({
     readSettings: ready(false),
@@ -199,18 +229,15 @@ test("disabled setting stops all archiving", async () => {
     now: () => NOW,
   });
   await janitor.fromHook(api, "turn_ended");
-  assert.deepEqual(archived, []);
+  assert.deepEqual(closed, []);
   assert.equal(lists(), 0);
   assert.deepEqual(lines, ["sweep skipped (turn_ended): disabled"]);
 });
 
 test("idle workspaces without live agents or terminals are archived", async () => {
   const live = { ...row("live", 1), workspaceId: "busy" };
-  const { api, archivedWorkspaces } = fakeApi(
-    [live],
-    [],
-    undefined,
-    [
+  const { api, archivedWorkspaces } = fakeApi([live], {
+    workspaces: [
       workspace("old", 30),
       workspace("busy", 30),
       workspace("recent", 1),
@@ -218,82 +245,20 @@ test("idle workspaces without live agents or terminals are archived", async () =
       workspace("worktree", 30, { workspaceKind: "worktree" }),
       workspace("terminal", 30),
     ],
-    ["terminal"],
-  );
-  const result = await sweep(
-    api,
-    { enabled: true, idleHours: 24, keepRecent: 0 },
-    { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal },
-  );
+    terminalWorkspaceIds: ["terminal"],
+  });
+  const result = await sweep(api, SETTINGS, sweepOptions());
   assert.deepEqual(archivedWorkspaces, ["old"]);
   assert.equal(result.workspacesStale, 2);
   assert.equal(result.workspacesArchived, 1);
 });
 
-test("retention is per workspace and retained threads protect their workspaces", async () => {
-  const busy = Array.from({ length: 10 }, (_, i) => ({
-    ...row(`busy-${i}`, 30 + i),
-    workspaceId: "busy",
-  }));
-  const quiet = Array.from({ length: 2 }, (_, i) => ({
-    ...row(`quiet-${i}`, 60 + i),
-    workspaceId: "quiet",
-  }));
-  const { api, archived, archivedWorkspaces } = fakeApi([...busy, ...quiet], [], undefined, [
-    workspace("busy", 40),
-    workspace("quiet", 70),
-  ]);
-  const settings = { enabled: true, idleHours: 24, keepRecent: 7 };
-  const options = { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal };
-  await sweep(api, settings, options);
-  assert.deepEqual(archived, ["busy-7", "busy-8", "busy-9"]);
+test("closed threads keep their workspaces", async () => {
+  const rows = [{ ...row("old", 30), workspaceId: "kept" }];
+  const { api, closed, archivedWorkspaces } = fakeApi(rows, {
+    workspaces: [workspace("kept", 30)],
+  });
+  await sweep(api, SETTINGS, sweepOptions());
+  assert.deepEqual(closed, ["old"]);
   assert.deepEqual(archivedWorkspaces, []);
-  await sweep(api, settings, options);
-  assert.deepEqual(archived, ["busy-7", "busy-8", "busy-9"]);
-});
-
-test("fresh activity can move a stale candidate into the retained threads", async () => {
-  const { api, archived } = fakeApi([row("recent", 30), row("older", 40)], [], (agent) =>
-    agent ? { ...agent, updatedAt: new Date(NOW - 25 * HOUR_MS).toISOString() } : agent,
-  );
-  await sweep(
-    api,
-    { enabled: true, idleHours: 24, keepRecent: 1 },
-    { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal },
-  );
-  assert.deepEqual(archived, []);
-});
-
-test("retention protects ancestors from cascading into the newest seven threads", async () => {
-  const recent = Array.from({ length: 7 }, (_, i) => ({
-    ...row(`recent-${i}`, 30 + i),
-    workspaceId: "retained",
-    ...(i === 0 ? { labels: { "paseo.parent-agent-id": "parent" } } : {}),
-  }));
-  const rows: Row[] = [
-    ...recent,
-    { ...row("grandparent", 80), workspaceId: "retained" },
-    {
-      ...row("parent", 70),
-      workspaceId: "retained",
-      labels: { "paseo.parent-agent-id": "grandparent" },
-    },
-    { ...row("old-parent", 90), workspaceId: "retained" },
-    {
-      ...row("old-child", 85),
-      workspaceId: "retained",
-      labels: { "paseo.parent-agent-id": "old-parent" },
-    },
-  ];
-  const { api, archived, archivedWorkspaces } = fakeApi(rows, [], undefined, [
-    workspace("retained", 100),
-    workspace("old", 100),
-  ]);
-  const settings = { enabled: true, idleHours: 24, keepRecent: 7 };
-  const options = { now: () => new Date(NOW), log: () => {}, signal: new AbortController().signal };
-  await sweep(api, settings, options);
-  await sweep(api, settings, options);
-  assert.deepEqual(archived, ["old-parent", "old-child"]);
-  assert.ok(recent.every((agent) => !archived.includes(agent.id)));
-  assert.ok(!archivedWorkspaces.includes("retained"));
 });

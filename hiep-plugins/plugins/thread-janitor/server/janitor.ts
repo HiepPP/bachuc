@@ -5,6 +5,7 @@ import { liveWorkspaces, selectStale, selectStaleWorkspaces } from "./stale";
 
 export const SWEEP_THROTTLE_MS = 10 * 60 * 1000;
 export const SWEEP_INTERVAL_MS = 30 * 60 * 1000;
+export const RESUME_SETTLE_MS = 5 * 60 * 1000;
 
 type AgentsApi = Pick<PaseoApi, "agents" | "workspaces" | "terminals">;
 type Log = (line: string) => void;
@@ -12,7 +13,7 @@ type Log = (line: string) => void;
 export interface SweepResult {
   checked: number;
   stale: number;
-  archived: number;
+  closed: number;
   failed: number;
   workspacesStale: number;
   workspacesArchived: number;
@@ -66,30 +67,27 @@ export async function sweep(
   const result: SweepResult = {
     checked: agents.length,
     stale: stale.length,
-    archived: 0,
+    closed: 0,
     failed: 0,
     workspacesStale: 0,
     workspacesArchived: 0,
     workspacesFailed: 0,
   };
+  // Closing ends the provider process and its MCP servers. The thread stays unarchived.
   for (const agent of stale) {
     if (options.signal.aborted) break;
     try {
-      const ref = paseo.agents.ref(agent.id);
-      // Archive cancels a live turn, so re-check a fresh snapshot just before archiving.
+      // Close cancels a live turn, so re-check a fresh list just before closing.
       const current = await listUnarchived(paseo);
-      const fresh = await ref.refresh();
-      if (!fresh) continue;
-      const candidates = current.map((entry) => (entry.id === agent.id ? fresh.agent : entry));
-      if (!selectStale(candidates, options.now(), settings).some((entry) => entry.id === agent.id))
+      if (!selectStale(current, options.now(), settings).some((entry) => entry.id === agent.id))
         continue;
       if (options.signal.aborted) break;
-      await ref.archive();
-      result.archived += 1;
-      options.log(`archived ${agent.id} titleLength=${agent.title?.length ?? 0}`);
+      await paseo.agents.ref(agent.id).closeRuntime();
+      result.closed += 1;
+      options.log(`closed ${agent.id}`);
     } catch (error) {
       result.failed += 1;
-      options.log(`archive failed ${agent.id}: ${describe(error)}`);
+      options.log(`close failed ${agent.id}: ${describe(error)}`);
     }
   }
   if (options.signal.aborted) return result;
@@ -135,11 +133,12 @@ export function createJanitor(options: {
   let paseo: AgentsApi | undefined;
   let lastSweepAt = -Infinity;
   let running: Promise<void> | undefined;
+  let settleTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const run = (reason: string): Promise<void> | undefined => {
+  const run = (reason: string, throttled = true): Promise<void> | undefined => {
     if (controller.signal.aborted || !paseo || running) return running;
     const startedAt = now();
-    if (startedAt - lastSweepAt < SWEEP_THROTTLE_MS) return undefined;
+    if (throttled && startedAt - lastSweepAt < SWEEP_THROTTLE_MS) return undefined;
     lastSweepAt = startedAt;
     const api = paseo;
     running = (async () => {
@@ -158,10 +157,10 @@ export function createJanitor(options: {
         signal: controller.signal,
       });
       options.log(
-        `sweep (${reason}): archived ${result.archived} of ${result.stale} stale, ` +
+        `sweep (${reason}): closed ${result.closed} of ${result.stale} stale, ` +
           `checked ${result.checked}, failed ${result.failed}; ` +
           `archived ${result.workspacesArchived} of ${result.workspacesStale} stale workspaces, ` +
-          `failed ${result.workspacesFailed}; idleHours ${state.values.idleHours}; keepRecent ${state.values.keepRecent}`,
+          `failed ${result.workspacesFailed}; idleHours ${state.values.idleHours}`,
       );
     })()
       .catch((error: unknown) => options.log(`sweep failed (${reason}): ${describe(error)}`))
@@ -177,12 +176,23 @@ export function createJanitor(options: {
       paseo = api;
       return run(reason);
     },
+    /**
+     * A reconnect resumes every thread the app reads, one after another. Each resume pushes the
+     * sweep back, so one unthrottled sweep closes the whole burst after it settles.
+     */
+    afterResume(api: AgentsApi) {
+      if (controller.signal.aborted) return;
+      paseo = api;
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => void run("resume", false), RESUME_SETTLE_MS);
+    },
     /** Timer sweeps are skipped until a hook has supplied an API. */
     fromTimer() {
       return run("timer");
     },
     stop() {
       controller.abort();
+      clearTimeout(settleTimer);
       paseo = undefined;
     },
   };

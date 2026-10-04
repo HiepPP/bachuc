@@ -1,6 +1,6 @@
 {
   "id": "thread-janitor",
   "requirements": {
-    "paseo": ">=0.9.0-beta.2"
+    "paseo": ">=0.10.2-beta.900"
   }
 }

@@ -128,10 +128,10 @@ Gateway key and consume API quota.
 
 ## Keep threads tidy automatically
 
-Thread janitor archives idle threads with no confirmation dialog. By default a thread
-idle for more than 24 hours is archived; archiving stays reversible and never deletes
-agents, files, or worktrees. Sweeps run after `agent.turn_ended`/`agent.created` hooks
-and on a 30-minute timer, at most once per 10 minutes.
+Thread janitor closes the runtimes of stale threads, so their provider and MCP processes
+exit. By default a thread with no activity for more than 24 hours is closed. Threads stay
+unarchived and resume when opened or prompted. A reconnect can resume dozens of threads, so
+the janitor also sweeps 5 minutes after the last resume.
 
 [Configure Thread janitor →](plugins/thread-janitor/README.md)
 
@@ -163,7 +163,7 @@ status alone does not prove every plugin action works.
 | [watchtower-board](plugins/watchtower-board/README.md)           | Browse read-only Watchtower tasks and attach task briefs in the composer.                                                              |
 | [workspace-preflight](plugins/workspace-preflight/README.md)     | Discover workspace prerequisites, expose read-only MCP evidence, and optionally ask Jev for task relevance.                            |
 | [workspace-spaces](plugins/workspace-spaces/README.md)           | Group projects with numbered Spaces in the desktop sidebar; standalone fallback on other clients.                                      |
-| [thread-janitor](plugins/thread-janitor/README.md)               | Archive idle threads automatically, with no confirmation dialog.                                                                       |
+| [thread-janitor](plugins/thread-janitor/README.md)               | Close the runtimes of stale threads so their processes exit.                                                                           |
 | [idle-runtime-closer](plugins/idle-runtime-closer/README.md)     | Close the processes of idle threads automatically; the threads stay and resume on the next prompt.                                     |
 | [thread-context-attach](plugins/thread-context-attach/README.md) | Attach the last reply of another Paseo thread to your next message.                                                                    |
 | [loop-verify](plugins/loop-verify/README.md)                     | Prototype: retry a labeled agent's goal in fresh child agents until a verify command passes, up to 5 rounds.                           |

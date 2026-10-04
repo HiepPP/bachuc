@@ -2,6 +2,7 @@ import type { PaseoAgent, PaseoWorkspace } from "@getpaseo/client";
 import type { JanitorSettings } from "../shared/settings";
 
 const HOUR_MS = 60 * 60 * 1000;
+const PARENT_LABEL = "paseo.parent-agent-id";
 
 export type JanitorAgent = Pick<
   PaseoAgent,
@@ -25,47 +26,43 @@ export function lastActivityAt(agent: JanitorAgent): number {
   return Math.max(updated, lastMessage);
 }
 
+function isActive(agent: JanitorAgent): boolean {
+  return agent.status === "running" || agent.status === "initializing";
+}
+
+/** Ids of every agent with an active descendant, following the parent label upward. */
+function ancestorsOfActive(agents: readonly JanitorAgent[]): Set<string> {
+  const byId = new Map(agents.map((agent) => [agent.id, agent]));
+  const busy = new Set<string>();
+  for (const agent of agents) {
+    if (!isActive(agent)) continue;
+    let parentId: string | undefined = agent.labels?.[PARENT_LABEL];
+    while (parentId && !busy.has(parentId)) {
+      busy.add(parentId);
+      parentId = byId.get(parentId)?.labels?.[PARENT_LABEL];
+    }
+  }
+  return busy;
+}
+
+/**
+ * Threads whose runtime can be closed. `idle` and `error` are the only statuses that hold a
+ * runtime without a turn; `closed` has none and `running`/`initializing` are in use.
+ */
 export function selectStale<T extends JanitorAgent>(
   agents: readonly T[],
   now: Date,
   settings: JanitorSettings,
 ): T[] {
   if (!settings.enabled) return [];
-  // Keep the newest `keepRecent` threads in each workspace, keyed like liveWorkspaces().
-  const byWorkspace = new Map<string, T[]>();
-  for (const agent of agents) {
-    if (agent.archivedAt) continue;
-    const key = agent.workspaceId ? `id:${agent.workspaceId}` : `cwd:${agent.cwd}`;
-    const group = byWorkspace.get(key);
-    if (group) group.push(agent);
-    else byWorkspace.set(key, [agent]);
-  }
-  const retained = new Set<string>();
-  for (const group of byWorkspace.values()) {
-    group
-      .sort((a, b) => {
-        // Unknown activity is protected rather than treated as old.
-        const timeA = Number.isFinite(lastActivityAt(a)) ? lastActivityAt(a) : Infinity;
-        const timeB = Number.isFinite(lastActivityAt(b)) ? lastActivityAt(b) : Infinity;
-        return timeB - timeA || a.id.localeCompare(b.id);
-      })
-      .slice(0, settings.keepRecent)
-      .forEach((agent) => retained.add(agent.id));
-  }
-  // Archiving any ancestor can cascade into a retained descendant. Protect the
-  // entire chain conservatively, without depending on workspace or open-tab state.
-  const byId = new Map(agents.map((agent) => [agent.id, agent]));
-  for (const id of retained) {
-    const parentId = byId.get(id)?.labels?.["paseo.parent-agent-id"];
-    if (parentId && byId.has(parentId)) retained.add(parentId);
-  }
+  const busy = ancestorsOfActive(agents);
   const cutoff = now.getTime() - settings.idleHours * HOUR_MS;
   return agents.filter(
     (agent) =>
       !agent.archivedAt &&
-      !retained.has(agent.id) &&
-      agent.status !== "running" &&
+      (agent.status === "idle" || agent.status === "error") &&
       agent.pendingPermissions.length === 0 &&
+      !busy.has(agent.id) &&
       lastActivityAt(agent) < cutoff,
   );
 }
