@@ -13,6 +13,11 @@ Requires the Paseo fork `>=0.10.2-beta.900`; the stock 0.10.1 host refuses the p
   grammar, spelling, and wording are corrected. A one-line English command such as `/compact` is
   sent as typed. When the rewrite changes the draft, the bubble shows your original, labeled
   `VI gốc` or `EN gốc`. A failed rewrite keeps the draft and shows the error.
+- **Rewrite mode** picks the key that rewrites. **Automatic**, the default: Enter, the send
+  button, and dictation rewrite; Cmd+Enter (Ctrl+Enter elsewhere) sends the draft as typed.
+  **Cmd+Enter**: only Cmd+Enter rewrites; Enter, the send button, and dictation send the draft as
+  typed. The key reaches the plugin only from an app built with the fork's `sendKey` interceptor
+  field. On older builds, Automatic rewrites every send and Cmd+Enter mode never rewrites.
 - **Match original language** asks the agent to answer in Vietnamese for Vietnamese drafts,
   including rewritten ones, unless you asked for another language or a mode sets one.
 - Caveman mode and the reply-language line are added by the daemon `agent.prompt` hook to each

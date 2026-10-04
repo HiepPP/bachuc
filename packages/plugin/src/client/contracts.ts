@@ -127,6 +127,8 @@ export interface PluginClientContext extends PluginCommandCapabilities {
   }): void;
   /** Replaces the text of an agent's composer on this plugin's host and focuses it. */
   setComposerText(input: { agentId: string; text: string }): void;
+  /** Opens the Plugins page of host settings for this plugin's host. */
+  openPluginsPage(): void;
   openPanel(id: string, options: PluginClientOpenPanelOptions): void;
 }
 
@@ -208,10 +210,15 @@ export interface PluginComposerTarget {
   agentId: string | null;
 }
 
+/** `mod-enter` is Cmd+Enter on macOS and Ctrl+Enter elsewhere. */
+export type PluginComposerSendKey = "enter" | "mod-enter";
+
 export interface PluginComposerInterceptInput {
   target: PluginComposerTarget;
   text: string;
   action: "send" | "queue";
+  /** The key that sent the message. Absent for the send button, dictation, and older hosts. */
+  sendKey?: PluginComposerSendKey;
 }
 
 /** Return `{ text }` to change the message, `{ cancel: true }` to keep the draft, or nothing. */

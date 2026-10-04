@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
-import { buildNewWorkspaceRoute } from "@/utils/host-routes";
+import { buildNewWorkspaceRoute, buildSettingsHostSectionRoute } from "@/utils/host-routes";
 import { createPluginHosts } from "./hosts";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { PluginClientOpenPanelOptions } from "@getpaseo/plugin/client";
@@ -50,6 +50,9 @@ export function createPluginClientRuntime(
     },
     setComposerText({ agentId, text }) {
       setPluginComposerText(installation.serverId, agentId.trim(), text);
+    },
+    openPluginsPage() {
+      router.push(buildSettingsHostSectionRoute(installation.serverId, "plugins"));
     },
     openPanel(panelId, options) {
       openClientPanel({ installation, runtime, state, panelId, options });

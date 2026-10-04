@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { hasVietnamese } from "../shared/vietnamese";
 import { translateRpc } from "../shared/contracts";
-import { translateSettings } from "../shared/settings";
+import { rewritesOnSendKey, translateSettings } from "../shared/settings";
 
 test("hasVietnamese detects diacritics, including words shared with other languages", () => {
   assert.equal(hasVietnamese("cái này là gì"), true);
@@ -24,6 +24,7 @@ test("settings parse {} into complete defaults", () => {
   assert.deepEqual(translateSettings.schema.parse({}), {
     translate: true,
     enhanceShortcut: true,
+    rewriteMode: "automatic",
     matchReplyLanguage: true,
     cavemanMode: "follow-agent",
     chineseScript: "skill-default",
@@ -50,4 +51,13 @@ test("explicit draft command survives a rewrite that omitted it", () => {
     assert.equal(result, `${command}\n\nExplain git status.`);
     assert.equal(stripCavemanMode(result), result);
   }
+});
+
+test("automatic rewrites on Enter and the button; Cmd+Enter mode rewrites only on Cmd+Enter", () => {
+  assert.equal(rewritesOnSendKey("enter", "automatic"), true);
+  assert.equal(rewritesOnSendKey(undefined, "automatic"), true);
+  assert.equal(rewritesOnSendKey("mod-enter", "automatic"), false);
+  assert.equal(rewritesOnSendKey("mod-enter", "cmd-enter"), true);
+  assert.equal(rewritesOnSendKey("enter", "cmd-enter"), false);
+  assert.equal(rewritesOnSendKey(undefined, "cmd-enter"), false);
 });

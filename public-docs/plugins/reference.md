@@ -758,7 +758,8 @@ Paseo owns the route, header, close action, host picker, error boundary, and que
 
 `openSurface(id, { pluginId, serverId })` opens another plugin's surface or picks a host; both
 default to the calling plugin. `client.openNewWorkspace({ cwd, projectId, name, serverId })` opens
-the new workspace screen for a project directory.
+the new workspace screen for a project directory. `client.openPluginsPage()` opens the Plugins page
+of host settings for the plugin's host.
 
 ### Workspace header subtitle
 
@@ -1591,7 +1592,9 @@ in plugin order, and each one sees the previous result. The input is locked whil
 thrown error keeps the draft and shows the message.
 
 `target` is `{ serverId, workspaceId, agentId }`; `agentId` is `null` for a composer that creates a
-new agent. `action` is `"send"` or `"queue"`. A queued message is final when queued.
+new agent. `action` is `"send"` or `"queue"`. A queued message is final when queued. `sendKey` is
+`"enter"` or `"mod-enter"` (Cmd+Enter on macOS, Ctrl+Enter elsewhere) when a desktop key sent the
+message; it is absent for the send button, dictation, and older apps.
 
 `client.setComposerText({ agentId, text })` replaces an agent composer's text and focuses it. When
 the composer is not mounted, the text becomes that agent's stored draft.

@@ -34,6 +34,7 @@ import {
   collectImageFilesFromClipboardData,
   filesToImageAttachments,
 } from "@/utils/image-attachments-from-files";
+import type { PluginComposerSendKey } from "@getpaseo/plugin/client";
 import type { ComposerAttachment } from "@/attachments/types";
 import type { ImageAttachment, MessagePayload, TextReplacement } from "@/composer/types";
 import { focusWithRetries } from "@/utils/web-focus";
@@ -79,6 +80,7 @@ import {
   resolveComposerSurfacePresentation,
   runAlternateSendAction,
   runDefaultSendAction,
+  runEnterSendAction,
   runMessageInputKeyboardAction,
   stopRealtimeVoice,
 } from "./state";
@@ -389,6 +391,7 @@ interface DesktopKeyPressContext {
   isSubmitDisabled: boolean;
   isSubmitLoading: boolean;
   disabled: boolean;
+  setSendKey: (sendKey: PluginComposerSendKey | undefined) => void;
   handleAlternateSendAction: () => void;
   handleDefaultSendAction: () => void;
 }
@@ -414,16 +417,15 @@ function handleDesktopKeyPressImpl(
   if (!ctx.submitOnEnter) return;
   if (shiftKey) return;
 
-  if ((metaKey || ctrlKey) && ctx.isAgentRunning && ctx.onQueue) {
-    if (ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
-    event.preventDefault();
-    ctx.handleAlternateSendAction();
-    return;
-  }
-
   if (ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
   event.preventDefault();
-  ctx.handleDefaultSendAction();
+  runEnterSendAction({
+    isModEnter: Boolean(metaKey || ctrlKey),
+    canQueue: ctx.isAgentRunning && Boolean(ctx.onQueue),
+    setSendKey: ctx.setSendKey,
+    handleAlternateSendAction: ctx.handleAlternateSendAction,
+    handleDefaultSendAction: ctx.handleDefaultSendAction,
+  });
 }
 
 function getTextInputNativeElement(current: ComposerTextInputHandle | null): HTMLElement | null {
@@ -912,6 +914,7 @@ interface SendMessageContext {
   allowEmptySubmit: boolean;
   cwd: string;
   isAgentRunning: boolean;
+  sendKey: PluginComposerSendKey | undefined;
   onSubmit: (payload: MessagePayload) => void;
   onMinimizeHeight: () => void;
   preserveHeightOnSubmit: boolean;
@@ -932,6 +935,7 @@ function sendMessageImpl(ctx: SendMessageContext): void {
     attachments: ctx.attachments,
     cwd: ctx.cwd,
     forceSend: ctx.isAgentRunning || undefined,
+    ...(ctx.sendKey ? { sendKey: ctx.sendKey } : {}),
   });
   // When the host preserves and locks the composer (e.g. new-workspace creation),
   // the text stays put — collapsing the height would clip it. Keep it grown.
@@ -944,6 +948,7 @@ interface QueueMessageContext {
   value: string;
   attachments: ComposerAttachment[];
   cwd: string;
+  sendKey: PluginComposerSendKey | undefined;
   onQueue: ((payload: MessagePayload) => void) | undefined;
   replaceText: (text: string) => void;
   onMinimizeHeight: () => void;
@@ -953,7 +958,12 @@ function queueMessageImpl(ctx: QueueMessageContext): void {
   if (!ctx.onQueue) return;
   const trimmed = ctx.value.trim();
   if (!trimmed && ctx.attachments.length === 0) return;
-  ctx.onQueue({ text: trimmed, attachments: ctx.attachments, cwd: ctx.cwd });
+  ctx.onQueue({
+    text: trimmed,
+    attachments: ctx.attachments,
+    cwd: ctx.cwd,
+    ...(ctx.sendKey ? { sendKey: ctx.sendKey } : {}),
+  });
   ctx.replaceText("");
   ctx.onMinimizeHeight();
 }
@@ -1502,6 +1512,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       resetComposerHeight?.();
     }, [resetComposerHeight]);
 
+    const sendKeyRef = useRef<PluginComposerSendKey | undefined>(undefined);
     const handleSendMessage = useCallback(() => {
       const liveValue = textInputRef.current?.getText() ?? valueRef.current;
       if (!preserveHeightOnSubmit) {
@@ -1514,6 +1525,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         allowEmptySubmit,
         cwd,
         isAgentRunning,
+        sendKey: sendKeyRef.current,
         onSubmit,
         onMinimizeHeight: minimizeInputHeight,
         preserveHeightOnSubmit,
@@ -1536,6 +1548,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
           value: textInputRef.current?.getText() ?? valueRef.current,
           attachments,
           cwd,
+          sendKey: sendKeyRef.current,
           onQueue,
           replaceText,
           onMinimizeHeight: minimizeInputHeight,
@@ -1611,6 +1624,9 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         isSubmitDisabled,
         isSubmitLoading,
         disabled,
+        setSendKey: (sendKey) => {
+          sendKeyRef.current = sendKey;
+        },
         handleAlternateSendAction,
         handleDefaultSendAction,
       });

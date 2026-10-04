@@ -6,6 +6,7 @@ import {
   resolveComposerSurfacePresentation,
   runAlternateSendAction,
   runDefaultSendAction,
+  runEnterSendAction,
   runMessageInputKeyboardAction,
   stopRealtimeVoice,
 } from "./state";
@@ -314,5 +315,31 @@ describe("stopRealtimeVoice", () => {
     });
 
     expect(calls).toEqual(["cancel agent", "stop voice"]);
+  });
+});
+
+describe("runEnterSendAction", () => {
+  function run(isModEnter: boolean, canQueue: boolean) {
+    let sendKey: string | undefined;
+    const sent: string[] = [];
+    runEnterSendAction({
+      isModEnter,
+      canQueue,
+      setSendKey: (key) => {
+        sendKey = key;
+      },
+      handleAlternateSendAction: () => sent.push(`alternate:${sendKey}`),
+      handleDefaultSendAction: () => sent.push(`default:${sendKey}`),
+    });
+    return { sent, sendKey };
+  }
+
+  it("tags the send with the pressed key and clears it afterward", () => {
+    expect(run(false, true)).toEqual({ sent: ["default:enter"], sendKey: undefined });
+    expect(run(true, false)).toEqual({ sent: ["default:mod-enter"], sendKey: undefined });
+  });
+
+  it("queues on Cmd/Ctrl+Enter while the agent runs", () => {
+    expect(run(true, true)).toEqual({ sent: ["alternate:mod-enter"], sendKey: undefined });
   });
 });

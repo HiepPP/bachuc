@@ -17,6 +17,8 @@ export const cavemanModeSchema = z.enum([
   "wenyan-full",
   "wenyan-ultra",
 ]);
+export const rewriteModeSchema = z.enum(["automatic", "cmd-enter"]);
+export type RewriteMode = z.output<typeof rewriteModeSchema>;
 export const chineseScriptSchema = z.enum(["skill-default", "simplified"]);
 
 export const translateSettings = defineSettings({
@@ -26,6 +28,7 @@ export const translateSettings = defineSettings({
   schema: z.object({
     translate: z.boolean().default(true),
     enhanceShortcut: z.boolean().default(true),
+    rewriteMode: rewriteModeSchema.default("automatic"),
     matchReplyLanguage: z.boolean().default(true),
     cavemanMode: cavemanModeSchema.default("follow-agent"),
     chineseScript: chineseScriptSchema.default("skill-default"),
@@ -35,3 +38,14 @@ export const translateSettings = defineSettings({
   }),
 });
 export type TranslateSettings = z.output<typeof translateSettings.schema>;
+
+/**
+ * Automatic rewrites on Enter and the send button; Cmd/Ctrl+Enter sends as typed.
+ * Cmd+Enter mode rewrites only on Cmd/Ctrl+Enter. The button, dictation, and older hosts report no key.
+ */
+export function rewritesOnSendKey(
+  sendKey: "enter" | "mod-enter" | undefined,
+  mode: RewriteMode,
+): boolean {
+  return mode === "automatic" ? sendKey !== "mod-enter" : sendKey === "mod-enter";
+}

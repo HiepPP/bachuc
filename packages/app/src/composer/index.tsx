@@ -59,6 +59,7 @@ import {
   type ComposerKeyPressEvent,
   type MessageInputRef,
 } from "./input/input";
+import type { PluginComposerSendKey } from "@getpaseo/plugin/client";
 import type { ImageAttachment, MessagePayload, TextReplacement } from "./types";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 import type { DraftCommandConfig } from "@/hooks/use-agent-commands-query";
@@ -1452,7 +1453,11 @@ function ComposerContentImpl({
 
   // Plugin interceptors on this host may rewrite or cancel the message. Null means cancel.
   const interceptPluginText = useCallback(
-    async (text: string, action: "send" | "queue"): Promise<string | null> => {
+    async (
+      text: string,
+      action: "send" | "queue",
+      sendKey: PluginComposerSendKey | undefined,
+    ): Promise<string | null> => {
       if (inputMode === "terminal") return text;
       const interceptors = pluginRegistry
         .getSnapshot()
@@ -1468,7 +1473,12 @@ function ComposerContentImpl({
       };
       setIsProcessing(true);
       try {
-        const outcome = await runComposerInterceptors(interceptors, { target, text, action });
+        const outcome = await runComposerInterceptors(interceptors, {
+          target,
+          text,
+          action,
+          ...(sendKey ? { sendKey } : {}),
+        });
         return outcome.kind === "cancel" ? null : outcome.text;
       } catch (error) {
         setSendError(error instanceof Error ? error.message : String(error));
@@ -1791,7 +1801,7 @@ function ComposerContentImpl({
       if (pluginSlashCommand && runPluginClientSlashCommand(pluginSlashCommand)) return;
 
       void (async () => {
-        const text = await interceptPluginText(payload.text, "send");
+        const text = await interceptPluginText(payload.text, "send", payload.sendKey);
         if (text === null) return;
         if (blurOnSubmit) {
           messageInputRef.current?.blur();
@@ -2048,7 +2058,7 @@ function ComposerContentImpl({
       });
       if (pluginSlashCommand && runPluginClientSlashCommand(pluginSlashCommand)) return;
       void (async () => {
-        const text = await interceptPluginText(payload.text, "queue");
+        const text = await interceptPluginText(payload.text, "queue", payload.sendKey);
         if (text !== null) queueMessage(text, outgoingAttachments);
       })();
     },

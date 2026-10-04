@@ -1,5 +1,6 @@
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { ActiveTurnBehavior } from "@getpaseo/protocol/messages";
+import type { PluginComposerSendKey } from "@getpaseo/plugin/client";
 import type { MessagePayload } from "@/composer/types";
 import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
 
@@ -132,6 +133,26 @@ export function runAlternateSendAction(ctx: SendActionContext): void {
   }
   if (ctx.isAgentRunning && ctx.onQueue) {
     ctx.handleQueueMessage();
+  }
+}
+
+interface EnterSendContext {
+  isModEnter: boolean;
+  canQueue: boolean;
+  setSendKey: (sendKey: PluginComposerSendKey | undefined) => void;
+  handleAlternateSendAction: () => void;
+  handleDefaultSendAction: () => void;
+}
+
+/** Cmd/Ctrl+Enter queues while the agent runs; the key tags the payload for plugin interceptors. */
+export function runEnterSendAction(ctx: EnterSendContext): void {
+  // The send handlers build the payload synchronously, so the key tags only this send.
+  ctx.setSendKey(ctx.isModEnter ? "mod-enter" : "enter");
+  try {
+    if (ctx.isModEnter && ctx.canQueue) ctx.handleAlternateSendAction();
+    else ctx.handleDefaultSendAction();
+  } finally {
+    ctx.setSendKey(undefined);
   }
 }
 

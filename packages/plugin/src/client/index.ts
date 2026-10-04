@@ -35,6 +35,7 @@ export type {
   PluginWorkspaceHeaderSubtitleProps,
   PluginWorkspaceHeaderSubtitleContribution,
   PluginComposerInterceptInput,
+  PluginComposerSendKey,
   PluginComposerInterceptResult,
   PluginComposerInterceptorContribution,
   SettingsState,

@@ -1,7 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { settingsRpc } from "@getpaseo/plugin";
 import { enhanceRpc, originalRpc, translateRpc } from "./shared/contracts";
-import { translateSettings } from "./shared/settings";
+import { rewritesOnSendKey, translateSettings } from "./shared/settings";
 import { hasVietnamese } from "./shared/vietnamese";
 import { createNoteCache } from "./client/notes";
 import { createNoteView, noteSchema } from "./client/note-view";
@@ -41,9 +41,11 @@ export default function contribute(client: PluginClientContext) {
   });
   const interceptor = client.addComposerInterceptor({
     id: "rewrite-english",
-    async intercept({ text }) {
+    async intercept({ text, sendKey }) {
       // The host setting decides; the pill only picks the Caveman mode.
       if (!current.values.enhanceShortcut || !text.trim()) return undefined;
+      // The key that does not rewrite in this mode sends the draft as typed.
+      if (!rewritesOnSendKey(sendKey, current.values.rewriteMode)) return undefined;
       // A one-line English command such as /compact or $caveman ultra reaches the agent as typed.
       if (!hasVietnamese(text) && /^[/$][^\n]*$/.test(text.trim())) return undefined;
       return { text: (await client.rpc(enhanceRpc, { text, deferCaveman: true })).prompt };

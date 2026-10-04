@@ -86,7 +86,7 @@ export type PluginClientRuntime = Pick<
   | "addComposerPill"
   | "addHeaderButton"
 > &
-  Partial<Pick<PluginClientContext, "setComposerText" | "openNewWorkspace">> & {
+  Partial<Pick<PluginClientContext, "setComposerText" | "openNewWorkspace" | "openPluginsPage">> & {
     hosts: ReturnType<typeof createPluginHosts>;
   };
 
@@ -476,6 +476,10 @@ export function runPluginClientBundle(
       if (!runtime.setComposerText) throw new Error("Composer text is unavailable on this host");
       if (!input.agentId.trim()) throw new Error("setComposerText needs an agent");
       runtime.setComposerText(input);
+    },
+    openPluginsPage() {
+      if (!runtime.openPluginsPage) throw new Error("Plugins page is unavailable on this host");
+      runtime.openPluginsPage();
     },
     addComposerPill(contribution) {
       if (stopped) throw new Error("Plugin has stopped");

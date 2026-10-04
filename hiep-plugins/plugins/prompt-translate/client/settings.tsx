@@ -13,6 +13,7 @@ import {
   cavemanModeSchema,
   chineseScriptSchema,
   providerSchema,
+  rewriteModeSchema,
   translateSettings,
   type TranslateSettings,
 } from "../shared/settings";
@@ -76,6 +77,19 @@ export function TranslateSettingsScreen({ theme }: PluginSurfaceProps) {
             value={values.enhanceShortcut}
             disabled={settings.saving}
             onValueChange={(enhanceShortcut) => void save({ ...values, enhanceShortcut })}
+          />
+          <SettingsSelect
+            label="Rewrite mode"
+            hint="Automatic: Enter and the send button rewrite; Cmd+Enter sends your draft as typed. Cmd+Enter: only Cmd+Enter rewrites; Enter and the send button send your draft as typed."
+            value={values.rewriteMode}
+            options={[
+              { label: "Automatic", value: "automatic" },
+              { label: "Cmd+Enter", value: "cmd-enter" },
+            ]}
+            disabled={settings.saving || !values.enhanceShortcut}
+            onValueChange={(rewriteMode) =>
+              void save({ ...values, rewriteMode: rewriteModeSchema.parse(rewriteMode) })
+            }
           />
         </SettingsCard>
       </SettingsSection>
