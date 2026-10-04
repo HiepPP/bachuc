@@ -535,45 +535,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
   },
 
   // --- Workspace index jump ---
-  {
-    id: "workspace-navigate-index-cmd-digit-mac",
-    action: "workspace.navigate.index",
-    combo: "Cmd+Digit",
-    when: { mac: true, desktop: true, commandCenter: false },
-    payload: { type: "index" },
-    help: {
-      id: "workspace-jump-index",
-      section: "workspaces",
-      label: "Jump to workspace",
-      defaultDisplayKeys: ["mod", "1-9"],
-    },
-  },
-  {
-    id: "workspace-navigate-index-ctrl-digit-non-mac",
-    action: "workspace.navigate.index",
-    combo: "Ctrl+Digit",
-    when: { mac: false, desktop: true, commandCenter: false, terminal: false },
-    payload: { type: "index" },
-    help: {
-      id: "workspace-jump-index",
-      section: "workspaces",
-      label: "Jump to workspace",
-      defaultDisplayKeys: ["mod", "1-9"],
-    },
-  },
-  {
-    id: "workspace-navigate-index-alt-digit-web",
-    action: "workspace.navigate.index",
-    combo: "Alt+Digit",
-    when: { desktop: false, commandCenter: false },
-    payload: { type: "index" },
-    help: {
-      id: "workspace-jump-index",
-      section: "workspaces",
-      label: "Jump to workspace",
-      defaultDisplayKeys: ["alt", "1-9"],
-    },
-  },
+  // Disabled in this fork: no Cmd/Ctrl/Alt+1-9 jump, so the sidebar number badges never show.
 
   // --- Tab index jump ---
   {
