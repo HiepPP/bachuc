@@ -89,7 +89,7 @@ scripts/paseo-release.sh --force     # install while agents are mid-turn
 - From the install on, a real run appends its output, with every command it ran, to `~/Library/Logs/Paseo/release-install.log`; the terminal only mirrors that file. Closing the terminal mid-install triggers the same rollback, and the log shows how it ended.
 - The daemon gets 120 seconds to close its agents (`STOP_TIMEOUT`). The install does not force-kill it: past that, the install fails and rolls back.
 - Every rename checks that the destination is free and that the destination is the same inode afterwards. `mv` onto an existing directory moves the source inside it without an error.
-- The release is ad-hoc signed, so macOS asks again for file and microphone access after each install.
+- The build is signed with the self-signed `Paseo Fork Local` identity from your login keychain. Its designated requirement is the certificate, not the cdhash, so macOS keeps file and microphone grants across installs. An ad-hoc build gets a new cdhash each time and asks for every grant again. A new certificate also starts the grants over, so keep this one (export it as `.p12` before you reinstall macOS). To create it again, use Keychain Access > Certificate Assistant > Create a Certificate with Self Signed Root and Code Signing, then set its Code Signing trust to Always Trust. Check it with `security find-identity -v -p codesigning`.
 - `~/.paseo-switch` is left from the time stock and the release took turns on `~/.paseo`. It holds the stock app and the stock data, and nothing reads it. Only the user deletes it.
 
 ### Expo Router

@@ -365,9 +365,11 @@ main() {
 
   step "build the release"
   cd "$REPO_ROOT"
-  # hardenedRuntime off: without a Developer ID the app is ad-hoc signed, and an ad-hoc signed
-  # app with the hardened runtime dies at launch.
-  run npm run build:desktop -- --dir -c.mac.hardenedRuntime=false -c.mac.notarize=false
+  # Signed with the self-signed "Paseo Fork Local" identity in the login keychain. Its designated
+  # requirement is the certificate, not the cdhash, so macOS keeps file access grants across builds.
+  # hardenedRuntime stays off: there is no Developer ID, and the app died at launch with it on.
+  run npm run build:desktop -- --dir -c.mac.hardenedRuntime=false -c.mac.notarize=false \
+    -c.mac.identity="Paseo Fork Local"
   [ "$DRY_RUN" = 1 ] || start_output_log "$@"
 
   step "check the build, and the running agents again"
