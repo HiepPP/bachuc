@@ -1,0 +1,6 @@
+{
+  "id": "stop-orb",
+  "requirements": {
+    "paseo": ">=1.0.0-hiep"
+  }
+}

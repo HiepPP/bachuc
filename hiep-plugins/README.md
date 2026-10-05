@@ -3,7 +3,7 @@
 See what your agents are doing. Keep projects organized. Bring task context and
 workspace checks into Paseo without leaving your conversation.
 
-Sixteen independent local plugins. Install only what you need; each owns its
+Nineteen independent local plugins. Install only what you need; each owns its
 dependencies, checks, and configuration.
 
 Gallery refreshed September 22, 2026 from Paseo desktop **0.9.0-beta.2**.
@@ -153,6 +153,8 @@ status alone does not prove every plugin action works.
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | [vscode-warm-light](plugins/vscode-warm-light/README.md)         | Apply the warm, customized VS Code Light+ palette through Paseo's theme API.                                                           |
 | [claude-look](plugins/claude-look/README.md)                     | Claude Light theme, Claude desktop's 768px chat column, and its 1.5 reply line-height.                                                 |
+| [edit-diffs](plugins/edit-diffs/README.md)                       | Show edit tool calls as diffs with file line numbers, open by default like Claude Code.                                                |
+| [stop-orb](plugins/stop-orb/README.md)                           | Replace the composer stop button with the animated solving thinking orb on desktop.                                                    |
 | [next-prompt-actions](plugins/next-prompt-actions/README.md)     | Send next-step prompts inside their blocks on desktop, with optional bounded Jev auto-run.                                             |
 | [prompt-translate](plugins/prompt-translate/README.md)           | Show English translations under Vietnamese prompts, and rewrite drafts as English prompts with Cmd/Ctrl+Enter, on desktop.             |
 | [plugins-nav](plugins/plugins-nav/README.md)                     | Add a Plugins row to the sidebar that opens the active host's Plugins settings page.                                                   |
