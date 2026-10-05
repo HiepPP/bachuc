@@ -37,6 +37,10 @@ export function createRunStore(now = () => new Date().toISOString()) {
   const active = new Map<string, Run>();
   const finished: Run[] = [];
   let revision = 0;
+  let unread: { agentIds: ReadonlySet<string>; checkedAt: string } | null = null;
+  // A run that ended after the last host read has not been opened yet, whatever the host said.
+  const isUnread = (run: Run) =>
+    !unread || unread.agentIds.has(run.agentId) || (run.endedAt ?? "") > unread.checkedAt;
   const metadata = (agent: PluginHookAgent) => ({
     agentId: agent.id,
     parentAgentId: agent.parentAgentId,
@@ -257,6 +261,10 @@ export function createRunStore(now = () => new Date().toISOString()) {
         }
       }
     },
+    /** Host read state from an agent list that started at `checkedAt`. */
+    setUnread(agentIds: ReadonlySet<string>, checkedAt: string) {
+      unread = { agentIds, checkedAt };
+    },
     /** Runs whose model was never read, such as subagents that finished between polls. */
     unresolvedModels() {
       return [...active.values(), ...finished]
@@ -301,8 +309,8 @@ export function createRunStore(now = () => new Date().toISOString()) {
     snapshot() {
       const runs = [...active.values(), ...finished]
         .filter((run) => !run.dismissed)
-        .map(
-          ({
+        .map((stored) => {
+          const {
             providerTurnId: _p,
             snapshotTurnId: _s,
             dismissed: _d,
@@ -310,8 +318,13 @@ export function createRunStore(now = () => new Date().toISOString()) {
             projectResolved: _r,
             promptTitle: _t,
             ...run
-          }) => ({ ...run, title: display({ ...run, promptTitle: _t }) }),
-        );
+          } = stored;
+          return {
+            ...run,
+            title: display({ ...run, promptTitle: _t }),
+            unread: run.status !== "running" && isUnread(stored),
+          };
+        });
       return { runs, observingSince };
     },
     clear() {

@@ -16,6 +16,7 @@ test("fetches every page and detects repeated cursors", async () => {
   assert.deepEqual(await listBoardAgents(client, new AbortController().signal), {
     agents: [],
     visibleAgentIds: new Set(),
+    unreadAgentIds: new Set(),
   });
   assert.equal(calls, 3);
   const repeated = {
@@ -94,4 +95,26 @@ test("a failed directory page rejects instead of returning incomplete membership
     },
   } as unknown as PaseoApi;
   await assert.rejects(listBoardAgents(client, new AbortController().signal), /offline/);
+});
+
+test("collects unread threads from finished and failed attention only", async () => {
+  const attention = {
+    finished: { requiresAttention: true, attentionReason: "finished" },
+    error: { requiresAttention: true, attentionReason: "error" },
+    permission: { requiresAttention: true, attentionReason: "permission" },
+    read: { requiresAttention: false, attentionReason: null },
+  };
+  const client = {
+    agents: {
+      list: async () => ({
+        entries: Object.entries(attention).map(([id, flags]) => ({
+          agent: { id, status: "idle", labels: {}, ...flags },
+          project: null,
+        })),
+        pageInfo: { hasMore: false },
+      }),
+    },
+  } as unknown as PaseoApi;
+  const { unreadAgentIds } = await listBoardAgents(client, new AbortController().signal);
+  assert.deepEqual([...unreadAgentIds], ["finished", "error"]);
 });

@@ -5,6 +5,8 @@ import type { ActiveAgent } from "./store";
 export async function listBoardAgents(paseo: Pick<PaseoApi, "agents">, signal: AbortSignal) {
   const agents: ActiveAgent[] = [];
   const visibleAgentIds = new Set<string>();
+  // The host flags a thread when a turn finishes or fails and clears it when a client opens it.
+  const unreadAgentIds = new Set<string>();
   const cursors = new Set<string>();
   let cursor: string | undefined;
   do {
@@ -15,6 +17,11 @@ export async function listBoardAgents(paseo: Pick<PaseoApi, "agents">, signal: A
     });
     for (const { agent, project } of page.entries) {
       visibleAgentIds.add(agent.id);
+      if (
+        agent.requiresAttention &&
+        (agent.attentionReason === "finished" || agent.attentionReason === "error")
+      )
+        unreadAgentIds.add(agent.id);
       if (agent.status !== "running") continue;
       agents.push({
         ...agent,
@@ -31,5 +38,5 @@ export async function listBoardAgents(paseo: Pick<PaseoApi, "agents">, signal: A
     if (!cursor || cursors.has(cursor)) throw new Error("Agent list changed. Refresh to retry.");
     cursors.add(cursor);
   } while (cursor);
-  return { agents, visibleAgentIds };
+  return { agents, visibleAgentIds, unreadAgentIds };
 }

@@ -8,6 +8,8 @@ export const runSchema = z.object({
   title: z.string(),
   starred: z.boolean(),
   needsInput: z.boolean().optional(),
+  // Host read state of a finished run; absent from older hosts. Never persisted.
+  unread: z.boolean().optional(),
   project: z.string(),
   projectKey: z.string(),
   projectId: z.string().optional(),

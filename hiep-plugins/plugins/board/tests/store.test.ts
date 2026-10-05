@@ -341,3 +341,22 @@ test("malformed parent cycles cannot make removal loop", () => {
   assert.equal(s.removeFinished("a", observingSince, endedAt), true);
   assert.deepEqual(s.snapshot().runs, []);
 });
+
+test("finished runs are unread until the host reports them opened after they ended", () => {
+  const s = setup();
+  s.end(agent, "first", { kind: "completed" });
+  const unread = () => s.snapshot().runs.find((run) => run.agentId === agent.id)?.unread;
+  // No host read yet.
+  assert.equal(unread(), true);
+  const endedAt = s.snapshot().runs[0].endedAt!;
+  const after = new Date(Date.parse(endedAt) + 500).toISOString();
+  s.setUnread(new Set([agent.id]), after);
+  assert.equal(unread(), true);
+  s.setUnread(new Set(), after);
+  assert.equal(unread(), false);
+  // A list that started before the run ended cannot know it was opened.
+  s.setUnread(new Set(), new Date(Date.parse(endedAt) - 500).toISOString());
+  assert.equal(unread(), true);
+  s.start(agent, "second");
+  assert.equal(unread(), false);
+});

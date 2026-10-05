@@ -41,6 +41,8 @@ const CONTROL_RADIUS = 6;
 const COLUMN_GAP = 24;
 const RAIL_HEIGHT = 40;
 const SEPARATOR = " · ";
+// Content of a finished card that was opened since; actions keep full contrast.
+const SEEN_OPACITY = 0.5;
 // Counts and durations keep their width as digits change.
 const TABULAR = { fontVariant: ["tabular-nums"] } satisfies TextStyle;
 
@@ -285,9 +287,12 @@ function RunCard({
   subagent = false,
   inheritedProject = false,
   removeCount = 1,
+  seen = false,
   orb,
 }: {
   projectHue?: number;
+  /** Finished and opened since its last turn: neutral surface, content dimmed until hover. */
+  seen?: boolean;
   /** Saved thinking-orb settings; null until loaded, which keeps the host spinner. */
   orb: OrbSettings | null;
   /** Rendered inside a cluster card: no own border. */
@@ -481,6 +486,9 @@ function RunCard({
   ) : null;
 
   const label = run.needsInput ? "Needs input" : statusLabel(run.status);
+  const active = hovered || starHovered || repoHovered || removeHovered || focus?.keyboard;
+  const dim = seen && !active ? SEEN_OPACITY : 1;
+  const readLabel = running || subagent ? "" : seen ? ", seen" : run.unread ? ", new" : "";
   // Only attention and non-success outcomes take a status color; the rest stays muted.
   const labelColor =
     run.needsInput || (!running && run.status !== "completed") ? tone : colors.foregroundMuted;
@@ -494,11 +502,11 @@ function RunCard({
 
   return (
     <View
-      accessibilityLabel={`${run.title}, ${label}`}
+      accessibilityLabel={`${run.title}, ${label}${readLabel}`}
       style={{
         borderRadius: s(subagent ? CONTROL_RADIUS : embedded ? 0 : CARD_RADIUS),
         borderWidth: embedded || subagent ? 0 : 1,
-        ...repoSurface(projectHue, theme),
+        ...repoSurface(seen ? undefined : projectHue, theme),
         ...(subagent || embedded ? { backgroundColor: "transparent" } : {}),
         overflow: "hidden",
         // An embedded parent hands its ring to the cluster, whose clipping would hide it here.
@@ -536,14 +544,14 @@ function RunCard({
               pointerEvents="none"
               accessibilityElementsHidden
               importantForAccessibility="no-hide-descendants"
-              style={{ opacity: 0.6 }}
+              style={{ opacity: 0.6 * dim }}
             >
               <Icon name="CornerDownRight" size={s(14)} color={colors.foregroundMuted} />
             </View>
-            <View pointerEvents="none">
+            <View pointerEvents="none" style={{ opacity: dim }}>
               <AgentAvatar agentId={run.agentId} size={s(24)} />
             </View>
-            <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: s(1) }}>
+            <View pointerEvents="none" style={{ flex: 1, minWidth: 0, gap: s(1), opacity: dim }}>
               <Text
                 numberOfLines={1}
                 style={{
@@ -636,7 +644,7 @@ function RunCard({
                   gap: s(7),
                   paddingHorizontal: s(2),
                   borderRadius: s(CONTROL_RADIUS),
-                  opacity: pressed ? 0.6 : 1,
+                  opacity: (pressed ? 0.6 : 1) * dim,
                   ...ring("repo"),
                 })}
               >
@@ -664,7 +672,7 @@ function RunCard({
             </View>
             <View
               pointerEvents="none"
-              style={{ flexDirection: "row", alignItems: "flex-start", gap: s(10) }}
+              style={{ flexDirection: "row", alignItems: "flex-start", gap: s(10), opacity: dim }}
             >
               {thinking ? (
                 <OrbAvatar
@@ -749,7 +757,7 @@ function RunCard({
         >
           <View
             pointerEvents="none"
-            style={{ flex: 1, minWidth: 0, flexDirection: "row", overflow: "hidden" }}
+            style={{ flex: 1, minWidth: 0, flexDirection: "row", overflow: "hidden", opacity: dim }}
           >
             <ModelTags run={run} theme={theme} scale={scale} compact={subagent} />
           </View>
@@ -823,8 +831,12 @@ function RunCluster({ tree, collapsed, onToggle, depth = 0, ...card }: ClusterPr
   const [panelWidth, setPanelWidth] = useState(0);
   // Remove cascades to subagents, so it waits until the whole cluster has finished.
   const onRemove = tree.running ? undefined : card.onRemove;
+  // The root's read state covers the whole cluster; subagents are read through their parent.
+  const seen = depth === 0 ? !tree.running && tree.run.unread === false : card.seen;
   if (!tree.children.length)
-    return <RunCard {...card} run={tree.run} subagent={depth > 0} onRemove={onRemove} />;
+    return (
+      <RunCard {...card} run={tree.run} subagent={depth > 0} onRemove={onRemove} seen={seen} />
+    );
   const summary = clusterSummary(tree);
   const summaryColor = summary.needsInput
     ? colors.statusWarning
@@ -845,7 +857,7 @@ function RunCluster({ tree, collapsed, onToggle, depth = 0, ...card }: ClusterPr
           ? null
           : {
               borderWidth: 1,
-              ...repoSurface(card.projectHue, theme),
+              ...repoSurface(seen ? undefined : card.projectHue, theme),
               borderRadius: s(CARD_RADIUS),
               overflow: "hidden",
               // One ring around the whole card when its open action has keyboard focus.
@@ -860,6 +872,7 @@ function RunCluster({ tree, collapsed, onToggle, depth = 0, ...card }: ClusterPr
         subagent={nested}
         onRemove={onRemove}
         removeCount={tree.count}
+        seen={seen}
         onFocusChange={nested ? undefined : setRootFocused}
       />
       <Pressable
@@ -880,7 +893,7 @@ function RunCluster({ tree, collapsed, onToggle, depth = 0, ...card }: ClusterPr
           alignItems: "center",
           gap: s(8),
           borderTopWidth: nested ? 0 : 1,
-          borderTopColor: repoDivider(card.projectHue, theme),
+          borderTopColor: repoDivider(seen ? undefined : card.projectHue, theme),
           borderRadius: nested ? s(CONTROL_RADIUS) : 0,
           backgroundColor: toggleHovered ? colors.surface2 : "transparent",
           opacity: pressed ? 0.7 : 1,
@@ -972,6 +985,7 @@ function RunCluster({ tree, collapsed, onToggle, depth = 0, ...card }: ClusterPr
             >
               <RunCluster
                 {...card}
+                seen={seen}
                 tree={child}
                 collapsed={collapsed}
                 onToggle={onToggle}
@@ -1023,6 +1037,7 @@ const RunColumn = memo(function RunColumn({
   const runs = trees.map((tree) => ({ ...tree.run, starred: tree.starred }));
   const byId = new Map(trees.map((tree) => [tree.run.id, tree]));
   const count = trees.reduce((total, tree) => total + tree.count, 0);
+  const unread = trees.filter((tree) => !tree.running && tree.run.unread).length;
   // Cards keep the project grouping order; each card names its own project.
   const cards = groupRuns(runs).projects.flatMap((project) => project.runs);
   const labelStyle = {
@@ -1033,7 +1048,7 @@ const RunColumn = memo(function RunColumn({
   } satisfies TextStyle;
   return (
     <View
-      accessibilityLabel={`${title}, ${count} conversations`}
+      accessibilityLabel={`${title}, ${count} conversations${unread ? `, ${unread} new` : ""}`}
       style={{ flex: 1, minWidth: 0, gap: s(10) }}
     >
       {/* Every host lane names its two status columns, with their counts. */}
@@ -1050,6 +1065,22 @@ const RunColumn = memo(function RunColumn({
           {title}
         </Text>
         <Text style={{ ...labelStyle, fontWeight: "400", ...TABULAR }}>{count}</Text>
+        {unread ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: s(5) }}>
+            <View
+              accessibilityElementsHidden
+              style={{
+                width: s(6),
+                height: s(6),
+                borderRadius: s(3),
+                backgroundColor: colors.statusSuccess,
+              }}
+            />
+            <Text style={{ ...labelStyle, color: colors.statusSuccess, ...TABULAR }}>
+              {unread} new
+            </Text>
+          </View>
+        ) : null}
       </View>
       {cards.length ? (
         cards.map((run) => (

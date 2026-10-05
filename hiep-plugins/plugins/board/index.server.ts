@@ -164,10 +164,12 @@ export default function contribute(server: PluginServerContext) {
     ensureActive();
     if (!pending) {
       const revision = store.revision;
+      const checkedAt = new Date().toISOString();
       pending = listBoardAgents(paseo, controller.signal)
-        .then(async ({ agents, visibleAgentIds }) => {
+        .then(async ({ agents, visibleAgentIds, unreadAgentIds }) => {
           ensureActive();
           store.reconcile(agents, revision, visibleAgentIds);
+          store.setUnread(unreadAgentIds, checkedAt);
           await Promise.all(
             store.unresolvedProjects().map(async ({ agentId, cwd }) => {
               // Placement enrichment must not hide the board when an agent is unavailable.
