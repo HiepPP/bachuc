@@ -1013,6 +1013,10 @@ interface ComposerProps {
   agentControls?: DraftAgentControlsProps;
   /** Extra styles merged onto the message input wrapper (e.g. elevated background). */
   inputWrapperStyle?: import("react-native").ViewStyle;
+  /** Docked at the top of the input surface, above the attachments (the agent's track strip). */
+  header?: ReactNode;
+  /** Lines the empty input reserves before it grows. Defaults to 1. */
+  minInputLines?: number;
   /** Optional panel/container layout breakpoint. Defaults to the screen breakpoint. */
   isCompactLayout?: boolean;
   /**
@@ -1301,6 +1305,8 @@ function ComposerContentImpl({
   onAttentionPromptSend,
   agentControls,
   inputWrapperStyle,
+  header,
+  minInputLines,
   isCompactLayout: isCompactLayoutOverride,
   inputMode = "chat",
   readOnly = false,
@@ -2424,6 +2430,18 @@ function ComposerContentImpl({
       t,
     ],
   );
+  const inputSurfaceTop = useMemo(
+    () =>
+      header ? (
+        <>
+          {header}
+          {attachmentTray}
+        </>
+      ) : (
+        attachmentTray
+      ),
+    [attachmentTray, header],
+  );
 
   const queueList = useMemo(
     () =>
@@ -2571,7 +2589,8 @@ function ComposerContentImpl({
                   onFocusChange={handleFocusChange}
                   onHeightChange={onComposerHeightChange}
                   inputWrapperStyle={inputWrapperStyle}
-                  attachmentSlot={attachmentTray}
+                  attachmentSlot={inputSurfaceTop}
+                  minInputLines={minInputLines}
                   inputMode={inputMode}
                   readOnly={readOnly}
                   textReplacement={textReplacement}

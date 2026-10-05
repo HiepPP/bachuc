@@ -7,7 +7,7 @@ interface ComposerControlLayoutValue {
 }
 
 const DEFAULT_LAYOUT: ComposerControlLayoutValue = {
-  glyphSize: 16,
+  glyphSize: 14,
   presentation: {
     showCarets: true,
     showThinkingLabel: true,

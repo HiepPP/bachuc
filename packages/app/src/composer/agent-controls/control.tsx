@@ -112,11 +112,12 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: 0,
     justifyContent: "center",
   },
+  // The xs control tier: 28px tall with sm labels, the same size as the pills above.
   toolbarValue: {
     minWidth: 0,
     flexShrink: 1,
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.base,
+    fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.normal,
   },
   sheetRow: {

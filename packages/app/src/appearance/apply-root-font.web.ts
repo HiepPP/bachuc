@@ -7,9 +7,19 @@
 // beats both RN-web's base font and Unistyles' generated classes (0,1,0) — no reliance
 // on stylesheet order. Code/diff/terminal surfaces carry `data-pmono` (and have their
 // subtree excluded via `:not([data-pmono] *)`) so they keep their monospace font.
+//
+// The composer placeholder sits at the interface `sm` size, like the pills and toolbar around
+// it, while typed text keeps the content size. A pseudo-element cannot take a theme style, so it
+// reads the scaled size from a CSS variable. The line height stays the input's own.
 const STYLE_ID = "paseo-ui-font";
 const RULE =
-  ":is(#root, #overlay-root) *:not([data-pmono]):not([data-pmono] *){font-family:var(--paseo-ui-font);}";
+  ":is(#root, #overlay-root) *:not([data-pmono]):not([data-pmono] *){font-family:var(--paseo-ui-font);}" +
+  "[data-composer-input]::placeholder{font-size:var(--paseo-font-size-sm,12px);}";
+
+export function applyRootFontSizeSm(size: number): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.style.setProperty("--paseo-font-size-sm", `${size}px`);
+}
 
 export function applyRootUiFont(uiFontStack: string): void {
   if (typeof document === "undefined") return;

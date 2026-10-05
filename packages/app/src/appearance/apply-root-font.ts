@@ -2,3 +2,5 @@
 // interface font applies only where components read theme.fontFamily.ui. The web
 // build (apply-root-font.web.ts) overrides this to apply it app-wide.
 export function applyRootUiFont(_uiFontStack: string): void {}
+
+export function applyRootFontSizeSm(_size: number): void {}

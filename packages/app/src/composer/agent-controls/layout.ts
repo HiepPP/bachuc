@@ -130,5 +130,5 @@ export function resolveComposerControlPresentation(
 }
 
 export function resolveComposerToolbarGlyphSize(platform: "web" | "native"): number {
-  return platform === "native" ? 20 : 16;
+  return platform === "native" ? 20 : 14;
 }

@@ -29,7 +29,7 @@ import {
   iconButtonChromeStyle,
   type IconButtonChromeState,
 } from "@/components/ui/icon-button-chrome";
-import { composerPillStyles } from "@/composer/pill-styles";
+import { useComposerPillStyles } from "@/composer/pill-styles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { ToastApiProvider, useToast } from "@/contexts/toast-context";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
@@ -305,6 +305,7 @@ function ButtonControl({ view }: { view: ButtonView }) {
   const chevron = (toolbar || !composer) && !props.layout.compact && expanded;
   const label = resolveLabel(view, composer);
   const press = useCallback(() => pressButton(view, []), [view]);
+  const composerPillStyles = useComposerPillStyles();
   let contextKey: string | undefined;
   if (entry.context.context === "agent") contextKey = entry.context.agentId;
   if (entry.context.context === "draft") contextKey = entry.context.draft.id;
@@ -324,7 +325,16 @@ function ButtonControl({ view }: { view: ButtonView }) {
             color !== undefined && { borderColor: color },
           ]
         : headerButtonStyle(props.layout.compact, { hovered, pressed, open: entry.open }, disabled),
-    [composer, toolbar, corner, color, disabled, entry.open, props.layout.compact],
+    [
+      composer,
+      toolbar,
+      composerPillStyles,
+      corner,
+      color,
+      disabled,
+      entry.open,
+      props.layout.compact,
+    ],
   );
   const labelStyle = useMemo(
     () => [resolveLabelStyle(composer, toolbar), color !== undefined && { color }],
@@ -857,7 +867,7 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius["2xl"],
   },
   toolbarLabel: {
-    fontSize: theme.fontSize.base,
+    fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
     flexShrink: 1,
   },

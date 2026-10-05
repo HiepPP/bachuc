@@ -162,7 +162,7 @@ describe("composer control layout", () => {
       labelPadding: 8,
       caretSize: 14,
     });
-    expect(resolveComposerToolbarGlyphSize("web")).toBe(16);
+    expect(resolveComposerToolbarGlyphSize("web")).toBe(14);
     expect(resolveComposerToolbarGlyphSize("native")).toBe(20);
   });
 });

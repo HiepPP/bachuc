@@ -199,6 +199,8 @@ function noopChangeAttachments() {}
 function noopClearDraft() {}
 
 const PROJECT_ICON_FALLBACK_FONT_SIZE = 10;
+// Room for a real first prompt here; thread composers start at one line to save space.
+const NEW_WORKSPACE_INPUT_LINES = 5;
 const ThemedChevronDown = withUnistyles(ChevronDown);
 const chevronExtraMutedMapping = (theme: Theme) => ({ color: theme.colors.foregroundExtraMuted });
 
@@ -2402,6 +2404,7 @@ export function NewWorkspaceScreen({
       clearDraft={noopClearDraft}
       autoFocus={terminalTakesPrompt}
       autoFocusKey={launchFocusKey}
+      minInputLines={NEW_WORKSPACE_INPUT_LINES}
     />
   ) : (
     <Composer
@@ -2433,6 +2436,7 @@ export function NewWorkspaceScreen({
       autoFocusKey={launchFocusKey}
       commandDraftConfig={composerState?.commandDraftConfig}
       agentControls={agentControlsWithDisabled}
+      minInputLines={NEW_WORKSPACE_INPUT_LINES}
     />
   );
   return (

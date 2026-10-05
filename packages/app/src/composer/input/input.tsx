@@ -59,6 +59,7 @@ import { RenderProfile } from "@/utils/render-profiler";
 import { useComposerHeight } from "./height";
 import { resolveComposerInputMode, type ComposerInputMode } from "@/composer/input-mode";
 import type { NativePastedFile } from "@/composer/native-pasted-image";
+import { COMPOSER_SURFACE_PADDING } from "@/composer/pill-styles";
 import {
   EditingTextInput,
   type EditingTextInputHandle as ComposerTextInputHandle,
@@ -167,6 +168,8 @@ export interface MessageInputProps {
   inputWrapperStyle?: import("react-native").ViewStyle;
   /** Content rendered inside the bordered input surface, above the text input (e.g. attachment pills). */
   attachmentSlot?: React.ReactNode;
+  /** Lines the empty input reserves before it grows. Defaults to 1. */
+  minInputLines?: number;
   /** What this composer is for. See `@/composer/input-mode` for what each mode implies. */
   inputMode?: ComposerInputMode;
   /** Renders `value` as static text on the same surface, for content there is nothing to type into. */
@@ -192,10 +195,17 @@ export interface MessageInputRef {
 }
 
 const MIN_INPUT_HEIGHT_MOBILE = 30;
-const MIN_INPUT_HEIGHT_DESKTOP = 46;
+// One web line at the default content size (15px * 1.4). On web the measured height follows the
+// live content size, and each new line grows the input until it reaches the max height.
+const INPUT_LINE_HEIGHT = 21;
+const MIN_INPUT_HEIGHT_DESKTOP = INPUT_LINE_HEIGHT;
 const DEFAULT_MAX_INPUT_HEIGHT = 160;
 const MAX_INPUT_VIEWPORT_RATIO = 0.5;
 const MIN_INPUT_HEIGHT = isWeb ? MIN_INPUT_HEIGHT_DESKTOP : MIN_INPUT_HEIGHT_MOBILE;
+
+function resolveMinInputHeight(lines: number): number {
+  return MIN_INPUT_HEIGHT + (lines - 1) * INPUT_LINE_HEIGHT;
+}
 type WebTextInputKeyPressEvent = NativeSyntheticEvent<
   TextInputKeyPressEventData & {
     metaKey?: boolean;
@@ -1089,6 +1099,7 @@ interface ResolvedMessageInputProps {
   onHeightChange: ((height: number) => void) | undefined;
   inputWrapperStyle: import("react-native").ViewStyle | undefined;
   attachmentSlot: React.ReactNode;
+  minInputLines: number;
   inputMode: ComposerInputMode;
   readOnly: boolean;
   textReplacement: TextReplacement;
@@ -1136,6 +1147,7 @@ function resolveMessageInputProps(props: MessageInputProps): ResolvedMessageInpu
     onHeightChange: props.onHeightChange,
     inputWrapperStyle: props.inputWrapperStyle,
     attachmentSlot: props.attachmentSlot,
+    minInputLines: props.minInputLines ?? 1,
     inputMode: props.inputMode ?? "chat",
     readOnly: props.readOnly ?? false,
     textReplacement: props.textReplacement,
@@ -1191,6 +1203,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       onHeightChange,
       inputWrapperStyle,
       attachmentSlot,
+      minInputLines,
       inputMode,
       readOnly,
       textReplacement,
@@ -1225,7 +1238,8 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const composerHeight = useComposerHeight({
       getText: getLiveText,
       textareaRef: webTextareaRef,
-      minHeight: MIN_INPUT_HEIGHT,
+      minHeight: resolveMinInputHeight(minInputLines),
+      minLines: minInputLines,
       maxHeight: maxInputHeight,
     });
     const { style: composerHeightStyle, scrollEnabled: isComposerScrollEnabled } = composerHeight;
@@ -1932,19 +1946,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
   inputWrapper: {
     flexShrink: 1,
     flexDirection: "column",
-    gap: theme.spacing[3],
+    gap: theme.spacing[1.5],
     backgroundColor: theme.colors.surface1,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.borderAccent,
     borderRadius: theme.borderRadius["2xl"],
-    paddingVertical: {
-      xs: theme.spacing[2],
-      md: theme.spacing[4],
-    },
-    paddingHorizontal: {
-      xs: theme.spacing[3],
-      md: theme.spacing[4],
-    },
+    paddingVertical: COMPOSER_SURFACE_PADDING.vertical,
+    paddingHorizontal: COMPOSER_SURFACE_PADDING.horizontal,
     ...(isWeb
       ? {
           transitionProperty: "border-color",

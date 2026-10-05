@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo, useState, type ReactElement } from "react";
 import { Pressable } from "react-native";
 import { useTranslation } from "react-i18next";
 import { DiffStat } from "@/components/diff-stat";
-import { composerPillStyles } from "@/composer/pill-styles";
+import { useComposerPillStyles } from "@/composer/pill-styles";
 import { useVisibleWorkspaceDiffStat } from "@/composer/workspace-diff-stat";
 
 interface ComposerDiffStatPillProps {
@@ -13,12 +13,13 @@ interface ComposerDiffStatPillProps {
 
 export function ComposerDiffStatPill({ additions, deletions, onPress }: ComposerDiffStatPillProps) {
   const { t } = useTranslation();
+  const composerPillStyles = useComposerPillStyles();
   const [isHovered, setIsHovered] = useState(false);
   const handleHoverIn = useCallback(() => setIsHovered(true), []);
   const handleHoverOut = useCallback(() => setIsHovered(false), []);
   const bodyStyle = useMemo(
     () => [composerPillStyles.body, isHovered && composerPillStyles.bodyActive],
-    [isHovered],
+    [composerPillStyles, isHovered],
   );
 
   return (

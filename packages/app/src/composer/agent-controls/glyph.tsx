@@ -16,8 +16,8 @@ export function ComposerToolbarGlyph({ children, size }: { children: ReactNode; 
 
 const styles = StyleSheet.create({
   web: {
-    width: 16,
-    height: 16,
+    width: 14,
+    height: 14,
     flexShrink: 0,
     alignItems: "center",
     justifyContent: "center",

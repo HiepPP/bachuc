@@ -5,7 +5,9 @@ import type { ComposerHeightResult } from "./height.types";
 interface ComposerHeightArgs {
   getText: () => string;
   textareaRef: RefObject<HTMLElement | null>;
+  /** Used until the first measurement; the measured floor is `minLines` at the live line height. */
   minHeight: number;
+  minLines: number;
   maxHeight: number;
 }
 
@@ -35,12 +37,13 @@ export function useComposerHeight({
   getText,
   textareaRef,
   minHeight,
+  minLines,
   maxHeight,
 }: ComposerHeightArgs): ComposerHeightResult {
   const [height, setHeight] = useState(minHeight);
   const heightRef = useRef(minHeight);
-  const paramsRef = useRef({ getText, minHeight, maxHeight });
-  paramsRef.current = { getText, minHeight, maxHeight };
+  const paramsRef = useRef({ getText, minHeight, minLines, maxHeight });
+  paramsRef.current = { getText, minHeight, minLines, maxHeight };
   const mirrorRef = useRef<HTMLTextAreaElement | null>(null);
 
   const setBoundedHeight = useCallback((nextHeight: number) => {
@@ -64,6 +67,8 @@ export function useComposerHeight({
         mirror.style[property] = computedStyle[property];
       }
       mirror.style.width = `${sourceWidth}px`;
+      // A textarea is never shorter than its rows, so the floor tracks the live line height.
+      mirror.rows = paramsRef.current.minLines;
       mirror.value = text.endsWith("\n") ? `${text} ` : text;
       setBoundedHeight(mirror.scrollHeight);
     },
@@ -101,7 +106,7 @@ export function useComposerHeight({
 
   useLayoutEffect(() => {
     measure(getText());
-  }, [maxHeight, minHeight, getText, measure]);
+  }, [maxHeight, minHeight, minLines, getText, measure]);
 
   useEffect(() => {
     const source = textareaRef.current;

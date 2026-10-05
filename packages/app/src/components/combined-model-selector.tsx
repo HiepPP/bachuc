@@ -252,7 +252,7 @@ export function CombinedModelSelector({
           chevron={toolbar?.showCaret === false ? null : undefined}
         >
           {selectedProvider.trim().length > 0 ? (
-            <View style={toolbar?.glyphSize === 20 ? styles.toolbarGlyph20 : styles.toolbarGlyph16}>
+            <View style={resolveToolbarGlyphBoxStyle(toolbar?.glyphSize)}>
               <ModelProviderGlyph
                 provider={selectedProvider}
                 serverId={serverId}
@@ -260,7 +260,11 @@ export function CombinedModelSelector({
               />
             </View>
           ) : null}
-          <Text style={styles.triggerText} numberOfLines={1} ellipsizeMode="tail">
+          <Text
+            style={toolbar ? styles.toolbarTriggerText : styles.triggerText}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
             {browser.triggerLabel}
           </Text>
         </ComboboxTrigger>
@@ -287,6 +291,12 @@ export function CombinedModelSelector({
   );
 }
 
+function resolveToolbarGlyphBoxStyle(glyphSize: number | undefined) {
+  if (glyphSize === 20) return styles.toolbarGlyph20;
+  if (glyphSize === 14) return styles.toolbarGlyph14;
+  return styles.toolbarGlyph16;
+}
+
 const styles = StyleSheet.create((theme) => ({
   mobileBrowserContent: {
     paddingHorizontal: 0,
@@ -304,6 +314,11 @@ const styles = StyleSheet.create((theme) => ({
   },
   triggerHovered: {
     backgroundColor: theme.colors.surface2,
+  },
+  toolbarGlyph14: {
+    width: 14,
+    height: 14,
+    flexShrink: 0,
   },
   toolbarGlyph16: {
     width: 16,
@@ -326,6 +341,14 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 1,
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.normal,
+  },
+  // Composer toolbar controls are the xs tier: sm labels, the same size as the pills above.
+  toolbarTriggerText: {
+    minWidth: 0,
+    flexShrink: 1,
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.normal,
   },
   customTriggerWrapper: {

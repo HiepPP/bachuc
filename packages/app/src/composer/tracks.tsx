@@ -16,7 +16,13 @@ import { isWeb } from "@/constants/platform";
 import { getStatusDotColor } from "@/utils/status-dot-color";
 import { STATUS_INDICATOR_FILLED_DOT_SIZE } from "@/utils/status-indicator-geometry";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
-import { COMPOSER_PILL_CLEARANCE, composerPillStyles } from "./pill-styles";
+import {
+  COMPOSER_DOCKED_STRIP_HEIGHT,
+  COMPOSER_PILL_CLEARANCE,
+  COMPOSER_SURFACE_PADDING,
+  ComposerPillPlacementProvider,
+  useComposerPillStyles,
+} from "./pill-styles";
 
 /**
  * The strip of pills where a pane's ambient trackers and plugin actions live.
@@ -37,6 +43,30 @@ export function ComposerTrackBar({ children }: { children: ReactNode }): ReactEl
         {children}
       </View>
     </View>
+  );
+}
+
+/**
+ * The same pills docked into the top of the composer surface instead of floating over the
+ * transcript. The strip bleeds through the surface padding so its divider spans the whole card,
+ * and the pills' own padding puts their glyphs back on the input's text rail. `trailing` pins
+ * to the right edge while there is room and follows the other pills when there is not.
+ */
+export function ComposerTrackStrip({
+  children,
+  trailing,
+}: {
+  children: ReactNode;
+  trailing?: ReactNode;
+}): ReactElement {
+  return (
+    <ComposerPillPlacementProvider value="docked">
+      <View style={styles.strip}>
+        {children}
+        {trailing ? <View style={styles.stripSpacer} /> : null}
+        {trailing}
+      </View>
+    </ComposerPillPlacementProvider>
   );
 }
 
@@ -120,6 +150,7 @@ function ComposerTrackPillTrigger({
   accessibilityLabel: string;
 }): ReactElement {
   const { open } = useMenuContext("ComposerTrackPill");
+  const composerPillStyles = useComposerPillStyles();
   const accessibilityState = useMemo(() => ({ expanded: open }), [open]);
   // React Native Web does not map `accessibilityState.expanded` to `aria-expanded`, so the web
   // attribute is set by hand — the same workaround header toggles use.
@@ -129,11 +160,11 @@ function ComposerTrackPillTrigger({
       composerPillStyles.body,
       (hovered || pressed || isOpen) && composerPillStyles.bodyActive,
     ],
-    [],
+    [composerPillStyles],
   );
   const labelStyle = useMemo(
     () => [composerPillStyles.label, open && composerPillStyles.labelActive],
-    [open],
+    [composerPillStyles, open],
   );
 
   return (
@@ -332,6 +363,21 @@ const styles = StyleSheet.create((theme) => {
       flexDirection: "row",
       alignItems: "center",
       gap: theme.spacing[1],
+    },
+    strip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing[0.5],
+      minHeight: COMPOSER_DOCKED_STRIP_HEIGHT,
+      marginTop: -COMPOSER_SURFACE_PADDING.vertical,
+      marginHorizontal: -COMPOSER_SURFACE_PADDING.horizontal,
+      paddingHorizontal: COMPOSER_SURFACE_PADDING.horizontal - theme.spacing[1.5],
+      borderBottomWidth: theme.borderWidth[1],
+      borderBottomColor: theme.colors.border,
+      overflow: "hidden",
+    },
+    stripSpacer: {
+      flexGrow: 1,
     },
     // The rail every panel row sits on: inset from the panel edge so the fill is a rounded block
     // inside it, and tall enough that revealing an action button cannot resize the row.

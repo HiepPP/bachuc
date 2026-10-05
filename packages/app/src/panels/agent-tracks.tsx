@@ -1,8 +1,8 @@
-import { memo, useCallback, type ReactElement } from "react";
+import { memo, useCallback, useMemo, type ReactElement } from "react";
 import { WorkspaceDiffStatPill } from "@/composer/diff-stat-pill";
 import { useWorkspaceHasDiffStat } from "@/composer/workspace-diff-stat";
 import { AgentTaskList } from "@/composer/task-list";
-import { ComposerTrackBar } from "@/composer/tracks";
+import { ComposerTrackStrip } from "@/composer/tracks";
 import { supportsDesktopPaneSplits, useIsCompactFormFactor } from "@/constants/layout";
 import { usePaneContext } from "@/panels/pane-context";
 import { useSettings } from "@/hooks/use-settings";
@@ -22,11 +22,11 @@ import { openPreferredWorkspaceTarget } from "@/workspace-tabs/open-beside";
 import { openComposerChanges } from "@/workspace-tabs/open-supporting-view";
 
 /**
- * The pane's ambient context — workspace changes, subagents, and tasks — as a row of pills above
- * the composer.
+ * The pane's ambient context — workspace changes, subagents, and tasks — as a strip of pills
+ * docked at the top of the composer surface.
  *
- * The row shares the composer's keyboard transform and owns the space between itself and the
- * transcript. Each pill owns its action while tab placement stays behind the workspace boundary.
+ * The composer owns the strip's height, so the transcript needs no extra clearance for it. Each
+ * pill owns its action while tab placement stays behind the workspace boundary.
  */
 export const AgentTracks = memo(function AgentTracks({
   serverId,
@@ -111,6 +111,16 @@ export const AgentTracks = memo(function AgentTracks({
       preferences: openInSidePane,
     });
   }, [cwd, isCompact, openInSidePane, serverId, workspaceKey]);
+  const diffStatPill = useMemo(
+    () => (
+      <WorkspaceDiffStatPill
+        serverId={serverId}
+        workspaceId={workspaceId}
+        onPress={handleOpenChanges}
+      />
+    ),
+    [handleOpenChanges, serverId, workspaceId],
+  );
 
   if (
     !hasWorkspaceDiffStat &&
@@ -125,7 +135,7 @@ export const AgentTracks = memo(function AgentTracks({
   }
 
   return (
-    <ComposerTrackBar>
+    <ComposerTrackStrip trailing={diffStatPill}>
       <AgentTaskList tasks={tasks} />
       <SubagentsTrack
         serverId={serverId}
@@ -143,12 +153,7 @@ export const AgentTracks = memo(function AgentTracks({
         agentId={agentId}
         compact={isCompact}
       />
-      <WorkspaceDiffStatPill
-        serverId={serverId}
-        workspaceId={workspaceId}
-        onPress={handleOpenChanges}
-      />
-    </ComposerTrackBar>
+    </ComposerTrackStrip>
   );
 });
 

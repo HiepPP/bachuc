@@ -7,7 +7,7 @@ import {
   REGISTERED_THEMES,
   type Theme,
 } from "@/styles/theme";
-import { applyRootUiFont } from "./apply-root-font";
+import { applyRootFontSizeSm, applyRootUiFont } from "./apply-root-font";
 
 const ALL_THEME_KEYS = Object.keys(REGISTERED_THEMES) as (keyof typeof REGISTERED_THEMES)[];
 
@@ -63,6 +63,7 @@ export function applyAppearance(input: AppearanceInput): void {
   const ui = input.uiFontFamily.trim() || DEFAULT_UI_FONT_STACK;
   const mono = input.monoFontFamily.trim() || DEFAULT_MONO_FONT_STACK;
   const diffLineHeight = Math.round(input.codeFontSize * 1.5); // couple to code size
+  const fontSize = scaleFontSize(input.uiBaseFontSize, input.contentFontSize, input.codeFontSize);
   const activeTheme = UnistylesRuntime.themeName;
   // Unistyles web emits after each registry patch. Updating the mounted theme
   // first ensures subscribers receive its new numeric tokens in this render;
@@ -74,11 +75,6 @@ export function applyAppearance(input: AppearanceInput): void {
   for (const key of themeKeys) {
     UnistylesRuntime.updateTheme(key, (t) => {
       const fontFamily = { ui, mono };
-      const fontSize = scaleFontSize(
-        input.uiBaseFontSize,
-        input.contentFontSize,
-        input.codeFontSize,
-      );
       const lineHeight = { ...t.lineHeight, diff: diffLineHeight };
       if (t.colorScheme === "light") {
         return {
@@ -102,4 +98,5 @@ export function applyAppearance(input: AppearanceInput): void {
   // Web: apply the UI font app-wide (RN-web stamps a default font on every text
   // element, so it can't be done through the theme alone). No-op on native.
   applyRootUiFont(ui);
+  applyRootFontSizeSm(fontSize.sm);
 }

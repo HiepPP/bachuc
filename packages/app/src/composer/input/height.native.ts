@@ -6,6 +6,7 @@ interface ComposerHeightArgs {
   getText: () => string;
   textareaRef: RefObject<unknown>;
   minHeight: number;
+  minLines: number;
   maxHeight: number;
 }
 

@@ -27,11 +27,6 @@ import { FileDropZone } from "@/components/file-drop/file-drop-zone";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { RetainedChatContent } from "./retained-chat-content";
 import { Composer } from "@/composer";
-import { useWorkspaceHasDiffStat } from "@/composer/workspace-diff-stat";
-import {
-  resolveComposerTrackControlClearance,
-  resolveComposerTrackTailClearance,
-} from "@/composer/pill-styles";
 import { getActiveMessageSubmissions } from "@/composer/submission/model";
 import { RewindComposerRestoreProvider } from "@/components/rewind/composer-restore";
 import { getProviderIcon } from "@/components/provider-icons";
@@ -76,7 +71,7 @@ import {
   deriveRouteBottomAnchorRequest,
 } from "@/screens/agent/agent-ready-screen-bottom-anchor";
 import { WorkspaceDraftAgentTab } from "@/composer/draft/workspace-tab";
-import { AgentTracks, hasAgentTracks } from "@/panels/agent-tracks";
+import { AgentTracks } from "@/panels/agent-tracks";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import { buildDraftStoreKey, generateDraftId } from "@/stores/draft-keys";
 import {
@@ -1168,12 +1163,32 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   });
   const hasPluginComposerPills = useHasPluginComposerPills(serverId, workspaceId, agentId);
   const hasActiveComposer = !agentState.archivedAt && !isArchivingCurrentAgent;
-  const hasVisibleAgentTracks = hasAgentTracks({
-    subagentRows,
-    tasks,
-    archiveFinishedStatus: archiveFinishedSubagents.status,
-    hasPluginComposerPills,
-  });
+  const composerTracks = useMemo(
+    () => (
+      <AgentTracks
+        serverId={serverId}
+        workspaceId={workspaceId}
+        agentId={agentId}
+        cwd={cwd}
+        subagentRows={subagentRows}
+        tasks={tasks}
+        archiveFinishedStatus={archiveFinishedSubagents.status}
+        onArchiveFinished={archiveFinishedSubagents.archiveFinished}
+        hasPluginComposerPills={hasPluginComposerPills}
+      />
+    ),
+    [
+      agentId,
+      archiveFinishedSubagents.archiveFinished,
+      archiveFinishedSubagents.status,
+      cwd,
+      hasPluginComposerPills,
+      serverId,
+      subagentRows,
+      tasks,
+      workspaceId,
+    ],
+  );
   const rawAgentInputDraft = useAgentInputDraft({
     draftKey: buildDraftStoreKey({
       serverId,
@@ -1235,6 +1250,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
         onAttentionPromptSend={onAttentionPromptSend}
         onComposerHeightChange={handleComposerHeightChange}
         onMessageSent={handleMessageSent}
+        tracks={composerTracks}
       />
     </RenderProfile>
   );
@@ -1244,30 +1260,14 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
         <AgentStreamSection
           streamViewRef={streamViewRef}
           serverId={serverId}
-          workspaceId={workspaceId}
           agentId={agentId}
           agent={effectiveAgent}
           routeBottomAnchorRequest={routeBottomAnchorRequest}
           hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
-          hasActiveComposer={hasActiveComposer}
-          hasVisibleAgentTracks={hasVisibleAgentTracks}
           toast={toastApi}
           onOpenWorkspaceFile={onOpenWorkspaceFile}
         />
       </RenderProfile>
-      {hasActiveComposer ? (
-        <AgentTracks
-          serverId={serverId}
-          workspaceId={workspaceId}
-          agentId={agentId}
-          cwd={cwd}
-          subagentRows={subagentRows}
-          tasks={tasks}
-          archiveFinishedStatus={archiveFinishedSubagents.status}
-          onArchiveFinished={archiveFinishedSubagents.archiveFinished}
-          hasPluginComposerPills={hasPluginComposerPills}
-        />
-      ) : null}
       {hasActiveComposer ? (
         <PluginComposerCornerPills
           serverId={serverId}
@@ -1376,38 +1376,22 @@ function TimelineSyncErrorCallout({
 const AgentStreamSection = memo(function AgentStreamSection({
   streamViewRef,
   serverId,
-  workspaceId,
   agentId,
   agent,
   routeBottomAnchorRequest,
   hasAppliedAuthoritativeHistory,
-  hasActiveComposer,
-  hasVisibleAgentTracks,
   toast,
   onOpenWorkspaceFile,
 }: {
   streamViewRef: React.RefObject<AgentStreamViewHandle | null>;
   serverId: string;
-  workspaceId: string;
   agentId?: string;
   agent: AgentScreenAgent;
   routeBottomAnchorRequest: RouteBottomAnchorRequest;
   hasAppliedAuthoritativeHistory: boolean;
-  hasActiveComposer: boolean;
-  hasVisibleAgentTracks: boolean;
   toast: ReturnType<typeof useToastHost>["api"];
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
 }) {
-  const isCompactFormFactor = useIsCompactFormFactor();
-  const hasWorkspaceDiffStat = useWorkspaceHasDiffStat(serverId, workspaceId);
-  const hasVisibleComposerTracks =
-    hasActiveComposer && (hasVisibleAgentTracks || hasWorkspaceDiffStat);
-  const bottomOverlayTailClearance = hasVisibleComposerTracks
-    ? resolveComposerTrackTailClearance(isCompactFormFactor)
-    : 0;
-  const bottomOverlayControlClearance = hasVisibleComposerTracks
-    ? resolveComposerTrackControlClearance(isCompactFormFactor)
-    : 0;
   const streamItemsRaw = useSessionStore((state) =>
     agentId ? state.sessions[serverId]?.agentStreamTail?.get(agentId) : undefined,
   );
@@ -1463,8 +1447,6 @@ const AgentStreamSection = memo(function AgentStreamSection({
       pendingPermissions={pendingPermissions}
       routeBottomAnchorRequest={routeBottomAnchorRequest}
       isAuthoritativeHistoryReady={hasAppliedAuthoritativeHistory}
-      bottomOverlayTailClearance={bottomOverlayTailClearance}
-      bottomOverlayControlClearance={bottomOverlayControlClearance}
       toast={toast}
       pendingMessageSubmissions={pendingMessageSubmissions}
       turnPresentation={turnPresentation}
@@ -1486,6 +1468,7 @@ const AgentComposerSection = memo(function AgentComposerSection({
   onAttentionPromptSend,
   onComposerHeightChange,
   onMessageSent,
+  tracks,
 }: {
   agentId?: string;
   serverId: string;
@@ -1499,6 +1482,8 @@ const AgentComposerSection = memo(function AgentComposerSection({
   onAttentionPromptSend: () => void;
   onComposerHeightChange: (height: number) => void;
   onMessageSent: () => void;
+  /** Docked at the top of the composer surface. */
+  tracks: ReactNode;
 }) {
   if (!agentId) {
     return null;
@@ -1522,6 +1507,7 @@ const AgentComposerSection = memo(function AgentComposerSection({
       onAttentionPromptSend={onAttentionPromptSend}
       onComposerHeightChange={onComposerHeightChange}
       onMessageSent={onMessageSent}
+      tracks={tracks}
     />
   );
 });
@@ -1537,6 +1523,7 @@ function ActiveAgentComposer({
   onAttentionPromptSend,
   onComposerHeightChange,
   onMessageSent,
+  tracks,
 }: {
   agentId: string;
   serverId: string;
@@ -1548,6 +1535,7 @@ function ActiveAgentComposer({
   onAttentionPromptSend: () => void;
   onComposerHeightChange: (height: number) => void;
   onMessageSent: () => void;
+  tracks: ReactNode;
 }) {
   const isCompactFormFactor = useIsCompactFormFactor();
   const { onLayout: onInputAreaLayout, isBelow: isCompactComposerLayout } = useContainerWidthBelow(
@@ -1649,6 +1637,7 @@ function ActiveAgentComposer({
         onMessageSent={onMessageSent}
         onClientSlashCommand={handleClientSlashCommand}
         isCompactLayout={isCompactComposerLayout}
+        header={tracks}
       />
     </View>
   );
