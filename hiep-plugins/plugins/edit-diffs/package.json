@@ -1,0 +1,27 @@
+{
+  "name": "edit-diffs",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "lint": "oxlint --disable-nested-config index.server.ts index.client.tsx client server shared tests",
+    "format": "oxfmt index.server.ts index.client.tsx client server shared tests README.md package.json tsconfig.json paseo-plugin.json"
+  },
+  "devDependencies": {
+    "@getpaseo/client": "file:../../../packages/client",
+    "@getpaseo/plugin": "file:../../../packages/plugin",
+    "@getpaseo/protocol": "file:../../../packages/protocol",
+    "@tanstack/react-query": "^5.90.11",
+    "@types/node": "^22.0.0",
+    "@types/react": "~19.2.0",
+    "oxfmt": "0.46.0",
+    "oxlint": "1.61.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "id": "edit-diffs",
+  "requirements": {
+    "paseo": ">=1.0.0-hiep"
+  }
+}
