@@ -10,6 +10,10 @@ the Overview tool call groups, so they show even when the commands around them a
 - A write shows the whole written file as added lines, numbered from line 1. The provider
   sends no old content, so overwriting an existing file also shows only added lines.
 - Only edit and write tool calls change. Read, shell, and other tool calls keep Paseo's rows.
+- Each new agent's system prompt gets a rule: change files only with edit tools, never with shell
+  scripts such as `python3 - <<EOF` or `sed -i`. A shell edit has no diff to show. Claude's
+  bypass mode tells it to prefer shell edits, so the rule says it overrides that. Agents created
+  before the plugin loaded keep their old prompt.
 
 ## Line numbers
 
