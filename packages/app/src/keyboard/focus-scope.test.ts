@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolveKeyboardFocusScope } from "./focus-scope";
+import { isTypeToFocusKey, resolveKeyboardFocusScope } from "./focus-scope";
 
 class FakeNode {
   parentElement: FakeElement | null = null;
@@ -76,5 +76,27 @@ describe("resolveKeyboardFocusScope", () => {
       commandCenterOpen: false,
     });
     expect(scope).toBe("editable");
+  });
+});
+
+describe("isTypeToFocusKey", () => {
+  const key = (
+    value: string,
+    mods: Partial<Record<"metaKey" | "ctrlKey" | "altKey", boolean>> = {},
+  ) => isTypeToFocusKey({ key: value, metaKey: false, ctrlKey: false, altKey: false, ...mods });
+
+  it("accepts plain printable keys", () => {
+    expect(key("a")).toBe(true);
+    expect(key("A")).toBe(true);
+    expect(key("/")).toBe(true);
+  });
+
+  it("rejects space, named keys, and modified keys", () => {
+    expect(key(" ")).toBe(false);
+    expect(key("Enter")).toBe(false);
+    expect(key("ArrowDown")).toBe(false);
+    expect(key("l", { metaKey: true })).toBe(false);
+    expect(key("l", { ctrlKey: true })).toBe(false);
+    expect(key("1", { altKey: true })).toBe(false);
   });
 });

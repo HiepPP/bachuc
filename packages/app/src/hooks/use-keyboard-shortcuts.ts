@@ -13,7 +13,7 @@ import {
   buildEffectiveBindings,
   getWorkspaceIndexJumpModifierKey,
 } from "@/keyboard/keyboard-shortcuts";
-import { resolveKeyboardFocusScope } from "@/keyboard/focus-scope";
+import { isTypeToFocusKey, resolveKeyboardFocusScope } from "@/keyboard/focus-scope";
 import {
   buildBrowserKeyboardPolicy,
   parseBrowserShortcutInput,
@@ -365,6 +365,26 @@ export function useKeyboardShortcuts({
     });
   });
 
+  // Runs in the bubble phase, after shortcuts and component handlers had their
+  // chance. Focusing the composer during keydown makes the browser insert the
+  // typed character there.
+  const handleTypeToFocus = useStableEvent((event: KeyboardEvent) => {
+    if (!shouldHandle() || event.defaultPrevented || !isTypeToFocusKey(event)) {
+      return;
+    }
+    const store = useKeyboardShortcutsStore.getState();
+    if (store.capturingShortcut || store.commandCenterOpen || store.shortcutsDialogOpen) {
+      return;
+    }
+    if (hasActiveWebOverlay() || document.querySelector("[aria-modal='true']")) {
+      return;
+    }
+    if (resolveKeyboardFocusScope({ target: event.target, commandCenterOpen: false }) !== "other") {
+      return;
+    }
+    keyboardActionDispatcher.dispatch({ id: "message-input.focus", scope: "message-input" });
+  });
+
   const handleKeyUp = useStableEvent((event: KeyboardEvent) => {
     const key = event.key ?? "";
     if (key === badgeModifierKey) {
@@ -394,6 +414,7 @@ export function useKeyboardShortcuts({
     };
 
     window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("keydown", handleTypeToFocus);
     window.addEventListener("keyup", handleKeyUp, true);
     window.addEventListener("blur", handleBlurOrHide);
     document.addEventListener("visibilitychange", handleBlurOrHide);
@@ -411,6 +432,7 @@ export function useKeyboardShortcuts({
         };
       }
       window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("keydown", handleTypeToFocus);
       window.removeEventListener("keyup", handleKeyUp, true);
       window.removeEventListener("blur", handleBlurOrHide);
       document.removeEventListener("visibilitychange", handleBlurOrHide);
@@ -425,6 +447,7 @@ export function useKeyboardShortcuts({
     handleBrowserShortcutInput,
     handleKeyDown,
     handleKeyUp,
+    handleTypeToFocus,
     resetModifiers,
     shortcutsAvailable,
   ]);

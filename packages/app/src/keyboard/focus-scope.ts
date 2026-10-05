@@ -28,6 +28,17 @@ function getFocusCandidateElements(target: EventTarget | null): Element[] {
   return candidates;
 }
 
+// A plain printable key that should move focus to the composer and type there.
+// Space is excluded so it still activates a focused button.
+export function isTypeToFocusKey(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey">,
+): boolean {
+  if (event.metaKey || event.ctrlKey || event.altKey) {
+    return false;
+  }
+  return event.key.length === 1 && event.key !== " ";
+}
+
 export function resolveKeyboardFocusScope(input: {
   target: EventTarget | null;
   commandCenterOpen: boolean;
