@@ -34,6 +34,8 @@ export type {
   PluginSidebarSectionContribution,
   PluginWorkspaceHeaderSubtitleProps,
   PluginWorkspaceHeaderSubtitleContribution,
+  PluginComposerStopButtonProps,
+  PluginComposerStopButtonContribution,
   PluginComposerInterceptInput,
   PluginComposerSendKey,
   PluginComposerInterceptResult,

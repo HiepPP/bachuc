@@ -90,3 +90,16 @@ export declare const Markdown: ComponentType<{
 }>;
 /** Command on macOS, Control elsewhere; false on touch-only clients. */
 export declare function usePrimaryModifier(): boolean;
+
+/** A run of code text; `style` names its syntax category, such as `"keyword"`. */
+export interface SyntaxTokenData {
+  text: string;
+  style: string | null;
+}
+/**
+ * Tokenizes `code` with the host highlighter, chosen by the extension of `filePath`.
+ * Returns one token array per line, or null when the language is unsupported or the code is too large.
+ */
+export declare function tokenizeCode(code: string, filePath: string): SyntaxTokenData[][] | null;
+/** Renders one token in the active theme's syntax color. Nest it inside a `Text`. */
+export declare const SyntaxToken: ComponentType<{ token: SyntaxTokenData }>;

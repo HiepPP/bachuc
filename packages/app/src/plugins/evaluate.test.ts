@@ -3,6 +3,8 @@ import { runPluginClientBundle, type PluginClientRuntime } from "./evaluate";
 
 // This suite checks module registration, not Markdown rendering. The native dependency ships JSX in .js.
 vi.mock("@/components/markdown/renderer", () => ({ MarkdownRenderer: () => null }));
+// The stub theme has no syntax palette.
+vi.mock("@/styles/syntax-token-styles", () => ({ syntaxTokenStyleFor: () => undefined }));
 
 const runtime = {
   paseo: {},
@@ -529,6 +531,27 @@ describe("evaluatePluginClientBundle", () => {
     ).toThrow("Duplicate workspace header subtitle: project");
   });
 
+  it("collects a composer stop button and rejects a duplicate id", () => {
+    const plugin = evaluatePluginClientBundle(
+      "example",
+      bundle(`
+        function Face() { return null; }
+        plugin.addComposerStopButton({ id: "orb", Component: Face });
+      `),
+    );
+    expect(plugin.composerStopButtons?.map((button) => button.id)).toEqual(["orb"]);
+    expect(() =>
+      evaluatePluginClientBundle(
+        "example",
+        bundle(`
+          function Face() { return null; }
+          plugin.addComposerStopButton({ id: "orb", Component: Face });
+          plugin.addComposerStopButton({ id: "orb", Component: Face });
+        `),
+      ),
+    ).toThrow("Duplicate composer stop button: orb");
+  });
+
   it("rejects a bundle without a default contribution function", () => {
     expect(() => evaluatePluginClientBundle("example", `(function() { return {}; })`)).toThrow(
       "must default export a function",
@@ -591,7 +614,7 @@ describe("evaluatePluginClientBundle", () => {
       const shared = require("@getpaseo/plugin");
       const client = require("@getpaseo/plugin/client");
       const ui = require("@getpaseo/plugin/client/ui");
-      for (const name of ["ExternalLink", "Button", "Markdown", "usePrimaryModifier"]) {
+      for (const name of ["ExternalLink", "Button", "Markdown", "usePrimaryModifier", "tokenizeCode", "SyntaxToken"]) {
         if (typeof ui[name] !== "function") throw new Error(name);
       }
       for (const name of ["usePaseo", "useRpc", "useSettings", "useAgent", "useWorkspace", "openExternalUrl"]) {

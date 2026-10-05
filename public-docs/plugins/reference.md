@@ -161,6 +161,12 @@ button face; hover callbacks run alongside the host hover state. `Markdown` acce
 `usePrimaryModifier()` reports Command on macOS and Control elsewhere, resetting on window blur.
 It returns false on native clients; always provide a visible touch action for the alternate operation.
 
+`tokenizeCode(code, filePath)` runs the host syntax highlighter, choosing the language from the
+file extension. It returns one `{ text, style }` array per line, or `null` when the language is
+unsupported or the code exceeds the size cap; render plain text then. Render each token with
+`<SyntaxToken token={token} />` inside a `Text`, so it takes the active theme's syntax color.
+Tokenize a whole document rather than single lines, so multi-line strings and comments keep their color.
+
 ### Cross-platform rules
 
 Client code runs on iOS, Android, and in browsers through React Native Web. A component that works
@@ -768,6 +774,15 @@ workspace title, for workspaces on the plugin's host. The component receives the
 `host`, and `layout`, plus `workspaceId`, `projectId`, and `projectDisplayName`. The first
 contribution on the host wins. Paseo shows its own project name when the component throws, and
 hides the row when the project name repeats the workspace title on a wide layout.
+
+### Composer stop button
+
+`client.addComposerStopButton({ id, Component })` replaces the look of the stop button that the
+composer shows while an agent on the plugin's host runs. The component receives the surface
+`theme`, `host`, and `layout`, plus `agentId`, `size` (the button's square box in px), `iconSize`
+(the px size of the composer's other button icons), and `cancelling`, which is true from the stop press until the agent stops. Paseo keeps the press,
+tooltip, shortcut, and disabled state. The first contribution on the host wins. Paseo shows its
+own red button when the component throws.
 
 ### Sidebar projects and sections
 

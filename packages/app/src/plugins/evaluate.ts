@@ -26,6 +26,7 @@ import {
   type PluginSidebarProjectMenuContribution,
   type PluginSidebarSectionContribution,
   type PluginWorkspaceHeaderSubtitleContribution,
+  type PluginComposerStopButtonContribution,
   type PluginSurfaceProps,
   type PluginTimelineRendererContribution,
   type PluginTimelineTransformerContribution,
@@ -102,6 +103,8 @@ export function runPluginClientBundle(
   const sidebarSections: PluginSidebarSectionContribution[] = [];
   const workspaceHeaderSubtitles: PluginWorkspaceHeaderSubtitleContribution[] = [];
   const workspaceHeaderSubtitleIds = new Set<string>();
+  const composerStopButtons: PluginComposerStopButtonContribution[] = [];
+  const composerStopButtonIds = new Set<string>();
   const sidebarContributionIds = new Set<string>();
   const collector: Omit<EvaluatedPlugin, "id" | "cleanup"> = {
     surfaces: [],
@@ -119,6 +122,7 @@ export function runPluginClientBundle(
     sidebarProjectMenus,
     sidebarSections,
     workspaceHeaderSubtitles,
+    composerStopButtons,
   };
   const composerInterceptorIds = new Set<string>();
   const surfaceIds = new Set<string>();
@@ -467,6 +471,19 @@ export function runPluginClientBundle(
         () => workspaceHeaderSubtitleIds.delete(subtitleId),
       );
     },
+    addComposerStopButton(contribution) {
+      const buttonId = requireId(contribution.id, "composer stop button id");
+      if (composerStopButtonIds.has(buttonId))
+        throw new Error(`Duplicate composer stop button: ${buttonId}`);
+      if (typeof contribution.Component !== "function")
+        throw new Error(`Composer stop button ${buttonId} is not a component`);
+      composerStopButtonIds.add(buttonId);
+      return register(
+        composerStopButtons,
+        { id: buttonId, Component: contribution.Component },
+        () => composerStopButtonIds.delete(buttonId),
+      );
+    },
     openNewWorkspace(input) {
       if (!runtime.openNewWorkspace) throw new Error("New workspace is unavailable on this host");
       if (!input.cwd.trim()) throw new Error("openNewWorkspace needs a directory");
@@ -580,5 +597,6 @@ export function runPluginClientBundle(
     sidebarProjectMenus: collector.sidebarProjectMenus,
     sidebarSections: collector.sidebarSections,
     workspaceHeaderSubtitles: collector.workspaceHeaderSubtitles,
+    composerStopButtons: collector.composerStopButtons,
   };
 }

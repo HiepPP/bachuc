@@ -116,6 +116,8 @@ export interface PluginClientContext extends PluginCommandCapabilities {
   addWorkspaceHeaderSubtitle(
     contribution: PluginWorkspaceHeaderSubtitleContribution,
   ): PluginCleanup;
+  /** Replaces the look of the composer's stop button for agents on this plugin's host. */
+  addComposerStopButton(contribution: PluginComposerStopButtonContribution): PluginCleanup;
   /** Runs before a composer on this plugin's host sends or queues a message. */
   addComposerInterceptor(contribution: PluginComposerInterceptorContribution): PluginCleanup;
   /** Opens the new workspace screen for a project directory, on this plugin's host by default. */
@@ -199,6 +201,21 @@ export interface PluginWorkspaceHeaderSubtitleProps extends PluginHostProps {
 export interface PluginWorkspaceHeaderSubtitleContribution {
   id: string;
   Component: ComponentType<PluginWorkspaceHeaderSubtitleProps>;
+}
+
+export interface PluginComposerStopButtonProps extends PluginHostProps {
+  agentId: string;
+  /** The button's square box in px. */
+  size: number;
+  /** The px size of the icons in the composer's other buttons. */
+  iconSize: number;
+  /** True from the stop press until the agent stops. */
+  cancelling: boolean;
+}
+
+export interface PluginComposerStopButtonContribution {
+  id: string;
+  Component: ComponentType<PluginComposerStopButtonProps>;
 }
 
 /** `agentId` is null for composers that create a new agent. */

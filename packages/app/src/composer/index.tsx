@@ -94,6 +94,7 @@ import { usePluginClientSlashCommands } from "@/plugins/client-slash-commands";
 import { createPluginClientStateSource } from "@/plugins/client-state/source";
 import { PluginComposerToolbarPills } from "@/plugins/buttons/view";
 import { registerComposerHandle, runComposerInterceptors } from "@/plugins/composer";
+import { PluginComposerStopButtonFace } from "@/plugins/composer-stop-button";
 import type { PluginComposerDraftState } from "@/plugins/composer/draft";
 import { pluginRegistry } from "@/plugins/registry";
 import {
@@ -252,6 +253,8 @@ function resolveCheckoutRemoteUrl(
 ): string | null {
   return checkoutStatus?.remoteUrl ?? null;
 }
+
+const CANCEL_BUTTON_SIZE = 28;
 
 function buildCancelButtonStyle(isConnected: boolean, isCancellingAgent: boolean): object[] {
   const disabled = !isConnected || isCancellingAgent ? styles.buttonDisabled : undefined;
@@ -1123,6 +1126,8 @@ function ComposerForgeBinding({
 }
 
 interface ComposerCancelButtonProps {
+  serverId: string;
+  agentId: string;
   buttonIconSize: number;
   cancelButtonStyle: (object | undefined)[];
   handleCancelAgent: () => void;
@@ -1133,6 +1138,8 @@ interface ComposerCancelButtonProps {
 }
 
 function ComposerCancelButton({
+  serverId,
+  agentId,
   buttonIconSize,
   cancelButtonStyle,
   handleCancelAgent,
@@ -1149,6 +1156,17 @@ function ComposerCancelButton({
   ) : (
     <Square size={buttonIconSize} color="white" fill="white" />
   );
+  const face = (
+    <PluginComposerStopButtonFace
+      serverId={serverId}
+      agentId={agentId}
+      size={CANCEL_BUTTON_SIZE}
+      iconSize={buttonIconSize}
+      cancelling={isCancellingAgent}
+    >
+      <View style={styles.cancelButtonFace}>{icon}</View>
+    </PluginComposerStopButtonFace>
+  );
   const shortcutNode = agentInterruptKeys ? <Shortcut chord={agentInterruptKeys} /> : null;
   return (
     <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
@@ -1159,7 +1177,7 @@ function ComposerCancelButton({
         accessibilityRole="button"
         style={cancelButtonStyle}
       >
-        {icon}
+        {face}
       </TooltipTrigger>
       <TooltipContent side="top" align="center" offset={8}>
         <View style={styles.tooltipRow}>
@@ -2103,6 +2121,8 @@ function ComposerContentImpl({
   const activeActionContent = useMemo(
     () => (
       <ComposerCancelButton
+        serverId={serverId}
+        agentId={agentId}
         buttonIconSize={buttonIconSize}
         cancelButtonStyle={cancelButtonStyle}
         handleCancelAgent={handleCancelAgent}
@@ -2113,12 +2133,14 @@ function ComposerContentImpl({
       />
     ),
     [
+      agentId,
       agentInterruptKeys,
       buttonIconSize,
       cancelButtonStyle,
       handleCancelAgent,
       isCancellingAgent,
       isConnected,
+      serverId,
       t,
     ],
   );
@@ -2667,13 +2689,20 @@ const styles = StyleSheet.create((theme: Theme) => ({
     gap: theme.spacing[3],
   },
   cancelButton: {
-    width: 28,
-    height: 28,
+    width: CANCEL_BUTTON_SIZE,
+    height: CANCEL_BUTTON_SIZE,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: theme.spacing[1],
+  },
+  // A plugin can replace this face, so the red circle lives here rather than on the pressable.
+  cancelButtonFace: {
+    width: CANCEL_BUTTON_SIZE,
+    height: CANCEL_BUTTON_SIZE,
     borderRadius: theme.borderRadius.full,
     backgroundColor: theme.colors.palette.red[600],
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: theme.spacing[1],
   },
   rightControls: {
     flexDirection: "row",
