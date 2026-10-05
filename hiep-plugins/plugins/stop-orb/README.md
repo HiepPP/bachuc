@@ -5,7 +5,8 @@ Replaces the composer's red stop button with the `solving` thinking orb from
 agent, as before. The tooltip and the interrupt shortcut stay. The orb freezes after you press
 it, until the agent stops.
 
-- The orb turns red on hover, in the red of Paseo's stop button, to show that a press stops the agent.
+- The orb is always red, in the red of Paseo's stop button, not the library's grayscale ink.
+- On hover the orb gains the composer's icon-button background and spins faster.
 - Web and desktop only. thinking-orbs draws on a DOM canvas, so iOS and Android keep Paseo's red button.
 - The orb's sphere is as wide as the composer's other icons (16 px on web). Its theme follows the Paseo surface color.
 - No server entry, RPC, settings, or network requests.
