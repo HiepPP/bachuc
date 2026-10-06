@@ -806,6 +806,23 @@ const AgentActiveTurnPayloadSchema = z.object({
   startedAt: z.string().nullable(),
 });
 
+// COMPAT(agentMessageQueue): added in v1.0.0-hiep, remove the gate after 2027-04-06.
+export const AgentQueuedMessageSummarySchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  /** "image" for an image, else the attachment `type`. Image bytes never ride in snapshots. */
+  attachmentKinds: z.array(z.string()),
+  createdAt: z.string(),
+});
+
+export const AgentMessageQueueSummarySchema = z.object({
+  /** Stop holds the queue until the user resumes it or promotes an item. */
+  held: z.boolean(),
+  items: z.array(AgentQueuedMessageSummarySchema),
+});
+
+export type AgentMessageQueueSummary = z.infer<typeof AgentMessageQueueSummarySchema>;
+
 export const AgentSnapshotPayloadSchema = z.object({
   id: z.string(),
   provider: AgentProviderSchema,
@@ -835,6 +852,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   attentionTimestamp: z.string().nullable().optional(),
   archivedAt: z.string().nullable().optional(),
   providerUnavailable: z.boolean().optional(),
+  queue: AgentMessageQueueSummarySchema.optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
@@ -1191,6 +1209,17 @@ const ImageAttachmentSchema = z.object({
   data: z.string(), // base64 encoded image
   mimeType: z.string(), // e.g., "image/jpeg", "image/png"
 });
+
+/** A queued message with its full content, returned when the user takes it back. */
+export const AgentQueuedMessageSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  images: z.array(ImageAttachmentSchema).optional(),
+  attachments: z.array(AgentAttachmentSchema).optional(),
+  createdAt: z.string(),
+});
+
+export type AgentQueuedMessage = z.infer<typeof AgentQueuedMessageSchema>;
 
 export const ActiveTurnBehaviorSchema = z.enum(["interrupt", "steer"]);
 export type ActiveTurnBehavior = z.infer<typeof ActiveTurnBehaviorSchema>;
@@ -1882,6 +1911,54 @@ export const AgentForkContextRequestMessageSchema = z.object({
   boundaryCursor: AgentTimelineCursorSchema.optional(),
   boundaryMessageId: z.string().optional(),
   requestId: z.string(),
+});
+
+// COMPAT(agentMessageQueue): daemon-owned message queue, gated on
+// server_info.features.agentMessageQueue. Items are addressed by id.
+export const AgentQueueEnqueueRequestMessageSchema = z.object({
+  type: z.literal("agent.queue.enqueue.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  text: z.string(),
+  images: z.array(ImageAttachmentSchema).optional(),
+  attachments: AgentAttachmentsSchema,
+});
+
+export const AgentQueueEditRequestMessageSchema = z.object({
+  type: z.literal("agent.queue.edit.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  itemId: z.string(),
+  text: z.string(),
+});
+
+export const AgentQueueReorderRequestMessageSchema = z.object({
+  type: z.literal("agent.queue.reorder.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  itemId: z.string(),
+  /** Move the item before this one; null moves it to the end. */
+  beforeItemId: z.string().nullable(),
+});
+
+export const AgentQueueCancelRequestMessageSchema = z.object({
+  type: z.literal("agent.queue.cancel.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  itemId: z.string(),
+});
+
+export const AgentQueuePromoteRequestMessageSchema = z.object({
+  type: z.literal("agent.queue.promote.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  itemId: z.string(),
+});
+
+export const AgentQueueResumeRequestMessageSchema = z.object({
+  type: z.literal("agent.queue.resume.request"),
+  requestId: z.string(),
+  agentId: z.string(),
 });
 
 export const SetAgentModeRequestMessageSchema = z.object({
@@ -3259,6 +3336,12 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProviderSubagentTimelineRequestMessageSchema,
   SetAgentTimelineSubscriptionRequestMessageSchema,
   AgentForkContextRequestMessageSchema,
+  AgentQueueEnqueueRequestMessageSchema,
+  AgentQueueEditRequestMessageSchema,
+  AgentQueueReorderRequestMessageSchema,
+  AgentQueueCancelRequestMessageSchema,
+  AgentQueuePromoteRequestMessageSchema,
+  AgentQueueResumeRequestMessageSchema,
   SetAgentModeRequestMessageSchema,
   SetAgentModelRequestMessageSchema,
   SetAgentThinkingRequestMessageSchema,
@@ -3648,6 +3731,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentForkContext: z.boolean().optional(),
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
         agentForkContextCursor: z.boolean().optional(),
+        // COMPAT(agentMessageQueue): added in v1.0.0-hiep, remove gate after 2027-04-06.
+        agentMessageQueue: z.boolean().optional(),
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: z.boolean().optional(),
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain wire field.
@@ -4801,6 +4886,45 @@ export const AgentForkContextResponseMessageSchema = z.object({
     boundaryCursor: AgentTimelineCursorSchema.nullable().optional(),
     error: z.string().nullable(),
   }),
+});
+
+const AgentQueueResponsePayloadSchema = z.object({
+  requestId: z.string(),
+  agentId: z.string(),
+  /** The queue after the operation, or null when the operation failed. */
+  queue: AgentMessageQueueSummarySchema.nullable(),
+  error: z.string().nullable(),
+});
+
+export const AgentQueueEnqueueResponseMessageSchema = z.object({
+  type: z.literal("agent.queue.enqueue.response"),
+  payload: AgentQueueResponsePayloadSchema.extend({ itemId: z.string().nullable() }),
+});
+
+export const AgentQueueEditResponseMessageSchema = z.object({
+  type: z.literal("agent.queue.edit.response"),
+  payload: AgentQueueResponsePayloadSchema,
+});
+
+export const AgentQueueReorderResponseMessageSchema = z.object({
+  type: z.literal("agent.queue.reorder.response"),
+  payload: AgentQueueResponsePayloadSchema,
+});
+
+export const AgentQueueCancelResponseMessageSchema = z.object({
+  type: z.literal("agent.queue.cancel.response"),
+  /** `item` carries the removed message, so a client can load it back for editing. */
+  payload: AgentQueueResponsePayloadSchema.extend({ item: AgentQueuedMessageSchema.nullable() }),
+});
+
+export const AgentQueuePromoteResponseMessageSchema = z.object({
+  type: z.literal("agent.queue.promote.response"),
+  payload: AgentQueueResponsePayloadSchema,
+});
+
+export const AgentQueueResumeResponseMessageSchema = z.object({
+  type: z.literal("agent.queue.resume.response"),
+  payload: AgentQueueResponsePayloadSchema,
 });
 
 export const CancelAgentResponseMessageSchema = z.object({
@@ -6828,6 +6952,12 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SetAgentTimelineSubscriptionResponseMessageSchema,
   AgentAttentionRequiredMessageSchema,
   AgentForkContextResponseMessageSchema,
+  AgentQueueEnqueueResponseMessageSchema,
+  AgentQueueEditResponseMessageSchema,
+  AgentQueueReorderResponseMessageSchema,
+  AgentQueueCancelResponseMessageSchema,
+  AgentQueuePromoteResponseMessageSchema,
+  AgentQueueResumeResponseMessageSchema,
   CancelAgentResponseMessageSchema,
   ClearAgentAttentionResponseMessageSchema,
   WorkspaceCreateResponseSchema,
@@ -7048,6 +7178,18 @@ export type AgentTimelineListPromptsResponseMessage = z.infer<
   typeof AgentTimelineListPromptsResponseMessageSchema
 >;
 export type AgentForkContextResponseMessage = z.infer<typeof AgentForkContextResponseMessageSchema>;
+export type AgentQueueEnqueueResponseMessage = z.infer<
+  typeof AgentQueueEnqueueResponseMessageSchema
+>;
+export type AgentQueueEditResponseMessage = z.infer<typeof AgentQueueEditResponseMessageSchema>;
+export type AgentQueueReorderResponseMessage = z.infer<
+  typeof AgentQueueReorderResponseMessageSchema
+>;
+export type AgentQueueCancelResponseMessage = z.infer<typeof AgentQueueCancelResponseMessageSchema>;
+export type AgentQueuePromoteResponseMessage = z.infer<
+  typeof AgentQueuePromoteResponseMessageSchema
+>;
+export type AgentQueueResumeResponseMessage = z.infer<typeof AgentQueueResumeResponseMessageSchema>;
 export type CancelAgentResponseMessage = z.infer<typeof CancelAgentResponseMessageSchema>;
 export type SendAgentMessageResponseMessage = z.infer<typeof SendAgentMessageResponseMessageSchema>;
 export type SetVoiceModeResponseMessage = z.infer<typeof SetVoiceModeResponseMessageSchema>;

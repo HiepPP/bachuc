@@ -4,6 +4,7 @@ import {
   AgentSnapshotPayloadSchema,
   AgentTimelineItemPayloadSchema,
   ServerInfoStatusPayloadSchema,
+  SessionInboundMessageSchema,
   SessionOutboundMessageSchema,
   WSHelloMessageSchema,
   WorkspaceSetupSnapshotSchema,
@@ -289,6 +290,84 @@ describe("wire schema compatibility", () => {
     expect(parsed.capabilities.supportsRewindConversation).toBe(false);
     expect(parsed.capabilities.supportsRewindFiles).toBe(false);
     expect(parsed.capabilities.supportsRewindBoth).toBe(false);
+  });
+
+  test("agent snapshots parse with and without the daemon message queue", () => {
+    const snapshot = {
+      id: "agent-1",
+      provider: "claude",
+      cwd: "/tmp/project",
+      model: null,
+      createdAt: "2026-10-06T00:00:00.000Z",
+      updatedAt: "2026-10-06T00:00:00.000Z",
+      lastUserMessageAt: null,
+      status: "running",
+      capabilities: {
+        supportsStreaming: true,
+        supportsSessionPersistence: true,
+        supportsDynamicModes: true,
+        supportsMcpServers: true,
+        supportsReasoningStream: true,
+        supportsToolInvocations: true,
+      },
+      currentModeId: null,
+      availableModes: [],
+      pendingPermissions: [],
+      persistence: null,
+      title: null,
+      labels: {},
+    };
+    expect(AgentSnapshotPayloadSchema.parse(snapshot).queue).toBeUndefined();
+
+    const queue = {
+      held: false,
+      items: [
+        {
+          id: "queued-1",
+          text: "Then run the tests",
+          attachmentKinds: ["image"],
+          createdAt: "2026-10-06T00:00:01.000Z",
+        },
+      ],
+    };
+    expect(AgentSnapshotPayloadSchema.parse({ ...snapshot, queue }).queue).toEqual(queue);
+    // A client from before the queue keeps parsing a snapshot that carries it.
+    const PreQueueSnapshotSchema = AgentSnapshotPayloadSchema.omit({ queue: true });
+    expect(PreQueueSnapshotSchema.parse({ ...snapshot, queue })).not.toHaveProperty("queue");
+  });
+
+  test("queue requests parse and every queue response is a session outbound message", () => {
+    expect(
+      SessionInboundMessageSchema.parse({
+        type: "agent.queue.reorder.request",
+        requestId: "request-1",
+        agentId: "agent-1",
+        itemId: "queued-2",
+        beforeItemId: null,
+      }),
+    ).toMatchObject({ type: "agent.queue.reorder.request", beforeItemId: null });
+
+    const queue = { held: true, items: [] };
+    const responses = [
+      { type: "agent.queue.enqueue.response", extra: { itemId: "queued-1" } },
+      { type: "agent.queue.edit.response", extra: {} },
+      { type: "agent.queue.reorder.response", extra: {} },
+      {
+        type: "agent.queue.cancel.response",
+        extra: {
+          item: { id: "queued-1", text: "Then run the tests", createdAt: "2026-10-06T00:00:01Z" },
+        },
+      },
+      { type: "agent.queue.promote.response", extra: {} },
+      { type: "agent.queue.resume.response", extra: {} },
+    ];
+    for (const { type, extra } of responses) {
+      const message = {
+        type,
+        payload: { requestId: "request-1", agentId: "agent-1", queue, error: null, ...extra },
+      };
+      expect(SessionOutboundMessageSchema.parse(message)).toEqual(message);
+    }
   });
 
   test("notification timeline items parse their level and message", () => {

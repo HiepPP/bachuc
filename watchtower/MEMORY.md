@@ -51,3 +51,6 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: finish notices now wait `FINISH_NOTICE_WINDOW_MS` (1500 ms), but `vi.waitFor` gives up after 1000 ms by default. A fake timer made before `vi.useRealTimers()` never fires.
 - Source: `packages/server/src/server/agent/agent-prompt.ts`; `packages/server/src/server/agent/mcp-server.test.ts`.
 - Use next time: give finish-notice waits a longer timeout, and keep fake timers on through `vi.waitFor`.
+- Learned: `session.test.ts` mocks count `getAgent` calls, so an extra lookup in a lifecycle command fails it even when the code is correct.
+- Source: `packages/server/src/server/session.test.ts` ("cancel_agent_request reports refusal only through its response"); TASK-003 outcome.
+- Use next time: run `session.test.ts` after any change to `packages/server/src/server/agent/lifecycle-command.ts`.

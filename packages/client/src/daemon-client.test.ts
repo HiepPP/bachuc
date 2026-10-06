@@ -1671,6 +1671,72 @@ test("lists the full agent prompt index", async () => {
   });
 });
 
+test("enqueues an agent message and reports a queue error as a rejection", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const enqueuePromise = client.enqueueAgentMessage("agent-1", { text: "Then run the tests" });
+  const enqueueFrame = parseSentFrame(mock.sent[0]);
+  expect(enqueueFrame).toMatchObject({
+    type: "agent.queue.enqueue.request",
+    agentId: "agent-1",
+    text: "Then run the tests",
+  });
+  const queue = {
+    held: false,
+    items: [
+      {
+        id: "queued-1",
+        text: "Then run the tests",
+        attachmentKinds: [],
+        createdAt: "2026-10-06T00:00:00.000Z",
+      },
+    ],
+  };
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "agent.queue.enqueue.response",
+      payload: {
+        requestId: enqueueFrame.requestId,
+        agentId: "agent-1",
+        queue,
+        itemId: "queued-1",
+        error: null,
+      },
+    }),
+  );
+  await expect(enqueuePromise).resolves.toMatchObject({ itemId: "queued-1", queue });
+
+  const cancelPromise = client.cancelQueuedAgentMessage("agent-1", "queued-9");
+  const cancelFrame = parseSentFrame(mock.sent[1]);
+  expect(cancelFrame).toMatchObject({ type: "agent.queue.cancel.request", itemId: "queued-9" });
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "agent.queue.cancel.response",
+      payload: {
+        requestId: cancelFrame.requestId,
+        agentId: "agent-1",
+        queue: null,
+        item: null,
+        error: "Queued message queued-9 was already sent or removed",
+      },
+    }),
+  );
+  await expect(cancelPromise).rejects.toThrow("was already sent or removed");
+});
+
 test("honors explicit fetchAgents timeout below the session RPC default", async () => {
   useHeartbeatClock();
   const logger = createMockLogger();
