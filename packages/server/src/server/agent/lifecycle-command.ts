@@ -6,6 +6,7 @@ import {
   type AgentRunCancellationResult,
   type ManagedAgent,
 } from "./agent-manager.js";
+import { holdAgentMessageQueues } from "./agent-message-queue.js";
 import { disarmFinishNotifications } from "./agent-prompt.js";
 import type { StoredAgentRecord } from "./agent-storage.js";
 import type { AgentProviderNotice } from "./agent-sdk-types.js";
@@ -62,9 +63,11 @@ interface RequestedAgentRunCancellation extends CancelAgentRunResult {
 async function requestAgentRunCancellation(
   dependencies: Pick<AgentLifecycleCommandDependencies, "agentManager" | "logger">,
   agentId: string,
+  // A caller that already looked the agent up passes it, so Stop reads it once.
+  knownAgent?: LifecycleAgentSnapshot | null,
 ): Promise<RequestedAgentRunCancellation> {
   const { agentManager, logger } = dependencies;
-  const agent = agentManager.getAgent(agentId);
+  const agent = knownAgent === undefined ? agentManager.getAgent(agentId) : knownAgent;
   if (!agent) {
     logger.trace({ agentId }, "cancelAgentRunCommand: agent not found");
     throw new Error(`Agent ${agentId} not found`);
@@ -156,6 +159,9 @@ async function cancelDescendantRuns(
 ): Promise<void> {
   const { agentManager, logger } = dependencies;
   const descendantIds = disarmSubtreeNotices(agentManager, rootAgentId);
+  // Hold before any cancel: the idle state a cancel produces would otherwise start the
+  // next queued message on an agent the user just stopped.
+  await holdAgentMessageQueues({ agentManager, agentIds: [rootAgentId, ...descendantIds] });
 
   for (const descendantId of descendantIds) {
     if (!agentManager.hasInFlightRun(descendantId)) {
@@ -182,12 +188,12 @@ export async function cancelAgentRunCommand(
   dependencies: Pick<AgentLifecycleCommandDependencies, "agentManager" | "logger">,
   agentId: string,
 ): Promise<CancelAgentRunResult> {
-  const hasLiveAgent = dependencies.agentManager.getAgent(agentId) !== null;
+  const agent = dependencies.agentManager.getAgent(agentId);
   try {
-    if (hasLiveAgent) {
+    if (agent) {
       await cancelDescendantRuns(dependencies, agentId);
     }
-    const result = await requestAgentRunCancellation(dependencies, agentId);
+    const result = await requestAgentRunCancellation(dependencies, agentId, agent);
     if (result.cancellation.status === "refused") {
       dependencies.logger.warn(
         { agentId },
@@ -200,7 +206,7 @@ export async function cancelAgentRunCommand(
   } finally {
     // The parent keeps running until its own cancel settles, so it can arm new notices
     // or spawn children during the cascade. Disarm the subtree again once it is stopped.
-    if (hasLiveAgent) {
+    if (agent) {
       disarmSubtreeNotices(dependencies.agentManager, agentId);
     }
   }
@@ -219,6 +225,8 @@ export async function archiveAgentCommand(
   const liveAgent = dependencies.agentManager.getAgent(agentId);
   let record: StoredAgentRecord | null;
   if (liveAgent) {
+    // The cancel's idle state must not start a queued message on an agent being archived.
+    await holdAgentMessageQueues({ agentManager: dependencies.agentManager, agentIds: [agentId] });
     await requestAgentRunCancellation(dependencies, agentId);
     await dependencies.agentManager.clearAgentAttention(agentId).catch(() => undefined);
     await dependencies.agentManager.archiveAgent(agentId);

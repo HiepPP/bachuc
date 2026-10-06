@@ -7,7 +7,7 @@ import {
   type TimelineSubscription,
 } from "./connection/index.js";
 import { CreationClient } from "./creation/index.js";
-import type { CreationSnapshot } from "@getpaseo/protocol/messages";
+import type { AgentAttachment, CreationSnapshot } from "@getpaseo/protocol/messages";
 import type { z } from "zod";
 import type { SessionEventSubscription } from "@getpaseo/protocol/messages";
 import type { ClientCapability } from "@getpaseo/protocol/client-capabilities";
@@ -42,6 +42,12 @@ import type {
   FileWriteResult,
   FetchAgentTimelineResponseMessage,
   AgentForkContextResponseMessage,
+  AgentQueueCancelResponseMessage,
+  AgentQueueEditResponseMessage,
+  AgentQueueEnqueueResponseMessage,
+  AgentQueuePromoteResponseMessage,
+  AgentQueueReorderResponseMessage,
+  AgentQueueResumeResponseMessage,
   GitSetupOptions,
   CheckoutStatusResponse,
   CheckoutCommit,
@@ -642,6 +648,19 @@ type ScheduleUpdatePayload = Extract<
 >["payload"];
 export type FetchAgentTimelinePayload = FetchAgentTimelineResponseMessage["payload"];
 export type AgentForkContextPayload = AgentForkContextResponseMessage["payload"];
+export type AgentQueueEnqueuePayload = AgentQueueEnqueueResponseMessage["payload"];
+export type AgentQueueCancelPayload = AgentQueueCancelResponseMessage["payload"];
+export type AgentQueuePayload =
+  | AgentQueueEditResponseMessage["payload"]
+  | AgentQueueReorderResponseMessage["payload"]
+  | AgentQueuePromoteResponseMessage["payload"]
+  | AgentQueueResumeResponseMessage["payload"];
+
+export interface EnqueueAgentMessageInput {
+  text: string;
+  images?: Array<{ data: string; mimeType: string }>;
+  attachments?: AgentAttachment[];
+}
 
 export type FetchAgentTimelineDirection = FetchAgentTimelinePayload["direction"];
 export type FetchAgentTimelineProjection = FetchAgentTimelinePayload["projection"];
@@ -1181,6 +1200,13 @@ interface PingProbe {
   // heartbeat sets this; a latency measurement never drives teardown, even when a
   // heartbeat tick shares (dedupes onto) an in-flight measurement ping.
   drivesLivenessFailure: boolean;
+}
+
+function throwOnQueueError<TPayload extends { error: string | null }>(payload: TPayload): TPayload {
+  if (payload.error) {
+    throw new Error(payload.error);
+  }
+  return payload;
 }
 
 export class DaemonClient {
@@ -3432,6 +3458,160 @@ export class DaemonClient {
     }
 
     return payload;
+  }
+
+  // ============================================================================
+  // Agent Message Queue (gate on server_info.features.agentMessageQueue)
+  // ============================================================================
+
+  async enqueueAgentMessage(
+    agentId: string,
+    input: EnqueueAgentMessageInput,
+  ): Promise<AgentQueueEnqueuePayload> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.queue.enqueue.request",
+      requestId,
+      agentId,
+      text: input.text,
+      ...(input.images ? { images: input.images } : {}),
+      ...(input.attachments ? { attachments: input.attachments } : {}),
+    });
+    return throwOnQueueError(
+      await this.sendRequest({
+        requestId,
+        message,
+        timeout: 15000,
+        options: { skipQueue: true },
+        select: (msg) =>
+          msg.type === "agent.queue.enqueue.response" && msg.payload.requestId === requestId
+            ? msg.payload
+            : null,
+      }),
+    );
+  }
+
+  async editQueuedAgentMessage(
+    agentId: string,
+    itemId: string,
+    text: string,
+  ): Promise<AgentQueuePayload> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.queue.edit.request",
+      requestId,
+      agentId,
+      itemId,
+      text,
+    });
+    return throwOnQueueError(
+      await this.sendRequest({
+        requestId,
+        message,
+        timeout: 15000,
+        options: { skipQueue: true },
+        select: (msg) =>
+          msg.type === "agent.queue.edit.response" && msg.payload.requestId === requestId
+            ? msg.payload
+            : null,
+      }),
+    );
+  }
+
+  async reorderQueuedAgentMessage(
+    agentId: string,
+    itemId: string,
+    beforeItemId: string | null,
+  ): Promise<AgentQueuePayload> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.queue.reorder.request",
+      requestId,
+      agentId,
+      itemId,
+      beforeItemId,
+    });
+    return throwOnQueueError(
+      await this.sendRequest({
+        requestId,
+        message,
+        timeout: 15000,
+        options: { skipQueue: true },
+        select: (msg) =>
+          msg.type === "agent.queue.reorder.response" && msg.payload.requestId === requestId
+            ? msg.payload
+            : null,
+      }),
+    );
+  }
+
+  /** Removes the item and returns its full content, so a client can load it for editing. */
+  async cancelQueuedAgentMessage(
+    agentId: string,
+    itemId: string,
+  ): Promise<AgentQueueCancelPayload> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.queue.cancel.request",
+      requestId,
+      agentId,
+      itemId,
+    });
+    return throwOnQueueError(
+      await this.sendRequest({
+        requestId,
+        message,
+        timeout: 15000,
+        options: { skipQueue: true },
+        select: (msg) =>
+          msg.type === "agent.queue.cancel.response" && msg.payload.requestId === requestId
+            ? msg.payload
+            : null,
+      }),
+    );
+  }
+
+  async promoteQueuedAgentMessage(agentId: string, itemId: string): Promise<AgentQueuePayload> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.queue.promote.request",
+      requestId,
+      agentId,
+      itemId,
+    });
+    return throwOnQueueError(
+      await this.sendRequest({
+        requestId,
+        message,
+        timeout: 15000,
+        options: { skipQueue: true },
+        select: (msg) =>
+          msg.type === "agent.queue.promote.response" && msg.payload.requestId === requestId
+            ? msg.payload
+            : null,
+      }),
+    );
+  }
+
+  async resumeAgentMessageQueue(agentId: string): Promise<AgentQueuePayload> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.queue.resume.request",
+      requestId,
+      agentId,
+    });
+    return throwOnQueueError(
+      await this.sendRequest({
+        requestId,
+        message,
+        timeout: 15000,
+        options: { skipQueue: true },
+        select: (msg) =>
+          msg.type === "agent.queue.resume.response" && msg.payload.requestId === requestId
+            ? msg.payload
+            : null,
+      }),
+    );
   }
 
   // ============================================================================

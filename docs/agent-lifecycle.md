@@ -67,6 +67,23 @@ not block the parent. The whole subtree loses its armed notices even when a canc
 descendant that keeps running no longer wakes anyone. Reload, replace, rewind, and archive call
 `AgentManager.cancelAgentRun` directly and do not cascade; archive has its own cascade.
 
+### Message queue
+
+The daemon owns each agent's message queue (`packages/server/src/server/agent/agent-message-queue.ts`),
+gated on `server_info.features.agentMessageQueue`. Clients see it as the optional `queue` summary on
+the agent snapshot and change it through the `agent.queue.*` RPCs. The queue starts its head message
+only when a run ends normally: a `running` to `idle` change with no in-flight run. An error end, a
+daemon restart, and a fresh agent load do not drain it. An enqueue and a resume on an idle agent
+start the head message at once, because no run end is left to do it. Stop holds every non-empty
+queue in the stopped subtree before it cancels anything, so the idle state from the cancel cannot
+start the next message; a resume or a promote releases the hold, and an emptied queue drops it.
+Archive holds the queue the same way before its cancel. Drain, promote, and every queue mutation
+for one agent run in order. A direct `send_agent_message_request` and a finish notice do not take
+that order, so a drain starts its message with `replaceRunning: false`: if a run began after the
+idle check, the start fails and the item stays at the head until the next run end. An archived
+agent takes no enqueue, and a send to it fails, because `sendPromptToAgent` with `unarchive: false`
+would skip it silently and the item would be lost.
+
 ## Relationships
 
 Agents can launch other agents via the agent-scoped `create_agent` MCP tool. Agent-scoped creation is always asynchronous and always stamps `paseo.parent-agent-id`, pointing back at the caller. Omit `workspaceId` to use the caller's workspace, or pass an existing workspace ID returned by `create_workspace`. Placement never changes parentage.

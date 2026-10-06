@@ -53,6 +53,8 @@ $PASEO_HOME/
 ├── agents/
 │   └── {sanitized-cwd}/
 │       └── {agentId}.json               # One file per agent
+├── agent-queues/
+│   └── {agentId}.json                   # Daemon message queue; only while the agent has queued messages
 ├── schedules/
 │   └── {scheduleId}.json                # One file per schedule
 ├── projects/
@@ -546,6 +548,21 @@ than treating it as valid.
 ```
 
 Simple set of Expo push notification tokens. Loaded with permissive parsing (filters non-string entries). Persisted with atomic temp-file rename.
+
+---
+
+## 6a. Agent Message Queue
+
+**Path:** `$PASEO_HOME/agent-queues/{agentId}.json`
+
+```json
+{
+  "held": false,
+  "items": [{ "id": "…", "text": "…", "images": [], "attachments": [], "createdAt": "…" }]
+}
+```
+
+Items use `AgentQueuedMessageSchema` from `packages/protocol/src/messages.ts`. The queue lives in its own store, not in the agent record, because `toStoredAgentRecord` rebuilds the record on every flush and drops fields it does not know. Queued images stay inline as base64, so a file can be large, but a queue holds at most 50 items and only its summary reaches clients. The file is removed when the queue empties. An unreadable file is skipped with a warning at load.
 
 ---
 
