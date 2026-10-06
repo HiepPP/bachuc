@@ -371,12 +371,23 @@ export async function startCreatedAgentInitialPrompt(
   return refreshedSnapshot;
 }
 
+/**
+ * When a caller hears about its children. `always` batches notices and steers them into a
+ * running turn. `settled_only` holds them until the caller's own run ends.
+ */
+export type FinishNotificationWake = "always" | "settled_only";
+
+export const FINISH_NOTICE_WINDOW_MS = 1500;
+
 export interface SetupFinishNotificationParams {
   agentManager: AgentManager;
   agentStorage: AgentStorage;
   childAgentId: string;
   callerAgentId: string;
   requireParentOwnership?: boolean;
+  wake?: FinishNotificationWake;
+  /** Defaults to {@link FINISH_NOTICE_WINDOW_MS}. */
+  coalesceWindowMs?: number;
   logger: Logger;
 }
 
@@ -445,6 +456,172 @@ interface PendingFinishDelivery {
 // Disarm also cancels these in-flight deliveries, or a notice could land after Stop.
 const pendingFinishDeliveries = new WeakMap<object, Set<PendingFinishDelivery>>();
 
+interface FinishNoticeEntry {
+  key: string;
+  childAgentId: string;
+  reason: FinishNotificationReason;
+  body: string;
+}
+
+interface FinishNoticeMailbox {
+  callerAgentId: string;
+  wake: FinishNotificationWake;
+  entries: FinishNoticeEntry[];
+  timer: ReturnType<typeof setTimeout> | null;
+  unsubscribeSettle: (() => void) | null;
+}
+
+// Children that settle close together reach their caller as one system message. One
+// mailbox per caller and wake mode, so a settled-only notice never waits behind, or
+// rides along with, a steered one.
+const finishNoticeMailboxes = new WeakMap<object, Map<string, FinishNoticeMailbox>>();
+
+interface EnqueueFinishNoticeInput {
+  agentManager: AgentManager;
+  agentStorage: AgentStorage;
+  logger: Logger;
+  callerAgentId: string;
+  wake: FinishNotificationWake;
+  windowMs: number;
+  entry: FinishNoticeEntry;
+  immediate: boolean;
+}
+
+function enqueueFinishNotice(input: EnqueueFinishNoticeInput): void {
+  const mailboxes =
+    finishNoticeMailboxes.get(input.agentManager) ?? new Map<string, FinishNoticeMailbox>();
+  finishNoticeMailboxes.set(input.agentManager, mailboxes);
+  const mailboxKey = JSON.stringify([input.callerAgentId, input.wake]);
+  let mailbox = mailboxes.get(mailboxKey);
+  if (!mailbox) {
+    mailbox = {
+      callerAgentId: input.callerAgentId,
+      wake: input.wake,
+      entries: [],
+      timer: null,
+      unsubscribeSettle: null,
+    };
+    mailboxes.set(mailboxKey, mailbox);
+  }
+  // The same child and reason again in one window, such as after a quick follow-up,
+  // keeps one section with the newest body.
+  const duplicateIndex = mailbox.entries.findIndex((existing) => existing.key === input.entry.key);
+  if (duplicateIndex === -1) {
+    mailbox.entries.push(input.entry);
+  } else {
+    mailbox.entries[duplicateIndex] = input.entry;
+  }
+
+  const flushInput = { ...input, mailbox, mailboxes, mailboxKey };
+  if (input.immediate) {
+    flushFinishNotices(flushInput);
+    return;
+  }
+  if (!mailbox.timer) {
+    mailbox.timer = setTimeout(() => flushFinishNotices(flushInput), input.windowMs);
+  }
+}
+
+interface FlushFinishNoticesInput extends EnqueueFinishNoticeInput {
+  mailbox: FinishNoticeMailbox;
+  mailboxes: Map<string, FinishNoticeMailbox>;
+  mailboxKey: string;
+}
+
+function isCallerRunning(agentManager: AgentManager, callerAgentId: string): boolean {
+  return (
+    agentManager.hasInFlightRun(callerAgentId) ||
+    agentManager.getAgent(callerAgentId)?.lifecycle === "running"
+  );
+}
+
+function closeFinishNoticeMailbox(input: FlushFinishNoticesInput): void {
+  const { mailbox } = input;
+  if (mailbox.timer) {
+    clearTimeout(mailbox.timer);
+    mailbox.timer = null;
+  }
+  mailbox.unsubscribeSettle?.();
+  mailbox.unsubscribeSettle = null;
+  if (input.mailboxes.get(input.mailboxKey) === mailbox) {
+    input.mailboxes.delete(input.mailboxKey);
+  }
+}
+
+function flushFinishNotices(input: FlushFinishNoticesInput): void {
+  const { agentManager, mailbox } = input;
+  if (mailbox.entries.length === 0) {
+    closeFinishNoticeMailbox(input);
+    return;
+  }
+  if (mailbox.timer) {
+    clearTimeout(mailbox.timer);
+    mailbox.timer = null;
+  }
+  // A permission request blocks the child, so it never waits for the caller to settle.
+  const holdsPermission = mailbox.entries.some((entry) => entry.reason === "needs permission");
+  if (
+    mailbox.wake === "settled_only" &&
+    !holdsPermission &&
+    isCallerRunning(agentManager, mailbox.callerAgentId)
+  ) {
+    mailbox.unsubscribeSettle ??= agentManager.subscribe(
+      (event) => {
+        if (event.type !== "agent_state" || event.agent.id !== mailbox.callerAgentId) {
+          return;
+        }
+        if (!isCallerRunning(agentManager, mailbox.callerAgentId)) {
+          flushFinishNotices(input);
+        } else if (event.agent.lifecycle !== "running") {
+          // A failed turn start emits its error state before it clears the in-flight run,
+          // and no later state event follows. Check again once the run has settled.
+          setTimeout(() => {
+            if (!isCallerRunning(agentManager, mailbox.callerAgentId)) {
+              flushFinishNotices(input);
+            }
+          }, 0);
+        }
+      },
+      { agentId: mailbox.callerAgentId, replayState: false },
+    );
+    return;
+  }
+
+  const entries = mailbox.entries.splice(0);
+  closeFinishNoticeMailbox(input);
+  const body = entries.map((entry) => entry.body).join("\n\n");
+  void sendPromptToAgent({
+    agentManager,
+    agentStorage: input.agentStorage,
+    agentId: mailbox.callerAgentId,
+    prompt: formatSystemNotificationPrompt(body),
+    activeTurnBehavior: "steer",
+    unarchive: false,
+    logger: input.logger,
+  }).then(
+    () => undefined,
+    (error: unknown) => {
+      const [first] = entries;
+      input.logger.error(
+        entries.length === 1 && first
+          ? {
+              err: error,
+              childAgentId: first.childAgentId,
+              callerAgentId: mailbox.callerAgentId,
+              reason: first.reason,
+            }
+          : {
+              err: error,
+              childAgentIds: entries.map((entry) => entry.childAgentId),
+              callerAgentId: mailbox.callerAgentId,
+              reasons: entries.map((entry) => entry.reason),
+            },
+        "Failed to notify caller agent",
+      );
+    },
+  );
+}
+
 export interface DisarmFinishNotificationsInput {
   agentManager: object;
   callerAgentIds: ReadonlySet<string>;
@@ -464,6 +641,20 @@ export function disarmFinishNotifications(input: DisarmFinishNotificationsInput)
       delivery.cancelled = true;
     }
   }
+  const mailboxes = finishNoticeMailboxes.get(input.agentManager);
+  for (const [mailboxKey, mailbox] of Array.from(mailboxes ?? [])) {
+    if (!input.callerAgentIds.has(mailbox.callerAgentId)) {
+      continue;
+    }
+    if (mailbox.timer) {
+      clearTimeout(mailbox.timer);
+      mailbox.timer = null;
+    }
+    mailbox.unsubscribeSettle?.();
+    mailbox.unsubscribeSettle = null;
+    mailbox.entries.length = 0;
+    mailboxes?.delete(mailboxKey);
+  }
 }
 
 export function setupFinishNotification(params: SetupFinishNotificationParams): void {
@@ -473,6 +664,8 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
     childAgentId,
     callerAgentId,
     requireParentOwnership = false,
+    wake = "always",
+    coalesceWindowMs = FINISH_NOTICE_WINDOW_MS,
     logger,
   } = params;
   let hasSeenRunning = false;
@@ -524,14 +717,21 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
     if (delivery.cancelled) {
       return;
     }
-    await sendPromptToAgent({
+    // A permission request blocks the child, so it skips the coalescing window.
+    enqueueFinishNotice({
       agentManager,
       agentStorage,
-      agentId: callerAgentId,
-      prompt: formatSystemNotificationPrompt(body),
-      activeTurnBehavior: "steer",
-      unarchive: false,
       logger,
+      callerAgentId,
+      wake,
+      windowMs: coalesceWindowMs,
+      entry: {
+        key: JSON.stringify([childAgentId, reason, permissionRequest?.id ?? null]),
+        childAgentId,
+        reason,
+        body,
+      },
+      immediate: reason === "needs permission",
     });
   }
 
