@@ -1,8 +1,8 @@
 import { type PluginSurfaceProps, usePaseo } from "@getpaseo/plugin/client";
 import { ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { useMemo, useRef, useState } from "react";
+import { Pressable, type ScrollView as NativeScrollView, Text, View } from "react-native";
 import { WatchtowerBoard } from "./board";
 
 // Surfaces have no workspace context, so the sidebar page picks one and reuses the board.
@@ -24,6 +24,9 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
   const [picked, setPicked] = useState(lastWorkspaceId);
   const entries = workspaces.data ?? [];
   const workspace = entries.find((entry) => entry.id === picked) ?? entries[0] ?? null;
+  const picker = useRef<NativeScrollView>(null);
+  const revealed = useRef(false);
+  const inset = layout.compact ? 12 : 16;
   const styles = useMemo(
     () => ({
       screen: { flex: 1, backgroundColor: theme.colors.surface0 },
@@ -32,7 +35,7 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
         borderBottomWidth: 1,
         borderBottomColor: theme.colors.border,
       },
-      pickerContent: { padding: layout.compact ? 12 : 16, gap: 8 },
+      pickerContent: { padding: inset, gap: 8 },
       chip: {
         paddingHorizontal: 12,
         paddingVertical: 6,
@@ -46,7 +49,7 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
       chipMuted: { color: theme.colors.foregroundMuted },
       message: { padding: layout.compact ? 16 : 24, color: theme.colors.foregroundMuted },
     }),
-    [theme, layout.compact],
+    [theme, layout.compact, inset],
   );
 
   if (!workspace) {
@@ -64,7 +67,12 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
 
   return (
     <View style={styles.screen}>
-      <ScrollView horizontal style={styles.picker} contentContainerStyle={styles.pickerContent}>
+      <ScrollView
+        ref={picker}
+        horizontal
+        style={styles.picker}
+        contentContainerStyle={styles.pickerContent}
+      >
         {entries.map((entry) => {
           const selected = entry.id === workspace.id;
           return (
@@ -77,6 +85,18 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
                 lastWorkspaceId = entry.id;
                 setPicked(entry.id);
               }}
+              // Bring the open workspace's chip into view once when the page opens. A chip the
+              // user taps is already visible, so later picks keep the scroll position.
+              onLayout={
+                selected
+                  ? (event) => {
+                      if (revealed.current) return;
+                      revealed.current = true;
+                      const x = Math.max(0, event.nativeEvent.layout.x - inset);
+                      picker.current?.scrollTo({ x, animated: false });
+                    }
+                  : undefined
+              }
               style={[styles.chip, selected && styles.chipSelected]}
             >
               <Text style={styles.chipText} numberOfLines={1}>
