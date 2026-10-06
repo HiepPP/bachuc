@@ -20,7 +20,7 @@ One row per TASK. Group ties together items that write the same files.
 | 5     | TASK-005 PR watch plugin                                 | C     | DONE   | [watchtower/tasks/TASK-005-pr-watch-plugin.md](watchtower/tasks/TASK-005-pr-watch-plugin.md)                     | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | A7. Plugin only. Q-005, Q-006. auto: manual checks pending.                           |
 | 6     | TASK-006 Host API for selection actions and plugin chips | B     | DONE   | [watchtower/tasks/TASK-006-selection-action-host-api.md](watchtower/tasks/TASK-006-selection-action-host-api.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B3 host part 1. Q-007. auto: manual checks pending.                                   |
 | 7     | TASK-010 Host API to reveal a quoted passage             | B     | DONE   | [watchtower/tasks/TASK-010-reveal-passage-host-api.md](watchtower/tasks/TASK-010-reveal-passage-host-api.md)     | TASK-006           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B3 host part 2. Q-007, Q-010, ADR-0003. auto: manual checks pending.                  |
-| 8     | TASK-007 Assistant cite plugin                           | D     | TODO   | [watchtower/tasks/TASK-007-assistant-cite-plugin.md](watchtower/tasks/TASK-007-assistant-cite-plugin.md)         | TASK-006, TASK-010 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B3 plugin part. Q-007.                                                                |
+| 8     | TASK-007 Assistant cite plugin                           | D     | DONE   | [watchtower/tasks/TASK-007-assistant-cite-plugin.md](watchtower/tasks/TASK-007-assistant-cite-plugin.md)         | TASK-006, TASK-010 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B3 plugin part. Q-007, Q-011. auto: manual checks pending.                            |
 | 9     | TASK-008 Host API for a sandboxed HTML frame             | B     | TODO   | [watchtower/tasks/TASK-008-html-frame-host-api.md](watchtower/tasks/TASK-008-html-frame-host-api.md)             | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B4 host part. Q-008, ADR-0002.                                                        |
 | 10    | TASK-009 HTML reply plugin                               | E     | TODO   | [watchtower/tasks/TASK-009-html-reply-plugin.md](watchtower/tasks/TASK-009-html-reply-plugin.md)                 | TASK-008           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B4 plugin part. Q-008, ADR-0002.                                                      |
 
@@ -37,8 +37,9 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: The autorun loop builds TASK-007 (assistant cite plugin) next. It registers a chip-only attachment source with `onOpen` (ADR-0003, proposed).
-- Owner review: accept or reject ADR-0003, and answer Q-010 if native should scroll to a revealed passage.
+- Next action: The autorun loop builds TASK-008 (host API for a sandboxed HTML frame) next.
+- Owner review: accept or reject ADR-0003; answer Q-010 if native should scroll to a revealed passage, and Q-011 if plugins need a toast API.
+- Manual check pending: install `assistant-cite` on live, select assistant text, click Cite, add a comment, send, and press the chip to jump back (TASK-007).
 - Manual check pending: on web or Electron, a test plugin reveals an older message; the timeline scrolls there and highlights the passage (TASK-010).
 - Manual check pending: on web or Electron, a test selection action shows over selected assistant text, adds a chip, and the chip takes a comment (TASK-006).
 - Manual check pending: install `pr-watch` on live and in release, then have an agent watch a real PR (TASK-005).
