@@ -1,7 +1,8 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { Platform } from "react-native";
+import { Dimensions, Platform } from "react-native";
 import { WatchtowerPanel, WatchtowerProjectPanel } from "./client/board";
-import { WatchtowerPage } from "./client/page";
+import { isCompactWidth } from "./client/dashboard";
+import { preselectWorkspace, WatchtowerPage } from "./client/page";
 import { taskAttachments } from "./shared/board";
 
 export default function contribute(client: PluginClientContext) {
@@ -17,8 +18,9 @@ export default function contribute(client: PluginClientContext) {
     }) ?? (() => {});
   // Sidebar items follow plugin ID order, so "watchtower-board" lands below "board".
   // On web the row opens the current thread's Explorer board, like the Command Center item,
-  // or the project's board in the new workspace side panel. Native keeps the surface, which
-  // picks a workspace itself.
+  // or the project's board in the new workspace side panel. A compact web window opens the
+  // surface on the current workspace, because its Explorer has no plugin tabs. Native keeps
+  // the surface, which picks a workspace itself.
   const removeSidebar = client.addSidebarItem({
     id: "watchtower",
     title: "Watchtower",
@@ -30,7 +32,13 @@ export default function contribute(client: PluginClientContext) {
             requiresWorkspace: true,
             newWorkspacePanel: "board",
             onPress: ({ workspaceId }) => {
-              if (workspaceId) client.openPanel("board", { workspaceId, location: "explorer" });
+              if (!workspaceId) return;
+              if (isCompactWidth(Dimensions.get("window").width)) {
+                preselectWorkspace(workspaceId);
+                client.openSurface("watchtower");
+                return;
+              }
+              client.openPanel("board", { workspaceId, location: "explorer" });
             },
           }
         : undefined,

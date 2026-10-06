@@ -8,6 +8,11 @@ import { WatchtowerBoard } from "./board";
 // Surfaces have no workspace context, so the sidebar page picks one and reuses the board.
 let lastWorkspaceId: string | null = null;
 
+/** Picks the workspace the page shows when it next mounts. */
+export function preselectWorkspace(workspaceId: string) {
+  lastWorkspaceId = workspaceId;
+}
+
 export function WatchtowerPage(props: PluginSurfaceProps) {
   const { host, theme, layout } = props;
   const paseo = usePaseo();

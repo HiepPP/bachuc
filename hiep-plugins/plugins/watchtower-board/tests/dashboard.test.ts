@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { dashboardSummary, groupTasks, plural, questionsFor, taskTitle } from "../client/dashboard";
+import {
+  dashboardSummary,
+  groupTasks,
+  isCompactWidth,
+  plural,
+  questionsFor,
+  taskTitle,
+} from "../client/dashboard";
 import type { Task } from "../shared/board";
 
 function task(id: string, status: string): Task {
@@ -50,6 +57,12 @@ test("keeps unknown statuses separate from Todo", () => {
     groups.unknown.map(({ id }) => id),
     ["TASK-005"],
   );
+});
+
+test("treats windows narrower than the host md breakpoint as compact", () => {
+  assert.equal(isCompactWidth(390), true);
+  assert.equal(isCompactWidth(719), true);
+  assert.equal(isCompactWidth(720), false);
 });
 
 test("lists the open questions that block a task", () => {

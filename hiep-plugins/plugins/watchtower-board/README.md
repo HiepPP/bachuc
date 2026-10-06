@@ -10,7 +10,9 @@ With a thread open, click **Watchtower** in the sidebar, below **Board**, or cho
 **Files** and **Changes**, for the current workspace. On the new workspace screen, the board of the
 chosen project opens in the side panel; it reads the project root and has no attachment search key.
 On desktop and web the sidebar item is disabled elsewhere outside a thread, such as on the Board
-page. Mobile keeps a sidebar page that picks a workspace from a row sorted by recent activity.
+page. In a web window narrower than 720 px, the compact Explorer has no plugin tabs, so the sidebar
+item opens the Watchtower page on the current workspace instead.
+Mobile keeps a sidebar page that picks a workspace from a row sorted by recent activity.
 The header identifies its project. Each workspace keeps its own board and task selection.
 The board reads `watchtower/NEXT.md` in that workspace, not another checkout or its parent repository.
 The panel summarizes completion and counts for Active, Blocked, Todo, and Done tasks.
