@@ -42,3 +42,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: text a plugin appends in `before("agent.prompt")` must be wrapped in `<paseo-plugin-context>`, because providers replay their own history after a daemon restart.
 - Source: `packages/server/src/server/agent/plugin-prompt-context.ts`
 - Use next time: verify plugin prompt changes after a daemon restart, not only live.
+
+### 2026-10-06 - Autorun 20261006-t3code-orchestration-port
+
+- Learned: the lefthook pre-commit hook format-checks every staged `*.md`, including `watchtower/` plan files. The formatter reads a bare `**` glob as emphasis and rewrites it.
+- Source: `lefthook.yml`; the ADR-0002 Scope line.
+- Use next time: run `npm run format:files` on plan files before staging, and put globs in code spans.
+- Learned: finish notices now wait `FINISH_NOTICE_WINDOW_MS` (1500 ms), but `vi.waitFor` gives up after 1000 ms by default. A fake timer made before `vi.useRealTimers()` never fires.
+- Source: `packages/server/src/server/agent/agent-prompt.ts`; `packages/server/src/server/agent/mcp-server.test.ts`.
+- Use next time: give finish-notice waits a longer timeout, and keep fake timers on through `vi.waitFor`.

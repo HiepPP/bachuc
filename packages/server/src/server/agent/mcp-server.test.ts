@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { createAgentMcpServer } from "./mcp-server.js";
+import { FINISH_NOTICE_WINDOW_MS } from "./agent-prompt.js";
 import { AgentManager, type ManagedAgent } from "./agent-manager.js";
 import { AgentStorage, type StoredAgentRecord } from "./agent-storage.js";
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
@@ -4012,14 +4013,18 @@ describe("send_agent_prompt MCP tool", () => {
 
       childClient.sessions[0]!.finishTurn();
       await vi.advanceTimersByTimeAsync(1_000);
-      vi.useRealTimers();
 
-      await vi.waitFor(() => {
-        const parentPrompts = parentClient.sessions[0]!.prompts;
-        expect(parentPrompts).toHaveLength(1);
-        expect(parentPrompts[0]).toContain(child.id);
-        expect(parentPrompts[0]).toContain("finished");
-      });
+      // Fake timers stay on: the finish notice waits out its coalescing window on this
+      // clock, and vi.waitFor advances it on every check.
+      await vi.waitFor(
+        () => {
+          const parentPrompts = parentClient.sessions[0]!.prompts;
+          expect(parentPrompts).toHaveLength(1);
+          expect(parentPrompts[0]).toContain(child.id);
+          expect(parentPrompts[0]).toContain("finished");
+        },
+        { timeout: FINISH_NOTICE_WINDOW_MS + 2000 },
+      );
     } finally {
       vi.useRealTimers();
       await removeAgentStateDir(agentManager, storage, workdir);
@@ -4078,7 +4083,9 @@ describe("send_agent_prompt MCP tool", () => {
           prompt.includes(`Agent ${childId} (Busy Child) finished.`),
         );
       }
-      await vi.waitFor(() => expect(finishNotifications()).not.toHaveLength(0));
+      await vi.waitFor(() => expect(finishNotifications()).not.toHaveLength(0), {
+        timeout: FINISH_NOTICE_WINDOW_MS + 2000,
+      });
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(finishNotifications()).toHaveLength(1);
     } finally {

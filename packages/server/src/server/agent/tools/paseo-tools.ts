@@ -61,7 +61,11 @@ import {
   toScheduleSummary,
   waitForAgentWithTimeout,
 } from "../mcp-shared.js";
-import { sendPromptToAgent, setupFinishNotification } from "../agent-prompt.js";
+import {
+  sendPromptToAgent,
+  setupFinishNotification,
+  type FinishNotificationWake,
+} from "../agent-prompt.js";
 import { respondToAgentPermission } from "../permission-response.js";
 import {
   archiveAgentCommand,
@@ -1052,6 +1056,12 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         "Existing workspace id. Agent-scoped calls default to the caller workspace; top-level calls create a new local workspace when omitted.",
       ),
   };
+  const finishNotificationWakeSchema = z
+    .enum(["always", "settled_only"])
+    .optional()
+    .describe(
+      'When finish notifications reach you. "always" (default) batches notifications that arrive within 1.5 seconds and steers them into your running turn. "settled_only" holds them until your own run ends.',
+    );
   const agentToAgentInputSchema = {
     ...canonicalCreateAgentFields,
     notifyOnFinish: z
@@ -1061,6 +1071,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       .describe(
         "Get notified when the created agent finishes, errors, or needs permission. Set false only for truly fire-and-forget agents.",
       ),
+    wake: finishNotificationWakeSchema,
   };
   const canonicalTopLevelInputSchema = {
     ...canonicalCreateAgentFields,
@@ -1083,6 +1094,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     ...commonCreateAgentFields,
     ...legacyCreateAgentPlacementFields,
     notifyOnFinish: agentToAgentInputSchema.notifyOnFinish,
+    wake: finishNotificationWakeSchema,
   };
   const legacyTopLevelCreateAgentInputSchema = {
     ...commonCreateAgentFields,
@@ -1160,6 +1172,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       .describe(
         "Get notified when the prompted agent finishes, errors, or needs permission. Set false only for truly fire-and-forget prompts.",
       ),
+    wake: finishNotificationWakeSchema,
   };
   const topLevelSendAgentPromptInputSchema = {
     ...commonSendAgentPromptInputSchema,
@@ -1177,6 +1190,9 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       .describe(
         "Agent-scoped only: get notified when the prompted agent finishes, errors, or needs permission.",
       ),
+    wake: finishNotificationWakeSchema.describe(
+      "Agent-scoped only: when finish notifications reach the caller. Ignored without a calling agent.",
+    ),
   };
   const sendAgentPromptInputSchema = callerAgentId
     ? agentToAgentSendAgentPromptInputSchema
@@ -1469,9 +1485,11 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       const { parsedArgs, worktree } = resolvedArgs;
       let requestedBackground: boolean;
       let notifyOnFinish: boolean;
+      let wake: FinishNotificationWake | undefined;
       if (resolvedArgs.kind === "agent-scoped") {
         requestedBackground = true;
         notifyOnFinish = parsedArgs.notifyOnFinish;
+        wake = resolvedArgs.parsedArgs.wake;
       } else {
         requestedBackground = resolvedArgs.parsedArgs.background;
         notifyOnFinish = resolvedArgs.parsedArgs.notifyOnFinish ?? false;
@@ -1510,6 +1528,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
           mode: parsedArgs.settings?.modeId,
           background: requestedBackground,
           notifyOnFinish,
+          wake,
           detached: resolvedArgs.detached,
           callerAgentId,
           callerContext,
@@ -1930,6 +1949,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       sessionMode,
       background = Boolean(callerAgentId),
       notifyOnFinish = Boolean(callerAgentId),
+      wake,
     }) => {
       function armFinishNotification(): boolean {
         if (!callerAgentId || !notifyOnFinish) {
@@ -1940,6 +1960,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
           agentStorage,
           childAgentId: agentId,
           callerAgentId,
+          wake,
           logger: childLogger,
         });
         return true;
