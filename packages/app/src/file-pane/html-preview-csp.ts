@@ -26,7 +26,69 @@ const POLICY = [
   "object-src 'none'",
 ].join("; ");
 
-const META = `<meta http-equiv="Content-Security-Policy" content="${POLICY}">`;
+// Plugin HTML frames may opt into the network (ADR-0002): https scripts, styles, fonts, images,
+// and fetch. Everything else stays refused, and the file preview never uses this policy. The
+// sandbox below, not this policy, is what keeps the page away from the app.
+const NETWORK_POLICY = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline' 'unsafe-eval' blob: https:",
+  "style-src 'unsafe-inline' https:",
+  "img-src data: blob: https:",
+  "font-src data: https:",
+  "media-src data: blob:",
+  "connect-src https:",
+  "form-action 'none'",
+  "base-uri 'none'",
+  "frame-src 'none'",
+  "object-src 'none'",
+].join("; ");
+
+function meta(policy: string): string {
+  return `<meta http-equiv="Content-Security-Policy" content="${policy}">`;
+}
+
+const META = meta(POLICY);
+
+/**
+ * `allow-scripts` alone gives the document an opaque origin: its scripts run, but it cannot
+ * reach the app's DOM, cookies, or storage, open popups, or navigate the top window.
+ */
+export const PREVIEW_SANDBOX = "allow-scripts";
+
+const CSS_VARIABLE_NAME = /^[a-z][a-z0-9-]*$/;
+// A value may hold a font stack with quotes, but nothing that ends the declaration, the rule,
+// or the style element, and no comment or open quote or bracket that would swallow the
+// declarations after it.
+const UNSAFE_CSS_VALUE = /[<>{};\\]|\/\*/;
+
+function count(value: string, character: string): number {
+  return value.split(character).length - 1;
+}
+
+function isSafeCssValue(value: string): boolean {
+  return (
+    !UNSAFE_CSS_VALUE.test(value) &&
+    count(value, '"') % 2 === 0 &&
+    count(value, "'") % 2 === 0 &&
+    count(value, "(") === count(value, ")")
+  );
+}
+
+/** `:root` custom properties as a style element, skipping any unsafe name or value. */
+export function cssVariablesStyle(variables: Readonly<Record<string, string>>): string {
+  const declarations = Object.entries(variables)
+    .filter(([name, value]) => CSS_VARIABLE_NAME.test(name) && isSafeCssValue(value))
+    .map(([name, value]) => `--${name}: ${value};`)
+    .join(" ");
+  return declarations ? `<style>:root { ${declarations} }</style>` : "";
+}
+
+export interface PreviewDocumentOptions {
+  /** Allows https resources and fetch. Only plugin HTML frames set it. */
+  network?: boolean;
+  /** A style element from `cssVariablesStyle`, placed before the document's own markup. */
+  themeStyle?: string;
+}
 
 // The policy must reach the parser before any markup the document declares, and it
 // only counts if it lands in `<head>` — once the parser has moved on to `<body>`, a
@@ -50,6 +112,9 @@ const PROLOGUE = `<!doctype html>${META}`;
 // Left where it is, a BOM would sit mid-document and render as a zero-width space.
 const BOM = "\uFEFF";
 
-export function withPreviewCsp(html: string): string {
-  return PROLOGUE + (html.startsWith(BOM) ? html.slice(BOM.length) : html);
+export function withPreviewCsp(html: string, options: PreviewDocumentOptions = {}): string {
+  const prologue = options.network ? `<!doctype html>${meta(NETWORK_POLICY)}` : PROLOGUE;
+  return (
+    prologue + (options.themeStyle ?? "") + (html.startsWith(BOM) ? html.slice(BOM.length) : html)
+  );
 }

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { withPreviewCsp } from "./html-preview-csp";
+import { PREVIEW_SANDBOX, withPreviewCsp } from "./html-preview-csp";
 
 // `allow-scripts` alone: the file gets an opaque origin, so a plan page can run
 // its own scripts (Excalidraw, charts) but cannot reach the Paseo app's DOM,
@@ -14,8 +14,6 @@ import { withPreviewCsp } from "./html-preview-csp";
 // (see html-preview-csp.ts). That is the one hole left on web, it is bounded to
 // the page's own contents, and it is documented in SECURITY.md rather than papered
 // over with a directive browsers ignore.
-const SANDBOX = "allow-scripts";
-
 const iframeStyle = {
   flex: 1,
   minHeight: 0,
@@ -23,17 +21,37 @@ const iframeStyle = {
   backgroundColor: "white",
 } as const;
 
+export interface SandboxedHtmlViewProps {
+  /** A document from `withPreviewCsp`. */
+  document: string;
+  title: string;
+  testID?: string;
+  /** Native only: an iframe already scrolls inside a scrolling parent. */
+  nestedScroll?: boolean;
+}
+
+/** The sandboxed frame shared by the file preview and plugin HTML frames. */
+export function SandboxedHtmlView({ document, title, testID }: SandboxedHtmlViewProps) {
+  return (
+    <iframe
+      data-testid={testID}
+      title={title}
+      srcDoc={document}
+      sandbox={PREVIEW_SANDBOX}
+      referrerPolicy="no-referrer"
+      style={iframeStyle}
+    />
+  );
+}
+
 export function FileHtmlPreview({ html, testID }: { html: string; testID?: string }) {
   const { t } = useTranslation();
   const document = useMemo(() => withPreviewCsp(html), [html]);
   return (
-    <iframe
-      data-testid={testID}
+    <SandboxedHtmlView
+      document={document}
       title={t("panels.file.editor.preview")}
-      srcDoc={document}
-      sandbox={SANDBOX}
-      referrerPolicy="no-referrer"
-      style={iframeStyle}
+      testID={testID}
     />
   );
 }

@@ -193,6 +193,17 @@ Plugin UI runs on desktop and mobile across multiple themes: color every `Text` 
 `theme.colors.foreground` or `theme.colors.foregroundMuted`, and size layout from `layout.compact`.
 See `public-docs/plugins/reference.md`.
 
+`HtmlFrame` (`packages/app/src/plugins/react-native/html-frame.tsx`) renders through the same
+`SandboxedHtmlView` as the file preview, so the sandbox and the native navigation guard live in one
+place, `packages/app/src/file-pane/html-preview*.tsx`. `PREVIEW_SANDBOX` must stay
+`allow-scripts` alone; the browser test `html-preview-csp.browser.test.ts` renders the real
+`HtmlFrame` and checks its sandbox attribute, the `connect-src` refusal, and blocked storage.
+`network: true` swaps in the networked CSP from `html-preview-csp.ts`; the file preview never sets
+it. The networked CSP also allows `https:` fonts, because CDN stylesheets load them. The theme
+variables go after the CSP meta, so the policy stays the first element of the document and governs
+everything after it. The vitest Unistyles stub ignores `withUnistyles` mappings, so the theme
+mapping is tested on its own in `html-frame-theme.test.ts`.
+
 ### SDK import boundaries
 
 Classify every SDK export before adding it. All client entry points and implementations live under
