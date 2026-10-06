@@ -911,6 +911,7 @@ export const ru: TranslationResources = {
           title: "Архивировать «{{workspaceName}}»?",
           confirm: "Архивировать",
           cancel: "Отмена",
+          shortcutMessage: "Вместе с ним будут архивированы все его агенты, а терминалы закрыты.",
           uncommittedChanges: "Незафиксированные изменения",
           uncommittedChangesWithDiff: "Незафиксированные изменения ({{diffStat}})",
           addedLine: "Добавлено строк: {{count}}",

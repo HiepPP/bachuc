@@ -907,6 +907,8 @@ export const ja: TranslationResources = {
           title: '"{{workspaceName}}"をアーカイブしますか？',
           confirm: "アーカイブ",
           cancel: "キャンセル",
+          shortcutMessage:
+            "アーカイブすると、すべてのエージェントもアーカイブされ、ターミナルは閉じられます。",
           uncommittedChanges: "未コミットの変更",
           uncommittedChangesWithDiff: "未コミットの変更（{{diffStat}}）",
           addedLine: "{{count}}行追加",

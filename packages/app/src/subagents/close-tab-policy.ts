@@ -4,8 +4,10 @@ export type CloseAgentTabPolicy = { kind: "archive-on-close" } | { kind: "layout
 
 export function resolveCloseAgentTabPolicy(
   agent: Pick<Agent, "parentAgentId"> | null | undefined,
+  options: { fromShortcut?: boolean } = {},
 ): CloseAgentTabPolicy {
-  if (agent?.parentAgentId) {
+  // Cmd+W is easy to press by mistake, so a shortcut only closes the tab.
+  if (agent?.parentAgentId || options.fromShortcut) {
     return { kind: "layout-only" };
   }
 

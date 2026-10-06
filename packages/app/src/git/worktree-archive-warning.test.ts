@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildWorkspaceArchiveConfirmationMessage,
   buildWorktreeArchiveConfirmationMessage,
   buildWorktreeArchiveRiskReasons,
   toWorktreeArchiveRisk,
@@ -71,5 +72,46 @@ describe("workspace archive warning for worktree backing", () => {
       aheadOfOrigin: 3,
       diffStat: { additions: 2, deletions: 1 },
     });
+  });
+});
+
+describe("workspace archive confirmation", () => {
+  const clean = { workspaceName: "feature", isDirty: false, aheadOfOrigin: 0, diffStat: null };
+  const shortcutMessage = "Archive everything?";
+
+  it("archives a clean workspace from the menu without asking", () => {
+    expect(
+      buildWorkspaceArchiveConfirmationMessage({
+        ...clean,
+        workspaceKind: "worktree",
+        fromShortcut: false,
+        shortcutMessage,
+      }),
+    ).toBeNull();
+  });
+
+  it("always asks before a shortcut archives a clean workspace", () => {
+    for (const workspaceKind of ["worktree", "local_checkout"] as const) {
+      expect(
+        buildWorkspaceArchiveConfirmationMessage({
+          ...clean,
+          workspaceKind,
+          fromShortcut: true,
+          shortcutMessage,
+        }),
+      ).toBe(shortcutMessage);
+    }
+  });
+
+  it("keeps the worktree risk details when a shortcut archives a risky worktree", () => {
+    expect(
+      buildWorkspaceArchiveConfirmationMessage({
+        ...clean,
+        aheadOfOrigin: 2,
+        workspaceKind: "worktree",
+        fromShortcut: true,
+        shortcutMessage,
+      }),
+    ).toBe("2 unpushed commits");
   });
 });

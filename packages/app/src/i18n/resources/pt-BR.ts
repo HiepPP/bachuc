@@ -917,6 +917,7 @@ export const ptBR: TranslationResources = {
           title: 'Arquivar "{{workspaceName}}"?',
           confirm: "Arquivar",
           cancel: "Cancelar",
+          shortcutMessage: "Arquivar também arquiva todos os agentes dele e fecha os terminais.",
           uncommittedChanges: "Alterações sem commit",
           uncommittedChangesWithDiff: "Alterações sem commit ({{diffStat}})",
           addedLine: "{{count}} linha adicionada",

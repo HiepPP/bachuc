@@ -145,7 +145,7 @@ export function SidebarWorkspaceRow({
     enabled: selected && !isArchiving,
     priority: 0,
     handle: () => {
-      handleArchive();
+      archiveController.archive({ fromShortcut: true });
       return true;
     },
   });
