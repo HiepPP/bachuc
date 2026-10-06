@@ -30,6 +30,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 ## Avoid
 
 - Avoid running sidebar host filters together with an active host while one host is active. Reason: [ADR-0001](watchtower/decisions/ADR-0001-active-host-over-host-filters.md).
+- Avoid an offline-only CSP for HTML reply frames while the owner wants agent pages that load CDN libraries and call APIs. Reason: [ADR-0002](watchtower/decisions/ADR-0002-networked-html-replies-over-offline-only.md).
 
 ## Learnings
 

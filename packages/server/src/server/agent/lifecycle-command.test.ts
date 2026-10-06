@@ -9,6 +9,7 @@ import {
   detachAgentCommand,
   setAgentModeCommand,
   updateAgentCommand,
+  type LifecycleAgentLink,
   type LifecycleAgentSnapshot,
   type LifecycleAgentManager,
   type LifecycleAgentStorage,
@@ -30,7 +31,9 @@ class FakeLifecycleAgentStorage implements LifecycleAgentStorage {
 
 class FakeLifecycleAgentManager implements LifecycleAgentManager {
   readonly liveAgents = new Map<string, LifecycleAgentSnapshot>();
+  readonly liveAgentLabels = new Map<string, Record<string, string>>();
   readonly cancelledAgentIds: string[] = [];
+  readonly throwingCancellationAgentIds = new Set<string>();
   readonly clearedAttentionAgentIds: string[] = [];
   readonly archivedAgentIds: string[] = [];
   readonly closedAgentIds: string[] = [];
@@ -52,12 +55,22 @@ class FakeLifecycleAgentManager implements LifecycleAgentManager {
     return this.liveAgents.get(agentId) ?? null;
   }
 
+  listAgents(): LifecycleAgentLink[] {
+    return Array.from(this.liveAgents.keys(), (id) => ({
+      id,
+      labels: this.liveAgentLabels.get(id) ?? {},
+    }));
+  }
+
   hasInFlightRun(agentId: string): boolean {
     return this.inFlightAgentIds.has(agentId);
   }
 
   async cancelAgentRun(agentId: string) {
     this.cancelledAgentIds.push(agentId);
+    if (this.throwingCancellationAgentIds.has(agentId)) {
+      throw new Error(`cancel failed for ${agentId}`);
+    }
     if (this.settledDuringCancellationAgentIds.delete(agentId)) {
       this.inFlightAgentIds.delete(agentId);
       return { status: "not_running" } as const;
@@ -192,6 +205,81 @@ describe("agent lifecycle commands", () => {
       agent: manager.liveAgents.get("agent-1"),
       cancelled: false,
     });
+  });
+
+  test("stop cancels running managed subagents deepest first, then the parent", async () => {
+    const storage = new FakeLifecycleAgentStorage();
+    const manager = new FakeLifecycleAgentManager(storage);
+    addLiveAgent(manager, { id: "parent", lifecycle: "running", inFlight: true });
+    addLiveAgent(manager, {
+      id: "child-1",
+      lifecycle: "running",
+      inFlight: true,
+      parent: "parent",
+    });
+    addLiveAgent(manager, {
+      id: "child-2",
+      lifecycle: "running",
+      inFlight: true,
+      parent: "parent",
+    });
+    addLiveAgent(manager, {
+      id: "grandchild",
+      lifecycle: "running",
+      inFlight: true,
+      parent: "child-1",
+    });
+    addLiveAgent(manager, { id: "idle-child", lifecycle: "idle", parent: "parent" });
+    addLiveAgent(manager, { id: "detached", lifecycle: "running", inFlight: true });
+
+    const result = await cancelAgentRunCommand({ agentManager: manager, logger }, "parent");
+
+    expect(result).toEqual({ agent: manager.liveAgents.get("parent"), cancelled: true });
+    expect(manager.cancelledAgentIds).toEqual(["grandchild", "child-1", "child-2", "parent"]);
+    expect(manager.inFlightAgentIds).toEqual(new Set(["detached"]));
+  });
+
+  test("stop on an idle parent still cancels its running subagents", async () => {
+    const storage = new FakeLifecycleAgentStorage();
+    const manager = new FakeLifecycleAgentManager(storage);
+    addLiveAgent(manager, { id: "parent", lifecycle: "idle" });
+    addLiveAgent(manager, { id: "child", lifecycle: "running", inFlight: true, parent: "parent" });
+
+    const result = await cancelAgentRunCommand({ agentManager: manager, logger }, "parent");
+
+    expect(result).toEqual({ agent: manager.liveAgents.get("parent"), cancelled: false });
+    expect(manager.cancelledAgentIds).toEqual(["child"]);
+  });
+
+  test("stop ends on a parent-label cycle and cancels each agent once", async () => {
+    const storage = new FakeLifecycleAgentStorage();
+    const manager = new FakeLifecycleAgentManager(storage);
+    addLiveAgent(manager, { id: "a", lifecycle: "running", inFlight: true, parent: "b" });
+    addLiveAgent(manager, { id: "b", lifecycle: "running", inFlight: true, parent: "a" });
+
+    await cancelAgentRunCommand({ agentManager: manager, logger }, "a");
+
+    expect(manager.cancelledAgentIds).toEqual(["b", "a"]);
+  });
+
+  test("stop still cancels the parent when a subagent cancel fails", async () => {
+    const storage = new FakeLifecycleAgentStorage();
+    const manager = new FakeLifecycleAgentManager(storage);
+    addLiveAgent(manager, { id: "parent", lifecycle: "running", inFlight: true });
+    addLiveAgent(manager, {
+      id: "refused",
+      lifecycle: "running",
+      inFlight: true,
+      parent: "parent",
+    });
+    addLiveAgent(manager, { id: "throws", lifecycle: "running", inFlight: true, parent: "parent" });
+    manager.rejectedCancellationAgentIds.add("refused");
+    manager.throwingCancellationAgentIds.add("throws");
+
+    await expect(
+      cancelAgentRunCommand({ agentManager: manager, logger }, "parent"),
+    ).resolves.toEqual({ agent: manager.liveAgents.get("parent"), cancelled: true });
+    expect(manager.cancelledAgentIds).toEqual(["refused", "throws", "parent"]);
   });
 
   test("archives a live agent after canceling and clearing attention", async () => {
@@ -333,6 +421,24 @@ describe("agent lifecycle commands", () => {
     expect(manager.modeUpdates).toEqual([{ agentId: "agent-1", modeId: "plan" }]);
   });
 });
+
+function addLiveAgent(
+  manager: FakeLifecycleAgentManager,
+  input: {
+    id: string;
+    lifecycle: LifecycleAgentSnapshot["lifecycle"];
+    inFlight?: boolean;
+    parent?: string;
+  },
+): void {
+  manager.liveAgents.set(input.id, managedAgent(input.id, input.lifecycle));
+  if (input.parent) {
+    manager.liveAgentLabels.set(input.id, { [PARENT_AGENT_ID_LABEL]: input.parent });
+  }
+  if (input.inFlight) {
+    manager.inFlightAgentIds.add(input.id);
+  }
+}
 
 function managedAgent(
   id: string,

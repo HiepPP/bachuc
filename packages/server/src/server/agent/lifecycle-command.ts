@@ -1,17 +1,21 @@
 import type { Logger } from "pino";
+import { getParentAgentIdFromLabels } from "@getpaseo/protocol/agent-labels";
 
 import {
   AgentRunCancellationError,
   type AgentRunCancellationResult,
   type ManagedAgent,
 } from "./agent-manager.js";
+import { disarmFinishNotifications } from "./agent-prompt.js";
 import type { StoredAgentRecord } from "./agent-storage.js";
 import type { AgentProviderNotice } from "./agent-sdk-types.js";
 
 export type LifecycleAgentSnapshot = Pick<ManagedAgent, "id" | "cwd" | "lifecycle">;
+export type LifecycleAgentLink = Pick<ManagedAgent, "id" | "labels">;
 
 export interface LifecycleAgentManager {
   getAgent(agentId: string): LifecycleAgentSnapshot | null;
+  listAgents(): LifecycleAgentLink[];
   hasInFlightRun(agentId: string): boolean;
   cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult>;
   clearAgentAttention(agentId: string): Promise<void>;
@@ -93,20 +97,113 @@ async function requestAgentRunCancellation(
   };
 }
 
+// Live managed descendants found through the parent-agent-id label, deepest first.
+// Provider subagents are not managed agents, and the parent's own interrupt stops them.
+function listLiveDescendantsDeepestFirst(
+  agentManager: Pick<LifecycleAgentManager, "listAgents">,
+  rootAgentId: string,
+): string[] {
+  const childrenByParent = new Map<string, string[]>();
+  for (const agent of agentManager.listAgents()) {
+    const parentAgentId = getParentAgentIdFromLabels(agent.labels);
+    if (!parentAgentId) {
+      continue;
+    }
+    const siblings = childrenByParent.get(parentAgentId) ?? [];
+    siblings.push(agent.id);
+    childrenByParent.set(parentAgentId, siblings);
+  }
+
+  const levels: string[][] = [];
+  const visited = new Set<string>([rootAgentId]);
+  let frontier = [rootAgentId];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const parentAgentId of frontier) {
+      for (const childAgentId of childrenByParent.get(parentAgentId) ?? []) {
+        if (visited.has(childAgentId)) {
+          continue;
+        }
+        visited.add(childAgentId);
+        next.push(childAgentId);
+      }
+    }
+    if (next.length > 0) {
+      levels.push(next);
+    }
+    frontier = next;
+  }
+  return levels.toReversed().flat();
+}
+
+function disarmSubtreeNotices(
+  agentManager: Pick<LifecycleAgentManager, "listAgents">,
+  rootAgentId: string,
+): string[] {
+  const descendantIds = listLiveDescendantsDeepestFirst(agentManager, rootAgentId);
+  disarmFinishNotifications({
+    agentManager,
+    callerAgentIds: new Set([rootAgentId, ...descendantIds]),
+  });
+  return descendantIds;
+}
+
+// Stop applies to the whole managed subtree. Notices are disarmed first, so a child
+// that settles during the cascade cannot start a new turn on its stopped parent.
+async function cancelDescendantRuns(
+  dependencies: Pick<AgentLifecycleCommandDependencies, "agentManager" | "logger">,
+  rootAgentId: string,
+): Promise<void> {
+  const { agentManager, logger } = dependencies;
+  const descendantIds = disarmSubtreeNotices(agentManager, rootAgentId);
+
+  for (const descendantId of descendantIds) {
+    if (!agentManager.hasInFlightRun(descendantId)) {
+      continue;
+    }
+    try {
+      const cancellation = await agentManager.cancelAgentRun(descendantId);
+      if (cancellation.status === "refused") {
+        logger.warn(
+          { agentId: descendantId, rootAgentId },
+          "cancelAgentRunCommand: subagent run was not cancelled",
+        );
+      }
+    } catch (error) {
+      logger.warn(
+        { err: error, agentId: descendantId, rootAgentId },
+        "cancelAgentRunCommand: failed to cancel subagent run",
+      );
+    }
+  }
+}
+
 export async function cancelAgentRunCommand(
   dependencies: Pick<AgentLifecycleCommandDependencies, "agentManager" | "logger">,
   agentId: string,
 ): Promise<CancelAgentRunResult> {
-  const result = await requestAgentRunCancellation(dependencies, agentId);
-  if (result.cancellation.status === "refused") {
-    dependencies.logger.warn(
-      { agentId },
-      "cancelAgentRunCommand: reported running but no active run was cancelled",
-    );
-    throw new AgentRunCancellationError(agentId, "stop");
-  }
+  const hasLiveAgent = dependencies.agentManager.getAgent(agentId) !== null;
+  try {
+    if (hasLiveAgent) {
+      await cancelDescendantRuns(dependencies, agentId);
+    }
+    const result = await requestAgentRunCancellation(dependencies, agentId);
+    if (result.cancellation.status === "refused") {
+      dependencies.logger.warn(
+        { agentId },
+        "cancelAgentRunCommand: reported running but no active run was cancelled",
+      );
+      throw new AgentRunCancellationError(agentId, "stop");
+    }
 
-  return { agent: result.agent, cancelled: result.cancelled };
+    return { agent: result.agent, cancelled: result.cancelled };
+  } finally {
+    // The parent keeps running until its own cancel settles, so it can arm new notices
+    // or spawn children during the cascade. Disarm the subtree again once it is stopped.
+    if (hasLiveAgent) {
+      disarmSubtreeNotices(dependencies.agentManager, agentId);
+    }
+  }
 }
 
 export interface ArchiveAgentResult {
