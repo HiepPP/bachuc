@@ -172,6 +172,7 @@ status alone does not prove every plugin action works.
 | [loop-verify](plugins/loop-verify/README.md)                     | Prototype: retry a labeled agent's goal in fresh child agents until a verify command passes, up to 5 rounds.                           |
 | [pr-watch](plugins/pr-watch/README.md)                           | Let an agent watch its GitHub PR and wake it when checks fail or pass, someone comments, or a conflict appears.                        |
 | [assistant-cite](plugins/assistant-cite/README.md)               | Cite selected assistant text as a composer chip with an optional comment, and jump back to the quote from the chip.                    |
+| [html-reply](plugins/html-reply/README.md)                       | Let an agent publish a sandboxed, themed HTML page that renders inline in its thread.                                                  |
 
 ## Install a plugin
 

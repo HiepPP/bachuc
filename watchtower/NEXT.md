@@ -4,8 +4,8 @@
 
 - Title: Port T3 Code orchestration and reply features
 - Slug: 20261006-t3code-orchestration-port
-- Status: ACTIVE
-- Updated: 2026-10-06
+- Status: DONE
+- Updated: 2026-10-07
 
 ## Tracker
 
@@ -22,7 +22,7 @@ One row per TASK. Group ties together items that write the same files.
 | 7     | TASK-010 Host API to reveal a quoted passage             | B     | DONE   | [watchtower/tasks/TASK-010-reveal-passage-host-api.md](watchtower/tasks/TASK-010-reveal-passage-host-api.md)     | TASK-006           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B3 host part 2. Q-007, Q-010, ADR-0003. auto: manual checks pending.                  |
 | 8     | TASK-007 Assistant cite plugin                           | D     | DONE   | [watchtower/tasks/TASK-007-assistant-cite-plugin.md](watchtower/tasks/TASK-007-assistant-cite-plugin.md)         | TASK-006, TASK-010 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B3 plugin part. Q-007, Q-011. auto: manual checks pending.                            |
 | 9     | TASK-008 Host API for a sandboxed HTML frame             | B     | DONE   | [watchtower/tasks/TASK-008-html-frame-host-api.md](watchtower/tasks/TASK-008-html-frame-host-api.md)             | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B4 host part. Q-008, ADR-0002. auto: manual checks pending.                           |
-| 10    | TASK-009 HTML reply plugin                               | E     | TODO   | [watchtower/tasks/TASK-009-html-reply-plugin.md](watchtower/tasks/TASK-009-html-reply-plugin.md)                 | TASK-008           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B4 plugin part. Q-008, ADR-0002.                                                      |
+| 10    | TASK-009 HTML reply plugin                               | E     | DONE   | [watchtower/tasks/TASK-009-html-reply-plugin.md](watchtower/tasks/TASK-009-html-reply-plugin.md)                 | TASK-008           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B4 plugin part. Q-008, ADR-0002. auto: manual checks pending.                         |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
@@ -37,7 +37,8 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: The autorun loop builds TASK-009 (HTML reply plugin) next. It renders replies with `HtmlFrame` from `@getpaseo/plugin/client/ui`.
+- Next action: All TASKs are DONE. The autorun loop runs Finish: a draft PR from `t3code-port` to `main` for the owner to review.
+- Manual check pending: install `html-reply` on live; have an agent call `publish_html` with a page that loads a chart library from an https CDN, and check that it renders in the thread (TASK-009).
 - Manual check pending: a test plugin renders `HtmlFrame` on live web or Electron; its script runs, a fetch fails without `network` and works with it. On Android and iOS, check inner scroll and one https load (TASK-008).
 - Owner review: accept or reject ADR-0003; answer Q-010 if native should scroll to a revealed passage, and Q-011 if plugins need a toast API.
 - Manual check pending: install `assistant-cite` on live, select assistant text, click Cite, add a comment, send, and press the chip to jump back (TASK-007).
