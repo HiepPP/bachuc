@@ -69,6 +69,7 @@ import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/submit";
 import { encodeImages } from "@/utils/encode-images";
 import { DirectorySync, type RefreshAgentDirectoryResult } from "@/runtime/directory-sync";
+import { hostSupportsFeature } from "@/runtime/host-features";
 import { ReplicaCache } from "@/runtime/replica-cache";
 import type { ReplicaRowStore } from "@/runtime/replica-cache/row-store";
 import { createReplicaRowStore } from "@/runtime/replica-cache/row-store-factory";
@@ -2318,6 +2319,8 @@ export class HostRuntimeStore {
     if (this.queuedAgentDrainInFlight.has(drainKey)) return;
     const store = useSessionStore.getState();
     const session = store.sessions[serverId];
+    // COMPAT(agentMessageQueue): a capable daemon drains its own queue.
+    if (hostSupportsFeature(session?.serverInfo, "agentMessageQueue")) return;
     const queue = session?.queuedMessages.get(agentId);
     const client = session?.client;
     if (!client || !queue?.length || session.initializingAgents.get(agentId) === true) {
