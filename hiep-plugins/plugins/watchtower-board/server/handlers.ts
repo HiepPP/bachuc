@@ -39,7 +39,7 @@ export async function searchTaskAttachments(
   }
   const items: PluginAttachmentItem[] = [];
   for (const workspace of workspaces) {
-    const board = await readBoard(workspace.workspaceDirectory);
+    const board = await readBoard(workspace.workspaceDirectory, { runState: false });
     if (scoped && board.message && !board.tasks.length) throw new Error(board.message);
     for (const task of board.tasks) {
       const label = `${workspace.projectDisplayName} / ${workspace.name}`;

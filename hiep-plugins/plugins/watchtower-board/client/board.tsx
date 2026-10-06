@@ -10,7 +10,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { attachmentKey, readBoardRpc, readProjectBoardRpc, type Task } from "../shared/board";
-import { dashboardSummary, groupOrder, groupTasks, taskTitle, type TaskGroup } from "./dashboard";
+import {
+  dashboardSummary,
+  groupOrder,
+  groupTasks,
+  plural,
+  questionsFor,
+  taskTitle,
+  type TaskGroup,
+} from "./dashboard";
 
 const groupLabels: Record<TaskGroup, string> = {
   active: "Active",
@@ -74,6 +82,9 @@ export function WatchtowerBoard({
       ? board.data?.tasks.find((task) => task.id === selection.taskId)
       : null;
   const tasks = board.data?.tasks ?? [];
+  const questions = board.data?.questions ?? [];
+  const proposedAdrs = board.data?.proposedAdrs ?? 0;
+  const run = board.data?.run ?? null;
   const summary = useMemo(() => dashboardSummary(tasks), [tasks]);
   const groups = useMemo(() => groupTasks(tasks), [tasks]);
   const visibleGroups = groupOrder.filter(
@@ -171,6 +182,8 @@ export function WatchtowerBoard({
         gap: 8,
       },
       taskId: { color: theme.colors.foreground, fontSize: 12, fontWeight: "600" as const },
+      taskClass: { color: theme.colors.foregroundMuted, fontSize: 11, lineHeight: 18 },
+      section: { gap: 6 },
       taskName: {
         flex: 1,
         minWidth: 0,
@@ -331,6 +344,68 @@ export function WatchtowerBoard({
             </View>
           ) : null}
 
+          {board.data.warnings.map((warning) => (
+            <View key={warning} style={styles.stateCard}>
+              <Text style={styles.error}>{warning}</Text>
+            </View>
+          ))}
+
+          {questions.length || proposedAdrs ? (
+            <View style={[styles.card, styles.section]}>
+              <Text style={styles.detailLabel}>Waiting on the owner</Text>
+              <Text style={styles.muted}>
+                {plural(questions.length, "open question")} block tasks ·{" "}
+                {plural(proposedAdrs, "proposed ADR")}
+              </Text>
+              {questions.map((question) => (
+                <View key={question.id}>
+                  <Text style={styles.taskId}>
+                    {question.id} · blocks {question.blocks.join(", ")}
+                  </Text>
+                  <Text selectable style={styles.text}>
+                    {question.question}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {run ? (
+            <View style={[styles.card, styles.section]}>
+              <Text style={styles.detailLabel}>Autorun</Text>
+              <Text selectable style={styles.muted}>
+                {[
+                  run.runner && `Runner ${run.runner}`,
+                  run.profile && `Profile ${run.profile}`,
+                  run.schedule && `Schedule ${run.schedule}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "Runner not recorded"}
+              </Text>
+              <Text style={styles.muted}>
+                Started {run.started ?? "-"} ·{" "}
+                {run.finished ? `Finished ${run.finished}` : "Not finished"}
+              </Text>
+              {run.log.map((entry, index) => (
+                <View key={`${index}-${entry.task}-${entry.start}`}>
+                  <Text style={styles.taskId}>
+                    {entry.task} · {entry.result}
+                  </Text>
+                  <Text selectable style={styles.muted}>
+                    {entry.start}–{entry.end}
+                    {entry.detail ? ` · ${entry.detail}` : ""}
+                  </Text>
+                </View>
+              ))}
+              {run.total > run.log.length ? (
+                <Text style={styles.muted}>
+                  Latest {run.log.length} of {plural(run.total, "iteration")}
+                </Text>
+              ) : null}
+              {!run.total ? <Text style={styles.muted}>No iterations logged yet.</Text> : null}
+            </View>
+          ) : null}
+
           {visibleGroups.map((group) => {
             const isCollapsed = collapsed[group] === true;
             return (
@@ -350,6 +425,7 @@ export function WatchtowerBoard({
                   ? groups[group].map((task) => {
                       const isSelected = selected?.id === task.id;
                       const color = badgeColor(task.status);
+                      const blocking = questionsFor(task.id, questions);
                       return (
                         <View
                           key={task.id}
@@ -357,7 +433,7 @@ export function WatchtowerBoard({
                         >
                           <Pressable
                             accessibilityRole="button"
-                            accessibilityLabel={`${task.id}, ${taskTitle(task)}, ${groupLabels[group]}`}
+                            accessibilityLabel={`${task.id}, ${taskTitle(task)}, ${groupLabels[group]}${task.taskClass ? `, class ${task.taskClass}` : ""}`}
                             accessibilityHint="Shows task details and attachment search"
                             accessibilityState={{ selected: isSelected, expanded: isSelected }}
                             style={styles.taskRow}
@@ -367,6 +443,11 @@ export function WatchtowerBoard({
                             }}
                           >
                             <Text style={styles.taskId}>{task.id}</Text>
+                            {task.taskClass ? (
+                              <Text numberOfLines={1} style={styles.taskClass}>
+                                {task.taskClass}
+                              </Text>
+                            ) : null}
                             <Text
                               ellipsizeMode="tail"
                               numberOfLines={isSelected ? undefined : 1}
@@ -395,6 +476,24 @@ export function WatchtowerBoard({
                                   {task.deps || "-"}
                                 </Text>
                               </View>
+                              {task.brief ? (
+                                <View>
+                                  <Text style={styles.detailLabel}>Class</Text>
+                                  <Text selectable style={styles.text}>
+                                    {task.taskClass ?? "Missing; Watchtower reads it as risky."}
+                                  </Text>
+                                </View>
+                              ) : null}
+                              {blocking.length ? (
+                                <View>
+                                  <Text style={styles.detailLabel}>Open questions</Text>
+                                  {blocking.map((question) => (
+                                    <Text key={question.id} selectable style={styles.blocker}>
+                                      {question.id}: {question.question}
+                                    </Text>
+                                  ))}
+                                </View>
+                              ) : null}
                               {task.blocker ? (
                                 <View>
                                   <Text style={styles.detailLabel}>Blocker</Text>

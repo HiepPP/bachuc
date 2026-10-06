@@ -14,8 +14,11 @@ page. Mobile keeps a sidebar page that picks a workspace from a row sorted by re
 The header identifies its project. Each workspace keeps its own board and task selection.
 The board reads `watchtower/NEXT.md` in that workspace, not another checkout or its parent repository.
 The panel summarizes completion and counts for Active, Blocked, Todo, and Done tasks.
+**Waiting on the owner** lists the open questions that block tasks and counts proposed ADRs.
+**Autorun** shows the run's runner, profile, schedule, start and finish, and its five latest
+iterations, newest first. Each task row shows its class next to its ID.
 Expand or collapse a status group, then select a compact task row to read its full title, brief,
-dependencies, blocker, and file error. Refresh to read current files.
+dependencies, class, blocking questions, blocker, and file error. Refresh to read current files.
 
 To attach: open composer **+ → Watchtower task**, search by workspace or task, then select the result.
 The picker searches the host's 30 most recently active workspaces and returns up to 20 valid tasks.
@@ -34,11 +37,21 @@ Spec links may be relative to NEXT.md or start with `watchtower/` from the works
 Specs must have a matching H1 task ID and a non-empty `## Brief` section.
 The board displays Markdown brief text without rendering links or executing content.
 For BLOCKED tasks, it reads `Blocked:` from the matching task outcome, falling back to Tracker notes.
-Missing files, unsupported legacy formats, invalid links, and unreadable specs show messages.
+The class comes from the `Class:` line above the spec's first H2; a missing class reads as risky.
+Three optional files sit beside NEXT.md, in the Watchtower skill's formats:
+
+- `QUESTIONS.md`: rows with Status `OPEN` and a `TASK-NNN` in Blocks. Other rows are skipped.
+- `RUN.md`: the `Runner`, `Profile`, `Schedule`, `Started`, and `Finished` lines and the `## Log` table.
+- `DECISIONS.md`: rows of the `## Index` table with Status `proposed`.
+
+A missing optional file hides its section; an unreadable one shows a warning. Attachment search
+reads none of them. Missing files, unsupported legacy formats, invalid links, and unreadable specs
+show messages.
 Invalid or unavailable briefs cannot be attached.
 
 Files must stay inside the workspace's Watchtower directory, including resolved symlink targets.
 Limits: 128 KiB per Markdown file, 200 tasks, and 1 MiB of manifest and spec content per board.
+The three optional files count only against the per-file limit.
 No repository file is written. No agents are created or messaged. No external service or credential is needed.
 The plugin reads other workspaces on the same host only when the user opens the attachment picker.
 

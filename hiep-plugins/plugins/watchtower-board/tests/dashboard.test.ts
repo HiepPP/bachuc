@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { dashboardSummary, groupTasks, taskTitle } from "../client/dashboard";
+import { dashboardSummary, groupTasks, plural, questionsFor, taskTitle } from "../client/dashboard";
 import type { Task } from "../shared/board";
 
 function task(id: string, status: string): Task {
@@ -11,6 +11,7 @@ function task(id: string, status: string): Task {
     deps: "-",
     notes: "",
     spec: "",
+    taskClass: null,
     brief: "Do the work.",
     blocker: null,
     error: null,
@@ -49,6 +50,20 @@ test("keeps unknown statuses separate from Todo", () => {
     groups.unknown.map(({ id }) => id),
     ["TASK-005"],
   );
+});
+
+test("lists the open questions that block a task", () => {
+  const questions = [
+    { id: "Q-001", question: "Which key?", blocks: ["TASK-002", "TASK-005"] },
+    { id: "Q-002", question: "Which port?", blocks: ["TASK-003"] },
+  ];
+  assert.deepEqual(
+    questionsFor("TASK-005", questions).map(({ id }) => id),
+    ["Q-001"],
+  );
+  assert.deepEqual(questionsFor("TASK-009", questions), []);
+  assert.equal(plural(1, "proposed ADR"), "1 proposed ADR");
+  assert.equal(plural(0, "open question"), "0 open questions");
 });
 
 test("groups dashboard tasks and separates IDs from titles", () => {

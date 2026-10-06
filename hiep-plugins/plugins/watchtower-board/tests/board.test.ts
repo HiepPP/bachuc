@@ -190,6 +190,97 @@ test("invalid identity, missing Brief, oversized specs and unknown status fail c
   assert.equal(section("## Brief\nA\n## Verify\nB", "Brief"), "A");
 });
 
+const questions = `# Questions
+
+| ID | TASK | Blocks | Question | Default | Status | Answer |
+|----|------|--------|----------|---------|--------|--------|
+| Q-001 | TASK-002 | TASK-002, TASK-005 | Which \`API\` key? | none | OPEN | - |
+| Q-002 | TASK-001 | - | Which color? | blue | OPEN | - |
+| Q-003 | TASK-001 | TASK-001 | Which port? | none | ANSWERED | 8080 |
+`;
+const runLog = Array.from(
+  { length: 7 },
+  (_, i) => `| 09:0${i} | 09:1${i} | TASK-00${i + 1} | DONE | #${i + 1} |`,
+).join("\n");
+const run = `# Run
+
+- Runner: paseo
+- Schedule: sch-1
+- Profile: logic
+- Started: 2026-10-06 09:00
+- Finished: -
+
+## Log
+
+| Start | End | TASK | Result | PR or reason |
+|-------|-----|------|--------|--------------|
+${runLog}
+`;
+const decisions = `# Decisions
+
+## Index
+
+| ID | Date | Title | Status | Scope | File |
+|----|------|-------|--------|-------|------|
+| ADR-0001 | 2026-10-01 | A over B | accepted | src/** | [ADR-0001](watchtower/decisions/ADR-0001-a.md) |
+| ADR-0002 | 2026-10-02 | C over D | proposed | src/** | [ADR-0002](watchtower/decisions/ADR-0002-c.md) |
+| ADR-0003 | 2026-10-03 | E over F | proposed | lib/** | [ADR-0003](watchtower/decisions/ADR-0003-e.md) |
+`;
+
+test("reads class, blocking questions, the run log, and proposed ADRs without changing files", async (t) => {
+  const root = await fixture(t);
+  const dir = path.join(root, "watchtower");
+  await writeFile(
+    path.join(dir, "tasks/TASK-001-first.md"),
+    "# TASK-001 First task\n\nGroup: A\nClass: `code`\n\n## Brief\nBuild it.\n\n## Verify\nClass: risky\n",
+  );
+  await writeFile(path.join(dir, "QUESTIONS.md"), questions);
+  await writeFile(path.join(dir, "RUN.md"), run);
+  await writeFile(path.join(dir, "DECISIONS.md"), decisions);
+  const before = await snapshot(root);
+  const board = boardSchema.parse(await loadWorkspaceBoard("ws-1", api(root)));
+  assert.deepEqual(
+    board.tasks.map((task) => task.taskClass),
+    ["code", null],
+  );
+  assert.deepEqual(board.questions, [
+    { id: "Q-001", question: "Which API key?", blocks: ["TASK-002", "TASK-005"] },
+  ]);
+  assert.equal(board.proposedAdrs, 2);
+  assert.deepEqual(board.warnings, []);
+  assert.equal(board.run?.runner, "paseo");
+  assert.equal(board.run?.profile, "logic");
+  assert.equal(board.run?.finished, null);
+  assert.equal(board.run?.total, 7);
+  assert.deepEqual(
+    board.run?.log.map((entry) => entry.task),
+    ["TASK-007", "TASK-006", "TASK-005", "TASK-004", "TASK-003"],
+  );
+  assert.equal(board.run?.log[0].detail, "#7");
+  assert.deepEqual(await snapshot(root), before);
+});
+
+test("missing run files stay quiet, unreadable ones warn, and run state outlives NEXT.md", async (t) => {
+  const root = await fixture(t);
+  const dir = path.join(root, "watchtower");
+  const quiet = await readBoard(root);
+  assert.deepEqual(
+    [quiet.questions, quiet.run, quiet.proposedAdrs, quiet.warnings],
+    [[], null, 0, []],
+  );
+  await writeFile(path.join(dir, "QUESTIONS.md"), "x".repeat(128 * 1024 + 1));
+  await writeFile(path.join(dir, "RUN.md"), run);
+  const loud = await readBoard(root);
+  assert.equal(loud.warnings.length, 1);
+  assert.match(loud.warnings[0], /^QUESTIONS\.md: .*128 KiB/);
+  assert.deepEqual(loud.questions, []);
+  assert.equal((await readBoard(root, { runState: false })).run, null);
+  await unlink(path.join(dir, "NEXT.md"));
+  const orphan = await readBoard(root);
+  assert.match(orphan.message!, /File not found/);
+  assert.equal(orphan.run?.total, 7);
+});
+
 test("scoped attachment keys match the exact task ID and keep snapshots stable", async (t) => {
   const root = await fixture(t);
   const file = path.join(root, "watchtower/NEXT.md");

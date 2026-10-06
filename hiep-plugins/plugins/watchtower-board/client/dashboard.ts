@@ -1,4 +1,4 @@
-import type { Task } from "../shared/board";
+import type { Question, Task } from "../shared/board";
 
 export const groupOrder = ["active", "blocked", "todo", "done", "unknown"] as const;
 export type TaskGroup = (typeof groupOrder)[number];
@@ -34,6 +34,14 @@ export function groupTasks(tasks: readonly Task[]): Record<TaskGroup, Task[]> {
   };
   for (const task of tasks) groups[taskGroup(task.status)].push(task);
   return groups;
+}
+
+export function questionsFor(taskId: string, questions: readonly Question[]): Question[] {
+  return questions.filter((question) => question.blocks.includes(taskId));
+}
+
+export function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 export function taskTitle(task: Pick<Task, "id" | "title">): string {

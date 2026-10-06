@@ -1,11 +1,18 @@
 import { constants } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import path from "node:path";
-import type { Board, Task } from "../shared/board";
+import { type Board, type Question, RUN_LOG_LIMIT, type Run, type Task } from "../shared/board";
 
 const MAX_FILE_BYTES = 128 * 1024;
 const MAX_BOARD_BYTES = 1024 * 1024;
 const MAX_TASKS = 200;
+
+type Manifest = Pick<Board, "title" | "tasks" | "message">;
+type RunState = Pick<Board, "questions" | "run" | "proposedAdrs" | "warnings">;
+
+function noRunState(): RunState {
+  return { questions: [], run: null, proposedAdrs: 0, warnings: [] };
+}
 
 function inside(root: string, target: string): boolean {
   const relative = path.relative(root, target);
@@ -77,7 +84,97 @@ function plain(value: string): string {
     .trim();
 }
 
-export function parseManifest(markdown: string): Board {
+// Rows of the first table whose header has every required column, keyed by lowercase header.
+function tableRows(markdown: string, required: string[]): Record<string, string>[] {
+  const lines = markdown.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].trim().startsWith("|")) continue;
+    const headers = cells(lines[i]).map((value) => value.toLowerCase());
+    if (!required.every((value) => headers.includes(value))) continue;
+    const rows: Record<string, string>[] = [];
+    for (const line of lines.slice(i + 1)) {
+      if (!line.trim().startsWith("|")) break;
+      if (/^[\s|:-]+$/.test(line)) continue;
+      const row = cells(line);
+      rows.push(Object.fromEntries(headers.map((header, j) => [header, plain(row[j] ?? "")])));
+    }
+    return rows;
+  }
+  return [];
+}
+
+export function parseQuestions(markdown: string): Question[] {
+  return tableRows(markdown, ["id", "blocks", "question", "status"])
+    .filter((row) => row.status.toUpperCase() === "OPEN")
+    .map((row) => ({
+      id: row.id,
+      question: row.question,
+      blocks: [...(row.blocks.match(/\bTASK-\d+\b/g) ?? [])],
+    }))
+    .filter((question) => question.blocks.length > 0);
+}
+
+export function parseRun(markdown: string): Run {
+  const field = (name: string) => {
+    const value = plain(
+      markdown.match(new RegExp(`^[ \\t]*-[ \\t]*${name}:(.*)$`, "im"))?.[1] ?? "",
+    );
+    return value && value !== "-" ? value : null;
+  };
+  const rows = tableRows(section(markdown, "Log") ?? "", ["start", "end", "task", "result"]);
+  return {
+    runner: field("Runner"),
+    schedule: field("Schedule"),
+    profile: field("Profile"),
+    started: field("Started"),
+    finished: field("Finished"),
+    log: rows
+      .slice(-RUN_LOG_LIMIT)
+      .reverse()
+      .map((row) => ({
+        start: row.start,
+        end: row.end,
+        task: row.task,
+        result: row.result,
+        detail: row["pr or reason"] ?? "",
+      })),
+    total: rows.length,
+  };
+}
+
+export function countProposedAdrs(markdown: string): number {
+  return tableRows(section(markdown, "Index") ?? markdown, ["id", "status"]).filter(
+    (row) => row.status.toLowerCase() === "proposed",
+  ).length;
+}
+
+// Only the spec header, above its first H2, can hold the `Class:` line.
+function specClass(spec: string): string | null {
+  const header = spec.split(/^##\s/m)[0];
+  return plain(header.match(/^Class:(.*)$/m)?.[1] ?? "") || null;
+}
+
+async function readRunState(watchtower: string): Promise<RunState> {
+  const state = noRunState();
+  const optional = async (name: string) => {
+    try {
+      return await readFile(watchtower, path.join(watchtower, name));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+        state.warnings.push(`${name}: ${message(error)}`);
+      return null;
+    }
+  };
+  const questions = await optional("QUESTIONS.md");
+  const run = await optional("RUN.md");
+  const decisions = await optional("DECISIONS.md");
+  if (questions) state.questions = parseQuestions(questions);
+  if (run) state.run = parseRun(run);
+  if (decisions) state.proposedAdrs = countProposedAdrs(decisions);
+  return state;
+}
+
+export function parseManifest(markdown: string): Manifest {
   const tracker = section(markdown, "Tracker");
   const title = markdown.match(/^\s*-?\s*Title:\s*(.+)$/m)?.[1] ?? "Watchtower";
   if (tracker === null)
@@ -125,6 +222,7 @@ export function parseManifest(markdown: string): Board {
       deps: plain(get("deps")),
       notes: plain(get("notes")),
       spec,
+      taskClass: null,
       brief: null,
       blocker: null,
       error: ["TODO", "IN PROGRESS", "BLOCKED", "DONE"].includes(status)
@@ -153,21 +251,32 @@ function specPath(directory: string, watchtower: string, link: string): string {
   return target;
 }
 
-export async function readBoard(directory: string): Promise<Board> {
-  const empty = (text: string): Board => ({ title: "Watchtower", tasks: [], message: text });
+// Attachment search passes `runState: false`; it needs only tasks.
+export async function readBoard(directory: string, { runState = true } = {}): Promise<Board> {
+  const empty = (text: string, state = noRunState()): Board => ({
+    title: "Watchtower",
+    tasks: [],
+    message: text,
+    ...state,
+  });
   let root: string;
   let watchtower: string;
-  let markdown: string;
   try {
     root = await realpath(directory);
     watchtower = await realpath(path.join(root, "watchtower"));
     if (!inside(root, watchtower))
       return empty("Watchtower directory must stay inside the workspace.");
-    markdown = await readFile(watchtower, path.join(watchtower, "NEXT.md"));
   } catch (error) {
     return empty(`Cannot load watchtower/NEXT.md. ${message(error)}`);
   }
-  const board = parseManifest(markdown);
+  const state = runState ? await readRunState(watchtower) : noRunState();
+  let markdown: string;
+  try {
+    markdown = await readFile(watchtower, path.join(watchtower, "NEXT.md"));
+  } catch (error) {
+    return empty(`Cannot load watchtower/NEXT.md. ${message(error)}`, state);
+  }
+  const board: Board = { ...parseManifest(markdown), ...state };
   let bytes = Buffer.byteLength(markdown);
   for (const task of board.tasks) {
     try {
@@ -178,6 +287,7 @@ export async function readBoard(directory: string): Promise<Board> {
       if (bytes > MAX_BOARD_BYTES) throw new Error("Plan content exceeds the 1 MiB limit.");
       const heading = spec.match(/^#\s+(TASK-\d+)\b/m)?.[1];
       if (heading !== task.id) throw new Error("Spec TASK ID does not match the Tracker.");
+      task.taskClass = specClass(spec);
       task.brief = section(spec, "Brief");
       if (!task.brief) throw new Error("Spec has no non-empty Brief section.");
       if (task.status === "BLOCKED") {
