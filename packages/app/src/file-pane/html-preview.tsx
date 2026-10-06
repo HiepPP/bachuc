@@ -32,8 +32,21 @@ const ORIGIN_WHITELIST = ["*"];
 // would arrive with no injected policy and a clean slate to egress from.
 const BASE_URL = "about:blank";
 
-export function FileHtmlPreview({ html, testID }: { html: string; testID?: string }) {
-  const document = useMemo(() => withPreviewCsp(html), [html]);
+export interface SandboxedHtmlViewProps {
+  /** A document from `withPreviewCsp`. */
+  document: string;
+  /** Used by the web frame; a WebView has no title. */
+  title: string;
+  testID?: string;
+  /** Lets the page scroll inside a scrolling parent on Android, such as a timeline row. */
+  nestedScroll?: boolean;
+}
+
+/**
+ * The locked-down WebView shared by the file preview and plugin HTML frames. The guard governs
+ * navigations only; subresource loads are left to the document's CSP.
+ */
+export function SandboxedHtmlView({ document, testID, nestedScroll }: SandboxedHtmlViewProps) {
   const source = useMemo(() => ({ html: document, baseUrl: BASE_URL }), [document]);
   // Latched per document rather than once for the lifetime of the WebView: the
   // file pane re-renders with new content on every live-file refresh, and each of
@@ -63,9 +76,15 @@ export function FileHtmlPreview({ html, testID }: { html: string; testID?: strin
       domStorageEnabled={false}
       thirdPartyCookiesEnabled={false}
       cacheEnabled={false}
+      nestedScrollEnabled={nestedScroll}
       incognito
     />
   );
+}
+
+export function FileHtmlPreview({ html, testID }: { html: string; testID?: string }) {
+  const document = useMemo(() => withPreviewCsp(html), [html]);
+  return <SandboxedHtmlView document={document} title="" testID={testID} />;
 }
 
 const styles = StyleSheet.create(() => ({

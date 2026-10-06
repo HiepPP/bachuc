@@ -31,7 +31,7 @@ Verified:
 
 Anti-goal:
 
-- Final: test "caps the quote body at the limit" passed: a 4000-character quote is accepted with its body at 4000 characters or fewer, and 4001 characters returns `too_long`; 2026-10-07 01:52.
+- Final: test "caps the quote body at the limit" passed: a 4000-character quote is accepted with its body at 4000 characters or fewer, and 4001 characters returns `too_long`; 2026-10-07, between 01:42 and the 01:47 merge (corrected in TASK-008; the first note said 01:52).
 - Result: PASS.
 
 Lessons:

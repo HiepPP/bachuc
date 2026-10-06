@@ -103,3 +103,20 @@ export interface SyntaxTokenData {
 export declare function tokenizeCode(code: string, filePath: string): SyntaxTokenData[][] | null;
 /** Renders one token in the active theme's syntax color. Nest it inside a `Text`. */
 export declare const SyntaxToken: ComponentType<{ token: SyntaxTokenData }>;
+
+export interface HtmlFrameProps {
+  /** A self-contained HTML document. Its scripts run in an opaque origin. */
+  html: string;
+  /** Fixed height; taller content scrolls inside the frame. Defaults to 360. */
+  height?: number;
+  /** Allows https scripts, styles, fonts, images, and fetch. Defaults to false: offline. */
+  network?: boolean;
+  /** Accessible title of the web frame. Defaults to "HTML". */
+  title?: string;
+  testID?: string;
+}
+/**
+ * Renders HTML in the file preview's sandbox: an iframe with `sandbox="allow-scripts"` on web
+ * and a locked-down WebView on native. The page gets the app theme as `--paseo-*` CSS variables.
+ */
+export declare const HtmlFrame: ComponentType<HtmlFrameProps>;

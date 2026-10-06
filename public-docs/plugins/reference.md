@@ -167,6 +167,19 @@ unsupported or the code exceeds the size cap; render plain text then. Render eac
 `<SyntaxToken token={token} />` inside a `Text`, so it takes the active theme's syntax color.
 Tokenize a whole document rather than single lines, so multi-line strings and comments keep their color.
 
+`<HtmlFrame html={html} height={360} network={false} />` renders a self-contained HTML document
+in the file preview's sandbox: an iframe with `sandbox="allow-scripts"` on web and desktop, and a
+locked-down WebView on native. On web, the page's scripts run in an opaque origin, so they cannot
+read the app's cookies or storage, open popups, or navigate the app. On native, the WebView keeps
+storage, cookies, popups, and navigation off. By default the frame is offline: the page cannot load
+remote resources or call `fetch`. `network: true` allows `https:` scripts, styles, fonts, images,
+and `fetch`; the sandbox stays the same. The frame has a fixed `height`, 360 by default, and taller
+content scrolls inside it. The frame background is white; style the page with the app theme, which
+it gets as CSS variables: `--paseo-background`, `--paseo-surface`, `--paseo-foreground`,
+`--paseo-muted`, `--paseo-border`, `--paseo-accent`, `--paseo-success`, `--paseo-warning`,
+`--paseo-danger`, `--paseo-font-ui`, and `--paseo-font-mono`. A theme change reloads the page.
+Treat the HTML as untrusted: a page can still navigate its own frame.
+
 ### Cross-platform rules
 
 Client code runs on iOS, Android, and in browsers through React Native Web. A component that works
