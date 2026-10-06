@@ -168,6 +168,7 @@ export const fr: TranslationResources = {
       resumeQueue: "Reprendre la file d'attente",
       queueHeld: "File d'attente en pause après l'arrêt",
       queuedImagesNotRestored: "Impossible de restaurer {{count}} images de la file d'attente",
+      addComment: "Ajouter un commentaire",
       openImage: "Ouvrir la pièce jointe de l'image",
       removeImage: "Supprimer l'image jointe",
       removeFile: "Remove file attachment",

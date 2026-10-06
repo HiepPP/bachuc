@@ -4,6 +4,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { AttachmentMetadata, WorkspaceFileComposerAttachment } from "@/attachments/types";
 import { appendWorkspaceFileAttachment } from "@/attachments/workspace-file";
 import {
+  upsertPluginResourceAttachment,
+  type PluginResourceComposerAttachment,
+} from "@/plugins/attachments/model";
+import {
   garbageCollectAttachments,
   persistAttachmentFromDataUrl,
   persistAttachmentFromFileUri,
@@ -52,6 +56,11 @@ interface DraftStoreActions {
   attachWorkspaceFile: (input: {
     draftKey: string;
     attachment: WorkspaceFileComposerAttachment;
+  }) => Promise<void>;
+  /** Adds a plugin chip, or replaces the chip with the same plugin, source, and item. */
+  attachPluginResource: (input: {
+    draftKey: string;
+    attachment: PluginResourceComposerAttachment;
   }) => Promise<void>;
   getCreateModalDraft: () => DraftInput | null;
   saveCreateModalDraft: (draft: DraftInput | null) => void;
@@ -398,6 +407,31 @@ export const useDraftStore = create<DraftStore>()(
           };
         });
         scheduleAttachmentGc();
+      },
+
+      attachPluginResource: async ({ draftKey, attachment }) => {
+        await get().hydrateDraftInput({ draftKey });
+        set((state) => {
+          const existing = state.drafts[draftKey];
+          const draft = toDraftInputIfReady(existing) ?? { text: "", attachments: [] };
+          return {
+            drafts: {
+              ...state.drafts,
+              [draftKey]: createDraftRecord({
+                draft: {
+                  ...draft,
+                  attachments: upsertPluginResourceAttachment(draft.attachments, attachment),
+                },
+                lifecycle: "active",
+                previousVersion: existing?.version,
+              }),
+            },
+            attachmentFocusRequestByDraftKey: {
+              ...state.attachmentFocusRequestByDraftKey,
+              [draftKey]: (state.attachmentFocusRequestByDraftKey[draftKey] ?? 0) + 1,
+            },
+          };
+        });
       },
 
       getCreateModalDraft: () => {

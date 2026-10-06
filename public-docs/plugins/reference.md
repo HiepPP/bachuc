@@ -1637,6 +1637,45 @@ client.addComposerInterceptor({
 });
 ```
 
+## Selection actions and composer chips
+
+`client.addAssistantSelectionAction({ id, title, onSelect })` adds a button to the toolbar that
+shows over text the user selects in an assistant message, on web and desktop only. Native apps
+show no toolbar. `onSelect` gets `{ serverId, workspaceId, agentId, messageId?, text }`, where
+`text` is the selection as Markdown. The action returns a cleanup function; plugin unload
+removes it too. Two actions with the same `id` in one plugin throw.
+
+`client.addComposerAttachment({ agentId, sourceId, sourceTitle, icon, item, commentable? })` adds a
+chip to an agent's composer draft, or replaces the chip with the same plugin, `sourceId`, and
+`item.id`; a replaced chip keeps the user's comment. Empty `agentId`, `sourceId`, `sourceTitle`,
+or `icon`, or an invalid `item`, throws. `item` is a `PluginAttachmentItem`, the shape an
+[attachment source](#add-a-composer-attachment-source) returns. With `commentable: true`,
+the chip has a comment field; a non-empty comment reaches the agent after the item text as
+`Comment: <comment>`.
+
+```ts
+client.addAssistantSelectionAction({
+  id: "quote",
+  title: "Quote",
+  onSelect: ({ agentId, text }) =>
+    client.addComposerAttachment({
+      agentId,
+      sourceId: "quote",
+      sourceTitle: "Quote",
+      icon: "Quote",
+      item: {
+        id: crypto.randomUUID(),
+        identifier: "quote",
+        title: text.slice(0, 60),
+        url: "https://example.com/quote",
+        text: `> ${text}`,
+        resourceType: "quote",
+      },
+      commentable: true,
+    }),
+});
+```
+
 ## Button descriptor
 
 These contracts are exported from `@getpaseo/plugin/client`.

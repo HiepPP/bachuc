@@ -165,6 +165,7 @@ export const ko: TranslationResources = {
       resumeQueue: "대기열 재개",
       queueHeld: "중지 후 대기열 일시 정지됨",
       queuedImagesNotRestored: "대기 중인 이미지 {{count}}개를 복원하지 못했습니다",
+      addComment: "댓글 추가",
       openImage: "이미지 첨부 열기",
       removeImage: "이미지 첨부 제거",
       removeFile: "파일 첨부 제거",

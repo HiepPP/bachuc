@@ -17,9 +17,11 @@ import {
   type PluginThemeContribution,
 } from "@getpaseo/plugin";
 import {
+  type PluginAssistantSelectionActionContribution,
   type PluginCommandCenterItemContribution,
   type PluginClientContext,
   type PluginClientSlashCommandContribution,
+  type PluginComposerAttachmentInput,
   type PluginComposerInterceptorContribution,
   type PluginSidebarContribution,
   type PluginSidebarProjectFilterContribution,
@@ -78,6 +80,28 @@ function requireId(value: string, label: string): string {
   return id;
 }
 
+function requireText(value: unknown, label: string): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) throw new Error(`addComposerAttachment needs ${label}`);
+  return text;
+}
+
+// A chip the draft schema rejects would make the whole draft fail to load, so reject it here.
+function parseComposerAttachmentInput(
+  input: PluginComposerAttachmentInput,
+): PluginComposerAttachmentInput {
+  const item = pluginSharedRuntime.PluginAttachmentItemSchema.safeParse(input.item);
+  if (!item.success) throw new Error(`addComposerAttachment has an invalid item: ${item.error}`);
+  return {
+    agentId: requireText(input.agentId, "an agent"),
+    sourceId: requireText(input.sourceId, "a sourceId"),
+    sourceTitle: requireText(input.sourceTitle, "a sourceTitle"),
+    icon: requireText(input.icon, "an icon"),
+    item: item.data,
+    ...(input.commentable ? { commentable: true } : {}),
+  };
+}
+
 export type PluginClientRuntime = Pick<
   PluginClientContext,
   | "paseo"
@@ -88,7 +112,12 @@ export type PluginClientRuntime = Pick<
   | "addComposerPill"
   | "addHeaderButton"
 > &
-  Partial<Pick<PluginClientContext, "setComposerText" | "openNewWorkspace" | "openPluginsPage">> & {
+  Partial<
+    Pick<
+      PluginClientContext,
+      "setComposerText" | "addComposerAttachment" | "openNewWorkspace" | "openPluginsPage"
+    >
+  > & {
     hosts: ReturnType<typeof createPluginHosts>;
   };
 
@@ -99,6 +128,8 @@ export function runPluginClientBundle(
   onChange: () => void = () => undefined,
 ): EvaluatedPlugin {
   const composerInterceptors: PluginComposerInterceptorContribution[] = [];
+  const assistantSelectionActions: PluginAssistantSelectionActionContribution[] = [];
+  const assistantSelectionActionIds = new Set<string>();
   const sidebarProjectFilters: PluginSidebarProjectFilterContribution[] = [];
   const sidebarProjectMenus: PluginSidebarProjectMenuContribution[] = [];
   const sidebarSections: PluginSidebarSectionContribution[] = [];
@@ -121,6 +152,7 @@ export function runPluginClientBundle(
     timelineTransformers: [],
     timelineRenderers: [],
     composerInterceptors,
+    assistantSelectionActions,
     sidebarProjectFilters,
     sidebarProjectMenus,
     sidebarSections,
@@ -437,6 +469,30 @@ export function runPluginClientBundle(
         () => composerInterceptorIds.delete(interceptorId),
       );
     },
+    addAssistantSelectionAction(contribution) {
+      const actionId = requireId(contribution.id, "assistant selection action id");
+      if (assistantSelectionActionIds.has(actionId)) {
+        throw new Error(`Duplicate assistant selection action: ${actionId}`);
+      }
+      if (!contribution.title?.trim()) {
+        throw new Error(`Assistant selection action ${actionId} has no title`);
+      }
+      if (typeof contribution.onSelect !== "function") {
+        throw new Error(`Assistant selection action ${actionId} has no onSelect function`);
+      }
+      assistantSelectionActionIds.add(actionId);
+      return register(
+        assistantSelectionActions,
+        { id: actionId, title: contribution.title, onSelect: contribution.onSelect },
+        () => assistantSelectionActionIds.delete(actionId),
+      );
+    },
+    addComposerAttachment(input) {
+      if (!runtime.addComposerAttachment) {
+        throw new Error("Composer chips are unavailable on this host");
+      }
+      runtime.addComposerAttachment(parseComposerAttachmentInput(input));
+    },
     addSidebarProjectFilter(contribution) {
       const filterId = requireSidebarId(contribution.id, "filter");
       if (
@@ -623,6 +679,7 @@ export function runPluginClientBundle(
     timelineTransformers: collector.timelineTransformers,
     timelineRenderers: collector.timelineRenderers,
     composerInterceptors: collector.composerInterceptors,
+    assistantSelectionActions: collector.assistantSelectionActions,
     sidebarProjectFilters: collector.sidebarProjectFilters,
     sidebarProjectMenus: collector.sidebarProjectMenus,
     sidebarSections: collector.sidebarSections,

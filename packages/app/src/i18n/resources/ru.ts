@@ -166,6 +166,7 @@ export const ru: TranslationResources = {
       resumeQueue: "Возобновить очередь",
       queueHeld: "Очередь приостановлена после остановки",
       queuedImagesNotRestored: "Не удалось восстановить изображений из очереди: {{count}}",
+      addComment: "Добавить комментарий",
       openImage: "Открыть прикрепленное изображение",
       removeImage: "Удалить прикрепленное изображение",
       removeFile: "Удалить прикрепленный файл",

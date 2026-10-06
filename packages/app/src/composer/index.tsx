@@ -389,12 +389,14 @@ interface RenderAttachmentTrayArgs {
   isComposerLocked: boolean;
   handleOpenAttachment: (attachment: ComposerAttachment) => void;
   handleRemoveAttachment: (index: number) => void;
+  handleAttachmentCommentChange: (index: number, comment: string) => void;
   labels: {
     openImage: string;
     removeImage: string;
     removeFile: string;
     openGithub: (kind: string, numberLabel: string) => string;
     removeGithub: (kind: string, numberLabel: string) => string;
+    addComment: string;
   };
 }
 
@@ -405,6 +407,7 @@ function renderAttachmentTray(args: RenderAttachmentTrayArgs): ReactElement | nu
     isComposerLocked,
     handleOpenAttachment,
     handleRemoveAttachment,
+    handleAttachmentCommentChange,
     labels,
   } = args;
   if (selectedAttachments.length === 0 && pendingFiles.length === 0) return null;
@@ -417,6 +420,7 @@ function renderAttachmentTray(args: RenderAttachmentTrayArgs): ReactElement | nu
           disabled: isComposerLocked,
           onOpen: handleOpenAttachment,
           onRemove: handleRemoveAttachment,
+          onCommentChange: handleAttachmentCommentChange,
           labels,
         }),
       )}
@@ -525,11 +529,12 @@ interface RenderComposerAttachmentPillArgs {
   disabled: boolean;
   onOpen: (attachment: ComposerAttachment) => void;
   onRemove: (index: number) => void;
+  onCommentChange: (index: number, comment: string) => void;
   labels: RenderAttachmentTrayArgs["labels"];
 }
 
 function renderComposerAttachmentPill(args: RenderComposerAttachmentPillArgs): ReactElement {
-  const { attachment, index, disabled, onOpen, onRemove, labels } = args;
+  const { attachment, index, disabled, onOpen, onRemove, onCommentChange, labels } = args;
   if (attachment.kind === "image") {
     return (
       <ImageAttachmentPill
@@ -588,6 +593,8 @@ function renderComposerAttachmentPill(args: RenderComposerAttachmentPillArgs): R
         onRemove={onRemove}
         openLabel={labels.openGithub}
         removeLabel={labels.removeGithub}
+        onCommentChange={onCommentChange}
+        commentPlaceholder={labels.addComment}
       />
     );
   }
@@ -2677,6 +2684,19 @@ function ComposerContentImpl({
     [isComposerLocked],
   );
 
+  const handleAttachmentCommentChange = useCallback(
+    (index: number, comment: string) => {
+      setSelectedAttachments((current) =>
+        current.map((attachment, position) =>
+          position === index && attachment.kind === "plugin_resource"
+            ? { ...attachment, comment }
+            : attachment,
+        ),
+      );
+    },
+    [setSelectedAttachments],
+  );
+
   const attachmentTray = useMemo(
     () =>
       renderAttachmentTray({
@@ -2685,6 +2705,7 @@ function ComposerContentImpl({
         isComposerLocked,
         handleOpenAttachment,
         handleRemoveAttachment,
+        handleAttachmentCommentChange,
         labels: {
           openImage: t("composer.attachments.openImage"),
           removeImage: t("composer.attachments.removeImage"),
@@ -2693,9 +2714,11 @@ function ComposerContentImpl({
             t("composer.attachments.openGithub", { kind, number: numberLabel }),
           removeGithub: (kind: string, numberLabel: string) =>
             t("composer.attachments.removeGithub", { kind, number: numberLabel }),
+          addComment: t("composer.attachments.addComment"),
         },
       }),
     [
+      handleAttachmentCommentChange,
       handleOpenAttachment,
       handleRemoveAttachment,
       isComposerLocked,

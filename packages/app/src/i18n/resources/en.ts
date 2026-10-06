@@ -161,6 +161,7 @@ export const en = {
       resumeQueue: "Resume queue",
       queueHeld: "Queue paused after Stop",
       queuedImagesNotRestored: "{{count}} queued image(s) could not be restored",
+      addComment: "Add a comment",
       openImage: "Open image attachment",
       removeImage: "Remove image attachment",
       removeFile: "Remove file attachment",

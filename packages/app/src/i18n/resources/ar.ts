@@ -165,6 +165,7 @@ export const ar: TranslationResources = {
       resumeQueue: "استئناف قائمة الانتظار",
       queueHeld: "قائمة الانتظار متوقفة مؤقتًا بعد الإيقاف",
       queuedImagesNotRestored: "تعذر استعادة {{count}} من الصور في قائمة الانتظار",
+      addComment: "أضف تعليقًا",
       openImage: "فتح مرفق الصورة",
       removeImage: "إزالة مرفق الصورة",
       removeFile: "Remove file attachment",

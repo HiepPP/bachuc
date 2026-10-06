@@ -165,6 +165,7 @@ export const zhCN: TranslationResources = {
       resumeQueue: "恢复队列",
       queueHeld: "停止后队列已暂停",
       queuedImagesNotRestored: "有 {{count}} 张排队图片无法恢复",
+      addComment: "添加评论",
       openImage: "打开图片附件",
       removeImage: "移除图片附件",
       removeFile: "Remove file attachment",

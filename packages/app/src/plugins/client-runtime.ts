@@ -13,7 +13,7 @@ import { createPluginClientStateSource } from "./client-state/source";
 import type { PluginClientRuntime } from "./evaluate";
 import { createPluginNavigation } from "./navigation";
 import { pluginButtonStore } from "./buttons";
-import { setPluginComposerText } from "./composer";
+import { addPluginComposerAttachment, setPluginComposerText } from "./composer";
 import { createPluginSurfaceRuntime } from "./surface-runtime";
 import type { InstalledPlugin } from "./types";
 
@@ -50,6 +50,13 @@ export function createPluginClientRuntime(
     },
     setComposerText({ agentId, text }) {
       setPluginComposerText(installation.serverId, agentId.trim(), text);
+    },
+    addComposerAttachment(input) {
+      void addPluginComposerAttachment(installation.serverId, installation.id, input).catch(
+        (error: unknown) => {
+          console.error(`[plugin:${installation.id}] could not add a composer chip`, error);
+        },
+      );
     },
     openPluginsPage() {
       router.push(buildSettingsHostSectionRoute(installation.serverId, "plugins"));
