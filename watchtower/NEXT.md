@@ -16,7 +16,7 @@ One row per TASK. Group ties together items that write the same files.
 | 1     | TASK-001 Cascade Stop to managed subagents               | A     | DONE   | [watchtower/tasks/TASK-001-cascade-stop.md](watchtower/tasks/TASK-001-cascade-stop.md)                           | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | A2. auto: manual checks pending. Adds the disarm hook that TASK-002 and TASK-003 use. |
 | 2     | TASK-002 Coalesce child finish notices                   | A     | DONE   | [watchtower/tasks/TASK-002-coalesce-finish-notices.md](watchtower/tasks/TASK-002-coalesce-finish-notices.md)     | TASK-001           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | A1. Q-001. auto: manual checks pending.                                               |
 | 3     | TASK-003 Daemon-side message queue                       | A     | DONE   | [watchtower/tasks/TASK-003-daemon-message-queue.md](watchtower/tasks/TASK-003-daemon-message-queue.md)           | TASK-001           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | A3 daemon part. Protocol change. Q-002, Q-003, Q-004. auto: manual checks pending.    |
-| 4     | TASK-004 App uses the daemon queue                       | B     | TODO   | [watchtower/tasks/TASK-004-app-daemon-queue.md](watchtower/tasks/TASK-004-app-daemon-queue.md)                   | TASK-003           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | A3 app part.                                                                          |
+| 4     | TASK-004 App uses the daemon queue                       | B     | DONE   | [watchtower/tasks/TASK-004-app-daemon-queue.md](watchtower/tasks/TASK-004-app-daemon-queue.md)                   | TASK-003           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | A3 app part. auto: manual checks pending.                                             |
 | 5     | TASK-005 PR watch plugin                                 | C     | TODO   | [watchtower/tasks/TASK-005-pr-watch-plugin.md](watchtower/tasks/TASK-005-pr-watch-plugin.md)                     | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | A7. Plugin only. Q-005, Q-006.                                                        |
 | 6     | TASK-006 Host API for selection actions and plugin chips | B     | TODO   | [watchtower/tasks/TASK-006-selection-action-host-api.md](watchtower/tasks/TASK-006-selection-action-host-api.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B3 host part 1. Q-007.                                                                |
 | 7     | TASK-010 Host API to reveal a quoted passage             | B     | TODO   | [watchtower/tasks/TASK-010-reveal-passage-host-api.md](watchtower/tasks/TASK-010-reveal-passage-host-api.md)     | TASK-006           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | B3 host part 2: jump back to the source. Q-007.                                       |
@@ -37,9 +37,10 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: The autorun loop builds TASK-004 next. The app reads `snapshot.queue` and loads an edited item from the `cancel` response (see [watchtower/tasks/TASK-003-outcome.md](watchtower/tasks/TASK-003-outcome.md)).
+- Next action: The autorun loop builds TASK-005 (PR watch plugin) next.
 - Manual check pending: Stop on a live parent with a running subagent (TASK-001).
 - Manual check pending: 3 quick subagents give one combined notice (TASK-002).
+- Manual check pending: on a restarted live daemon, a queued message survives an app reload, shows on a second client, and sends when the run ends (TASK-003, TASK-004).
 
 ## Archive
 
