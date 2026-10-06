@@ -12,10 +12,14 @@ export function resolvePluginSurfaceContribution(
   surface: InstalledPlugin["surfaces"][number] | null;
 } {
   if (!identity) return { sidebarItem: null, surface: null };
+  // A surface opened directly takes the title and icon of the sidebar item that opens it.
+  // Match on the item's `surface`, never its `id`: the two ID spaces are separate.
   const sidebarItem =
-    identity.kind === "sidebar"
-      ? (plugin?.sidebarItems.find((contribution) => contribution.id === identity.id) ?? null)
-      : null;
+    plugin?.sidebarItems.find((contribution) =>
+      identity.kind === "sidebar"
+        ? contribution.id === identity.id
+        : contribution.surface === identity.id,
+    ) ?? null;
   const surfaceId = identity.kind === "sidebar" ? sidebarItem?.surface : identity.id;
   const surface = surfaceId
     ? (plugin?.surfaces.find((contribution) => contribution.id === surfaceId) ?? null)

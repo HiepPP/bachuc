@@ -70,6 +70,14 @@ describe("plugin surface contribution identity", () => {
     ]);
   });
 
+  it("gives a direct surface the sidebar item that opens it", () => {
+    const identity = { kind: "surface", id: "surface-v1" } as const;
+    const resolved = resolvePluginSurfaceContribution(installations[0] ?? null, identity);
+
+    expect(resolved.sidebarItem?.id).toBe("overview");
+    expect(resolved.surface?.id).toBe("surface-v1");
+  });
+
   it("does not let a same-id sidebar contribution capture a direct surface", () => {
     const identity = { kind: "surface", id: "overview" } as const;
     const resolved = resolvePluginSurfaceContribution(installations[0] ?? null, identity);
