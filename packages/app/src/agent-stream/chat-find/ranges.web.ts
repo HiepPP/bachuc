@@ -21,6 +21,16 @@ export function findMessageMatches(
   return findMessageRows(root, messageId).flatMap((row) => findRenderedMatches(row, query));
 }
 
+/** The single occurrence of `query` in a message; null when it is missing or not unique. */
+export function findUniqueMessageMatch(
+  root: HTMLElement | null,
+  messageId: string,
+  query: string,
+): Range | null {
+  const matches = findMessageMatches(root, messageId, query);
+  return matches.length === 1 ? matches[0]! : null;
+}
+
 /** Local offsets belong to the DOM that supplied the text, never to a host parser. */
 export function findRenderedMatches(row: HTMLElement, query: string): Range[] {
   if (!query.trim()) return [];

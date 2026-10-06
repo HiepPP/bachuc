@@ -1,5 +1,6 @@
 import type { JsonValue } from "@getpaseo/protocol/agent-types";
 import type { PluginRpcContract } from "./rpc.js";
+import type { PluginAttachmentItem } from "./attachments.js";
 
 export interface PluginTheme {
   readonly colors: {
@@ -74,9 +75,15 @@ export interface PluginAttachmentSourceContribution {
   id: string;
   title: string;
   icon: string;
-  pickerTitle: string;
-  searchPlaceholder: string;
-  search: PluginRpcContract;
+  /**
+   * The picker needs `pickerTitle`, `searchPlaceholder`, and `search`. A source without `search`
+   * stays out of the picker and only names chips that `addComposerAttachment` adds.
+   */
+  pickerTitle?: string;
+  searchPlaceholder?: string;
+  search?: PluginRpcContract;
+  /** Runs when the user presses a chip from this source, instead of opening `item.url`. */
+  onOpen?(item: PluginAttachmentItem): void | Promise<void>;
 }
 
 export type PluginTimelineData = JsonValue;

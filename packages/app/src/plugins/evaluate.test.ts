@@ -766,7 +766,45 @@ describe("evaluatePluginClientBundle", () => {
       })`,
     );
 
-    expect(plugin.attachmentSources.map((source) => source.search.name)).toEqual(["issues.search"]);
+    expect(plugin.attachmentSources.map((source) => source.search?.name)).toEqual([
+      "issues.search",
+    ]);
+  });
+
+  it("accepts a chip-only attachment source with onOpen and no search", () => {
+    const evaluated = evaluatePluginClientBundle(
+      "cite-source",
+      bundle(`
+      plugin.addAttachmentSource({ id: "quote", title: "Quote", icon: "Blocks", onOpen() {} });
+    `),
+    );
+    expect(evaluated.attachmentSources).toEqual([
+      { id: "quote", title: "Quote", icon: "Blocks", onOpen: expect.any(Function) },
+    ]);
+    expect(() =>
+      evaluatePluginClientBundle(
+        "empty-source",
+        bundle(`plugin.addAttachmentSource({ id: "quote", title: "Quote", icon: "Blocks" });`),
+      ),
+    ).toThrow("Attachment source quote needs a search RPC or onOpen");
+  });
+
+  it("forwards a timeline reveal and rejects one with no message", () => {
+    const revealTimelinePassage = vi.fn();
+    const reveal = (fields: string) =>
+      runPluginClientBundle(
+        "cite-reveal",
+        bundle(`plugin.revealTimelinePassage({ agentId: "agent-1", ${fields} });`),
+        { ...runtime, revealTimelinePassage } as PluginClientRuntime,
+      );
+
+    reveal(`messageId: "m1", text: "  quoted  "`);
+    expect(revealTimelinePassage).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      messageId: "m1",
+      text: "quoted",
+    });
+    expect(() => reveal(`messageId: " "`)).toThrow("revealTimelinePassage needs a messageId");
   });
 
   it("rejects modules that are not part of the client runtime", () => {

@@ -45,6 +45,7 @@ export type {
   PluginAssistantSelection,
   PluginAssistantSelectionActionContribution,
   PluginComposerAttachmentInput,
+  PluginTimelinePassage,
   SettingsState,
 } from "./contracts.js";
 export type {

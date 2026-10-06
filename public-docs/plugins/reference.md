@@ -1653,18 +1653,44 @@ or `icon`, or an invalid `item`, throws. `item` is a `PluginAttachmentItem`, the
 the chip has a comment field; a non-empty comment reaches the agent after the item text as
 `Comment: <comment>`.
 
+`client.revealTimelinePassage({ serverId?, agentId, messageId, text? })` opens the agent and
+scrolls its timeline to the message. `serverId` defaults to the plugin's host. On web and desktop,
+`text` is highlighted for a moment when it matches the rendered message exactly once, ignoring
+case and whitespace. A match stays inside one block, such as a paragraph or a list item, and
+Markdown syntax in `text` does not match the rendered text; without a single match the timeline
+only scrolls. A message that is not loaded in the timeline shows a toast after the agent opens.
+Native apps open the agent but do not scroll yet.
+
+This quote action adds a chip, and a press on the chip jumps back to the quoted passage. The map
+lives in memory, so a chip from an earlier session opens nothing; keep the source in the item when
+it must survive a reload.
+
 ```ts
+const passages = new Map<string, PluginTimelinePassage>();
+
+client.addAttachmentSource({
+  id: "quote",
+  title: "Quote",
+  icon: "Quote",
+  onOpen: (item) => {
+    const passage = passages.get(item.id);
+    if (passage) client.revealTimelinePassage(passage);
+  },
+});
+
 client.addAssistantSelectionAction({
   id: "quote",
   title: "Quote",
-  onSelect: ({ agentId, text }) =>
+  onSelect: ({ agentId, messageId, text }) => {
+    const id = crypto.randomUUID();
+    if (messageId) passages.set(id, { agentId, messageId, text });
     client.addComposerAttachment({
       agentId,
       sourceId: "quote",
       sourceTitle: "Quote",
       icon: "Quote",
       item: {
-        id: crypto.randomUUID(),
+        id,
         identifier: "quote",
         title: text.slice(0, 60),
         url: "https://example.com/quote",
@@ -1672,7 +1698,8 @@ client.addAssistantSelectionAction({
         resourceType: "quote",
       },
       commentable: true,
-    }),
+    });
+  },
 });
 ```
 
@@ -2100,6 +2127,11 @@ export default function contribute(server: PluginServerContext) {
 ```
 
 Paseo owns the composer menu, search picker, selected pill, draft state, and submission. The `text` value is the complete snapshot sent to the agent.
+
+Add `onOpen(item)` to run plugin code when the user presses a chip from the source; without it, a
+press opens `item.url`. A source with `onOpen` and no `search`, `pickerTitle`, or
+`searchPlaceholder` stays out of the picker. Use it to open chips that
+[`addComposerAttachment`](#selection-actions-and-composer-chips) adds with the same `sourceId`.
 
 ## Hosts and lifecycle
 

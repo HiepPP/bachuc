@@ -54,3 +54,15 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: `session.test.ts` mocks count `getAgent` calls, so an extra lookup in a lifecycle command fails it even when the code is correct.
 - Source: `packages/server/src/server/session.test.ts` ("cancel_agent_request reports refusal only through its response"); TASK-003 outcome.
 - Use next time: run `session.test.ts` after any change to `packages/server/src/server/agent/lifecycle-command.ts`.
+
+### 2026-10-07 - Autorun 20261006-t3code-orchestration-port
+
+- Learned: after a `packages/plugin` type change, the app typecheck reads stale declarations until the SDK is rebuilt.
+- Source: TASK-006 and TASK-010 outcomes.
+- Use next time: run `npm run build:plugin` before `npm run typecheck`.
+- Learned: app tests that load Expo fail from the repo root with `__DEV__ is not defined`.
+- Source: TASK-006 and TASK-010 runs.
+- Use next time: run app vitest files from `packages/app`, with `--project browser` for `*.browser.test.ts`.
+- Learned: the agent stream view mounts before its authoritative history arrives, and the vitest Lucide stub lacks many icons, such as `Quote`.
+- Source: `packages/app/src/panels/agent-panel.tsx`; `packages/app/test-stubs/lucide-react-native.ts`; TASK-010 outcome.
+- Use next time: wait for `isAuthoritativeHistoryReady` before checking loaded items, and use `Blocks` as the icon in plugin tests.

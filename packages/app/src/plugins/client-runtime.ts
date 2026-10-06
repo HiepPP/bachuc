@@ -1,6 +1,8 @@
 import { router } from "expo-router";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { buildNewWorkspaceRoute, buildSettingsHostSectionRoute } from "@/utils/host-routes";
+import { navigateToAgent } from "@/utils/navigate-to-agent";
+import { requestTimelinePassage } from "./timeline-reveal";
 import { createPluginHosts } from "./hosts";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { PluginClientOpenPanelOptions } from "@getpaseo/plugin/client";
@@ -57,6 +59,11 @@ export function createPluginClientRuntime(
           console.error(`[plugin:${installation.id}] could not add a composer chip`, error);
         },
       );
+    },
+    revealTimelinePassage({ serverId, agentId, messageId, text }) {
+      const targetServerId = serverId ?? installation.serverId;
+      navigateToAgent({ serverId: targetServerId, agentId });
+      requestTimelinePassage(targetServerId, agentId, { messageId, ...(text ? { text } : {}) });
     },
     openPluginsPage() {
       router.push(buildSettingsHostSectionRoute(installation.serverId, "plugins"));

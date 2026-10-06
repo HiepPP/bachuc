@@ -49,6 +49,7 @@ import {
   type HistoryStartSettleScheduler,
 } from "./history-start-settle-scheduler";
 import { useChatFindSelectedMessageId } from "@/agent-stream/chat-find";
+import { useRevealTargetMessageId } from "@/agent-stream/passage-reveal";
 import { getStreamItemMessageId } from "./presentation";
 import { useScrollToMessage } from "./use-scroll-to-message.web";
 
@@ -383,25 +384,27 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const activationKey = routeBottomAnchorRequest?.requestKey ?? props.agentId;
   const isActivationReady = !hasRouteBottomAnchorRequest || isAuthoritativeHistoryReady;
 
-  // Chat find counts and highlights occurrences from the DOM, so every block row of
-  // the message it selected has to be mounted even when the scroll window is nowhere
+  // Chat find and passage reveal count and highlight occurrences from the DOM, so every
+  // block row of their message has to be mounted even when the scroll window is nowhere
   // near it. Without this a hit in a far paragraph is invisible to the count and Next
   // walks off to the following message.
   const chatFindMessageId = useChatFindSelectedMessageId();
-  const chatFindRowIndexes = useMemo(() => {
-    if (!chatFindMessageId) return null;
-    const indexes = segments.historyVirtualized.flatMap((item, index) =>
-      getStreamItemMessageId(item) === chatFindMessageId ? [index] : [],
-    );
+  const revealMessageId = useRevealTargetMessageId();
+  const pinnedRowIndexes = useMemo(() => {
+    if (!chatFindMessageId && !revealMessageId) return null;
+    const indexes = segments.historyVirtualized.flatMap((item, index) => {
+      const messageId = getStreamItemMessageId(item);
+      return messageId === chatFindMessageId || messageId === revealMessageId ? [index] : [];
+    });
     return indexes.length > 0 ? indexes : null;
-  }, [chatFindMessageId, segments.historyVirtualized]);
+  }, [chatFindMessageId, revealMessageId, segments.historyVirtualized]);
   const rangeExtractor = useCallback(
     (range: VirtualRange) => {
       const visible = defaultRangeExtractor(range);
-      if (!chatFindRowIndexes) return visible;
-      return [...new Set([...visible, ...chatFindRowIndexes])].sort((left, right) => left - right);
+      if (!pinnedRowIndexes) return visible;
+      return [...new Set([...visible, ...pinnedRowIndexes])].sort((left, right) => left - right);
     },
-    [chatFindRowIndexes],
+    [pinnedRowIndexes],
   );
   const rowVirtualizer = useVirtualizer({
     count: segments.historyVirtualized.length,

@@ -233,6 +233,7 @@ export const en = {
     empty: "Start chatting with this agent...",
     scrollToBottom: "Scroll to bottom",
     historyLoadFailed: "Couldn't load agent history",
+    passageNotLoaded: "That message isn't loaded in this chat",
     messageCapped: "This message was capped ({{bytes}} bytes).",
     permission: {
       rejectedPlan: "Rejected plan",
