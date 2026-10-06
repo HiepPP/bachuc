@@ -425,10 +425,46 @@ interface NotifySafelyOptions {
   permissionRequest?: AgentPermissionRequest;
 }
 
+interface ArmedFinishNotification {
+  callerAgentId: string;
+  stop: () => void;
+}
+
 // A caller waits on a child through one armed notification. Arming again, such as a
 // follow-up prompt while the child still runs, replaces the earlier one so the child's
-// next finish reaches the caller once.
-const armedFinishNotifications = new WeakMap<AgentManager, Map<string, () => void>>();
+// next finish reaches the caller once. Keyed by the manager object so the lifecycle
+// commands can disarm through their narrower manager interface.
+const armedFinishNotifications = new WeakMap<object, Map<string, ArmedFinishNotification>>();
+
+interface PendingFinishDelivery {
+  callerAgentId: string;
+  cancelled: boolean;
+}
+
+// A terminal notice leaves the armed map before its delivery finishes reading storage.
+// Disarm also cancels these in-flight deliveries, or a notice could land after Stop.
+const pendingFinishDeliveries = new WeakMap<object, Set<PendingFinishDelivery>>();
+
+export interface DisarmFinishNotificationsInput {
+  agentManager: object;
+  callerAgentIds: ReadonlySet<string>;
+}
+
+// Stop drops every notice still armed or in flight for the stopped agents, so a child
+// that settles after the stop cannot start a new turn on a caller the user just stopped.
+export function disarmFinishNotifications(input: DisarmFinishNotificationsInput): void {
+  const armedByManager = armedFinishNotifications.get(input.agentManager);
+  for (const armed of Array.from(armedByManager?.values() ?? [])) {
+    if (input.callerAgentIds.has(armed.callerAgentId)) {
+      armed.stop();
+    }
+  }
+  for (const delivery of pendingFinishDeliveries.get(input.agentManager) ?? []) {
+    if (input.callerAgentIds.has(delivery.callerAgentId)) {
+      delivery.cancelled = true;
+    }
+  }
+}
 
 export function setupFinishNotification(params: SetupFinishNotificationParams): void {
   const {
@@ -445,23 +481,25 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
   let unsubscribe: (() => void) | null = null;
   let notificationQueue = Promise.resolve();
 
-  const armedByManager = armedFinishNotifications.get(agentManager) ?? new Map();
+  const armedByManager =
+    armedFinishNotifications.get(agentManager) ?? new Map<string, ArmedFinishNotification>();
   armedFinishNotifications.set(agentManager, armedByManager);
   const armedKey = JSON.stringify([childAgentId, callerAgentId]);
-  armedByManager.get(armedKey)?.();
-  armedByManager.set(armedKey, stop);
+  armedByManager.get(armedKey)?.stop();
+  armedByManager.set(armedKey, { callerAgentId, stop });
 
   function stop(): void {
     if (stopped) return;
     stopped = true;
     unsubscribe?.();
-    if (armedByManager.get(armedKey) === stop) {
+    if (armedByManager.get(armedKey)?.stop === stop) {
       armedByManager.delete(armedKey);
     }
   }
 
   async function notify(
     reason: FinishNotificationReason,
+    delivery: PendingFinishDelivery,
     permissionRequest?: AgentPermissionRequest,
   ): Promise<void> {
     const callerRecord = await agentStorage.get(callerAgentId);
@@ -483,6 +521,9 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
       permissionRequest,
     });
 
+    if (delivery.cancelled) {
+      return;
+    }
     await sendPromptToAgent({
       agentManager,
       agentStorage,
@@ -497,13 +538,21 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
   function notifySafely(reason: FinishNotificationReason, options: NotifySafelyOptions = {}): void {
     if (stopped) return;
     if (options.terminal ?? true) stop();
+    const deliveries =
+      pendingFinishDeliveries.get(agentManager) ?? new Set<PendingFinishDelivery>();
+    pendingFinishDeliveries.set(agentManager, deliveries);
+    const delivery: PendingFinishDelivery = { callerAgentId, cancelled: false };
+    deliveries.add(delivery);
     notificationQueue = notificationQueue
-      .then(() => notify(reason, options.permissionRequest))
+      .then(() => notify(reason, delivery, options.permissionRequest))
       .catch((error) => {
         logger.error(
           { err: error, childAgentId, callerAgentId, reason },
           "Failed to notify caller agent",
         );
+      })
+      .finally(() => {
+        deliveries.delete(delivery);
       });
   }
 

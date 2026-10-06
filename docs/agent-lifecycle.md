@@ -55,6 +55,18 @@ older cancellation from settling a newer turn. If interruption is rejected or ti
 keeps its active foreground turn and replacement, reload, rewind, and Stop report the failure.
 Accepting new work after an ambiguous interruption would create a split-brain session.
 
+Stop applies to the managed subtree. `cancelAgentRunCommand`, which serves the app Stop, MCP
+`cancel_agent`, and Hub interrupts, first disarms every armed finish notice that would wake the
+stopped agent or one of its live descendants. It then cancels the running descendants deepest first, and the
+parent last. This runs even when the parent is idle, because an orchestrator often waits idle for
+its children. Without the disarm, a child that settles after the stop would start a new turn on
+the parent the user just stopped. The disarm also cancels a notice whose delivery is already
+reading storage, and it runs again after the parent's own cancel, because the parent can arm new
+notices or spawn children while the cascade runs. A descendant whose cancel fails is logged and does
+not block the parent. The whole subtree loses its armed notices even when a cancel fails, so a
+descendant that keeps running no longer wakes anyone. Reload, replace, rewind, and archive call
+`AgentManager.cancelAgentRun` directly and do not cascade; archive has its own cascade.
+
 ## Relationships
 
 Agents can launch other agents via the agent-scoped `create_agent` MCP tool. Agent-scoped creation is always asynchronous and always stamps `paseo.parent-agent-id`, pointing back at the caller. Omit `workspaceId` to use the caller's workspace, or pass an existing workspace ID returned by `create_workspace`. Placement never changes parentage.
