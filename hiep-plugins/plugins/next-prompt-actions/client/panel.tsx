@@ -32,6 +32,8 @@ export const panelSchema = z.object({
       // Five-field Recap only. Optional, so rows stored before these fields stay valid.
       notYet: z.string().optional(),
       need: z.string().optional(),
+      // Compact Recap only.
+      sections: z.array(z.object({ label: z.string(), text: z.string() })).optional(),
     })
     .optional(),
 });
@@ -716,7 +718,7 @@ export function createNextPromptPanel(client: Client) {
                 </View>
               ))}
             </View>
-            {/* Five fields: each section has its label above its value, divided from the one before. */}
+            {/* Labeled fields: each section has its label above its value, divided from the one before. */}
             {(sections ?? [{ label: "", text: recap.did }]).map((section, index) => {
               const value = (
                 <Markdown key={section.label} text={section.text} compact enableHtmlish={false} />

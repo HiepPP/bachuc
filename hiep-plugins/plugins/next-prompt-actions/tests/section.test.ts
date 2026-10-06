@@ -238,7 +238,13 @@ test("the Commit chip maps each value and keeps the full value in its label", ()
     ["committed abc1234", "committed abc1234", true],
     ["Pushed main", "Pushed main", true],
     ["pending review", "pending review", false],
-    ["not committed", "not committed", false],
+    ["not committed", "Not committed", false],
+    ["no changes", "No changes", false],
+    ["no changes (files created and edited in working directory)", "No changes", false],
+    ["chưa commit", "Chưa commit", false],
+    ["không có thay đổi", "Không có thay đổi", false],
+    ["committed abc1234, pushed main", "committed abc1234, pushed main", true],
+    ["no changesets", "no changesets", false],
     ["yesterday", "yesterday", false],
   ];
   for (const [value, text, done] of rows)
@@ -270,6 +276,86 @@ test("five-field sections omit Not yet and Need from you that say nothing", () =
   ]);
   const parsed = five(swapNothing(list)).recap!;
   assert.deepEqual(labels(parsed), ["Did", "Need from you"]);
+});
+
+const compact = (lines: string[]) => splitRecap(["Result.", "", "## Recap", ...lines].join("\n"));
+
+test("a compact Recap folds with the fields it wrote", () => {
+  const recap = compact([
+    "- `main` · `no changes` (files created and edited in working directory)",
+    "- Did: Created notes.ts with 5 constants.",
+  ]).recap!;
+  assert.deepEqual(recap, {
+    branch: "`main`",
+    commit: "`no changes` (files created and edited in working directory)",
+    did: "Created notes.ts with 5 constants.",
+    sections: [{ label: "Did", text: "Created notes.ts with 5 constants." }],
+  });
+  assert.deepEqual(recapSections(recap), recap.sections);
+  assert.deepEqual(
+    compact([
+      "- `main` · not committed",
+      "- **Did:** Added the toggle.",
+      "- Open: The trace is not measured.",
+      "- Need from you: Install the release.",
+    ]).recap!.sections,
+    [
+      { label: "Did", text: "Added the toggle." },
+      { label: "Open", text: "The trace is not measured." },
+      { label: "Need from you", text: "Install the release." },
+    ],
+  );
+});
+
+test("a Vietnamese compact Recap keeps its labels and nested lists", () => {
+  assert.deepEqual(
+    compact([
+      "- `main` · chưa commit",
+      "- Đã làm: Thêm nút trên Board.",
+      "- Còn lại:",
+      "  - Chưa đo trace.",
+      "  - Release chưa cập nhật.",
+      "- Cần bạn: Cài bản release.",
+    ]).recap,
+    {
+      branch: "`main`",
+      commit: "chưa commit",
+      did: "Thêm nút trên Board.",
+      sections: [
+        { label: "Đã làm", text: "Thêm nút trên Board." },
+        { label: "Còn lại", text: "- Chưa đo trace.\n- Release chưa cập nhật." },
+        { label: "Cần bạn", text: "Cài bản release." },
+      ],
+    },
+  );
+  assert.deepEqual(
+    compact([
+      "- main · không có thay đổi",
+      "- Đã làm: Kiểm tra parser.",
+      "- Cần bạn: Trả lời.",
+    ]).recap!.sections!.map((section) => section.label),
+    ["Đã làm", "Cần bạn"],
+  );
+});
+
+test("any other compact shape keeps native rendering", () => {
+  const head = "- `main` · not committed";
+  const cases: Record<string, string[]> = {
+    "no Did": [head],
+    "Open before Did": [head, "- Open: x", "- Did: y"],
+    "Need before Open": [head, "- Did: x", "- Need from you: y", "- Open: z"],
+    "duplicate Open": [head, "- Did: x", "- Open: y", "- Open: z"],
+    "unknown label": [head, "- Did: x", "- Tests: y"],
+    "no middle dot": ["- `main`, not committed", "- Did: x"],
+    "lines without bullets": ["`main` · not committed", "Did: x"],
+    "list nested in the head": [head, "  - nested", "- Did: x"],
+    "empty Did without a list": [head, "- Did:"],
+    "prose after": [head, "- Did: x", "", "Extra prose must remain."],
+  };
+  for (const [name, lines] of Object.entries(cases)) {
+    const before = ["Result.", "", "## Recap", ...lines].join("\n");
+    assert.deepEqual(splitRecap(before), { before }, name);
+  }
 });
 
 test("the legacy Recap has no sections and no five-field keys", () => {

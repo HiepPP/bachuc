@@ -90,10 +90,14 @@ The agent marks each prompt it recommends doing next. Several prompts, including
 
 ## Recap
 
-A Recap directly before What Next or Next Steps folds into the panel. Two field sets are recognised.
+A Recap directly before What Next or Next Steps folds into the panel. Three field sets are recognised.
 Any other field set or order, a missing label, an extra unlabeled block, or a quoted or fenced Recap keeps its native rendering.
 A Recap with no suggestion panel after it is not folded.
 
+- Compact, the shape the global agent rules ask for: one bullet list whose first item is
+  `<branch> · <commit state>`, then `Did:`, then optional `Open:` and `Need from you:`, in that order.
+  Vietnamese replies use `Đã làm:`, `Còn lại:`, and `Cần bạn:`. The panel shows each label as
+  written. Did, Open, and Need from you may nest a list.
 - Five fields, in this order: `Branch`, `Commit/push`, `Did`, `Not yet`, `Need from you`.
   `Commit/push` is `no`, or `yes` followed by detail such as `yes, committed abc1234`.
   `Did`, `Not yet`, and `Need from you` may each hold a list. Write `nothing` for a field with nothing to report.
@@ -121,13 +125,14 @@ Need from you: Open a new session and check the chip.
 
 The header shows a Branch chip and a Commit chip. The Commit chip maps its value like this; its accessibility label keeps the full value (`Commit/push: <value>`).
 
-| Value                                                    | Chip text                                                               | Icon   |
-| -------------------------------------------------------- | ----------------------------------------------------------------------- | ------ |
-| `no`, or legacy `none`, with an optional trailing period | No commit                                                               | commit |
-| `yes` alone                                              | Committed                                                               | check  |
-| `yes` plus detail, such as `yes, committed abc1234`      | the detail without `yes` and its separator, such as `committed abc1234` | check  |
-| legacy `committed ...` or `pushed ...`                   | the value as written                                                    | check  |
-| anything else                                            | the value as written                                                    | commit |
+| Value                                                                                             | Chip text                                                               | Icon   |
+| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------ |
+| `no`, or legacy `none`, with an optional trailing period                                          | No commit                                                               | commit |
+| `yes` alone                                                                                       | Committed                                                               | check  |
+| `yes` plus detail, such as `yes, committed abc1234`                                               | the detail without `yes` and its separator, such as `committed abc1234` | check  |
+| `committed ...` or `pushed ...`                                                                   | the value as written                                                    | check  |
+| `no changes`, `not committed`, `chưa commit`, `không có thay đổi`, with an optional note after it | the state with a capital first letter, without the note                 | commit |
+| anything else                                                                                     | the value as written                                                    | commit |
 
 The body of a five-field Recap is three sections: Did, Not yet, and Need from you. Each has its label above its value, with a divider between sections; lists, inline code, and links are kept.
 A Not yet or Need from you section whose value is `nothing`, in any case and with an optional trailing period, is omitted. Did always shows, and a field that holds a list is never treated as nothing.
