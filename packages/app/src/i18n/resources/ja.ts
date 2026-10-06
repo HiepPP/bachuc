@@ -166,6 +166,7 @@ export const ja: TranslationResources = {
       resumeQueue: "キューを再開",
       queueHeld: "停止後、キューは一時停止中",
       queuedImagesNotRestored: "キューの画像 {{count}} 件を復元できませんでした",
+      addComment: "コメントを追加",
       openImage: "画像添付ファイルを開く",
       removeImage: "画像添付ファイルを削除",
       removeFile: "ファイル添付ファイルを削除",

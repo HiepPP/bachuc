@@ -4,6 +4,7 @@ import {
   PluginResourceComposerAttachmentSchema,
   pluginResourceAttachmentToAgentAttachment,
   togglePluginResourceAttachment,
+  upsertPluginResourceAttachment,
 } from "./model";
 import { splitComposerAttachmentsForSubmit } from "@/composer/attachments/submit";
 
@@ -25,6 +26,63 @@ const item = {
 };
 
 describe("plugin resource attachments", () => {
+  it("adds a chip from code, or replaces the same chip in place", () => {
+    const first = createPluginResourceAttachment(source, item);
+    const other = createPluginResourceAttachment(source, {
+      ...item,
+      id: "other",
+      identifier: "ENG-9",
+    });
+    const updated = { ...first, commentable: true, comment: "Look here" };
+
+    expect(upsertPluginResourceAttachment([], first)).toEqual([first]);
+    expect(upsertPluginResourceAttachment([first, other], updated)).toEqual([updated, other]);
+  });
+
+  it("keeps the user's comment when a plugin adds the same chip again", () => {
+    const readded = { ...createPluginResourceAttachment(source, item), commentable: true };
+    const commented = { ...readded, comment: "Why this order?" };
+
+    expect(upsertPluginResourceAttachment([commented], readded)).toEqual([commented]);
+  });
+
+  it("sends a comment only for a chip that takes one", () => {
+    const attachment = { ...createPluginResourceAttachment(source, item), comment: "stale" };
+    expect(pluginResourceAttachmentToAgentAttachment(attachment)).toMatchObject({
+      text: item.text,
+    });
+  });
+
+  it("sends a chip comment after the item text, and nothing extra without one", () => {
+    const attachment = createPluginResourceAttachment(source, item);
+    expect(pluginResourceAttachmentToAgentAttachment(attachment)).toMatchObject({
+      text: item.text,
+    });
+    expect(
+      pluginResourceAttachmentToAgentAttachment({
+        ...attachment,
+        commentable: true,
+        comment: "  Why this order?  ",
+      }),
+    ).toMatchObject({ text: `${item.text}\n\nComment: Why this order?` });
+    expect(
+      pluginResourceAttachmentToAgentAttachment({
+        ...attachment,
+        commentable: true,
+        comment: "  ",
+      }),
+    ).toMatchObject({ text: item.text });
+  });
+
+  it("keeps the comment fields through the draft schema", () => {
+    const attachment = {
+      ...createPluginResourceAttachment(source, item),
+      commentable: true,
+      comment: "x",
+    };
+    expect(PluginResourceComposerAttachmentSchema.parse(attachment)).toEqual(attachment);
+  });
+
   it("creates a draft-safe composer attachment", () => {
     const attachment = createPluginResourceAttachment(source, item);
 

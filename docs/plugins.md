@@ -427,6 +427,15 @@ only for plugins installed on the composer's host. Mounted composers register a 
 `packages/app/src/plugins/composer/` so `setComposerText` can reach them; without one, the text goes to
 the stored draft.
 
+`addComposerAttachment` writes to the draft store, never to a mounted composer, so a chip lands even
+when the composer is closed. The chip's comment lives on the draft attachment and joins the agent
+text only at submit, in `pluginResourceAttachmentToAgentAttachment`.
+
+Assistant selection actions are web-only: native text selection fires no JS selection events. The
+toolbar in `packages/app/src/assistant-selection-copy/selection-actions.web.tsx` mounts once per
+agent stream and uses a hidden anchor to find its own pane, so a selection in another pane never
+shows it. Its `mousedown` calls `preventDefault` to keep the selection alive through the press.
+
 Sidebar filters, project menu items, and sections live in `packages/app/src/plugins/sidebar/`. The
 filter runs inside `SidebarModelProvider` before the user's project and label filters and never
 touches `allProjects`, which pickers need.

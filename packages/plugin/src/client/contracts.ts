@@ -3,6 +3,7 @@ import type { PaseoApi } from "@getpaseo/client";
 import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
 import type { ZodType, input as ZodInput, output as ZodOutput } from "zod";
 import type { PluginRpcContract } from "../rpc.js";
+import type { PluginAttachmentItem } from "../attachments.js";
 import type {
   PluginButtonRegistration,
   PluginHeaderButtonContribution,
@@ -136,6 +137,15 @@ export interface PluginClientContext extends PluginCommandCapabilities {
   addComposerStopButton(contribution: PluginComposerStopButtonContribution): PluginCleanup;
   /** Runs before a composer on this plugin's host sends or queues a message. */
   addComposerInterceptor(contribution: PluginComposerInterceptorContribution): PluginCleanup;
+  /**
+   * Adds an action to the toolbar that shows over text selected in an assistant message.
+   * Web and desktop only; native shows no toolbar.
+   */
+  addAssistantSelectionAction(
+    contribution: PluginAssistantSelectionActionContribution,
+  ): PluginCleanup;
+  /** Adds a chip to an agent's composer on this plugin's host. The draft text stays. */
+  addComposerAttachment(input: PluginComposerAttachmentInput): void;
   /** Opens the new workspace screen for a project directory, on this plugin's host by default. */
   openNewWorkspace(input: {
     cwd: string;
@@ -262,6 +272,33 @@ export interface PluginComposerInterceptorContribution {
   intercept(
     input: PluginComposerInterceptInput,
   ): PluginComposerInterceptResult | Promise<PluginComposerInterceptResult>;
+}
+
+export interface PluginAssistantSelection {
+  serverId: string;
+  workspaceId: string | null;
+  agentId: string;
+  /** The message the selection starts in, when the host knows it. */
+  messageId?: string;
+  /** The selection as Markdown. */
+  text: string;
+}
+
+export interface PluginAssistantSelectionActionContribution {
+  id: string;
+  title: string;
+  onSelect(selection: PluginAssistantSelection): void | Promise<void>;
+}
+
+export interface PluginComposerAttachmentInput {
+  agentId: string;
+  /** Groups this plugin's chips, for example for an open handler. */
+  sourceId: string;
+  sourceTitle: string;
+  icon: string;
+  item: PluginAttachmentItem;
+  /** Lets the user write a comment on the chip. It is sent after the item text. */
+  commentable?: boolean;
 }
 
 export type PluginClientContribution = (client: PluginClientContext) => PluginCleanup;

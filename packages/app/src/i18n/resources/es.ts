@@ -166,6 +166,7 @@ export const es: TranslationResources = {
       resumeQueue: "Reanudar cola",
       queueHeld: "Cola en pausa tras detener",
       queuedImagesNotRestored: "No se pudieron restaurar {{count}} imágenes en cola",
+      addComment: "Añadir un comentario",
       openImage: "Abrir imagen adjunta",
       removeImage: "Quitar imagen adjunta",
       removeFile: "Remove file attachment",

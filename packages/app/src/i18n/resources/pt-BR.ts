@@ -166,6 +166,7 @@ export const ptBR: TranslationResources = {
       resumeQueue: "Retomar fila",
       queueHeld: "Fila pausada após parar",
       queuedImagesNotRestored: "Não foi possível restaurar {{count}} imagens da fila",
+      addComment: "Adicionar um comentário",
       openImage: "Abrir anexo de imagem",
       removeImage: "Remover anexo de imagem",
       removeFile: "Remover anexo de arquivo",

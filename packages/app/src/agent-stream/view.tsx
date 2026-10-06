@@ -88,6 +88,7 @@ import {
 } from "./bottom-anchor-controller";
 import { createAssistantImageOccurrenceKey } from "@/assistant-image/acquisition-cache";
 import { AssistantSelectionCopySurface } from "@/assistant-selection-copy/surface";
+import { AssistantSelectionActions } from "@/assistant-selection-copy/selection-actions";
 import {
   AssistantFileLinkResolverProvider,
   normalizeInlinePathTarget,
@@ -1120,6 +1121,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       >
         <ToolCallSheetProvider>
           <AssistantSelectionCopySurface style={stylesheet.container}>
+            <AssistantSelectionActions
+              serverId={resolvedServerId}
+              agentId={agentId}
+              workspaceId={context.workspaceId}
+            />
             <MessageOuterSpacingProvider disableOuterSpacing>
               {streamRenderStrategy.render({
                 agentId,

@@ -1,7 +1,9 @@
 import type {
+  PluginComposerAttachmentInput,
   PluginComposerInterceptInput,
   PluginComposerInterceptorContribution,
 } from "@getpaseo/plugin/client";
+import { createPluginResourceAttachment } from "@/plugins/attachments/model";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { useDraftStore } from "@/stores/draft-store";
 
@@ -48,6 +50,29 @@ export function setPluginComposerText(serverId: string, agentId: string, text: s
   useDraftStore
     .getState()
     .editDraftText({ draftKey: buildDraftStoreKey({ serverId, agentId }), text });
+}
+
+/** Adds a plugin chip to the agent's draft; a mounted composer shows it at once. */
+export async function addPluginComposerAttachment(
+  serverId: string,
+  pluginId: string,
+  input: PluginComposerAttachmentInput,
+): Promise<void> {
+  await useDraftStore.getState().attachPluginResource({
+    draftKey: buildDraftStoreKey({ serverId, agentId: input.agentId }),
+    attachment: {
+      ...createPluginResourceAttachment(
+        {
+          pluginId,
+          sourceId: input.sourceId,
+          sourceTitle: input.sourceTitle,
+          sourceIcon: input.icon,
+        },
+        input.item,
+      ),
+      ...(input.commentable ? { commentable: true } : {}),
+    },
+  });
 }
 
 export type ComposerInterceptOutcome = { kind: "send"; text: string } | { kind: "cancel" };
