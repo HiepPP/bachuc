@@ -320,6 +320,11 @@ export type PluginTimelineTransformerContribution<
       transform(input: {
         item: Extract<AgentTimelineItem, { type: ItemType }>;
         phase: "streaming" | "complete";
+        /**
+         * The agent whose timeline holds the item. A label change transforms the timeline again.
+         * Hosts without this field pass none.
+         */
+        agent?: Pick<PluginAgentSnapshot, "id" | "labels">;
       }): PluginTimelineTransformResult | undefined;
     }
   : never;

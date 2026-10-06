@@ -9,7 +9,15 @@ import { createRunStore } from "./server/store";
 import { createRunPersistence } from "./server/persistence";
 import { z } from "zod";
 import { listBoardAgents } from "./server/snapshot";
-import { boardHostRpc, boardRpc, closeRuntimeRpc, removeRunRpc, starRunRpc } from "./shared/board";
+import {
+  EDIT_DIFFS_MODE_LABEL,
+  boardHostRpc,
+  boardRpc,
+  closeRuntimeRpc,
+  editDiffsOffRpc,
+  removeRunRpc,
+  starRunRpc,
+} from "./shared/board";
 import { closeRuntimes } from "./server/runtime";
 import { createRecapStore, parseRecap, recapEntry } from "./server/recaps";
 import { recapsRpc } from "./shared/recaps";
@@ -146,6 +154,11 @@ export default function contribute(server: PluginServerContext) {
   server.handle(closeRuntimeRpc, ({ agentId }, { paseo }) => {
     ensureActive();
     return closeRuntimes(paseo, agentId, console.error);
+  });
+  server.handle(editDiffsOffRpc, async ({ agentId }, { paseo }) => {
+    ensureActive();
+    await paseo.agents.ref(agentId).setLabels({ [EDIT_DIFFS_MODE_LABEL]: "off" });
+    return {};
   });
   server.handle(recapsRpc, async ({ days }, { paseo }) => {
     const [grouped, { projects }] = await Promise.all([recaps.list(days), paseo.projects.list()]);

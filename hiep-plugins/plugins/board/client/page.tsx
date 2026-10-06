@@ -14,7 +14,14 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
-import { boardRpc, removeRunRpc, starRunRpc, groupRuns, type BoardRun } from "../shared/board";
+import {
+  boardRpc,
+  editDiffsOffRpc,
+  removeRunRpc,
+  starRunRpc,
+  groupRuns,
+  type BoardRun,
+} from "../shared/board";
 import { boardColumns, type RunTree } from "../shared/tree";
 import { BoardSizeControl } from "./size-control";
 import { BoardViewSwitch, RecapsView } from "./recaps";
@@ -271,7 +278,7 @@ function useStableCallback<Args extends unknown[], Result>(
   return useCallback((...args: Args) => latest.current(...args), []);
 }
 
-type CardPart = "card" | "repo" | "star" | "remove";
+type CardPart = "card" | "repo" | "star" | "remove" | "no-diffs";
 
 function RunCard({
   run,
@@ -279,6 +286,7 @@ function RunCard({
   theme,
   onRemove,
   onOpen,
+  onOpenWithoutDiffs,
   onOpenProject,
   onStar,
   onFocusChange,
@@ -308,6 +316,8 @@ function RunCard({
   theme: PluginSurfaceProps["theme"];
   onRemove?: (id: string) => Promise<void>;
   onOpen?: (agentId: string) => void;
+  /** Turns edit diffs off for the thread, then opens it. */
+  onOpenWithoutDiffs?: (agentId: string) => void;
   /** Starts a conversation in the card's project from its repo label. */
   onOpenProject?: (run: BoardRun) => void;
   onStar: (id: string, starred: boolean) => Promise<void>;
@@ -316,6 +326,7 @@ function RunCard({
 }) {
   const [hovered, setHovered] = useState(false);
   const [starHovered, setStarHovered] = useState(false);
+  const [noDiffsHovered, setNoDiffsHovered] = useState(false);
   const [repoHovered, setRepoHovered] = useState(false);
   const [focus, setFocus] = useState<{ part: CardPart; keyboard: boolean } | null>(null);
   const [removeHovered, setRemoveHovered] = useState(false);
@@ -437,6 +448,38 @@ function RunCard({
       )}
     </Pressable>
   );
+  // Subagent rows have no repo row, so only top-level cards carry it.
+  const noDiffsButton =
+    onOpenWithoutDiffs && !subagent ? (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${run.title} without edit diffs`}
+        {...focusProps("no-diffs")}
+        onHoverIn={() => setNoDiffsHovered(true)}
+        onHoverOut={() => setNoDiffsHovered(false)}
+        onPress={() => onOpenWithoutDiffs(run.agentId)}
+        hitSlop={s(8)}
+        style={{
+          width: s(28),
+          height: s(28),
+          marginVertical: -s(6),
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: s(CONTROL_RADIUS),
+          backgroundColor: noDiffsHovered ? colors.surface2 : "transparent",
+          // Shown with the star on hover; touch clients keep it visible.
+          opacity:
+            showStar || noDiffsHovered || focus?.part === "no-diffs" || !hoverActions ? 1 : 0,
+          ...ring("no-diffs"),
+        }}
+      >
+        <Icon
+          name="PencilOff"
+          size={s(16)}
+          color={noDiffsHovered ? colors.foreground : colors.foregroundMuted}
+        />
+      </Pressable>
+    ) : null;
   const removeButton = onRemove ? (
     <Pressable
       accessibilityRole="button"
@@ -486,7 +529,8 @@ function RunCard({
   ) : null;
 
   const label = run.needsInput ? "Needs input" : statusLabel(run.status);
-  const active = hovered || starHovered || repoHovered || removeHovered || focus?.keyboard;
+  const active =
+    hovered || starHovered || noDiffsHovered || repoHovered || removeHovered || focus?.keyboard;
   const dim = seen && !active ? SEEN_OPACITY : 1;
   const readLabel = running || subagent ? "" : seen ? ", seen" : run.unread ? ", new" : "";
   // Only attention and non-success outcomes take a status color; the rest stays muted.
@@ -668,7 +712,10 @@ function RunCard({
                   {run.project}
                 </Text>
               </Pressable>
-              {starButton}
+              <View pointerEvents="box-none" style={{ flexDirection: "row", alignItems: "center" }}>
+                {noDiffsButton}
+                {starButton}
+              </View>
             </View>
             <View
               pointerEvents="none"
@@ -1013,6 +1060,7 @@ const RunColumn = memo(function RunColumn({
   theme,
   onRemove,
   onOpen,
+  onOpenWithoutDiffs,
   onOpenProject,
   onStar,
   scale,
@@ -1029,6 +1077,7 @@ const RunColumn = memo(function RunColumn({
   theme: PluginSurfaceProps["theme"];
   onRemove?: (id: string) => Promise<void>;
   onOpen?: (agentId: string) => void;
+  onOpenWithoutDiffs?: (agentId: string) => void;
   onOpenProject?: (run: BoardRun) => void;
   onStar: (id: string, starred: boolean) => Promise<void>;
 }) {
@@ -1095,6 +1144,7 @@ const RunColumn = memo(function RunColumn({
             theme={theme}
             onRemove={onRemove}
             onOpen={onOpen}
+            onOpenWithoutDiffs={onOpenWithoutDiffs}
             onOpenProject={onOpenProject}
             onStar={onStar}
             orb={orb}
@@ -1334,6 +1384,14 @@ function HostBoard({
     navigation?.openAgent({ agentId, serverId: host.id, anchor: "latest-prompt" });
   });
   const openAgent = navigation ? openAgentStable : undefined;
+  const openWithoutDiffsStable = useStableCallback((agentId: string) => {
+    setProjectError(null);
+    client.rpc(editDiffsOffRpc, { agentId }).then(
+      () => openAgentStable(agentId),
+      (error: unknown) => setProjectError(error instanceof Error ? error.message : String(error)),
+    );
+  });
+  const openWithoutDiffs = navigation && online ? openWithoutDiffsStable : undefined;
   const onRemove = useStableCallback(async (id: string) => {
     const run = runs.find((item) => item.id === id);
     if (!run) return;
@@ -1530,6 +1588,7 @@ function HostBoard({
               emptyMessage="No conversations are running."
               theme={theme}
               onOpen={openAgent}
+              onOpenWithoutDiffs={openWithoutDiffs}
               onOpenProject={onOpenProject}
             />
             <RunColumn
@@ -1545,6 +1604,7 @@ function HostBoard({
               emptyMessage="No finished conversations observed yet."
               theme={theme}
               onOpen={openAgent}
+              onOpenWithoutDiffs={openWithoutDiffs}
               onOpenProject={onOpenProject}
               onRemove={online ? onRemove : undefined}
             />

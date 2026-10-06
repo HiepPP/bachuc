@@ -66,7 +66,8 @@ function installProbe(
 }
 
 function installedTransform(plugin: InstalledPlugin): TimelineItemTransform {
-  return (input) => transformTimelineItem({ ...input, plugins: [plugin] });
+  return (input) =>
+    transformTimelineItem({ ...input, plugins: [plugin], agent: { id: "agent-1", labels: {} } });
 }
 
 function toolCall(callId: string, name: string): ToolCallItem {

@@ -4799,6 +4799,13 @@ test("updateAgentMetadata bumps updatedAt for stored agents", async () => {
   expect(manager.getAgent(snapshot.id)).toBeNull();
 
   const upsertSpy = vi.spyOn(storage, "upsert");
+  const states: ManagedAgent[] = [];
+  manager.subscribe(
+    (event) => {
+      if (event.type === "agent_state") states.push(event.agent);
+    },
+    { replayState: false },
+  );
 
   await manager.updateAgentMetadata(snapshot.id, {
     title: "Stored title",
@@ -4810,6 +4817,10 @@ test("updateAgentMetadata bumps updatedAt for stored agents", async () => {
   expect(after?.title).toBe("Stored title");
   expect(after?.labels).toEqual({ surface: "mobile", role: "worker" });
   expect(Date.parse(after!.updatedAt)).toBeGreaterThan(Date.parse(before!.updatedAt));
+  // Clients learn the new title and labels without a live runtime.
+  expect(states.map(({ id, lifecycle, labels }) => ({ id, lifecycle, labels }))).toEqual([
+    { id: snapshot.id, lifecycle: "closed", labels: { surface: "mobile", role: "worker" } },
+  ]);
 });
 
 test("persists live mode, model, and thinking changes without an external snapshot subscriber", async () => {

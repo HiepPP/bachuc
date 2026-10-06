@@ -2053,6 +2053,8 @@ export class AgentManager {
       updatedAt: this.nextStoredUpdatedAt(record),
     };
     await registry.upsert(nextRecord);
+    // Without a live runtime nothing else tells clients about a new title or label.
+    if (!nextRecord.internal) this.dispatchStoredAgentState(nextRecord);
     return nextRecord;
   }
 

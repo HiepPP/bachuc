@@ -382,6 +382,8 @@ export interface PaseoAgentHandle {
   detach(): Promise<void>;
   /** Releases the agent's provider processes. The agent stays and resumes on the next prompt. */
   closeRuntime(): Promise<void>;
+  /** Sets the given labels and keeps the agent's other labels. */
+  setLabels(labels: Record<string, string>): Promise<void>;
   subscribe(handler: (update: PaseoAgentUpdate) => void): () => void;
 }
 
@@ -984,6 +986,9 @@ function createAgentHandleFactory(
       },
       closeRuntime: async () => {
         await daemonClient.closeAgentRuntime(id);
+      },
+      setLabels: async (labels) => {
+        await daemonClient.updateAgent(id, { labels });
       },
       subscribe: (handler) =>
         listen((update) => {

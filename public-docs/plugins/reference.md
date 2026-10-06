@@ -1048,6 +1048,9 @@ keep the native entry before or after `items`. For `user_message` and `assistant
 `source.text` replaces the text the native entry renders; images, copy, and rewind stay. Item `data` must be JSON-compatible. The `phase`
 input is `"streaming"` for the live assistant message, running tool calls, and loading reasoning;
 it is `"complete"` for committed or fetched messages and finished tools or reasoning.
+The `agent` input carries the owning agent's `id` and `labels`, so a transformer can act per
+thread. Set a label with `paseo.agents.ref(id).setLabels({ key: "value" })`; the timeline
+transforms again with the new labels.
 Assistant and reasoning callbacks receive the full accumulated text on each update, including
 paragraph separators. Paseo invokes transformers before splitting native Markdown or grouping
 tools in Overview. A claimed assistant message remains one source item throughout streaming;

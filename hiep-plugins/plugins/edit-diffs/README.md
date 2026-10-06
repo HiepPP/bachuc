@@ -6,6 +6,11 @@ the Overview tool call groups, so they show even when the commands around them a
 
 - **Settings → Plugins → Edit diffs → Auto-expand edit diffs** opens every edit's diff in
   the chat. It is on by default. When off, press the row to open the diff.
+- **Turn edit diffs off in one thread** for long automatic runs, where diff rows make a long thread
+  slow. Use the Command Center item **Turn edit diffs on or off in this thread**, or the pencil
+  button on a Board card. An off thread shows Paseo's own edit rows, which collapse into the tool
+  call groups. The choice is the agent label `edit-diffs.mode` (`off` or `on`), so it lasts and
+  every client sees it.
 - Removed lines show their old line number; added and unchanged lines show the new one.
 - A write shows the whole written file as added lines, numbered from line 1. The provider
   sends no old content, so overwriting an existing file also shows only added lines.
@@ -31,6 +36,9 @@ not found, the gutter stays empty. If the edited text occurs more than once, the
 
 Needs the fork's `tokenizeCode` and `SyntaxToken` exports from `@getpaseo/plugin/client/ui`
 (added after `1.0.0-hiep` was first built). An app without them fails to load the plugin.
+
+The per-thread switch needs the fork's `agent` input for timeline transformers and
+`setLabels` on agent handles. On an app without the `agent` input, every thread keeps its diffs.
 
 ## Checks
 

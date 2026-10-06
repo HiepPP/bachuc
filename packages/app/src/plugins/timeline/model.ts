@@ -94,8 +94,16 @@ function parseKeptSource(value: object): KeptTimelineSource | undefined {
   return text === undefined ? { placement } : { placement, text };
 }
 
+export interface TimelineAgent {
+  readonly id: string;
+  readonly labels: Readonly<Record<string, string>>;
+}
+
 export function transformTimelineItem(
-  input: TimelineItemTransformInput & { plugins: readonly InstalledPlugin[] },
+  input: TimelineItemTransformInput & {
+    plugins: readonly InstalledPlugin[];
+    agent: TimelineAgent;
+  },
 ): InstalledPluginTimelineItems | undefined {
   for (const plugin of input.plugins) {
     for (const transformer of plugin.timelineTransformers) {
@@ -104,8 +112,9 @@ export function transformTimelineItem(
         const transform = transformer.transform as (input: {
           item: AgentTimelineItem;
           phase: "streaming" | "complete";
+          agent: TimelineAgent;
         }) => PluginTimelineTransformResult | undefined;
-        const output = transform({ item: input.item, phase: input.phase });
+        const output = transform({ item: input.item, phase: input.phase, agent: input.agent });
         if (output === undefined) continue;
         const parsed = parseTransformResult(output);
         const items: InstalledPluginTimelineItems = parsed.items.map((transformedItem, index) => ({

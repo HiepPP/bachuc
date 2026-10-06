@@ -439,7 +439,9 @@ model, for both fetched history and live events, before native Markdown splittin
 tool grouping. Assistant callbacks receive the accumulated source text, never display fragments.
 Live assistant messages use `phase: "streaming"`; committing to history makes them `"complete"`.
 Paseo memoizes by source-item reference and phase and derives replacement IDs from source identity, so
-streaming updates preserve mounted component identity.
+streaming updates preserve mounted component identity. The callback also receives the owning `agent`
+(ID and labels). A label change drops the memo and transforms that timeline again; other agent
+updates keep it, because `useInstalledTimelineTransform` keys on the label values.
 
 `query.itemType` selects one public `AgentTimelineItem.type`. The callback owns any detailed
 recognition and returns plain plugin item objects. `undefined` keeps the source item, `items`

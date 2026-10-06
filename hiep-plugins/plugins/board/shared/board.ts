@@ -34,6 +34,14 @@ export const closeRuntimeRpc = defineRpc({
   input: z.object({ agentId: z.string().min(1) }),
   output: z.object({ closed: z.number(), kept: z.number(), failed: z.number() }),
 });
+// The edit-diffs plugin reads this agent label and leaves that thread's edits as Paseo's own rows.
+export const EDIT_DIFFS_MODE_LABEL = "edit-diffs.mode";
+// Turns edit diffs off for one thread. Runs on the thread's host.
+export const editDiffsOffRpc = defineRpc({
+  name: "board.edit-diffs.off",
+  input: z.object({ agentId: z.string().min(1) }),
+  output: z.object({}),
+});
 export const boardRpc = defineRpc({
   name: "board.snapshot",
   input: z.object({}),

@@ -45,12 +45,15 @@ const toolCall = {
   error: null,
 };
 
+const agent = { id: "agent-1", labels: { phase: "review" } };
+
 describe("plugin timeline transforms", () => {
   it("adds installation and source identity to plain transformed items", () => {
     const transformed = transformTimelineItem({
       item: toolCall,
       phase: "complete",
       sourceId: "agent_tool_call-1",
+      agent,
       plugins: [
         plugin({
           id: "reports",
@@ -86,6 +89,7 @@ describe("plugin timeline transforms", () => {
         item: toolCall,
         phase: "complete",
         sourceId: "agent_tool_call-1",
+        agent,
         plugins: [plugin({ id: "reports", transform: () => undefined })],
       }),
     ).toBeUndefined();
@@ -97,6 +101,7 @@ describe("plugin timeline transforms", () => {
       item: toolCall,
       phase: "complete",
       sourceId: "agent_tool_call-1",
+      agent,
       plugins: [
         plugin({ id: "first", transform: () => ({ items: [] }) }),
         plugin({ id: "second", transform: second }),
@@ -113,6 +118,7 @@ describe("plugin timeline transforms", () => {
       item: toolCall,
       phase: "complete",
       sourceId: "agent_tool_call-1",
+      agent,
       plugins: [
         plugin({
           id: "broken",
@@ -141,6 +147,7 @@ describe("plugin timeline transforms", () => {
       item: toolCall,
       phase: "complete",
       sourceId: "agent_tool_call-1",
+      agent,
       plugins: [
         plugin({
           id: "broken",
@@ -169,6 +176,7 @@ describe("plugin timeline transforms", () => {
       item: toolCall,
       phase: "complete",
       sourceId: "agent_tool_call-1",
+      agent,
       plugins: [
         plugin({
           id: "reports",
@@ -200,12 +208,14 @@ describe("plugin timeline transforms", () => {
       item: { ...toolCall, status: "running" },
       phase: "streaming",
       sourceId: "agent_tool_call-1",
+      agent,
       plugins: [plugin({ id: "reports", transform })],
     });
 
     expect(transform).toHaveBeenCalledWith({
       item: { ...toolCall, status: "running" },
       phase: "streaming",
+      agent,
     });
     expect(transformed?.[0]?.id).toBe("summary");
   });
@@ -216,6 +226,7 @@ describe("plugin timeline transforms", () => {
       item: toolCall,
       phase: "complete",
       sourceId: "agent_tool_call-1",
+      agent,
       plugins: [
         plugin({
           id: "reports",
@@ -229,6 +240,7 @@ describe("plugin timeline transforms", () => {
       item: toolCall,
       phase: "complete",
       sourceId: "agent_tool_call-1",
+      agent,
       plugins: [
         plugin({
           id: "reports",
