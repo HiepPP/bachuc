@@ -896,6 +896,33 @@ describe("ClaudeAgentSession features", () => {
     await session.close();
   });
 
+  test("omits Claude flag settings when fast mode is off", async () => {
+    const { queryFactory } = createQueryMock();
+    const client = new ClaudeAgentClient({
+      logger,
+      queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-opus-5-5",
+      featureValues: { fast_mode: false },
+    });
+
+    await expect(
+      (
+        session as unknown as {
+          ensureQuery(): Promise<unknown>;
+        }
+      ).ensureQuery(),
+    ).resolves.toBeDefined();
+
+    expect(queryFactory.mock.calls[0]?.[0].options.settings).toBeUndefined();
+
+    await session.close();
+  });
+
   async function captureSdkUserMessage(prompt: AgentPromptInput): Promise<SDKUserMessage> {
     const { queryFactory, queryMock } = createQueryMock();
     let resolveSent: ((message: SDKUserMessage) => void) | null = null;

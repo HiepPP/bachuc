@@ -3352,13 +3352,15 @@ class ClaudeAgentSession implements AgentSession {
     providerOptions: ClaudeProviderOptions,
     input: { ultracode: boolean },
   ): Pick<ClaudeOptions, "settings"> | Record<string, never> {
-    const fastMode = this.resolveFastModeSetting();
-    if (fastMode === null && !input.ultracode) {
+    const fastMode = this.resolveFastModeSetting() === true;
+    // SDK settings replace a --settings flag from a custom provider command, so send
+    // them only when a value differs from the Claude default.
+    if (!fastMode && !input.ultracode) {
       return {};
     }
     return {
       settings: mergeClaudeSettings(providerOptions.settings, {
-        ...(fastMode === null ? {} : { fastMode }),
+        ...(fastMode ? { fastMode } : {}),
         ...(input.ultracode ? { ultracode: true } : {}),
       }),
     };
