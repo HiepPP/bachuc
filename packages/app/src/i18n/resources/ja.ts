@@ -1270,6 +1270,10 @@ export const ja: TranslationResources = {
       worktree: "新しいワークツリー",
       label: "分離方法",
     },
+    sidePanel: {
+      show: "サイドパネルを表示",
+      hide: "サイドパネルを非表示",
+    },
     fields: {
       project: "プロジェクト",
       base: "ベース",
@@ -2037,6 +2041,14 @@ export const ja: TranslationResources = {
     general: {
       title: "一般",
       sending: "送信",
+      newWorkspace: {
+        title: "新しいワークスペース",
+        sidePanel: {
+          label: "サイドパネルを開く",
+          description:
+            "Watchtower などのプラグインパネルを新しいワークスペースのフォームの横に表示します",
+        },
+      },
       browserData: {
         title: "ブラウザーデータ",
         siteData: "Cookie とサイトデータ",

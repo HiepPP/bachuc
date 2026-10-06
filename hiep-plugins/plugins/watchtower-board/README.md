@@ -7,9 +7,10 @@ Requires the fork daemon and client 0.10.2-beta.900+, Node 22+, and enabled trus
 
 With a thread open, click **Watchtower** in the sidebar, below **Board**, or choose
 **Open Watchtower board** in the Command Center. Both open the board in Explorer, beside
-**Files** and **Changes**, for the current workspace. On desktop and web the sidebar item is
-disabled outside a thread, such as on the Board page. Mobile keeps a sidebar page that picks
-a workspace from a row sorted by recent activity.
+**Files** and **Changes**, for the current workspace. On the new workspace screen, the board of the
+chosen project opens in the side panel; it reads the project root and has no attachment search key.
+On desktop and web the sidebar item is disabled elsewhere outside a thread, such as on the Board
+page. Mobile keeps a sidebar page that picks a workspace from a row sorted by recent activity.
 The header identifies its project. Each workspace keeps its own board and task selection.
 The board reads `watchtower/NEXT.md` in that workspace, not another checkout or its parent repository.
 The panel summarizes completion and counts for Active, Blocked, Todo, and Done tasks.

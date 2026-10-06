@@ -84,6 +84,20 @@ export interface PluginAgentPanelProps extends PluginNavigableHostProps {
   agentId: string;
 }
 
+export interface PluginNewWorkspacePanelProps extends PluginNavigableHostProps {
+  /** The project chosen on the new workspace screen, on this plugin's host. */
+  projectId: string;
+  /** That project's directory on this plugin's host. */
+  cwd: string;
+}
+
+export interface PluginNewWorkspacePanelContribution {
+  id: string;
+  title: string;
+  icon: string;
+  Component: ComponentType<PluginNewWorkspacePanelProps>;
+}
+
 export interface PluginClientOpenPanelOptions extends PluginOpenPanelOptions {
   workspaceId: string;
   agentId?: string;
@@ -94,6 +108,8 @@ export interface PluginClientContext extends PluginCommandCapabilities {
   addSurface(id: string, Component: ComponentType<PluginSurfaceProps>): PluginCleanup;
   addSidebarItem(contribution: PluginSidebarContribution): PluginCleanup;
   addWorkspacePanel(contribution: PluginWorkspacePanelContribution): PluginCleanup;
+  /** Adds a panel to the side panel of the new workspace screen, for projects on this plugin's host. */
+  addNewWorkspacePanel(contribution: PluginNewWorkspacePanelContribution): PluginCleanup;
   addCommandCenterItem(contribution: PluginCommandCenterItemContribution): PluginCleanup;
   addSlashCommand(contribution: PluginClientSlashCommandContribution): PluginCleanup;
   addHeaderButton(contribution: PluginHeaderButtonContribution): PluginButtonRegistration;
@@ -277,6 +293,11 @@ export interface PluginSidebarAction {
   onPress(context: { workspaceId: string | null }): void;
   /** Disables the row while no workspace on this plugin's host is open. */
   requiresWorkspace?: boolean;
+  /**
+   * The ID of a new workspace panel. On the new workspace screen, the row shows that panel in the
+   * side panel instead of calling `onPress`, and `requiresWorkspace` does not disable it.
+   */
+  newWorkspacePanel?: string;
 }
 
 export interface PluginSidebarContribution {

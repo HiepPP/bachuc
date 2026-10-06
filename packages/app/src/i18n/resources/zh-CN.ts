@@ -1245,6 +1245,10 @@ export const zhCN: TranslationResources = {
       worktree: "新建 worktree",
       label: "隔离",
     },
+    sidePanel: {
+      show: "显示侧边面板",
+      hide: "隐藏侧边面板",
+    },
     fields: {
       project: "项目",
       base: "基线",
@@ -1995,6 +1999,13 @@ export const zhCN: TranslationResources = {
     general: {
       title: "通用",
       sending: "发送",
+      newWorkspace: {
+        title: "新建 workspace",
+        sidePanel: {
+          label: "打开侧边面板",
+          description: "在新建 workspace 表单旁显示 Watchtower 等插件面板",
+        },
+      },
       browserData: {
         title: "浏览器数据",
         siteData: "Cookie 和网站数据",

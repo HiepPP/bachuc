@@ -1256,6 +1256,10 @@ export const ar: TranslationResources = {
       worktree: "شجرة عمل جديدة",
       label: "العزل",
     },
+    sidePanel: {
+      show: "إظهار اللوحة الجانبية",
+      hide: "إخفاء اللوحة الجانبية",
+    },
     fields: {
       project: "المشروع",
       base: "الأساس",
@@ -2017,6 +2021,13 @@ export const ar: TranslationResources = {
     general: {
       title: "عام",
       sending: "الإرسال",
+      newWorkspace: {
+        title: "مساحة عمل جديدة",
+        sidePanel: {
+          label: "فتح اللوحة الجانبية",
+          description: "عرض لوحات الإضافات، مثل Watchtower، بجانب نموذج مساحة العمل الجديدة",
+        },
+      },
       browserData: {
         title: "بيانات المتصفح",
         siteData: "ملفات تعريف الارتباط وبيانات المواقع",

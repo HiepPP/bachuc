@@ -27,6 +27,7 @@ import {
   type PluginSidebarSectionContribution,
   type PluginWorkspaceHeaderSubtitleContribution,
   type PluginComposerStopButtonContribution,
+  type PluginNewWorkspacePanelContribution,
   type PluginSurfaceProps,
   type PluginTimelineRendererContribution,
   type PluginTimelineTransformerContribution,
@@ -105,6 +106,8 @@ export function runPluginClientBundle(
   const workspaceHeaderSubtitleIds = new Set<string>();
   const composerStopButtons: PluginComposerStopButtonContribution[] = [];
   const composerStopButtonIds = new Set<string>();
+  const newWorkspacePanels: PluginNewWorkspacePanelContribution[] = [];
+  const newWorkspacePanelIds = new Set<string>();
   const sidebarContributionIds = new Set<string>();
   const collector: Omit<EvaluatedPlugin, "id" | "cleanup"> = {
     surfaces: [],
@@ -123,6 +126,7 @@ export function runPluginClientBundle(
     sidebarSections,
     workspaceHeaderSubtitles,
     composerStopButtons,
+    newWorkspacePanels,
   };
   const composerInterceptorIds = new Set<string>();
   const surfaceIds = new Set<string>();
@@ -214,6 +218,8 @@ export function runPluginClientBundle(
       const action = contribution.action;
       if (action && typeof action.onPress !== "function")
         throw new Error(`Sidebar item ${normalizedId} action has no onPress`);
+      if (action?.newWorkspacePanel !== undefined)
+        requireId(action.newWorkspacePanel, "sidebar new workspace panel id");
       sidebarItemIds.add(normalizedId);
       return register(
         collector.sidebarItems,
@@ -255,6 +261,24 @@ export function runPluginClientBundle(
           locations,
         },
         () => workspacePanelIds.delete(normalizedId),
+      );
+    },
+    addNewWorkspacePanel(contribution: PluginNewWorkspacePanelContribution) {
+      const panelId = requireId(contribution.id, "new workspace panel id");
+      if (newWorkspacePanelIds.has(panelId))
+        throw new Error(`Duplicate new workspace panel: ${panelId}`);
+      const title = contribution.title.trim();
+      const icon = contribution.icon.trim();
+      if (!title) throw new Error(`New workspace panel ${panelId} has no title`);
+      if (!icon) throw new Error(`New workspace panel ${panelId} has no icon`);
+      if (typeof contribution.Component !== "function")
+        throw new Error(`New workspace panel ${panelId} is not a component`);
+      resolvePluginIcon(icon);
+      newWorkspacePanelIds.add(panelId);
+      return register(
+        newWorkspacePanels,
+        { id: panelId, title, icon, Component: contribution.Component },
+        () => newWorkspacePanelIds.delete(panelId),
       );
     },
     addCommandCenterItem(contribution: PluginCommandCenterItemContribution) {
@@ -552,6 +576,12 @@ export function runPluginClientBundle(
       if (!surfaceIds.has(item.surface)) {
         throw new Error(`Sidebar item ${item.id} references missing surface ${item.surface}`);
       }
+      const panelId = item.action?.newWorkspacePanel;
+      if (panelId !== undefined && !newWorkspacePanelIds.has(panelId)) {
+        throw new Error(
+          `Sidebar item ${item.id} references missing new workspace panel ${panelId}`,
+        );
+      }
     }
   } catch (error) {
     stopped = true;
@@ -598,5 +628,6 @@ export function runPluginClientBundle(
     sidebarSections: collector.sidebarSections,
     workspaceHeaderSubtitles: collector.workspaceHeaderSubtitles,
     composerStopButtons: collector.composerStopButtons,
+    newWorkspacePanels: collector.newWorkspacePanels,
   };
 }

@@ -19,6 +19,7 @@ import type {
   PluginTimelineRendererContribution,
   PluginWorkspaceHeaderSubtitleContribution,
   PluginComposerStopButtonContribution,
+  PluginNewWorkspacePanelContribution,
   PluginTimelineTransformerContribution,
   PluginPanelLocation,
   PluginWorkspacePanelContribution,
@@ -47,6 +48,7 @@ export interface EvaluatedPlugin {
   sidebarSections?: PluginSidebarSectionContribution[];
   workspaceHeaderSubtitles?: PluginWorkspaceHeaderSubtitleContribution[];
   composerStopButtons?: PluginComposerStopButtonContribution[];
+  newWorkspacePanels?: PluginNewWorkspacePanelContribution[];
 }
 
 export interface InstalledPlugin extends EvaluatedPlugin {

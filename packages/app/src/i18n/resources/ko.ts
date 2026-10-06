@@ -1263,6 +1263,10 @@ export const ko: TranslationResources = {
       worktree: "새 워크트리",
       label: "격리",
     },
+    sidePanel: {
+      show: "사이드 패널 표시",
+      hide: "사이드 패널 숨기기",
+    },
     fields: {
       project: "프로젝트",
       base: "기준",
@@ -2027,6 +2031,13 @@ export const ko: TranslationResources = {
     general: {
       title: "일반",
       sending: "전송",
+      newWorkspace: {
+        title: "새 워크스페이스",
+        sidePanel: {
+          label: "사이드 패널 열기",
+          description: "Watchtower 같은 플러그인 패널을 새 워크스페이스 양식 옆에 표시합니다",
+        },
+      },
       browserData: {
         title: "브라우저 데이터",
         siteData: "쿠키 및 사이트 데이터",

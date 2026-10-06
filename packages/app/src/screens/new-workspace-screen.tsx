@@ -62,6 +62,11 @@ import {
 import { normalizeWorkspaceDescriptor, type WorkspaceDescriptor } from "@/stores/session-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { PluginDraftComposerPills } from "@/plugins/buttons/view";
+import {
+  NewWorkspaceSidePanel,
+  NewWorkspaceSidePanelToggle,
+  useNewWorkspaceSidePanelTarget,
+} from "@/plugins/new-workspace-side-panel/side-panel";
 import { usePluginComposerDraft } from "@/plugins/composer/draft";
 import { buildNewWorkspaceDraftKey, generateDraftId } from "@/stores/draft-keys";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
@@ -2377,6 +2382,15 @@ export function NewWorkspaceScreen({
   });
 
   const screenHeaderLeft = useMemo(() => <SidebarMenuToggle />, []);
+  const sidePanelTarget = useNewWorkspaceSidePanelTarget({
+    serverId: selectedServerId,
+    project: selectedProject,
+    cwd: selectedSourceDirectory,
+  });
+  const screenHeaderRight = useMemo(
+    () => <NewWorkspaceSidePanelToggle target={sidePanelTarget} />,
+    [sidePanelTarget],
+  );
 
   const composer = isTerminalLaunch ? (
     <Composer
@@ -2441,23 +2455,26 @@ export function NewWorkspaceScreen({
   );
   return (
     <FileDropZone style={styles.container}>
-      <ScreenHeader left={screenHeaderLeft} borderless />
-      <View style={styles.content}>
-        <TitlebarDragRegion />
-        <NewWorkspaceLayout
-          isCompact={isCompact}
-          title={t("newWorkspace.title")}
-          formStack={formStack}
-        >
-          <PluginDraftComposerPills
-            serverId={selectedServerId}
-            draft={pluginDraft}
-            compact={isCompact}
-            hidden={isTerminalLaunch}
-          />
-          {composer}
-          {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-        </NewWorkspaceLayout>
+      <ScreenHeader left={screenHeaderLeft} right={screenHeaderRight} borderless />
+      <View style={styles.body}>
+        <View style={styles.content}>
+          <TitlebarDragRegion />
+          <NewWorkspaceLayout
+            isCompact={isCompact}
+            title={t("newWorkspace.title")}
+            formStack={formStack}
+          >
+            <PluginDraftComposerPills
+              serverId={selectedServerId}
+              draft={pluginDraft}
+              compact={isCompact}
+              hidden={isTerminalLaunch}
+            />
+            {composer}
+            {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+          </NewWorkspaceLayout>
+        </View>
+        <NewWorkspaceSidePanel target={sidePanelTarget} />
       </View>
     </FileDropZone>
   );
@@ -2495,6 +2512,10 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.colors.surface0,
     userSelect: "none",
+  },
+  body: {
+    flex: 1,
+    flexDirection: "row",
   },
   content: {
     position: "relative",

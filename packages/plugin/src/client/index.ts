@@ -10,6 +10,8 @@ export type {
   PluginClientContext,
   PluginClientContribution,
   PluginWorkspacePanelContribution,
+  PluginNewWorkspacePanelProps,
+  PluginNewWorkspacePanelContribution,
   PluginSettingsScreenContribution,
   PluginSurfaceContribution,
   PluginSidebarAction,

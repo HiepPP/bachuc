@@ -1274,6 +1274,10 @@ export const ru: TranslationResources = {
       worktree: "Новый worktree",
       label: "Изоляция",
     },
+    sidePanel: {
+      show: "Показать боковую панель",
+      hide: "Скрыть боковую панель",
+    },
     fields: {
       project: "Проект",
       base: "Базовая ветка",
@@ -2050,6 +2054,14 @@ export const ru: TranslationResources = {
     general: {
       title: "Основные",
       sending: "Отправка",
+      newWorkspace: {
+        title: "Новое рабочее пространство",
+        sidePanel: {
+          label: "Открывать боковую панель",
+          description:
+            "Показывает панели плагинов, например Watchtower, рядом с формой нового рабочего пространства",
+        },
+      },
       browserData: {
         title: "Данные браузера",
         siteData: "Файлы cookie и данные сайтов",

@@ -197,6 +197,24 @@ describe("loadAppSettingsFromStorage", () => {
     expect(result.chatOutlineEnabled).toBe(false);
   });
 
+  it("opens the new workspace side panel by default", async () => {
+    const result = await loadAppSettingsFromStorage(makeDeps());
+
+    expect(result.newWorkspaceSidePanel).toBe(true);
+  });
+
+  it("loads a closed new workspace side panel preference", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ newWorkspaceSidePanel: false }),
+      }),
+    });
+
+    const result = await loadAppSettingsFromStorage(deps);
+
+    expect(result.newWorkspaceSidePanel).toBe(false);
+  });
+
   it("defaults sidebar navigation items to an empty preference list", async () => {
     const deps = makeDeps();
 

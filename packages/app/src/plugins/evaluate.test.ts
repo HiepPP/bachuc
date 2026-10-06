@@ -510,6 +510,30 @@ describe("evaluatePluginClientBundle", () => {
     ).toThrow("action has no onPress");
   });
 
+  it("collects a new workspace panel that a sidebar action opens and rejects a missing one", () => {
+    const plugin = evaluatePluginClientBundle(
+      "example",
+      bundle(`
+        function Surface() { return null; }
+        plugin.addSurface("main", Surface);
+        plugin.addNewWorkspacePanel({ id: "board", title: "Board", icon: "Blocks", Component: Surface });
+        plugin.addSidebarItem({ id: "main", title: "Example", icon: "Blocks", surface: "main", action: { onPress() {}, newWorkspacePanel: "board" } });
+      `),
+    );
+    expect(plugin.newWorkspacePanels?.map((panel) => panel.id)).toEqual(["board"]);
+    expect(plugin.sidebarItems[0]?.action?.newWorkspacePanel).toBe("board");
+    expect(() =>
+      evaluatePluginClientBundle(
+        "example",
+        bundle(`
+          function Surface() { return null; }
+          plugin.addSurface("main", Surface);
+          plugin.addSidebarItem({ id: "main", title: "Example", icon: "Blocks", surface: "main", action: { onPress() {}, newWorkspacePanel: "board" } });
+        `),
+      ),
+    ).toThrow("references missing new workspace panel board");
+  });
+
   it("collects a workspace header subtitle and rejects a duplicate id", () => {
     const plugin = evaluatePluginClientBundle(
       "example",

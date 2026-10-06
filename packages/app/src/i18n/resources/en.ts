@@ -1264,6 +1264,10 @@ export const en = {
       worktree: "New worktree",
       label: "Isolation",
     },
+    sidePanel: {
+      show: "Show side panel",
+      hide: "Hide side panel",
+    },
     fields: {
       project: "Project",
       base: "Base",
@@ -2141,6 +2145,13 @@ export const en = {
     general: {
       title: "General",
       sending: "Sending",
+      newWorkspace: {
+        title: "New workspace",
+        sidePanel: {
+          label: "Open the side panel",
+          description: "Show plugin panels, such as Watchtower, beside the new workspace form",
+        },
+      },
       browserData: {
         title: "Browser data",
         siteData: "Cookies and site data",

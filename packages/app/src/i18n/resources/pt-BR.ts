@@ -1282,6 +1282,10 @@ export const ptBR: TranslationResources = {
       worktree: "Novo worktree",
       label: "Isolamento",
     },
+    sidePanel: {
+      show: "Mostrar painel lateral",
+      hide: "Ocultar painel lateral",
+    },
     fields: {
       project: "Projeto",
       base: "Base",
@@ -2050,6 +2054,14 @@ export const ptBR: TranslationResources = {
     general: {
       title: "Geral",
       sending: "Envio",
+      newWorkspace: {
+        title: "Novo workspace",
+        sidePanel: {
+          label: "Abrir o painel lateral",
+          description:
+            "Mostra painéis de plugins, como o Watchtower, ao lado do formulário do novo workspace",
+        },
+      },
       browserData: {
         title: "Dados do navegador",
         siteData: "Cookies e dados de sites",

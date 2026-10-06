@@ -749,7 +749,9 @@ client.addSidebarItem({
 ```
 
 `workspaceId` is the open workspace on the plugin's host, or `null` outside one.
-`requiresWorkspace` disables the row while it is `null`.
+`requiresWorkspace` disables the row while it is `null`. `newWorkspacePanel` names a
+[new workspace panel](#new-workspace-panel): on the new workspace screen, the row shows that panel
+instead of calling `onPress`, and `requiresWorkspace` does not disable it.
 
 `PluginSurfaceProps` contains:
 
@@ -774,6 +776,16 @@ workspace title, for workspaces on the plugin's host. The component receives the
 `host`, and `layout`, plus `workspaceId`, `projectId`, and `projectDisplayName`. The first
 contribution on the host wins. Paseo shows its own project name when the component throws, and
 hides the row when the project name repeats the workspace title on a wide layout.
+
+### New workspace panel
+
+`client.addNewWorkspacePanel({ id, title, icon, Component })` adds a panel to the side panel of the
+new workspace screen, for projects on the plugin's host. The screen has no workspace yet, so the
+component receives the surface props plus `projectId` and `cwd`, the chosen project's directory.
+The side panel shows on wide layouts only, one panel at a time: the one a sidebar row's
+`newWorkspacePanel` asked for, or the host's first. It opens with the screen unless the user turns
+off **Settings → General → New workspace → Open the side panel**; the header toggle shows or hides
+it.
 
 ### Composer stop button
 

@@ -14,7 +14,7 @@ import path from "node:path";
 import os from "node:os";
 import type { PaseoApi, PaseoWorkspace } from "@getpaseo/client";
 import { readBoard, parseManifest, section } from "../server/board";
-import { loadWorkspaceBoard, searchTaskAttachments } from "../server/handlers";
+import { loadProjectBoard, loadWorkspaceBoard, searchTaskAttachments } from "../server/handlers";
 import { attachmentKey, boardSchema, searchTasksRpc } from "../shared/board";
 
 const manifest = `# NEXT
@@ -64,6 +64,9 @@ function api(root: string): PaseoApi {
       ref: (id: string) => ({ refresh: async () => (id === workspace.id ? workspace : null) }),
       list: async () => ({ entries: [workspace] }),
     },
+    projects: {
+      list: async () => ({ projects: [{ projectId: "project-1", projectRootPath: root }] }),
+    },
   } as unknown as PaseoApi;
 }
 async function snapshot(root: string) {
@@ -105,6 +108,16 @@ test("reads task status, dependencies, brief and recorded blocker without changi
   assert.match(result.items[0].text, /Build the second feature/);
   assert.match(result.items[0].text, /Blocker: - Need a fixture/);
   assert.deepEqual(await snapshot(root), before);
+});
+
+test("reads a project's board from its root before any workspace exists", async (t) => {
+  const root = await fixture(t);
+  const board = boardSchema.parse(await loadProjectBoard("project-1", api(root)));
+  assert.deepEqual(
+    board.tasks.map((task) => task.id),
+    ["TASK-001", "TASK-002"],
+  );
+  await assert.rejects(loadProjectBoard("unknown", api(root)), /unavailable/);
 });
 
 test("attachment search returns validated snapshots without any send API", async (t) => {

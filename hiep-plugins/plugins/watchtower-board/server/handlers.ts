@@ -11,6 +11,13 @@ export async function loadWorkspaceBoard(workspaceId: string, paseo: PaseoApi) {
   return readBoard(workspace.workspaceDirectory);
 }
 
+export async function loadProjectBoard(projectId: string, paseo: PaseoApi) {
+  const { projects } = await paseo.projects.list();
+  const project = projects.find((candidate) => candidate.projectId === projectId);
+  if (!project) throw new Error("Project is unavailable on this host.");
+  return readBoard(project.projectRootPath);
+}
+
 export async function searchTaskAttachments(
   query: string,
   paseo: PaseoApi,

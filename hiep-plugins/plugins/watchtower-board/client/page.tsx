@@ -85,7 +85,7 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
       <WatchtowerBoard
         {...props}
         key={workspace.id}
-        workspaceId={workspace.id}
+        source={{ workspaceId: workspace.id }}
         projectName={workspace.projectDisplayName}
       />
     </View>

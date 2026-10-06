@@ -1292,6 +1292,10 @@ export const fr: TranslationResources = {
       worktree: "Nouveau worktree",
       label: "Isolation",
     },
+    sidePanel: {
+      show: "Afficher le panneau latéral",
+      hide: "Masquer le panneau latéral",
+    },
     fields: {
       project: "Projet",
       base: "Base",
@@ -2070,6 +2074,14 @@ export const fr: TranslationResources = {
     general: {
       title: "Général",
       sending: "Envoi",
+      newWorkspace: {
+        title: "Nouvel espace de travail",
+        sidePanel: {
+          label: "Ouvrir le panneau latéral",
+          description:
+            "Affiche les panneaux des plugins, comme Watchtower, à côté du formulaire du nouvel espace de travail",
+        },
+      },
       browserData: {
         title: "Données du navigateur",
         siteData: "Cookies et données des sites",

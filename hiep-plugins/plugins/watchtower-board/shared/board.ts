@@ -28,6 +28,12 @@ export const readBoardRpc = defineRpc({
   input: z.object({ workspaceId: z.string().min(1).max(256) }),
   output: boardSchema,
 });
+// The new workspace screen has a project but no workspace yet.
+export const readProjectBoardRpc = defineRpc({
+  name: "watchtower.project.read",
+  input: z.object({ projectId: z.string().min(1).max(256) }),
+  output: boardSchema,
+});
 export const searchTasksRpc = defineRpc({
   name: "watchtower.search",
   input: z.object({ query: z.string().max(512) }),

@@ -1,5 +1,6 @@
 import {
   type PluginHostProps,
+  type PluginNewWorkspacePanelProps,
   type PluginWorkspacePanelProps,
   useRpc,
   useWorkspace,
@@ -8,7 +9,7 @@ import { copyText, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { attachmentKey, readBoardRpc, type Task } from "../shared/board";
+import { attachmentKey, readBoardRpc, readProjectBoardRpc, type Task } from "../shared/board";
 import { dashboardSummary, groupOrder, groupTasks, taskTitle, type TaskGroup } from "./dashboard";
 
 const groupLabels: Record<TaskGroup, string> = {
@@ -21,30 +22,55 @@ const groupLabels: Record<TaskGroup, string> = {
 
 export function WatchtowerPanel(props: PluginWorkspacePanelProps) {
   const projectName = useWorkspace(props.workspaceId, (workspace) => workspace.projectDisplayName);
-  return <WatchtowerBoard {...props} projectName={projectName} />;
+  return (
+    <WatchtowerBoard
+      {...props}
+      source={{ workspaceId: props.workspaceId }}
+      projectName={projectName}
+    />
+  );
 }
+
+// The new workspace screen has no workspace yet, so the board reads the project's root.
+export function WatchtowerProjectPanel(props: PluginNewWorkspacePanelProps) {
+  const folder = props.cwd.split(/[\\/]/).filter(Boolean).pop() ?? null;
+  return (
+    <WatchtowerBoard {...props} source={{ projectId: props.projectId }} projectName={folder} />
+  );
+}
+
+type BoardSource =
+  | { workspaceId: string; projectId?: undefined }
+  | { projectId: string; workspaceId?: undefined };
 
 // useWorkspace throws outside workspace panels, so the sidebar page passes projectName itself.
 export function WatchtowerBoard({
-  workspaceId,
+  source,
   projectName,
   host,
   theme,
   layout,
-}: PluginHostProps & { workspaceId: string; projectName: string | null }) {
-  const read = useRpc(readBoardRpc);
+}: PluginHostProps & { source: BoardSource; projectName: string | null }) {
+  const readWorkspace = useRpc(readBoardRpc);
+  const readProject = useRpc(readProjectBoardRpc);
+  // Attachment search keys name a workspace, so a project board cannot offer them.
+  const workspaceId = source.workspaceId ?? null;
+  const sourceKey = workspaceId ?? `project:${source.projectId}`;
   const board = useQuery({
-    queryKey: ["watchtower-board", host.id, workspaceId],
-    queryFn: () => read({ workspaceId }),
+    queryKey: ["watchtower-board", host.id, sourceKey],
+    queryFn: () =>
+      source.workspaceId === undefined
+        ? readProject({ projectId: source.projectId })
+        : readWorkspace({ workspaceId: source.workspaceId }),
     retry: false,
   });
-  const [selection, setSelection] = useState<{ workspaceId: string; taskId: string } | null>(null);
+  const [selection, setSelection] = useState<{ sourceKey: string; taskId: string } | null>(null);
   const [collapsed, setCollapsed] = useState<Partial<Record<TaskGroup, boolean>>>({});
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
   const dense = layout.compact || (panelWidth !== null && panelWidth < 520);
   const selected =
-    selection?.workspaceId === workspaceId
+    selection?.sourceKey === sourceKey
       ? board.data?.tasks.find((task) => task.id === selection.taskId)
       : null;
   const tasks = board.data?.tasks ?? [];
@@ -211,7 +237,7 @@ export function WatchtowerBoard({
     return theme.colors.statusDanger;
   }
 
-  async function copySearch(task: Task) {
+  async function copySearch(task: Task, workspaceId: string) {
     try {
       await copyText(attachmentKey(workspaceId, task.id));
       setNotice(
@@ -336,7 +362,7 @@ export function WatchtowerBoard({
                             accessibilityState={{ selected: isSelected, expanded: isSelected }}
                             style={styles.taskRow}
                             onPress={() => {
-                              setSelection(isSelected ? null : { workspaceId, taskId: task.id });
+                              setSelection(isSelected ? null : { sourceKey, taskId: task.id });
                               setNotice("");
                             }}
                           >
@@ -385,7 +411,7 @@ export function WatchtowerBoard({
                                   </Text>
                                 </View>
                               ) : null}
-                              {task.brief && !task.error ? (
+                              {task.brief && !task.error && workspaceId ? (
                                 <>
                                   <Text selectable style={styles.key}>
                                     {attachmentKey(workspaceId, task.id)}
@@ -394,7 +420,7 @@ export function WatchtowerBoard({
                                     accessibilityRole="button"
                                     accessibilityLabel={`Copy attachment search for ${task.id}`}
                                     style={styles.copyButton}
-                                    onPress={() => void copySearch(task)}
+                                    onPress={() => void copySearch(task, workspaceId)}
                                   >
                                     <Text style={styles.copyButtonText}>
                                       Copy attachment search
