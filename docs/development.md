@@ -79,6 +79,7 @@ In Paseo-managed worktree services, use the injected service environment rather 
 scripts/paseo-release.sh             # build, install, start
 scripts/paseo-release.sh --dry-run   # print every step, change nothing
 scripts/paseo-release.sh --force     # install while agents are mid-turn
+scripts/paseo-release.sh --skip-build  # install the last build again, no new build
 ```
 
 - Run it from Terminal.app. It stops the daemon that owns every Paseo agent and terminal, so it refuses to run inside one. It also refuses while an agent is mid-turn unless you pass `--force`; it checks before the build and again after it.

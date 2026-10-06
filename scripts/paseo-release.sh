@@ -5,6 +5,7 @@
 #   scripts/paseo-release.sh             build, install, start
 #   scripts/paseo-release.sh --dry-run   print every change without making it
 #   scripts/paseo-release.sh --force     install while agents are mid-turn
+#   scripts/paseo-release.sh --skip-build  install the existing build in packages/desktop/release
 #
 # An install that fails after the daemon stopped puts the previous app back and starts it. From
 # the install on, real runs append their output to ~/Library/Logs/Paseo/release-install.log; the
@@ -22,6 +23,7 @@ RELEASE_LISTEN="127.0.0.1:$RELEASE_PORT"
 APP="/Applications/Paseo Fork.app"
 BUILD_APP="$REPO_ROOT/packages/desktop/release/mac-arm64/Paseo.app"
 BUILD_BUNDLE_ID="sh.paseo.desktop.dev"
+SIGN_IDENTITY="Paseo Fork Local"
 # The release loads hiep-plugins from this folder, as directory installs. The daemon compiles a
 # plugin at load time and needs its type dependencies, which only a full checkout has.
 PLUGINS_DIR="$REPO_ROOT/hiep-plugins/plugins"
@@ -32,6 +34,7 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 
 DRY_RUN=0
 FORCE=0
+SKIP_BUILD=0
 PROBLEMS=""
 STEP=""
 STEP_NUMBER=0
@@ -188,6 +191,13 @@ preflight_build() {
   [ "$(plist "$BUILD_APP/Contents/Info.plist" CFBundleIdentifier)" = "$BUILD_BUNDLE_ID" ] ||
     problem "build bundle ID is not $BUILD_BUNDLE_ID"
   [ -x "$(app_cli "$BUILD_APP")" ] || problem "build has no CLI at $(app_cli "$BUILD_APP")"
+  # A reused build can be ad-hoc signed or cut off mid-signing; either loses the file access grants.
+  case "$(codesign -dvv "$BUILD_APP" 2>&1 || true)" in
+    *"Authority=$SIGN_IDENTITY"*) ;;
+    *) problem "build is not signed by $SIGN_IDENTITY" ;;
+  esac
+  codesign --verify --deep --strict "$BUILD_APP" >/dev/null 2>&1 ||
+    problem "build signature does not verify: codesign --verify --deep --strict \"$BUILD_APP\""
 }
 
 # Points every repo plugin at its folder in the release home's config. A plugin already listed
@@ -347,7 +357,8 @@ main() {
     case "$arg" in
       --dry-run) DRY_RUN=1 ;;
       --force) FORCE=1 ;;
-      *) die "unknown argument: $arg (expected --dry-run, --force)" ;;
+      --skip-build) SKIP_BUILD=1 ;;
+      *) die "unknown argument: $arg (expected --dry-run, --force, --skip-build)" ;;
     esac
   done
 
@@ -363,13 +374,19 @@ main() {
   check_running_agents "$cli"
   report_problems
 
-  step "build the release"
   cd "$REPO_ROOT"
-  # Signed with the self-signed "Paseo Fork Local" identity in the login keychain. Its designated
-  # requirement is the certificate, not the cdhash, so macOS keeps file access grants across builds.
-  # hardenedRuntime stays off: there is no Developer ID, and the app died at launch with it on.
-  run npm run build:desktop -- --dir -c.mac.hardenedRuntime=false -c.mac.notarize=false \
-    -c.mac.identity="Paseo Fork Local"
+  # The step stays numbered when skipped, so step numbers mean the same thing in every run.
+  if [ "$SKIP_BUILD" = 1 ]; then
+    step "reuse the build at $BUILD_APP"
+    [ ! -d "$BUILD_APP" ] || log "    built $(stat -f %Sm "$BUILD_APP")"
+  else
+    step "build the release"
+    # Signed with the self-signed SIGN_IDENTITY in the login keychain. Its designated requirement
+    # is the certificate, not the cdhash, so macOS keeps file access grants across builds.
+    # hardenedRuntime stays off: there is no Developer ID, and the app died at launch with it on.
+    run npm run build:desktop -- --dir -c.mac.hardenedRuntime=false -c.mac.notarize=false \
+      -c.mac.identity="$SIGN_IDENTITY"
+  fi
   [ "$DRY_RUN" = 1 ] || start_output_log "$@"
 
   step "check the build, and the running agents again"
