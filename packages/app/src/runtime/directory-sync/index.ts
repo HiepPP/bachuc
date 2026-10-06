@@ -159,6 +159,8 @@ export class DirectorySync {
   private readonly fullDemandSources = new Set<object>();
   private demandRefresh: Promise<void> | null = null;
   private satisfiedDemandSource: DirectorySourceToken | null = null;
+  // Bumped on every release, so a refresh that outlives a release cannot mark demand satisfied.
+  private subscriptionRelease = 0;
   private cursors: DirectoryCheckpoint = {};
 
   constructor(
@@ -247,6 +249,7 @@ export class DirectorySync {
     this.workspaceSubscription = null;
     this.eventSubscription = null;
     this.satisfiedDemandSource = null;
+    this.subscriptionRelease += 1;
   }
 
   private receiveAgentDelta(source: DirectorySourceToken, delta: AgentDirectoryDelta): void {
@@ -307,6 +310,7 @@ export class DirectorySync {
     ) {
       return Promise.resolve();
     }
+    const release = this.subscriptionRelease;
     const refresh =
       this.fullDemandSources.size > 0
         ? this.refreshAll()
@@ -316,7 +320,7 @@ export class DirectorySync {
           ]).then(() => undefined);
     this.demandRefresh = refresh
       .then(() => {
-        this.satisfiedDemandSource = source;
+        if (release === this.subscriptionRelease) this.satisfiedDemandSource = source;
         return undefined;
       })
       .finally(() => {
@@ -325,7 +329,8 @@ export class DirectorySync {
         if (
           this.hasDemand() &&
           (current.clientGeneration !== source.clientGeneration ||
-            current.connectionEpoch !== source.connectionEpoch)
+            current.connectionEpoch !== source.connectionEpoch ||
+            release !== this.subscriptionRelease)
         ) {
           void this.requestDemandRefresh().catch(() => undefined);
         }

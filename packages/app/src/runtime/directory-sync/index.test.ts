@@ -208,35 +208,36 @@ function createDirectory(
   return { client, directory };
 }
 
+function createAgentPayload(id: string) {
+  return {
+    id,
+    provider: "codex",
+    cwd: "/repo",
+    model: null,
+    createdAt: "2026-08-26T00:00:00.000Z",
+    updatedAt: "2026-08-26T00:00:00.000Z",
+    lastUserMessageAt: null,
+    status: "idle" as const,
+    capabilities: {
+      supportsStreaming: true,
+      supportsSessionPersistence: true,
+      supportsDynamicModes: true,
+      supportsMcpServers: true,
+      supportsReasoningStream: true,
+      supportsToolInvocations: true,
+    },
+    currentModeId: null,
+    availableModes: [],
+    pendingPermissions: [],
+    persistence: null,
+    title: "Cached",
+    labels: {},
+  };
+}
+
 function createAgent(serverId: string, id: string) {
   return {
-    ...normalizeAgentSnapshot(
-      {
-        id,
-        provider: "codex",
-        cwd: "/repo",
-        model: null,
-        createdAt: "2026-08-26T00:00:00.000Z",
-        updatedAt: "2026-08-26T00:00:00.000Z",
-        lastUserMessageAt: null,
-        status: "idle",
-        capabilities: {
-          supportsStreaming: true,
-          supportsSessionPersistence: true,
-          supportsDynamicModes: true,
-          supportsMcpServers: true,
-          supportsReasoningStream: true,
-          supportsToolInvocations: true,
-        },
-        currentModeId: null,
-        availableModes: [],
-        pendingPermissions: [],
-        persistence: null,
-        title: "Cached",
-        labels: {},
-      },
-      serverId,
-    ),
+    ...normalizeAgentSnapshot(createAgentPayload(id), serverId),
     projectPlacement: null,
   };
 }
@@ -493,6 +494,43 @@ describe("DirectorySync session readiness", () => {
     await directory.refreshAll();
 
     expect(client.lastAgentOptions).toMatchObject({ subscribe: {} });
+    directory.dispose();
+  });
+
+  it("keeps live agent updates when demand returns during an in-flight refresh", async () => {
+    const serverId = "demand-returns-during-refresh";
+    const { client, directory } = createDirectory(serverId);
+    const releaseAgents = client.holdAgentFetch();
+    const store = useSessionStore.getState();
+    store.initializeSession(serverId, client as unknown as DaemonClient, 1);
+    store.updateSessionServerInfo(serverId, {
+      serverId,
+      hostname: null,
+      version: "test",
+      features: { workspaceMultiplicity: true },
+    });
+
+    // A demand holder re-subscribes (effect cleanup, then setup) while the first refresh waits.
+    const holder = {};
+    directory.setDemand(holder, true);
+    await expect.poll(() => client.fetchAgentsCalls).toBe(1);
+    directory.setDemand(holder, false);
+    directory.setDemand(holder, true);
+    releaseAgents({
+      requestId: "agents",
+      entries: [],
+      pageInfo: { hasMore: false, nextCursor: null, prevCursor: null },
+    });
+    // The first subscription was released, so returning demand needs a new one.
+    await expect.poll(() => client.fetchAgentsCalls).toBe(2);
+
+    client.emit({
+      type: "agent_update",
+      payload: { kind: "upsert", agent: createAgentPayload("live-agent"), project: null },
+    });
+    await expect
+      .poll(() => useSessionStore.getState().sessions[serverId]?.agents.has("live-agent"))
+      .toBe(true);
     directory.dispose();
   });
 
