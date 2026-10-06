@@ -239,6 +239,7 @@ export const ru: TranslationResources = {
     empty: "Начните общаться с этим агентом...",
     scrollToBottom: "Прокрутить вниз",
     historyLoadFailed: "Не удалось загрузить историю агента",
+    passageNotLoaded: "Это сообщение не загружено в этом чате",
     messageCapped: "Это сообщение было обрезано ({{bytes}} байт).",
     permission: {
       rejectedPlan: "Отклонённый план",

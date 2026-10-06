@@ -14,6 +14,7 @@ export async function searchPluginAttachments(
   invoke: (method: string, input: unknown) => Promise<unknown>,
   query: string,
 ) {
+  if (!source.search) throw new Error(`Attachment source ${source.id} has no search`);
   const output = await callPluginRpc(source.search, invoke, { query });
   return PluginAttachmentSearchPayloadSchema.parseAsync(output);
 }

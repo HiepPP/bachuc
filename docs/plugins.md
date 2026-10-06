@@ -436,6 +436,20 @@ toolbar in `packages/app/src/assistant-selection-copy/selection-actions.web.tsx`
 agent stream and uses a hidden anchor to find its own pane, so a selection in another pane never
 shows it. Its `mousedown` calls `preventDefault` to keep the selection alive through the press.
 
+A chip press reaches the plugin through the `onOpen` of the attachment source whose id matches the
+chip's `sourceId`. The handler lives on the source, never on the chip, because draft chips are
+persisted and a function cannot be. A source without `search` is chip-only and stays out of the
+picker.
+
+`revealTimelinePassage` navigates to the agent, then hands the request to the revealer that the
+agent's stream registers in `packages/app/src/plugins/timeline-reveal.ts`. A request made before
+the stream mounts waits up to 10 seconds, and the stream holds it until its authoritative history
+is ready, because a stream mounts before its items arrive. The web revealer in
+`packages/app/src/agent-stream/passage-reveal/` reuses the chat find matching and
+`scrollToMessage`, and pins its message in the virtualizer like chat find, so a duplicate in an
+unmounted paragraph still counts. It mounts once per stream and keeps props in a ref, so rows gain
+no effects. The native stream has no `scrollToMessage`, so native only opens the agent.
+
 Sidebar filters, project menu items, and sections live in `packages/app/src/plugins/sidebar/`. The
 filter runs inside `SidebarModelProvider` before the user's project and label filters and never
 touches `allProjects`, which pickers need.

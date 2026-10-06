@@ -241,6 +241,7 @@ export const fr: TranslationResources = {
     empty: "Commencez à discuter avec cet agent...",
     scrollToBottom: "Faire défiler vers le bas",
     historyLoadFailed: "Impossible de charger l’historique de l’agent",
+    passageNotLoaded: "Ce message n’est pas chargé dans cette conversation",
     messageCapped: "Ce message a été tronqué ({{bytes}} octets).",
     permission: {
       rejectedPlan: "Plan refusé",

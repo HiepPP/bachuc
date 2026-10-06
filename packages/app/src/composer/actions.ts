@@ -6,6 +6,7 @@ import type {
   ComposerAttachment,
   UserComposerAttachment,
 } from "@/attachments/types";
+import type { PluginResourceComposerAttachment } from "@/plugins/attachments";
 import {
   isWorkspaceAttachment,
   userAttachmentsOnly,
@@ -340,6 +341,8 @@ export interface OpenComposerAttachmentInput {
   setLightboxMetadata: (metadata: AttachmentMetadata) => void;
   openWorkspaceAttachment: (input: { attachment: ComposerAttachment }) => boolean;
   openExternalUrl: (url: string) => void;
+  /** Returns true when the chip's plugin handled the press itself. */
+  openPluginResource?: (attachment: PluginResourceComposerAttachment) => boolean;
 }
 
 export function openComposerAttachment(input: OpenComposerAttachmentInput): void {
@@ -352,6 +355,9 @@ export function openComposerAttachment(input: OpenComposerAttachmentInput): void
   }
   if (isWorkspaceAttachment(input.attachment)) {
     input.openWorkspaceAttachment({ attachment: input.attachment });
+    return;
+  }
+  if (input.attachment.kind === "plugin_resource" && input.openPluginResource?.(input.attachment)) {
     return;
   }
   input.openExternalUrl(input.attachment.item.url);

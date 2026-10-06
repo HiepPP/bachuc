@@ -146,6 +146,11 @@ export interface PluginClientContext extends PluginCommandCapabilities {
   ): PluginCleanup;
   /** Adds a chip to an agent's composer on this plugin's host. The draft text stays. */
   addComposerAttachment(input: PluginComposerAttachmentInput): void;
+  /**
+   * Opens an agent's timeline at a message. On web and desktop it also highlights `text` when it
+   * matches the rendered message exactly once. A message that is not loaded shows a toast.
+   */
+  revealTimelinePassage(input: PluginTimelinePassage): void;
   /** Opens the new workspace screen for a project directory, on this plugin's host by default. */
   openNewWorkspace(input: {
     cwd: string;
@@ -299,6 +304,15 @@ export interface PluginComposerAttachmentInput {
   item: PluginAttachmentItem;
   /** Lets the user write a comment on the chip. It is sent after the item text. */
   commentable?: boolean;
+}
+
+export interface PluginTimelinePassage {
+  /** Defaults to this plugin's host. */
+  serverId?: string;
+  agentId: string;
+  messageId: string;
+  /** Rendered text to highlight; whitespace differences are ignored. */
+  text?: string;
 }
 
 export type PluginClientContribution = (client: PluginClientContext) => PluginCleanup;

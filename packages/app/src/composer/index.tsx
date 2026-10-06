@@ -101,6 +101,7 @@ import { registerComposerHandle, runComposerInterceptors } from "@/plugins/compo
 import { PluginComposerStopButtonFace } from "@/plugins/composer-stop-button";
 import type { PluginComposerDraftState } from "@/plugins/composer/draft";
 import { pluginRegistry } from "@/plugins/registry";
+import { openPluginResourceAttachment } from "@/plugins/attachments/open";
 import {
   executePluginClientSlashCommand,
   resolvePluginClientSlashCommand,
@@ -2173,9 +2174,11 @@ function ComposerContentImpl({
         openExternalUrl: (url) => {
           void openExternalUrl(url);
         },
+        openPluginResource: (resource) =>
+          openPluginResourceAttachment(pluginRegistry.getSnapshot(), serverId, resource),
       });
     },
-    [openAttachment],
+    [openAttachment, serverId],
   );
 
   const handleCancelAgent = useCallback(() => {

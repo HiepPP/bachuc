@@ -58,11 +58,14 @@ function installedAttachmentSources(
   return plugins
     .filter((plugin) => plugin.serverId === serverId)
     .flatMap((plugin) =>
-      plugin.attachmentSources.map((source) => ({
-        plugin,
-        source,
-        key: `${plugin.id}/${source.id}`,
-      })),
+      // A source without `search` only opens chips added from code.
+      plugin.attachmentSources
+        .filter((source) => source.search)
+        .map((source) => ({
+          plugin,
+          source,
+          key: `${plugin.id}/${source.id}`,
+        })),
     );
 }
 
