@@ -354,7 +354,7 @@ export function WatchtowerBoard({
             <View style={[styles.card, styles.section]}>
               <Text style={styles.detailLabel}>Waiting on the owner</Text>
               <Text style={styles.muted}>
-                {plural(questions.length, "open question")} block tasks ·{" "}
+                {plural(questions.length, "blocking question")} ·{" "}
                 {plural(proposedAdrs, "proposed ADR")}
               </Text>
               {questions.map((question) => (
