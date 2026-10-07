@@ -1058,6 +1058,10 @@ export class VoiceAssistantWebSocketServer {
 
   public prepareForShutdown(): void {
     this.connectionLifecycle = "stopping";
+    // Shutdown closes running agents, which ends their runs like a normal end. A queue that
+    // still listened would drain into a closing agent and lose the message it already
+    // removed from disk.
+    this.agentMessageQueue.close();
   }
 
   public beginAcceptingConnections(): void {
