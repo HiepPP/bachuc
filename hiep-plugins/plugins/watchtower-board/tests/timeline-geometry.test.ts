@@ -5,6 +5,7 @@ import {
   connector,
   laneCenter,
   PAD_X,
+  parallelCaption,
   timelineGeometry,
   viewCount,
 } from "../client/timeline-geometry";
@@ -65,6 +66,7 @@ const mock = buildTimeline({
       row("TASK-005", 92, 100),
     ],
     nowMinute: 140,
+    stopped: false,
   },
   questions: [],
 });
@@ -105,6 +107,36 @@ test("a label that would touch the previous one in its lane moves below the bar"
   assert.equal(labels["TASK-002"].y, geometry.bars[1].y + BAR_HEIGHT + 1);
   assert.equal(labels["TASK-003"].below, false);
   assert.equal(labels["TASK-003"].text, "003");
+});
+
+test("a label that would cross the now line moves off it", () => {
+  const model: Timeline = {
+    ...mock,
+    bars: [
+      { id: "TASK-001", kind: "done", start: 0, end: 50, expectedEnd: null, lane: 0 },
+      { id: "TASK-010", kind: "planned", start: 49, end: 60, expectedEnd: null, lane: 1 },
+      { id: "TASK-011", kind: "planned", start: 98, end: 100, expectedEnd: null, lane: 0 },
+    ],
+    edges: [],
+    laneCount: 2,
+    axis: { start: 0, end: 100, ticks: [] },
+  };
+  // One minute is one px, so now at minute 50 sits at x 54, inside the "010" label at x 53.
+  const geometry = timelineGeometry(model, 100 + PAD_X * 2, 50);
+  const labels = Object.fromEntries(geometry.labels.map((label) => [label.id, label]));
+  assert.equal(geometry.nowX, 54);
+  assert.equal(labels["TASK-010"].x, 60);
+  assert.equal(labels["TASK-001"].x, PAD_X);
+  // Near the right edge there is no room after the line, so the label moves before it.
+  const late = timelineGeometry(model, 100 + PAD_X * 2, 98);
+  const end = Object.fromEntries(late.labels.map((label) => [label.id, label]));
+  assert.ok(end["TASK-011"].x + 3 * 6.2 <= late.nowX! - 6 + 0.001);
+});
+
+test("the stat caption is singular for one branch", () => {
+  assert.equal(parallelCaption(1), "branch at once");
+  assert.equal(parallelCaption(2), "branches at once");
+  assert.equal(parallelCaption(0), "branches at once");
 });
 
 test("the now line sits at the x of now", () => {

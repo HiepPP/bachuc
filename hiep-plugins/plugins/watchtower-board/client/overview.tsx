@@ -54,7 +54,10 @@ export function WatchtowerOverview({
     if (!data) return null;
     const timeline = buildTimeline(data);
     const started = data.run?.started ?? null;
-    const deadlines = new Map(timeline.deadlines.map((entry) => [entry.questionId, entry.minute]));
+    // A stopped run has no real "now", so its answer-by times would be in the past.
+    const deadlines = new Map(
+      data.run?.stopped ? [] : timeline.deadlines.map((entry) => [entry.questionId, entry.minute]),
+    );
     const rows = needsYou(data).map((row) => {
       const minute = deadlines.get(row.id);
       const clock = minute === undefined ? null : clockAt(started, minute);
@@ -233,17 +236,20 @@ export function WatchtowerOverview({
   } else {
     const { timeline, started } = derived;
     const finish = timeline.finishMinute === null ? null : clockAt(started, timeline.finishMinute);
+    const stoppedAt = data.run?.stopped ? clockAt(started, data.run.nowMinute ?? 0) : null;
     const timelineCell = (
       <OverviewCell
         title="Branch timeline"
         aside={
-          finish
-            ? `Finish about ${finish}`
-            : data.run?.finished
-              ? "Run finished"
-              : started
-                ? `Autorun since ${clockAt(started, 0)}`
-                : undefined
+          stoppedAt
+            ? `Run stopped at ${stoppedAt}`
+            : finish
+              ? `Finish about ${finish}`
+              : data.run?.finished
+                ? "Run finished"
+                : started
+                  ? `Autorun since ${clockAt(started, 0)}`
+                  : undefined
         }
         theme={theme}
       >

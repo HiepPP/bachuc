@@ -10,6 +10,8 @@ export const LINE = 2;
 // The 10 px mono label font is about 6.2 px per character.
 const CHAR_WIDTH = 6.2;
 const LABEL_GAP = 3;
+// Room between the now line and a label moved off it; at 3 px the label still looks attached.
+const NOW_GAP = 6;
 
 export type SegmentTone = "done" | "active" | "pending";
 export interface Rect {
@@ -56,6 +58,10 @@ export function laneCenter(lane: number): number {
 
 export function shortId(id: string): string {
   return id.replace(/^TASK-/, "");
+}
+
+export function parallelCaption(count: number): string {
+  return count === 1 ? "branch at once" : "branches at once";
 }
 
 // The clock time of a timeline minute, from the run's `Started:` value.
@@ -122,22 +128,29 @@ export function timelineGeometry(
     };
   });
 
-  // A label that would touch the previous label in its lane moves below its bar.
+  // A label that would cross the now line moves to its right, or to its left near the edge. A
+  // label that would touch the previous label in its lane then moves below its bar.
+  const nowX = nowMinute === null ? null : x(nowMinute);
   const labelEnds = new Map<number, number>();
   const labels: LabelPosition[] = [];
   for (const rect of [...bars].sort((a, b) => a.x - b.x)) {
     const lane = byId.get(rect.id)?.lane ?? 0;
     const text = shortId(rect.id);
-    const below = rect.x < (labelEnds.get(lane) ?? -Infinity) + LABEL_GAP;
+    const labelWidth = text.length * CHAR_WIDTH;
+    let left = rect.x;
+    if (nowX !== null && left - NOW_GAP <= nowX && nowX <= left + labelWidth + NOW_GAP) {
+      left = nowX + NOW_GAP + labelWidth <= width ? nowX + NOW_GAP : nowX - NOW_GAP - labelWidth;
+    }
+    const below = left < (labelEnds.get(lane) ?? -Infinity) + LABEL_GAP;
     labels.push({
       id: rect.id,
       text,
       kind: rect.kind,
-      x: rect.x,
+      x: left,
       y: below ? rect.y + BAR_HEIGHT + 1 : laneTop(lane),
       below,
     });
-    if (!below) labelEnds.set(lane, rect.x + text.length * CHAR_WIDTH);
+    if (!below) labelEnds.set(lane, left + labelWidth);
   }
 
   const segments = model.edges.flatMap((edge) => {
@@ -153,17 +166,18 @@ export function timelineGeometry(
     bars,
     labels,
     segments,
-    nowX: nowMinute === null ? null : x(nowMinute),
+    nowX,
     ticks: model.axis.ticks.map((tick) => ({ x: x(tick.minute), label: tick.label })),
     axisY,
   };
 }
 
-// Every absolutely positioned View the timeline draws: bars, expected parts, labels, segments,
-// ticks, the now line, and the axis line.
+// Every absolutely positioned View the timeline draws: bars, running tints, expected parts, labels,
+// segments, ticks, the now line, and the axis line.
 export function viewCount(geometry: TimelineGeometry): number {
   return (
     geometry.bars.length +
+    geometry.bars.filter((bar) => bar.kind === "running").length +
     geometry.bars.filter((bar) => bar.expected).length +
     geometry.labels.length +
     geometry.segments.length +

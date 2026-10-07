@@ -61,6 +61,7 @@ function midRun(): Input {
         row("TASK-005", 92, 100),
       ],
       nowMinute: 140,
+      stopped: false,
     },
     questions: [
       {
@@ -206,7 +207,14 @@ test("the model stays cheap on 200 tasks and 200 log rows", (t) => {
   }
   const input: Input = {
     tasks,
-    run: { runner: "loop", started: "2026-10-06 22:52", finished: null, log, nowMinute: 4000 },
+    run: {
+      runner: "loop",
+      started: "2026-10-06 22:52",
+      finished: null,
+      log,
+      nowMinute: 4000,
+      stopped: false,
+    },
     questions: [],
   };
   const runs = 50;

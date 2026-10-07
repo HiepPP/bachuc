@@ -6,6 +6,7 @@ import {
   BAR_HEIGHT,
   type BarRect,
   clockAt,
+  parallelCaption,
   type SegmentTone,
   shortId,
   timelineGeometry,
@@ -50,7 +51,10 @@ export function BranchTimeline({
   };
   const barStyle = (bar: BarRect) => {
     if (bar.kind === "done") return { backgroundColor: colors.statusSuccess, opacity: 0.8 };
-    if (bar.kind === "running") return { backgroundColor: colors.accent };
+    // An accent outline with a light tint, so a running bar stays distinct from a done bar even in
+    // a theme whose accent is green like statusSuccess.
+    if (bar.kind === "running")
+      return { borderWidth: 1.5, borderColor: colors.accent, overflow: "hidden" as const };
     return {
       borderWidth: 1,
       borderStyle: "dashed" as const,
@@ -71,7 +75,7 @@ export function BranchTimeline({
       caption: stats.overAverage ? `${stats.overAverage.minutes} min over average` : "over average",
       warn: Boolean(stats.overAverage),
     },
-    { value: String(stats.maxParallel), caption: "branches at once", warn: false },
+    { value: String(stats.maxParallel), caption: parallelCaption(stats.maxParallel), warn: false },
   ];
 
   return (
@@ -115,7 +119,22 @@ export function BranchTimeline({
                       borderRadius: 3,
                       ...barStyle(bar),
                     }}
-                  />
+                  >
+                    {bar.kind === "running" ? (
+                      <View
+                        pointerEvents="none"
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          right: 0,
+                          bottom: 0,
+                          left: 0,
+                          backgroundColor: colors.accent,
+                          opacity: 0.22,
+                        }}
+                      />
+                    ) : null}
+                  </Pressable>
                   {bar.expected ? (
                     <View
                       style={{

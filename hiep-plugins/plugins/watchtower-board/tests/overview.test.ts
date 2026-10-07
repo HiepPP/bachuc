@@ -111,9 +111,9 @@ test("reads plan meta, deps, groups, Plan Verify, and manual checks", async (t) 
     "Link text check -> passes.",
   ]);
   assert.deepEqual(overview.manualChecks, [
-    { text: "install assistant-cite on live and cite a reply (TASK-007).", tasks: ["TASK-007"] },
+    { text: "Install assistant-cite on live and cite a reply (TASK-007).", tasks: ["TASK-007"] },
     {
-      text: "a queued message survives a reload (TASK-003, TASK-004).",
+      text: "A queued message survives a reload (TASK-003, TASK-004).",
       tasks: ["TASK-003", "TASK-004"],
     },
   ]);
@@ -199,12 +199,31 @@ test("run log times become minutes from the start across midnight", () => {
   );
   assert.equal(run.log[0].detail, "#2");
   assert.equal(run.nowMinute, 140);
+  assert.equal(run.stopped, false);
   const finished = parseOverviewRun(
     runLog.replace("- Finished: -", "- Finished: 2026-10-07 02:18. All done."),
     new Date(2026, 9, 9, 9, 0),
   );
   assert.equal(finished.nowMinute, 206);
+  assert.equal(finished.stopped, false);
   assert.equal(parseOverviewRun("# Run\n").nowMinute, null);
+  assert.equal(parseOverviewRun("# Run\n").stopped, false);
+});
+
+test("a run with no finish and no log activity for over two hours has stopped", () => {
+  // The last logged activity ends at 00:21, minute 89.
+  const recent = parseOverviewRun(runLog, new Date(2026, 9, 7, 2, 21));
+  assert.equal(recent.stopped, false);
+  assert.equal(recent.nowMinute, 209);
+  const stale = parseOverviewRun(runLog, new Date(2026, 9, 7, 2, 22));
+  assert.equal(stale.stopped, true);
+  assert.equal(stale.nowMinute, 89);
+  const empty = parseOverviewRun(
+    "# Run\n\n- Started: 2026-10-07 08:00\n- Finished: -\n",
+    new Date(2026, 9, 7, 13, 0),
+  );
+  assert.equal(empty.stopped, true);
+  assert.equal(empty.nowMinute, 0);
 });
 
 test("questions keep OPEN and DEFAULTED rows only", () => {

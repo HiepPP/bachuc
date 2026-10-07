@@ -36,8 +36,11 @@ export const overviewRunSchema = z.object({
   finished: z.string().nullable(),
   // Every log row, oldest first.
   log: z.array(overviewRunEntrySchema),
-  // Minutes from `Started:` to the read time, or to `Finished:` once the run ends.
+  // Minutes from `Started:` to the read time, or to `Finished:` once the run ends. A stopped run
+  // keeps the minute of its last log activity.
   nowMinute: z.number().int().nullable(),
+  // No `Finished:` line and no log activity for more than two hours.
+  stopped: z.boolean(),
 });
 // An OPEN or DEFAULTED row of QUESTIONS.md.
 export const overviewQuestionSchema = z.object({

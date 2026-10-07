@@ -26,7 +26,14 @@ function overview(patch: Partial<Overview> = {}): Overview {
     tasks: [task("TASK-001", "DONE"), task("TASK-002", "IN PROGRESS", "B")],
     planVerify: ["npm test", "npm run lint"],
     manualChecks: [],
-    run: { runner: "loop", started: "2026-10-07 12:32", finished: null, log: [], nowMinute: 10 },
+    run: {
+      runner: "loop",
+      started: "2026-10-07 12:32",
+      finished: null,
+      log: [],
+      nowMinute: 10,
+      stopped: false,
+    },
     questions: [],
     decisions: [],
     history: [],
@@ -55,6 +62,21 @@ test("open tasks put the plan in Implement", () => {
   assert.equal(phases[3].meta, "After the run");
 });
 
+test("a stopped run is not live", () => {
+  const input = overview({
+    run: {
+      runner: "loop",
+      started: "2026-10-07 08:00",
+      finished: null,
+      log: [],
+      nowMinute: 30,
+      stopped: true,
+    },
+  });
+  assert.equal(lifecyclePhases(input)[1].meta, "1 of 2 done, run stopped");
+  assert.equal(states(input)[1], "Implement:current");
+});
+
 test("every task done without a finish puts the plan in Verify", () => {
   const input = overview({ tasks: [task("TASK-001", "DONE"), task("TASK-002", "DONE")] });
   assert.deepEqual(states(input).slice(0, 3), ["Plan:done", "Implement:done", "Verify:current"]);
@@ -68,6 +90,7 @@ test("a finished run puts the plan in Review", () => {
       finished: "2026-10-07 15:00",
       log: [],
       nowMinute: 148,
+      stopped: false,
     },
   });
   assert.deepEqual(states(input), [

@@ -15,6 +15,9 @@ const MANUAL_CHECK = /^Manual check pending:\s*/i;
 // readBoard caps NEXT.md and the specs at 1 MiB; the overview's own reads get the same cap.
 const MAX_OVERVIEW_BYTES = 1024 * 1024;
 const DAY_MINUTES = 24 * 60;
+// A run with no `Finished:` line and no log activity for this long has stopped: the loop died or
+// was stopped by hand. Its "now" stays at the last activity instead of growing with the clock.
+export const STALE_RUN_MINUTES = 120;
 
 function taskIds(text: string): string[] {
   return [...(text.match(/\bTASK-\d+\b/g) ?? [])];
@@ -63,7 +66,8 @@ export function parseManualChecks(handoff: string | null): ManualCheck[] {
   return bullets(handoff)
     .filter((line) => MANUAL_CHECK.test(line))
     .map((line) => {
-      const text = line.replace(MANUAL_CHECK, "").trim();
+      const rest = line.replace(MANUAL_CHECK, "").trim();
+      const text = rest.charAt(0).toUpperCase() + rest.slice(1);
       return { text, tasks: taskIds(text) };
     });
 }
@@ -101,12 +105,16 @@ export function parseOverviewRun(markdown: string, now = new Date()): OverviewRu
     };
   });
   const end = dateTime(finished) ?? now;
+  const elapsed = startedAt ? Math.floor((end.getTime() - startedAt.getTime()) / 60_000) : null;
+  const lastActivity = [...log].reverse().find((row) => row.endMinute !== null)?.endMinute ?? 0;
+  const stopped = !finished && elapsed !== null && elapsed - lastActivity > STALE_RUN_MINUTES;
   return {
     runner: field(markdown, "Runner"),
     started,
     finished,
     log,
-    nowMinute: startedAt ? Math.floor((end.getTime() - startedAt.getTime()) / 60_000) : null,
+    nowMinute: stopped ? lastActivity : elapsed,
+    stopped,
   };
 }
 
