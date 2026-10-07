@@ -36,7 +36,8 @@ export function lifecyclePhases(overview: LifecycleInput): Phase[] {
   const current = currentPhase(overview);
   const done = tasks.filter((task) => task.status === "DONE").length;
   const groups = new Set(tasks.map((task) => task.group).filter((group) => group !== null)).size;
-  const live = Boolean(run?.started && !run.finished);
+  const live = Boolean(run?.started && !run.finished && !run.stopped);
+  const runState = live ? ", autorun live" : run?.stopped ? ", run stopped" : "";
   const meta: Record<PhaseName, string> = {
     Plan:
       tasks.length === 0
@@ -44,7 +45,7 @@ export function lifecyclePhases(overview: LifecycleInput): Phase[] {
         : groups > 0
           ? `${plural(tasks.length, "task")} in ${plural(groups, "group")}`
           : plural(tasks.length, "task"),
-    Implement: `${done} of ${tasks.length} done${live ? ", autorun live" : ""}`,
+    Implement: `${done} of ${tasks.length} done${runState}`,
     Verify: `${plural(planVerify.length, "check")} and ${plural(manualChecks.length, "manual check")}`,
     Review: run?.finished ? "Draft PR open" : "After the run",
     Archive: "Learnings, then archive",
