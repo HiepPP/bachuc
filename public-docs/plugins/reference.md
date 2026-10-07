@@ -176,7 +176,8 @@ remote resources or call `fetch`. `network: true` allows `https:` scripts, style
 and `fetch`; the sandbox stays the same. A number `height` fixes the frame, 360 by default, and
 taller content scrolls inside it. `height="auto"` grows the frame to show the whole page, up to 8000;
 a page sized to the frame, such as one with `100vh`, stops growing after three equal steps and
-scrolls inside it. The frame background is white; style the page with the app theme, which
+scrolls inside it. A page shown before in the same app session starts at its last height, so it
+does not jump when its row mounts again. The frame background is white; style the page with the app theme, which
 it gets as CSS variables: `--paseo-background`, `--paseo-surface`, `--paseo-foreground`,
 `--paseo-muted`, `--paseo-border`, `--paseo-accent`, `--paseo-success`, `--paseo-warning`,
 `--paseo-danger`, `--paseo-font-ui`, and `--paseo-font-mono`. A theme change reloads the page.

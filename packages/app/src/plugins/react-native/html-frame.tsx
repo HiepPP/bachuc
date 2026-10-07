@@ -1,10 +1,16 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { HtmlFrameProps } from "@getpaseo/plugin/client/ui";
 import { SandboxedHtmlView } from "@/file-pane/html-preview";
 import { cssVariablesStyle, withPreviewCsp } from "@/file-pane/html-preview-csp";
-import { INITIAL_AUTO_HEIGHT, nextAutoHeight, readReportedHeight } from "./html-frame-height";
+import {
+  frameHeightKey,
+  initialAutoHeight,
+  nextAutoHeight,
+  readReportedHeight,
+  rememberAutoHeight,
+} from "./html-frame-height";
 import { htmlFrameCssVariables } from "./html-frame-theme";
 
 const DEFAULT_HEIGHT = 360;
@@ -29,9 +35,16 @@ function FixedHeightFrame({
   );
 }
 
-// Keyed by document, so a new page starts again from the initial height.
-function AutoHeightFrame({ document, title, testID }: FrameBodyProps) {
-  const [size, setSize] = useState(INITIAL_AUTO_HEIGHT);
+// Keyed by document, so a new page starts again; it starts at the page's last height when the
+// same page was shown before.
+function AutoHeightFrame({
+  document,
+  title,
+  testID,
+  heightKey,
+}: FrameBodyProps & { heightKey: string }) {
+  const [size, setSize] = useState(() => initialAutoHeight(heightKey));
+  useEffect(() => rememberAutoHeight(heightKey, size), [heightKey, size]);
   const handleFrameMessage = useCallback((data: unknown) => {
     const reported = readReportedHeight(data);
     if (reported !== null) setSize((current) => nextAutoHeight(current, reported));
@@ -70,10 +83,18 @@ function HtmlFrameView({
     () => withPreviewCsp(source, { network, themeStyle, reportHeight: auto }),
     [auto, network, source, themeStyle],
   );
+  // Keyed by the page alone, so a theme change keeps the page's remembered height.
+  const heightKey = useMemo(() => (auto ? frameHeightKey(source) : ""), [auto, source]);
   return (
     <View style={styles.frame}>
       {auto ? (
-        <AutoHeightFrame key={document} document={document} title={title} testID={testID} />
+        <AutoHeightFrame
+          key={document}
+          document={document}
+          title={title}
+          testID={testID}
+          heightKey={heightKey}
+        />
       ) : (
         <FixedHeightFrame document={document} title={title} testID={testID} height={height} />
       )}
