@@ -1,11 +1,26 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { mkdtemp, mkdir, writeFile, readdir, unlink, rmdir } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  writeFile,
+  readdir,
+  readFile,
+  unlink,
+  rmdir,
+  symlink,
+} from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import type { PaseoApi, PaseoWorkspace } from "@getpaseo/client";
 import { loadWorkspaceOverview } from "../server/handlers";
-import { parseManualChecks, readOverview } from "../server/overview";
+import {
+  parseDecisions,
+  parseManualChecks,
+  parseOverviewQuestions,
+  parseOverviewRun,
+  readOverview,
+} from "../server/overview";
 import { overviewSchema, readOverviewRpc } from "../shared/overview";
 
 const manifest = `# NEXT
@@ -150,4 +165,139 @@ test("the workspace handler reads the workspace directory", async (t) => {
     workspaces: { ref: () => ({ refresh: async () => null }) },
   } as unknown as PaseoApi;
   await assert.rejects(loadWorkspaceOverview("ws-2", missing), /Workspace is unavailable/);
+});
+
+const runLog = `# Run
+
+- Runner: loop
+- Started: 2026-10-06 22:52
+- Finished: -
+
+## Log
+
+| Start | End | TASK | Result | PR or reason |
+| --- | --- | --- | --- | --- |
+| 22:52 | 23:06 | TASK-001 | DONE | #2 |
+| 23:09 | 23:28 | TASK-002 | DONE | #3 |
+| 00:02 | 00:21 | TASK-004 | DONE | #5 |
+| 00:35 | now | TASK-006 | IN PROGRESS | - |
+`;
+
+test("run log times become minutes from the start across midnight", () => {
+  const run = parseOverviewRun(runLog, new Date(2026, 9, 7, 1, 12));
+  assert.equal(run.runner, "loop");
+  assert.equal(run.started, "2026-10-06 22:52");
+  assert.equal(run.finished, null);
+  assert.deepEqual(
+    run.log.map((row) => [row.task, row.startMinute, row.endMinute]),
+    [
+      ["TASK-001", 0, 14],
+      ["TASK-002", 17, 36],
+      ["TASK-004", 70, 89],
+      ["TASK-006", 103, null],
+    ],
+  );
+  assert.equal(run.log[0].detail, "#2");
+  assert.equal(run.nowMinute, 140);
+  const finished = parseOverviewRun(
+    runLog.replace("- Finished: -", "- Finished: 2026-10-07 02:18. All done."),
+    new Date(2026, 9, 9, 9, 0),
+  );
+  assert.equal(finished.nowMinute, 206);
+  assert.equal(parseOverviewRun("# Run\n").nowMinute, null);
+});
+
+test("questions keep OPEN and DEFAULTED rows only", () => {
+  const questions =
+    parseOverviewQuestions(`| ID | TASK | Blocks | Question | Default | Status | Answer |
+| --- | --- | --- | --- | --- | --- | --- |
+| Q-001 | TASK-002 | - | Done? | Yes | ANSWERED | Yes |
+| Q-008 | TASK-008, TASK-009 | TASK-009 | Network access? | No network | OPEN | - |
+| Q-010 | TASK-010 | - | Native scroll? | Open the agent only | DEFAULTED | - |
+| Q-011 | TASK-007 | - | Toast API? | No | DROPPED | - |
+`);
+  assert.deepEqual(questions, [
+    {
+      id: "Q-008",
+      tasks: ["TASK-008", "TASK-009"],
+      blocks: ["TASK-009"],
+      question: "Network access?",
+      default: "No network",
+      status: "OPEN",
+    },
+    {
+      id: "Q-010",
+      tasks: ["TASK-010"],
+      blocks: [],
+      question: "Native scroll?",
+      default: "Open the agent only",
+      status: "DEFAULTED",
+    },
+  ]);
+  assert.deepEqual(
+    parseDecisions(`## Index
+
+| ID | Date | Title | Status | Scope | File |
+| --- | --- | --- | --- | --- | --- |
+| ADR-0003 | 2026-10-07 | Chip-only sources | proposed | x | [ADR](a.md) |
+`),
+    [{ id: "ADR-0003", date: "2026-10-07", title: "Chip-only sources", status: "proposed" }],
+  );
+});
+
+test("history lists the 5 newest real archive folders", async (t) => {
+  const files: Files = { "NEXT.md": manifest, ...specs };
+  for (let day = 1; day <= 8; day++) {
+    const slug = `202609${String(day).padStart(2, "0")}-plan-${day}`;
+    files[`archive/${slug}/NEXT.md`] = `# NEXT\n\n- Title: Plan ${day}\n`;
+    if (day % 2 === 0) files[`archive/${slug}/LEARN.md`] = "# Learn\n";
+  }
+  files["archive/notes.md"] = "A file, not a plan.\n";
+  files["../elsewhere/NEXT.md"] = "# NEXT\n\n- Title: Outside\n";
+  const root = await fixture(t, files);
+  await symlink(
+    path.join(root, "elsewhere"),
+    path.join(root, "watchtower/archive/20261231-linked"),
+    "dir",
+  );
+  const overview = overviewSchema.parse(await readOverview(root));
+  assert.deepEqual(overview.warnings, []);
+  assert.deepEqual(overview.history, [
+    { slug: "20260908-plan-8", date: "2026-09-08", title: "Plan 8", hasLearn: true },
+    { slug: "20260907-plan-7", date: "2026-09-07", title: "Plan 7", hasLearn: false },
+    { slug: "20260906-plan-6", date: "2026-09-06", title: "Plan 6", hasLearn: true },
+    { slug: "20260905-plan-5", date: "2026-09-05", title: "Plan 5", hasLearn: false },
+    { slug: "20260904-plan-4", date: "2026-09-04", title: "Plan 4", hasLearn: true },
+  ]);
+});
+
+test("an unreadable run file warns and the plan still loads", async (t) => {
+  const root = await fixture(t, { "NEXT.md": manifest, ...specs, "QUESTIONS.md/keep": "x" });
+  const overview = overviewSchema.parse(await readOverview(root));
+  assert.equal(overview.message, null);
+  assert.deepEqual(overview.warnings, ["QUESTIONS.md: Expected a regular Markdown file."]);
+  assert.deepEqual(overview.questions, []);
+});
+
+test("the real t3code plan parses without warnings and stays small", async (t) => {
+  const repo = path.resolve(import.meta.dirname, "../../../..");
+  const plan = path.join(repo, "watchtower/archive/20261006-t3code-orchestration-port");
+  const files: Files = {};
+  for (const name of ["NEXT.md", "QUESTIONS.md", "RUN.md"])
+    files[name] = await readFile(path.join(plan, name), "utf8");
+  for (const name of await readdir(path.join(plan, "tasks")))
+    files[`tasks/${name}`] = await readFile(path.join(plan, "tasks", name), "utf8");
+  files["DECISIONS.md"] = await readFile(path.join(repo, "watchtower/DECISIONS.md"), "utf8");
+  const root = await fixture(t, files);
+  const overview = overviewSchema.parse(await readOverview(root, new Date(2026, 9, 7, 3, 0)));
+  assert.deepEqual(overview.warnings, []);
+  assert.equal(overview.message, null);
+  assert.equal(overview.tasks.length, 10);
+  assert.equal(overview.run?.log.length, 10);
+  assert.equal(overview.run?.log.at(-1)?.endMinute, 203);
+  assert.equal(overview.run?.nowMinute, 206);
+  assert.ok(overview.decisions.some((decision) => decision.status === "proposed"));
+  const size = Buffer.byteLength(JSON.stringify(overview));
+  t.diagnostic(`overview JSON bytes: ${size}`);
+  assert.ok(size <= 32 * 1024, `overview JSON is ${size} bytes`);
 });
