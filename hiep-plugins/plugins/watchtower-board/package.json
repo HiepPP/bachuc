@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint index.server.ts index.client.tsx server client shared tests",
+    "lint": "oxlint --disable-nested-config index.server.ts index.client.tsx server client shared tests",
     "format": "oxfmt index.server.ts index.client.tsx server client shared tests README.md package.json tsconfig.json paseo-plugin.json",
     "test": "tsx --test tests/*.test.ts"
   },
