@@ -4,7 +4,7 @@
 
 - Title: Port T3 Code orchestration and reply features
 - Slug: 20261006-t3code-orchestration-port
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-07
 
 ## Tracker
@@ -53,3 +53,4 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 - [watchtower/archive/20260930-active-machine-switch/](watchtower/archive/20260930-active-machine-switch/)
 - [watchtower/archive/20260930-plugin-host-apis/](watchtower/archive/20260930-plugin-host-apis/)
+- Archived: 2026-10-07 -> watchtower/archive/20261006-t3code-orchestration-port/
