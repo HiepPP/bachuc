@@ -4,7 +4,7 @@
 
 - Title: Watchtower process overview screen
 - Slug: 20261007-watchtower-process-overview
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-07
 
 ## Tracker
@@ -22,7 +22,7 @@ One row per TASK. Group ties together items that write the same files.
 | 7     | TASK-007 Overview screen                        | F     | DONE   | [watchtower/tasks/TASK-007-overview-screen.md](watchtower/tasks/TASK-007-overview-screen.md)           | TASK-005, TASK-006 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending (render on live).             |
 | 8     | TASK-008 Full-screen surface shows the overview | G     | DONE   | [watchtower/tasks/TASK-008-surface-switch.md](watchtower/tasks/TASK-008-surface-switch.md)             | TASK-007           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending (live was down).              |
 | 9     | TASK-009 Composer pill entry                    | H     | DONE   | [watchtower/tasks/TASK-009-composer-pill.md](watchtower/tasks/TASK-009-composer-pill.md)               | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending (live was down).              |
-| 10    | TASK-010 README for the overview and pill       | I     | TODO   | [watchtower/tasks/TASK-010-readme.md](watchtower/tasks/TASK-010-readme.md)                             | TASK-008, TASK-009 | -                                              | Docs only.                                                |
+| 10    | TASK-010 README for the overview and pill       | I     | DONE   | [watchtower/tasks/TASK-010-readme.md](watchtower/tasks/TASK-010-readme.md)                             | TASK-008, TASK-009 | -                                              | auto: no manual check.                                    |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
@@ -37,7 +37,12 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: The autorun builds TASK-010 next, then runs Finish.
+- Next action: All TASKs are DONE. The autorun runs Finish: a draft PR from `watchtower-overview` to `main` for the owner to review.
+- Plan Verify on 2026-10-07 13:16: `npm test` 49 pass, `tests/board.test.ts` 10 of 10, typecheck and lint exit 0, and the format check passes on all 22 changed plugin files. The live reload check is `UNVERIFIED (autonomous run)`, because the live daemon was stopped.
+- Manual check pending: start live, reload `watchtower-board`, and look at an agent composer. The Watchtower pill shows the plan progress beside Tasks and Subagents (TASK-009).
+- Manual check pending: on a wide window, click the pill. The page opens on that workspace and shows the lifecycle, the branch timeline, Needs you, the run log, manual checks, and decisions and history (TASK-005, TASK-006, TASK-007, TASK-008).
+- Manual check pending: make the window narrower than 720 px. The Watchtower page shows the board, as before (TASK-008).
+- Manual check pending: on New workspace, the pill reads `Watchtower` and opens the Watchtower page (TASK-009).
 
 ## Archive
 
