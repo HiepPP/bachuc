@@ -19,7 +19,7 @@ One row per TASK. Group ties together items that write the same files.
 | 4     | TASK-004 Branch timeline model                  | C     | DONE   | [watchtower/tasks/TASK-004-timeline-model.md](watchtower/tasks/TASK-004-timeline-model.md)             | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: no manual check.                                    |
 | 5     | TASK-005 Branch timeline view                   | D     | DONE   | [watchtower/tasks/TASK-005-timeline-view.md](watchtower/tasks/TASK-005-timeline-view.md)               | TASK-004           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending (render on live).             |
 | 6     | TASK-006 Overview cells                         | E     | DONE   | [watchtower/tasks/TASK-006-overview-cells.md](watchtower/tasks/TASK-006-overview-cells.md)             | TASK-003           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending (render on live).             |
-| 7     | TASK-007 Overview screen                        | F     | TODO   | [watchtower/tasks/TASK-007-overview-screen.md](watchtower/tasks/TASK-007-overview-screen.md)           | TASK-005, TASK-006 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | One query per open.                                       |
+| 7     | TASK-007 Overview screen                        | F     | DONE   | [watchtower/tasks/TASK-007-overview-screen.md](watchtower/tasks/TASK-007-overview-screen.md)           | TASK-005, TASK-006 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending (render on live).             |
 | 8     | TASK-008 Full-screen surface shows the overview | G     | TODO   | [watchtower/tasks/TASK-008-surface-switch.md](watchtower/tasks/TASK-008-surface-switch.md)             | TASK-007           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Compact layouts keep the board.                           |
 | 9     | TASK-009 Composer pill entry                    | H     | TODO   | [watchtower/tasks/TASK-009-composer-pill.md](watchtower/tasks/TASK-009-composer-pill.md)               | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Opens the surface. Q-002.                                 |
 | 10    | TASK-010 README for the overview and pill       | I     | TODO   | [watchtower/tasks/TASK-010-readme.md](watchtower/tasks/TASK-010-readme.md)                             | TASK-008, TASK-009 | -                                              | Docs only.                                                |
@@ -37,7 +37,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: The autorun builds TASK-007 next, then TASK-008.
+- Next action: The autorun builds TASK-008 next, then TASK-009 and TASK-010.
 
 ## Archive
 
