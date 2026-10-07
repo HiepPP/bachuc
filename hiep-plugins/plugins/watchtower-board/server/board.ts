@@ -42,7 +42,7 @@ export async function readFile(root: string, target: string): Promise<string> {
   }
 }
 
-function message(error: unknown): string {
+export function message(error: unknown): string {
   const code = (error as NodeJS.ErrnoException)?.code;
   if (code === "ENOENT") return "File not found.";
   if (code === "EACCES" || code === "EPERM") return "File is not readable.";

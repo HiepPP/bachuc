@@ -14,7 +14,7 @@ One row per TASK. Group ties together items that write the same files.
 | Order | TASK                                            | Group | Status | Spec                                                                                                   | Deps               | Context                                        | Notes                                                     |
 | ----- | ----------------------------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------------ | ------------------ | ---------------------------------------------- | --------------------------------------------------------- |
 | 1     | TASK-001 Overview plan data reader              | A     | DONE   | [watchtower/tasks/TASK-001-overview-plan-reader.md](watchtower/tasks/TASK-001-overview-plan-reader.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: no manual check. Also fixed the plugin lint script. |
-| 2     | TASK-002 Overview run, questions, and history   | A     | TODO   | [watchtower/tasks/TASK-002-overview-run-history.md](watchtower/tasks/TASK-002-overview-run-history.md) | TASK-001           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Same files as TASK-001.                                   |
+| 2     | TASK-002 Overview run, questions, and history   | A     | DONE   | [watchtower/tasks/TASK-002-overview-run-history.md](watchtower/tasks/TASK-002-overview-run-history.md) | TASK-001           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: no manual check. Overview tasks drop `brief`.       |
 | 3     | TASK-003 Lifecycle and needs-you model          | B     | TODO   | [watchtower/tasks/TASK-003-lifecycle-model.md](watchtower/tasks/TASK-003-lifecycle-model.md)           | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Pure functions with tests.                                |
 | 4     | TASK-004 Branch timeline model                  | C     | TODO   | [watchtower/tasks/TASK-004-timeline-model.md](watchtower/tasks/TASK-004-timeline-model.md)             | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Pure functions with tests.                                |
 | 5     | TASK-005 Branch timeline view                   | D     | TODO   | [watchtower/tasks/TASK-005-timeline-view.md](watchtower/tasks/TASK-005-timeline-view.md)               | TASK-004           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | React Native Views, no SVG.                               |
@@ -37,7 +37,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: The autorun builds TASK-002 next. TASK-009 can also run, because it has no deps.
+- Next action: The autorun builds TASK-003 next, then TASK-004. TASK-009 can also run, because it has no deps.
 
 ## Archive
 
