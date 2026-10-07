@@ -69,3 +69,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: in vitest browser tests, app sources compile with the classic JSX runtime, and the Unistyles stub ignores `withUnistyles` mappings.
 - Source: `packages/app/src/components/question-form-card.browser.test.tsx`; `packages/app/test-stubs/react-native-unistyles.ts`; TASK-008 outcome.
 - Use next time: call `vi.stubGlobal("React", React)` before rendering app components, and test theme mappings as pure functions.
+
+### 2026-10-07 - Autorun 20261007-watchtower-process-overview
+
+- Learned: a plugin `lint` script without `--disable-nested-config` fails before it reads any file. oxlint treats the repo root `.oxlintrc.json` as a nested config and rejects its `options.typeAware` key.
+- Source: `hiep-plugins/plugins/watchtower-board/package.json`; `hiep-plugins/plugins/pr-watch/package.json`; TASK-001 outcome.
+- Use next time: give every plugin `lint` script the `--disable-nested-config` flag.
