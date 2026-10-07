@@ -17,6 +17,7 @@ test("fetches every page and detects repeated cursors", async () => {
     agents: [],
     visibleAgentIds: new Set(),
     unreadAgentIds: new Set(),
+    diffsOffAgentIds: new Set(),
   });
   assert.equal(calls, 3);
   const repeated = {
@@ -117,4 +118,26 @@ test("collects unread threads from finished and failed attention only", async ()
   } as unknown as PaseoApi;
   const { unreadAgentIds } = await listBoardAgents(client, new AbortController().signal);
   assert.deepEqual([...unreadAgentIds], ["finished", "error"]);
+});
+
+test("collects threads whose edit diffs are off, running or not", async () => {
+  const modes: Record<string, Record<string, string>> = {
+    off: { "edit-diffs.mode": "off" },
+    "idle-off": { "edit-diffs.mode": "off" },
+    on: { "edit-diffs.mode": "on" },
+    unset: {},
+  };
+  const client = {
+    agents: {
+      list: async () => ({
+        entries: Object.entries(modes).map(([id, labels]) => ({
+          agent: { id, status: id === "idle-off" ? "idle" : "running", labels },
+          project: null,
+        })),
+        pageInfo: { hasMore: false },
+      }),
+    },
+  } as unknown as PaseoApi;
+  const { diffsOffAgentIds } = await listBoardAgents(client, new AbortController().signal);
+  assert.deepEqual([...diffsOffAgentIds], ["off", "idle-off"]);
 });
