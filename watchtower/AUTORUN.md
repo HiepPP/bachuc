@@ -13,7 +13,8 @@ max_line: 100
 header_pattern: ^(feat|fix|docs|refactor|test|chore|perf)(\([a-z0-9-]+\))?: .+
 runner: loop
 loop_delay_seconds: 60
-paseo_every: 15m
+paseo_every: 5m
+paseo_profile: Opus
 ```
 
 ## Repo Rules
@@ -27,6 +28,7 @@ paseo_every: 15m
 - Run GitNexus `impact` before you edit a symbol. Run `detect_changes` before each commit, per the root `CLAUDE.md`.
 - The gate has no `formatter` line: oxfmt 0.46.0 rejects `--check` together with `--stdin-filepath`. Format with `npm run format:files -- <changed files>` before you stage. This includes `watchtower/` markdown, because the lefthook pre-commit hook checks the format of every staged `*.md` file. Put path globs in code spans first; the formatter reads a bare `**` as emphasis.
 - The plan files were written at Start and are not committed yet. Ship them with the first iteration's commit.
+- Create the schedule and each handoff agent with thinking `xhigh` (`--thinking xhigh`). This overrides the `high` of the `Opus` profile.
 - Skip: none.
 
 ## Verify Extras
