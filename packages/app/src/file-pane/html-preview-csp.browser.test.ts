@@ -94,6 +94,33 @@ it("grows an auto-height frame to show the whole page without inner scroll", asy
   await expect.poll(height, { timeout: 3000 }).toBe(920);
 });
 
+it("counts the body's default margins once, with no blank space below the page", async () => {
+  const height = renderAutoFrame('<body><div style="height:900px"></div></body>');
+
+  await expect.poll(height, { timeout: 3000 }).toBe(916);
+});
+
+it("fits content positioned outside the root box, through scrollHeight", async () => {
+  const height = renderAutoFrame(
+    '<body style="margin:0"><div style="height:100px"></div>' +
+      '<div style="position:absolute;top:0;width:10px;height:700px"></div></body>',
+  );
+
+  await expect.poll(height, { timeout: 3000 }).toBe(700);
+});
+
+it("reserves a page's last height before the first paint of a remount", async () => {
+  const html = '<body style="margin:0;padding:10px"><div style="height:640px"></div></body>';
+  const first = renderAutoFrame(html);
+  await expect.poll(first, { timeout: 3000 }).toBe(660);
+  root?.unmount();
+  document.body.replaceChildren();
+
+  const second = renderAutoFrame(html);
+
+  expect(second()).toBe(660);
+});
+
 it("stops growing a page sized to the frame, such as 100vh", async () => {
   const height = renderAutoFrame(
     '<body style="margin:8px"><div style="height:100vh"></div></body>',

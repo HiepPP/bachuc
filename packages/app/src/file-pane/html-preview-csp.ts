@@ -95,18 +95,32 @@ export interface PreviewDocumentOptions {
 export const FRAME_HEIGHT_MESSAGE_KEY = "paseoHtmlFrameHeight";
 
 // A sandboxed frame has an opaque origin, so the host cannot read its height; the page reports
-// it instead, through postMessage on web and the WebView bridge on native. It measures the root
-// box plus the body's margins, which collapse outside it, and never `scrollHeight`, which is at
-// least the frame's own height and so could never shrink. The page is untrusted: the host clamps
-// whatever arrives.
+// it instead, through postMessage on web and the WebView bridge on native. While the page
+// overflows the frame, `scrollHeight` is exact, content positioned outside the root box included.
+// Otherwise it is at least the frame's own height and could never shrink, so the reporter takes
+// the larger of the root box, which holds the body's margins because the root never collapses
+// margins, and the lowest element, which catches absolutely positioned content once the frame
+// fits it. Fixed and hidden elements have no offset parent and are skipped. It never listens to
+// window resizes, so a frame resize alone never triggers a new report. The page is untrusted:
+// the host clamps whatever arrives.
 const HEIGHT_REPORTER = `<script>(function () {
   var last = -1;
+  function lowestElement() {
+    var bottom = 0;
+    var elements = document.body.getElementsByTagName("*");
+    for (var index = 0; index < elements.length; index++) {
+      var element = elements[index];
+      if (element.offsetParent === null) continue;
+      bottom = Math.max(bottom, element.getBoundingClientRect().bottom);
+    }
+    return Math.ceil(bottom + window.scrollY);
+  }
   function send() {
-    var body = document.body;
-    if (!body) return;
-    var style = getComputedStyle(body);
-    var height = Math.ceil(document.documentElement.getBoundingClientRect().height +
-      parseFloat(style.marginTop) + parseFloat(style.marginBottom));
+    if (!document.body) return;
+    var root = document.documentElement;
+    var height = root.scrollHeight > root.clientHeight
+      ? root.scrollHeight
+      : Math.max(Math.ceil(root.getBoundingClientRect().height), lowestElement());
     if (Math.abs(height - last) < 1) return;
     last = height;
     var message = { ${FRAME_HEIGHT_MESSAGE_KEY}: height };

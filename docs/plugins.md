@@ -207,9 +207,13 @@ mapping is tested on its own in `html-frame-theme.test.ts`.
 `height="auto"` cannot read the frame's height, because the sandbox gives the page an opaque
 origin. `withPreviewCsp` injects a reporter that posts the content height through `postMessage` on
 web and the `ReactNativeWebView` bridge on native; native gets the bridge only when
-`onFrameMessage` is set, so the file preview never exposes it. The reporter measures the root box,
-never `scrollHeight`, which is at least the frame height and so could never shrink.
-`html-frame-height.ts` clamps each report and freezes a page whose height follows the frame.
+`onFrameMessage` is set, so the file preview never exposes it. Like T3 Code, the reporter uses
+`scrollHeight` while the page overflows the frame; once it fits, `scrollHeight` equals the frame
+height and could never shrink, so it takes the larger of the root box and the lowest element. The
+root never collapses margins, so the root box already holds the body's margins.
+`html-frame-height.ts` clamps each report, freezes a page whose height follows the frame, and
+remembers the last height per page, so a remount reserves its box before the first paint. The
+memory lives only for the app session; a page shown for the first time starts at 120.
 
 ### SDK import boundaries
 
