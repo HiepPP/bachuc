@@ -37,7 +37,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: All TASKs are DONE. The autorun runs Finish: a draft PR from `watchtower-overview` to `main` for the owner to review.
+- Next action: All TASKs are DONE. The owner reviews draft PR #24 from `watchtower-overview` to `main`, after the manual checks below. PR #13 should merge first, because this branch starts from `t3code-port`.
 - Plan Verify on 2026-10-07 13:16: `npm test` 49 pass, `tests/board.test.ts` 10 of 10, typecheck and lint exit 0, and the format check passes on all 22 changed plugin files. The live reload check is `UNVERIFIED (autonomous run)`, because the live daemon was stopped.
 - Manual check pending: start live, reload `watchtower-board`, and look at an agent composer. The Watchtower pill shows the plan progress beside Tasks and Subagents (TASK-009).
 - Manual check pending: on a wide window, click the pill. The page opens on that workspace and shows the lifecycle, the branch timeline, Needs you, the run log, manual checks, and decisions and history (TASK-005, TASK-006, TASK-007, TASK-008).
