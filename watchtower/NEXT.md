@@ -16,7 +16,7 @@ One row per TASK. Group ties together items that write the same files.
 | 1     | TASK-001 Overview plan data reader              | A     | DONE   | [watchtower/tasks/TASK-001-overview-plan-reader.md](watchtower/tasks/TASK-001-overview-plan-reader.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: no manual check. Also fixed the plugin lint script. |
 | 2     | TASK-002 Overview run, questions, and history   | A     | DONE   | [watchtower/tasks/TASK-002-overview-run-history.md](watchtower/tasks/TASK-002-overview-run-history.md) | TASK-001           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: no manual check. Overview tasks drop `brief`.       |
 | 3     | TASK-003 Lifecycle and needs-you model          | B     | DONE   | [watchtower/tasks/TASK-003-lifecycle-model.md](watchtower/tasks/TASK-003-lifecycle-model.md)           | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: no manual check.                                    |
-| 4     | TASK-004 Branch timeline model                  | C     | TODO   | [watchtower/tasks/TASK-004-timeline-model.md](watchtower/tasks/TASK-004-timeline-model.md)             | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Pure functions with tests.                                |
+| 4     | TASK-004 Branch timeline model                  | C     | DONE   | [watchtower/tasks/TASK-004-timeline-model.md](watchtower/tasks/TASK-004-timeline-model.md)             | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: no manual check.                                    |
 | 5     | TASK-005 Branch timeline view                   | D     | TODO   | [watchtower/tasks/TASK-005-timeline-view.md](watchtower/tasks/TASK-005-timeline-view.md)               | TASK-004           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | React Native Views, no SVG.                               |
 | 6     | TASK-006 Overview cells                         | E     | TODO   | [watchtower/tasks/TASK-006-overview-cells.md](watchtower/tasks/TASK-006-overview-cells.md)             | TASK-003           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Presentational only. Q-001.                               |
 | 7     | TASK-007 Overview screen                        | F     | TODO   | [watchtower/tasks/TASK-007-overview-screen.md](watchtower/tasks/TASK-007-overview-screen.md)           | TASK-005, TASK-006 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | One query per open.                                       |
@@ -37,7 +37,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: The autorun builds TASK-004 next. TASK-006 and TASK-009 can also run.
+- Next action: The autorun builds TASK-005 next. TASK-006 and TASK-009 can also run.
 
 ## Archive
 
