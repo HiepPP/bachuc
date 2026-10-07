@@ -4,6 +4,7 @@ import { type ReactNode, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import type { Decision, History, ManualCheck, OverviewRun } from "../shared/overview";
 import type { NeedsYouRow, Phase, PhaseName } from "./lifecycle";
+import { runningLogLine } from "./run-log";
 
 // Presentational parts of the overview. They take data through props and never fetch.
 export const LIST_LIMIT = 5;
@@ -306,17 +307,19 @@ function LogLine({
   cells,
   tail,
   strong,
-  accent,
+  tone,
   theme,
 }: {
   cells: readonly [string, string, string, string];
   tail: string;
   strong?: boolean;
-  accent?: boolean;
+  tone?: "active" | "warning";
 } & ThemeProps) {
   const { colors } = theme;
   const text = { fontFamily: MONO, fontSize: 11, lineHeight: 19 };
   const base = strong ? colors.foreground : colors.foregroundMuted;
+  const resultColor =
+    tone === "active" ? colors.accent : tone === "warning" ? colors.statusWarning : base;
   return (
     <View style={{ flexDirection: "row", alignItems: "center" }}>
       {logColumns.map((width, index) => (
@@ -324,7 +327,7 @@ function LogLine({
           {cells[index]}
         </Text>
       ))}
-      <Text style={{ ...text, flex: 1, color: accent ? colors.accent : base }}>{cells[3]}</Text>
+      <Text style={{ ...text, flex: 1, color: resultColor }}>{cells[3]}</Text>
       <Text style={{ ...text, color: tail.startsWith("#") ? colors.accent : base }}>{tail}</Text>
     </View>
   );
@@ -353,16 +356,19 @@ export function RunLogCell({
           theme={theme}
         />
       ))}
-      {live.map((task) => (
-        <LogLine
-          key={`running-${task.id}`}
-          cells={["", "now", task.id.replace(/^TASK-/, ""), "running"]}
-          tail={`${task.minutes}m`}
-          strong
-          accent
-          theme={theme}
-        />
-      ))}
+      {live.map((task) => {
+        const line = runningLogLine(task, Boolean(run?.stopped));
+        return (
+          <LogLine
+            key={`running-${task.id}`}
+            cells={line.cells}
+            tail={line.tail}
+            strong
+            tone={line.tone}
+            theme={theme}
+          />
+        );
+      })}
       {run && log.length === 0 && live.length === 0 ? (
         <Empty text="No iterations logged yet." theme={theme} />
       ) : null}
