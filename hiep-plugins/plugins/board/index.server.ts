@@ -14,7 +14,7 @@ import {
   boardHostRpc,
   boardRpc,
   closeRuntimeRpc,
-  editDiffsOffRpc,
+  editDiffsModeRpc,
   removeRunRpc,
   starRunRpc,
 } from "./shared/board";
@@ -126,6 +126,7 @@ export default function contribute(server: PluginServerContext) {
     },
   );
   let pending: Promise<void> | undefined;
+  let diffsOff: ReadonlySet<string> = new Set();
   // Provider model catalogs rarely change; a failed read is retried on the next poll.
   const catalogs = new Map<string, Promise<PaseoProviderModelsResult["models"]>>();
   const catalog = (paseo: PaseoApi, provider: string) => {
@@ -155,9 +156,13 @@ export default function contribute(server: PluginServerContext) {
     ensureActive();
     return closeRuntimes(paseo, agentId, console.error);
   });
-  server.handle(editDiffsOffRpc, async ({ agentId }, { paseo }) => {
+  server.handle(editDiffsModeRpc, async ({ agentId, off }, { paseo }) => {
     ensureActive();
-    await paseo.agents.ref(agentId).setLabels({ [EDIT_DIFFS_MODE_LABEL]: "off" });
+    await paseo.agents.ref(agentId).setLabels({ [EDIT_DIFFS_MODE_LABEL]: off ? "off" : "on" });
+    const next = new Set(diffsOff);
+    if (off) next.add(agentId);
+    else next.delete(agentId);
+    diffsOff = next;
     return {};
   });
   server.handle(recapsRpc, async ({ days }, { paseo }) => {
@@ -179,10 +184,11 @@ export default function contribute(server: PluginServerContext) {
       const revision = store.revision;
       const checkedAt = new Date().toISOString();
       pending = listBoardAgents(paseo, controller.signal)
-        .then(async ({ agents, visibleAgentIds, unreadAgentIds }) => {
+        .then(async ({ agents, visibleAgentIds, unreadAgentIds, diffsOffAgentIds }) => {
           ensureActive();
           store.reconcile(agents, revision, visibleAgentIds);
           store.setUnread(unreadAgentIds, checkedAt);
+          diffsOff = diffsOffAgentIds;
           await Promise.all(
             store.unresolvedProjects().map(async ({ agentId, cwd }) => {
               // Placement enrichment must not hide the board when an agent is unavailable.
@@ -255,6 +261,7 @@ export default function contribute(server: PluginServerContext) {
           model: model?.label ?? run.model,
           effort: effort?.label ?? run.effort,
           projectId: ids.get(run.projectKey),
+          diffsOff: diffsOff.has(run.agentId),
         };
       }),
     };

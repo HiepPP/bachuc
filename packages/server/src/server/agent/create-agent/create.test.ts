@@ -11,6 +11,14 @@ import { AgentStorage } from "../agent-storage.js";
 import type { CreatePaseoWorktreeWorkflowResult } from "../../worktree-session.js";
 import { createAgentCommand } from "./create.js";
 import type { ManagedAgent } from "../agent-manager.js";
+import { setupFinishNotification } from "../agent-prompt.js";
+
+// Only the wake pass-through test arms a finish notice; every other case sets
+// notifyOnFinish to false, so the spy changes nothing for them.
+vi.mock("../agent-prompt.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../agent-prompt.js")>()),
+  setupFinishNotification: vi.fn(),
+}));
 
 const logger = createTestLogger();
 
@@ -339,6 +347,55 @@ test("mcp create stamps the new worktree's workspaceId, not the parent's", async
     const storedChild = await storage.get(child.id);
     expect(storedChild?.workspaceId).toBe("ws-new-worktree");
     expect(child.cwd).toBe(join(workdir, "worktree", "packages", "app"));
+  } finally {
+    await removeRealAgentManagerWorkdir({ agentManager, storage, workdir });
+  }
+});
+
+test("mcp create passes the caller's wake choice to its finish notice", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "create-agent-wake-test-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const agentManager = createRealAgentManager(storage);
+  const providerSnapshotManager = createProviderSnapshotManagerStub().manager;
+
+  try {
+    const { snapshot: parent } = await createAgentCommand(
+      { agentManager, agentStorage: storage, logger, providerSnapshotManager },
+      {
+        kind: "session",
+        config: { provider: "codex", cwd: workdir },
+        workspaceId: "ws-parent",
+        labels: {},
+        provisionalTitle: null,
+        firstAgentContext: { attachments: [] },
+        buildSessionConfig: async (config) => ({ sessionConfig: config }),
+      },
+    );
+
+    const { snapshot: child, initialPromptStarted } = await createAgentCommand(
+      { agentManager, agentStorage: storage, logger, providerSnapshotManager },
+      {
+        kind: "mcp",
+        provider: "codex",
+        cwd: workdir,
+        title: "child",
+        initialPrompt: "Say done.",
+        background: true,
+        notifyOnFinish: true,
+        wake: "settled_only",
+        callerAgentId: parent.id,
+      },
+    );
+
+    expect(initialPromptStarted).toBe(true);
+    expect(vi.mocked(setupFinishNotification)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        childAgentId: child.id,
+        callerAgentId: parent.id,
+        requireParentOwnership: true,
+        wake: "settled_only",
+      }),
+    );
   } finally {
     await removeRealAgentManagerWorkdir({ agentManager, storage, workdir });
   }

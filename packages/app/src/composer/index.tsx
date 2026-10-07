@@ -30,8 +30,12 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { useShallow } from "zustand/shallow";
 import {
   ArrowUp,
+  ChevronDown,
+  ChevronUp,
   Square,
   Pencil,
+  Play,
+  X,
   AudioLines,
   CircleDot,
   FileText,
@@ -97,6 +101,7 @@ import { registerComposerHandle, runComposerInterceptors } from "@/plugins/compo
 import { PluginComposerStopButtonFace } from "@/plugins/composer-stop-button";
 import type { PluginComposerDraftState } from "@/plugins/composer/draft";
 import { pluginRegistry } from "@/plugins/registry";
+import { openPluginResourceAttachment } from "@/plugins/attachments/open";
 import {
   executePluginClientSlashCommand,
   resolvePluginClientSlashCommand,
@@ -106,6 +111,15 @@ import {
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
 } from "@/runtime/host-runtime";
+import { useHostFeature } from "@/runtime/host-features";
+import { retainAttachmentForGarbageCollection } from "@/attachments/gc-retention";
+import {
+  canEditDaemonQueuedMessage,
+  daemonQueueMoveTarget,
+  enqueueDaemonComposerMessage,
+  queuedMessagesFromDaemon,
+  takeBackDaemonQueuedMessage,
+} from "@/composer/daemon-queue";
 import {
   deleteAttachments,
   persistAttachmentFromBlob,
@@ -376,12 +390,14 @@ interface RenderAttachmentTrayArgs {
   isComposerLocked: boolean;
   handleOpenAttachment: (attachment: ComposerAttachment) => void;
   handleRemoveAttachment: (index: number) => void;
+  handleAttachmentCommentChange: (index: number, comment: string) => void;
   labels: {
     openImage: string;
     removeImage: string;
     removeFile: string;
     openGithub: (kind: string, numberLabel: string) => string;
     removeGithub: (kind: string, numberLabel: string) => string;
+    addComment: string;
   };
 }
 
@@ -392,6 +408,7 @@ function renderAttachmentTray(args: RenderAttachmentTrayArgs): ReactElement | nu
     isComposerLocked,
     handleOpenAttachment,
     handleRemoveAttachment,
+    handleAttachmentCommentChange,
     labels,
   } = args;
   if (selectedAttachments.length === 0 && pendingFiles.length === 0) return null;
@@ -404,6 +421,7 @@ function renderAttachmentTray(args: RenderAttachmentTrayArgs): ReactElement | nu
           disabled: isComposerLocked,
           onOpen: handleOpenAttachment,
           onRemove: handleRemoveAttachment,
+          onCommentChange: handleAttachmentCommentChange,
           labels,
         }),
       )}
@@ -420,21 +438,49 @@ function renderAttachmentTray(args: RenderAttachmentTrayArgs): ReactElement | nu
   );
 }
 
+// COMPAT(agentMessageQueue): only a daemon-owned queue can be cancelled, reordered, or held.
+interface DaemonQueueTrackActions {
+  held: boolean;
+  canEdit: (id: string) => boolean;
+  onCancel: (id: string) => void;
+  onMove: (id: string, direction: "up" | "down") => void;
+  onResume: () => void;
+  cancelLabel: string;
+  moveUpLabel: string;
+  moveDownLabel: string;
+  resumeLabel: string;
+  heldLabel: string;
+}
+
 interface RenderQueueTrackArgs {
   queuedMessages: readonly QueuedMessage[];
   handleEditQueuedMessage: (id: string) => void;
   handleSendQueuedNow: (id: string) => Promise<void>;
   editLabel: string;
   sendNowLabel: string;
+  daemon: DaemonQueueTrackActions | null;
 }
 
 function renderQueueTrack(args: RenderQueueTrackArgs): ReactElement | null {
-  const { queuedMessages, handleEditQueuedMessage, handleSendQueuedNow, editLabel, sendNowLabel } =
-    args;
+  const {
+    queuedMessages,
+    handleEditQueuedMessage,
+    handleSendQueuedNow,
+    editLabel,
+    sendNowLabel,
+    daemon,
+  } = args;
   if (queuedMessages.length === 0) return null;
   return (
     <View style={styles.queueTrack}>
-      {queuedMessages.map((item) => (
+      {daemon?.held ? (
+        <QueueHeldNotice
+          label={daemon.heldLabel}
+          resumeLabel={daemon.resumeLabel}
+          onResume={daemon.onResume}
+        />
+      ) : null}
+      {queuedMessages.map((item, index) => (
         <QueuedMessageRow
           key={item.id}
           item={item}
@@ -442,8 +488,38 @@ function renderQueueTrack(args: RenderQueueTrackArgs): ReactElement | null {
           onSendNow={handleSendQueuedNow}
           editLabel={editLabel}
           sendNowLabel={sendNowLabel}
+          canEdit={daemon ? daemon.canEdit(item.id) : true}
+          daemon={daemon}
+          isFirst={index === 0}
+          isLast={index === queuedMessages.length - 1}
         />
       ))}
+    </View>
+  );
+}
+
+interface QueueHeldNoticeProps {
+  label: string;
+  resumeLabel: string;
+  onResume: () => void;
+}
+
+function QueueHeldNotice({ label, resumeLabel, onResume }: QueueHeldNoticeProps) {
+  return (
+    <View style={styles.queueItem}>
+      <Text style={styles.queueText} numberOfLines={1}>
+        {label}
+      </Text>
+      <View style={styles.queueActions}>
+        <Pressable
+          onPress={onResume}
+          style={styles.queueActionButton}
+          accessibilityLabel={resumeLabel}
+          accessibilityRole="button"
+        >
+          <ThemedPlay size={ICON_SIZE.sm} uniProps={iconForegroundMapping} />
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -454,11 +530,12 @@ interface RenderComposerAttachmentPillArgs {
   disabled: boolean;
   onOpen: (attachment: ComposerAttachment) => void;
   onRemove: (index: number) => void;
+  onCommentChange: (index: number, comment: string) => void;
   labels: RenderAttachmentTrayArgs["labels"];
 }
 
 function renderComposerAttachmentPill(args: RenderComposerAttachmentPillArgs): ReactElement {
-  const { attachment, index, disabled, onOpen, onRemove, labels } = args;
+  const { attachment, index, disabled, onOpen, onRemove, onCommentChange, labels } = args;
   if (attachment.kind === "image") {
     return (
       <ImageAttachmentPill
@@ -517,6 +594,8 @@ function renderComposerAttachmentPill(args: RenderComposerAttachmentPillArgs): R
         onRemove={onRemove}
         openLabel={labels.openGithub}
         removeLabel={labels.removeGithub}
+        onCommentChange={onCommentChange}
+        commentPlaceholder={labels.addComment}
       />
     );
   }
@@ -714,6 +793,10 @@ interface QueuedMessageRowProps {
   onSendNow: (id: string) => void;
   editLabel: string;
   sendNowLabel: string;
+  canEdit: boolean;
+  daemon: DaemonQueueTrackActions | null;
+  isFirst: boolean;
+  isLast: boolean;
 }
 
 function QueuedMessageRow({
@@ -722,6 +805,10 @@ function QueuedMessageRow({
   onSendNow,
   editLabel,
   sendNowLabel,
+  canEdit,
+  daemon,
+  isFirst,
+  isLast,
 }: QueuedMessageRowProps) {
   const handleEdit = useCallback(() => {
     onEdit(item.id);
@@ -729,20 +816,61 @@ function QueuedMessageRow({
   const handleSendNow = useCallback(() => {
     onSendNow(item.id);
   }, [onSendNow, item.id]);
+  const handleCancel = useCallback(() => {
+    daemon?.onCancel(item.id);
+  }, [daemon, item.id]);
+  const handleMoveUp = useCallback(() => {
+    daemon?.onMove(item.id, "up");
+  }, [daemon, item.id]);
+  const handleMoveDown = useCallback(() => {
+    daemon?.onMove(item.id, "down");
+  }, [daemon, item.id]);
   return (
     <View style={styles.queueItem}>
       <Text style={styles.queueText} numberOfLines={2} ellipsizeMode="tail">
         {item.text}
       </Text>
       <View style={styles.queueActions}>
-        <Pressable
-          onPress={handleEdit}
-          style={styles.queueActionButton}
-          accessibilityLabel={editLabel}
-          accessibilityRole="button"
-        >
-          <ThemedPencil size={ICON_SIZE.sm} uniProps={iconForegroundMapping} />
-        </Pressable>
+        {daemon && !isFirst ? (
+          <Pressable
+            onPress={handleMoveUp}
+            style={styles.queueActionButton}
+            accessibilityLabel={daemon.moveUpLabel}
+            accessibilityRole="button"
+          >
+            <ThemedChevronUp size={ICON_SIZE.sm} uniProps={iconForegroundMapping} />
+          </Pressable>
+        ) : null}
+        {daemon && !isLast ? (
+          <Pressable
+            onPress={handleMoveDown}
+            style={styles.queueActionButton}
+            accessibilityLabel={daemon.moveDownLabel}
+            accessibilityRole="button"
+          >
+            <ThemedChevronDown size={ICON_SIZE.sm} uniProps={iconForegroundMapping} />
+          </Pressable>
+        ) : null}
+        {daemon ? (
+          <Pressable
+            onPress={handleCancel}
+            style={styles.queueActionButton}
+            accessibilityLabel={daemon.cancelLabel}
+            accessibilityRole="button"
+          >
+            <ThemedX size={ICON_SIZE.sm} uniProps={iconForegroundMapping} />
+          </Pressable>
+        ) : null}
+        {canEdit ? (
+          <Pressable
+            onPress={handleEdit}
+            style={styles.queueActionButton}
+            accessibilityLabel={editLabel}
+            accessibilityRole="button"
+          >
+            <ThemedPencil size={ICON_SIZE.sm} uniProps={iconForegroundMapping} />
+          </Pressable>
+        ) : null}
         <Pressable
           onPress={handleSendNow}
           style={[styles.queueActionButton, styles.queueSendButton]}
@@ -1356,7 +1484,16 @@ function ComposerContentImpl({
   const queuedMessagesRaw = useSessionStore((state) =>
     state.sessions[serverId]?.queuedMessages?.get(agentId),
   );
-  const queuedMessages = queuedMessagesRaw ?? EMPTY_ARRAY;
+  // COMPAT(agentMessageQueue): a capable host owns the queue; the client map stays empty there.
+  const usesDaemonQueue = useHostFeature(serverId, "agentMessageQueue");
+  const daemonQueue = useSessionStore(
+    (state) => state.sessions[serverId]?.agents?.get(agentId)?.queue,
+  );
+  const queuedMessages = useMemo(
+    () =>
+      usesDaemonQueue ? queuedMessagesFromDaemon(daemonQueue) : (queuedMessagesRaw ?? EMPTY_ARRAY),
+    [daemonQueue, queuedMessagesRaw, usesDaemonQueue],
+  );
 
   const setQueuedMessages = useSessionStore((state) => state.setQueuedMessages);
 
@@ -1725,6 +1862,52 @@ function ComposerContentImpl({
 
   const queueMessage = useCallback(
     (queuedMessage: string, queuedAttachments: ComposerAttachment[]) => {
+      if (usesDaemonQueue) {
+        if (!client) {
+          setSendError(t("workspace.terminal.hostDisconnected"));
+          return;
+        }
+        if (!queuedMessage.trim() && queuedAttachments.length === 0) return;
+        // Clear at once, as a send does, so a second press queues nothing. The cleared
+        // draft schedules a GC run, so the images stay retained until they are encoded.
+        const releaseImages = queuedAttachments.flatMap((attachment) =>
+          attachment.kind === "image"
+            ? [retainAttachmentForGarbageCollection(attachment.metadata.id)]
+            : [],
+        );
+        replaceUserInput("");
+        setSelectedAttachments([]);
+        void (async () => {
+          try {
+            await enqueueDaemonComposerMessage({
+              client,
+              agentId,
+              text: queuedMessage,
+              attachments: queuedAttachments,
+              attachmentSubmitFormat: resolveComposerAttachmentSubmitFormat({
+                supportsForgeAttachments: supportsForgeSearch,
+              }),
+              encodeImages,
+            });
+            resetSuppression();
+            clearSentAttachments(queuedAttachments);
+          } catch (error) {
+            // Give the message back, unless the user already started a new one.
+            if (textSource.getSnapshot().trim().length === 0) {
+              replaceUserInput(queuedMessage);
+              setSelectedAttachments(
+                composerWorkspaceAttachment.userAttachmentsOnly(queuedAttachments),
+              );
+            }
+            setSendError(
+              error instanceof Error ? error.message : t("composer.errors.failedToSend"),
+            );
+          } finally {
+            for (const release of releaseImages) release();
+          }
+        })();
+        return;
+      }
       const result = queueComposerMessage({
         agentId,
         text: queuedMessage,
@@ -1741,10 +1924,15 @@ function ComposerContentImpl({
     [
       agentId,
       clearSentAttachments,
+      client,
       queueWriter,
       resetSuppression,
       setSelectedAttachments,
       replaceUserInput,
+      supportsForgeSearch,
+      t,
+      textSource,
+      usesDaemonQueue,
     ],
   );
 
@@ -1986,9 +2174,11 @@ function ComposerContentImpl({
         openExternalUrl: (url) => {
           void openExternalUrl(url);
         },
+        openPluginResource: (resource) =>
+          openPluginResourceAttachment(pluginRegistry.getSnapshot(), serverId, resource),
       });
     },
-    [openAttachment],
+    [openAttachment, serverId],
   );
 
   const handleCancelAgent = useCallback(() => {
@@ -2032,8 +2222,41 @@ function ComposerContentImpl({
     });
   }, [agentId, hasAgent, isConnected, serverId, voice]);
 
+  const reportQueueError = useCallback(
+    (error: unknown) => {
+      setSendError(error instanceof Error ? error.message : t("composer.errors.failedToSend"));
+    },
+    [t],
+  );
+
   const handleEditQueuedMessage = useCallback(
     (id: string) => {
+      if (usesDaemonQueue) {
+        if (!client || !canEditDaemonQueuedMessage(daemonQueue, id)) return;
+        void (async () => {
+          try {
+            const result = await takeBackDaemonQueuedMessage({
+              client,
+              agentId,
+              itemId: id,
+              persistFromDataUrl: persistAttachmentFromDataUrl,
+            });
+            if (!result) return;
+            replaceUserInput(result.text);
+            setSelectedAttachments(result.attachments);
+            if (result.failedImageCount > 0) {
+              setSendError(
+                t("composer.attachments.queuedImagesNotRestored", {
+                  count: result.failedImageCount,
+                }),
+              );
+            }
+          } catch (error) {
+            reportQueueError(error);
+          }
+        })();
+        return;
+      }
       const result = editQueuedComposerMessage({
         agentId,
         messageId: id,
@@ -2043,11 +2266,50 @@ function ComposerContentImpl({
       replaceUserInput(result.text);
       setSelectedAttachments(result.attachments);
     },
-    [agentId, queueWriter, replaceUserInput, setSelectedAttachments],
+    [
+      agentId,
+      client,
+      daemonQueue,
+      queueWriter,
+      replaceUserInput,
+      reportQueueError,
+      setSelectedAttachments,
+      t,
+      usesDaemonQueue,
+    ],
   );
+
+  const handleCancelQueuedMessage = useCallback(
+    (id: string) => {
+      if (!client) return;
+      void client.cancelQueuedAgentMessage(agentId, id).catch(reportQueueError);
+    },
+    [agentId, client, reportQueueError],
+  );
+
+  const handleMoveQueuedMessage = useCallback(
+    (id: string, direction: "up" | "down") => {
+      const target = daemonQueueMoveTarget(queuedMessages, id, direction);
+      if (!client || !target) return;
+      void client
+        .reorderQueuedAgentMessage(agentId, id, target.beforeItemId)
+        .catch(reportQueueError);
+    },
+    [agentId, client, queuedMessages, reportQueueError],
+  );
+
+  const handleResumeQueue = useCallback(() => {
+    if (!client) return;
+    void client.resumeAgentMessageQueue(agentId).catch(reportQueueError);
+  }, [agentId, client, reportQueueError]);
 
   const handleSendQueuedNow = useCallback(
     async (id: string) => {
+      if (usesDaemonQueue) {
+        if (!client) return;
+        await client.promoteQueuedAgentMessage(agentId, id).catch(reportQueueError);
+        return;
+      }
       if (!sendAgentMessageRef.current && !onSubmitMessageRef.current) return;
       // Reuse the regular send path; server-side send atomically interrupts any active run.
       const result = await sendQueuedComposerMessageNow({
@@ -2062,7 +2324,7 @@ function ComposerContentImpl({
         setSendError(result.errorMessage);
       }
     },
-    [agentId, queueWriter, submitMessage, t],
+    [agentId, client, queueWriter, reportQueueError, submitMessage, t, usesDaemonQueue],
   );
 
   const handleQueue = useCallback(
@@ -2425,6 +2687,19 @@ function ComposerContentImpl({
     [isComposerLocked],
   );
 
+  const handleAttachmentCommentChange = useCallback(
+    (index: number, comment: string) => {
+      setSelectedAttachments((current) =>
+        current.map((attachment, position) =>
+          position === index && attachment.kind === "plugin_resource"
+            ? { ...attachment, comment }
+            : attachment,
+        ),
+      );
+    },
+    [setSelectedAttachments],
+  );
+
   const attachmentTray = useMemo(
     () =>
       renderAttachmentTray({
@@ -2433,6 +2708,7 @@ function ComposerContentImpl({
         isComposerLocked,
         handleOpenAttachment,
         handleRemoveAttachment,
+        handleAttachmentCommentChange,
         labels: {
           openImage: t("composer.attachments.openImage"),
           removeImage: t("composer.attachments.removeImage"),
@@ -2441,9 +2717,11 @@ function ComposerContentImpl({
             t("composer.attachments.openGithub", { kind, number: numberLabel }),
           removeGithub: (kind: string, numberLabel: string) =>
             t("composer.attachments.removeGithub", { kind, number: numberLabel }),
+          addComment: t("composer.attachments.addComment"),
         },
       }),
     [
+      handleAttachmentCommentChange,
       handleOpenAttachment,
       handleRemoveAttachment,
       isComposerLocked,
@@ -2473,8 +2751,32 @@ function ComposerContentImpl({
         handleSendQueuedNow,
         editLabel: t("composer.attachments.editQueuedMessage"),
         sendNowLabel: t("composer.attachments.sendQueuedMessageNow"),
+        daemon: usesDaemonQueue
+          ? {
+              held: daemonQueue?.held ?? false,
+              canEdit: (id) => canEditDaemonQueuedMessage(daemonQueue, id),
+              onCancel: handleCancelQueuedMessage,
+              onMove: handleMoveQueuedMessage,
+              onResume: handleResumeQueue,
+              cancelLabel: t("composer.attachments.cancelQueuedMessage"),
+              moveUpLabel: t("composer.attachments.moveQueuedMessageUp"),
+              moveDownLabel: t("composer.attachments.moveQueuedMessageDown"),
+              resumeLabel: t("composer.attachments.resumeQueue"),
+              heldLabel: t("composer.attachments.queueHeld"),
+            }
+          : null,
       }),
-    [handleEditQueuedMessage, handleSendQueuedNow, queuedMessages, t],
+    [
+      daemonQueue,
+      handleCancelQueuedMessage,
+      handleEditQueuedMessage,
+      handleMoveQueuedMessage,
+      handleResumeQueue,
+      handleSendQueuedNow,
+      queuedMessages,
+      t,
+      usesDaemonQueue,
+    ],
   );
 
   const autocompleteConfiguration = useMemo(
@@ -2796,6 +3098,10 @@ const styles = StyleSheet.create((theme: Theme) => ({
 const ThemedAttachmentSpinner = withUnistyles(LoadingSpinner);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedArrowUp = withUnistyles(ArrowUp);
+const ThemedChevronUp = withUnistyles(ChevronUp);
+const ThemedChevronDown = withUnistyles(ChevronDown);
+const ThemedX = withUnistyles(X);
+const ThemedPlay = withUnistyles(Play);
 const ThemedGitPullRequest = withUnistyles(GitPullRequest);
 const ThemedCircleDot = withUnistyles(CircleDot);
 const ThemedAudioLines = withUnistyles(AudioLines);

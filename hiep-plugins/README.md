@@ -170,6 +170,9 @@ status alone does not prove every plugin action works.
 | [idle-runtime-closer](plugins/idle-runtime-closer/README.md)     | Close the processes of idle threads automatically; the threads stay and resume on the next prompt.                                     |
 | [thread-context-attach](plugins/thread-context-attach/README.md) | Attach the last reply of another Paseo thread to your next message.                                                                    |
 | [loop-verify](plugins/loop-verify/README.md)                     | Prototype: retry a labeled agent's goal in fresh child agents until a verify command passes, up to 5 rounds.                           |
+| [pr-watch](plugins/pr-watch/README.md)                           | Let an agent watch its GitHub PR and wake it when checks fail or pass, someone comments, or a conflict appears.                        |
+| [assistant-cite](plugins/assistant-cite/README.md)               | Cite selected assistant text as a composer chip with an optional comment, and jump back to the quote from the chip.                    |
+| [html-reply](plugins/html-reply/README.md)                       | Let an agent publish a sandboxed, themed HTML page that renders inline in its thread.                                                  |
 
 ## Install a plugin
 

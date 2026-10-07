@@ -1,6 +1,8 @@
 import { router } from "expo-router";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { buildNewWorkspaceRoute, buildSettingsHostSectionRoute } from "@/utils/host-routes";
+import { navigateToAgent } from "@/utils/navigate-to-agent";
+import { requestTimelinePassage } from "./timeline-reveal";
 import { createPluginHosts } from "./hosts";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { PluginClientOpenPanelOptions } from "@getpaseo/plugin/client";
@@ -13,7 +15,7 @@ import { createPluginClientStateSource } from "./client-state/source";
 import type { PluginClientRuntime } from "./evaluate";
 import { createPluginNavigation } from "./navigation";
 import { pluginButtonStore } from "./buttons";
-import { setPluginComposerText } from "./composer";
+import { addPluginComposerAttachment, setPluginComposerText } from "./composer";
 import { createPluginSurfaceRuntime } from "./surface-runtime";
 import type { InstalledPlugin } from "./types";
 
@@ -50,6 +52,18 @@ export function createPluginClientRuntime(
     },
     setComposerText({ agentId, text }) {
       setPluginComposerText(installation.serverId, agentId.trim(), text);
+    },
+    addComposerAttachment(input) {
+      void addPluginComposerAttachment(installation.serverId, installation.id, input).catch(
+        (error: unknown) => {
+          console.error(`[plugin:${installation.id}] could not add a composer chip`, error);
+        },
+      );
+    },
+    revealTimelinePassage({ serverId, agentId, messageId, text }) {
+      const targetServerId = serverId ?? installation.serverId;
+      navigateToAgent({ serverId: targetServerId, agentId });
+      requestTimelinePassage(targetServerId, agentId, { messageId, ...(text ? { text } : {}) });
     },
     openPluginsPage() {
       router.push(buildSettingsHostSectionRoute(installation.serverId, "plugins"));

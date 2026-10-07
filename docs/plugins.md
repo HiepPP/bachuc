@@ -193,6 +193,28 @@ Plugin UI runs on desktop and mobile across multiple themes: color every `Text` 
 `theme.colors.foreground` or `theme.colors.foregroundMuted`, and size layout from `layout.compact`.
 See `public-docs/plugins/reference.md`.
 
+`HtmlFrame` (`packages/app/src/plugins/react-native/html-frame.tsx`) renders through the same
+`SandboxedHtmlView` as the file preview, so the sandbox and the native navigation guard live in one
+place, `packages/app/src/file-pane/html-preview*.tsx`. `PREVIEW_SANDBOX` must stay
+`allow-scripts` alone; the browser test `html-preview-csp.browser.test.ts` renders the real
+`HtmlFrame` and checks its sandbox attribute, the `connect-src` refusal, and blocked storage.
+`network: true` swaps in the networked CSP from `html-preview-csp.ts`; the file preview never sets
+it. The networked CSP also allows `https:` fonts, because CDN stylesheets load them. The theme
+variables go after the CSP meta, so the policy stays the first element of the document and governs
+everything after it. The vitest Unistyles stub ignores `withUnistyles` mappings, so the theme
+mapping is tested on its own in `html-frame-theme.test.ts`.
+
+`height="auto"` cannot read the frame's height, because the sandbox gives the page an opaque
+origin. `withPreviewCsp` injects a reporter that posts the content height through `postMessage` on
+web and the `ReactNativeWebView` bridge on native; native gets the bridge only when
+`onFrameMessage` is set, so the file preview never exposes it. Like T3 Code, the reporter uses
+`scrollHeight` while the page overflows the frame; once it fits, `scrollHeight` equals the frame
+height and could never shrink, so it takes the larger of the root box and the lowest element. The
+root never collapses margins, so the root box already holds the body's margins.
+`html-frame-height.ts` clamps each report, freezes a page whose height follows the frame, and
+remembers the last height per page, so a remount reserves its box before the first paint. The
+memory lives only for the app session; a page shown for the first time starts at 120.
+
 ### SDK import boundaries
 
 Classify every SDK export before adding it. All client entry points and implementations live under
@@ -426,6 +448,29 @@ Composer interceptors run from `handleSubmit` and `handleQueue` in `packages/app
 only for plugins installed on the composer's host. Mounted composers register a handle in
 `packages/app/src/plugins/composer/` so `setComposerText` can reach them; without one, the text goes to
 the stored draft.
+
+`addComposerAttachment` writes to the draft store, never to a mounted composer, so a chip lands even
+when the composer is closed. The chip's comment lives on the draft attachment and joins the agent
+text only at submit, in `pluginResourceAttachmentToAgentAttachment`.
+
+Assistant selection actions are web-only: native text selection fires no JS selection events. The
+toolbar in `packages/app/src/assistant-selection-copy/selection-actions.web.tsx` mounts once per
+agent stream and uses a hidden anchor to find its own pane, so a selection in another pane never
+shows it. Its `mousedown` calls `preventDefault` to keep the selection alive through the press.
+
+A chip press reaches the plugin through the `onOpen` of the attachment source whose id matches the
+chip's `sourceId`. The handler lives on the source, never on the chip, because draft chips are
+persisted and a function cannot be. A source without `search` is chip-only and stays out of the
+picker.
+
+`revealTimelinePassage` navigates to the agent, then hands the request to the revealer that the
+agent's stream registers in `packages/app/src/plugins/timeline-reveal.ts`. A request made before
+the stream mounts waits up to 10 seconds, and the stream holds it until its authoritative history
+is ready, because a stream mounts before its items arrive. The web revealer in
+`packages/app/src/agent-stream/passage-reveal/` reuses the chat find matching and
+`scrollToMessage`, and pins its message in the virtualizer like chat find, so a duplicate in an
+unmounted paragraph still counts. It mounts once per stream and keeps props in a ref, so rows gain
+no effects. The native stream has no `scrollToMessage`, so native only opens the agent.
 
 Sidebar filters, project menu items, and sections live in `packages/app/src/plugins/sidebar/`. The
 filter runs inside `SidebarModelProvider` before the user's project and label filters and never

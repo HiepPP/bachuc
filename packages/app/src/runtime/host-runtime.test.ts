@@ -2865,6 +2865,40 @@ describe("HostRuntimeStore", () => {
     useSessionStore.getState().clearSession(host.serverId);
   });
 
+  it("leaves the queue to a daemon that drains its own queue", async () => {
+    const host = makeHost({ serverId: "srv_daemon_owned_queue" });
+    const fakeClient = new FakeDaemonClient();
+    const store = new HostRuntimeStore({
+      deps: {
+        createClient: () => fakeClient as unknown as DaemonClient,
+        connectToDaemon: async () => ({
+          client: fakeClient as unknown as DaemonClient,
+          serverId: host.serverId,
+          hostname: null,
+        }),
+        getClientId: async () => "cid_daemon_owned_queue",
+      },
+    });
+    const sessionStore = useSessionStore.getState();
+    sessionStore.initializeSession(host.serverId, fakeClient as unknown as DaemonClient, 1);
+    sessionStore.updateSessionServerInfo(host.serverId, {
+      serverId: host.serverId,
+      hostname: null,
+      version: null,
+      features: { agentMessageQueue: true },
+    });
+    sessionStore.setQueuedMessages(
+      host.serverId,
+      new Map([["agent", [{ id: "queued", text: "left from before", attachments: [] }]]]),
+    );
+
+    store.drainQueuedAgentMessage(host.serverId, "agent");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(fakeClient.sentAgentMessages).toHaveLength(0);
+    useSessionStore.getState().clearSession(host.serverId);
+  });
+
   it("restores an automatically drained message when sending fails", async () => {
     const host = makeHost({ serverId: "srv_failed_queue_drain" });
     const fakeClient = new FakeDaemonClient();

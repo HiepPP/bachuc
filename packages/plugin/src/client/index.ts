@@ -42,6 +42,10 @@ export type {
   PluginComposerSendKey,
   PluginComposerInterceptResult,
   PluginComposerInterceptorContribution,
+  PluginAssistantSelection,
+  PluginAssistantSelectionActionContribution,
+  PluginComposerAttachmentInput,
+  PluginTimelinePassage,
   SettingsState,
 } from "./contracts.js";
 export type {

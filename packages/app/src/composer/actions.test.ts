@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentAttachment, ForgeSearchItem } from "@getpaseo/protocol/messages";
+import { createPluginResourceAttachment } from "@/plugins/attachments/model";
 import type {
   AttachmentMetadata,
   ComposerAttachment,
@@ -930,6 +931,37 @@ describe("openComposerAttachment", () => {
       },
     });
     expect(externalUrlCalls).toEqual([issueItem.url]);
+  });
+
+  it("lets a plugin handle its chip press, and opens the URL when it does not", () => {
+    const chip = createPluginResourceAttachment(
+      { pluginId: "cite", sourceId: "quote", sourceTitle: "Quote", sourceIcon: "Quote" },
+      {
+        id: "q1",
+        identifier: "quote",
+        title: "Quote",
+        url: "https://example.com/q1",
+        text: "> quoted",
+        resourceType: "quote",
+      },
+    );
+    const open = (handled: boolean) => {
+      const calls: string[] = [];
+      openComposerAttachment({
+        attachment: chip,
+        setLightboxMetadata: () => undefined,
+        openWorkspaceAttachment: () => false,
+        openExternalUrl: (url) => calls.push(`url:${url}`),
+        openPluginResource: (resource) => {
+          calls.push(`plugin:${resource.item.id}`);
+          return handled;
+        },
+      });
+      return calls;
+    };
+
+    expect(open(true)).toEqual(["plugin:q1"]);
+    expect(open(false)).toEqual(["plugin:q1", "url:https://example.com/q1"]);
   });
 
   it("opens plugin resource URLs through the external url opener", () => {

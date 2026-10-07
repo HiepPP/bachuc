@@ -6,6 +6,7 @@ import type {
   PluginThemeContribution,
 } from "@getpaseo/plugin";
 import type {
+  PluginAssistantSelectionActionContribution,
   PluginCommandCenterItemContribution,
   PluginClientSlashCommandContribution,
   PluginComposerInterceptorContribution,
@@ -43,6 +44,7 @@ export interface EvaluatedPlugin {
   timelineTransformers: PluginTimelineTransformerContribution[];
   timelineRenderers: PluginTimelineRendererContribution[];
   composerInterceptors?: PluginComposerInterceptorContribution[];
+  assistantSelectionActions?: PluginAssistantSelectionActionContribution[];
   sidebarProjectFilters?: PluginSidebarProjectFilterContribution[];
   sidebarProjectMenus?: PluginSidebarProjectMenuContribution[];
   sidebarSections?: PluginSidebarSectionContribution[];

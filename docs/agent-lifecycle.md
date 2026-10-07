@@ -55,6 +55,35 @@ older cancellation from settling a newer turn. If interruption is rejected or ti
 keeps its active foreground turn and replacement, reload, rewind, and Stop report the failure.
 Accepting new work after an ambiguous interruption would create a split-brain session.
 
+Stop applies to the managed subtree. `cancelAgentRunCommand`, which serves the app Stop, MCP
+`cancel_agent`, and Hub interrupts, first disarms every armed finish notice that would wake the
+stopped agent or one of its live descendants. It then cancels the running descendants deepest first, and the
+parent last. This runs even when the parent is idle, because an orchestrator often waits idle for
+its children. Without the disarm, a child that settles after the stop would start a new turn on
+the parent the user just stopped. The disarm also cancels a notice whose delivery is already
+reading storage, and it runs again after the parent's own cancel, because the parent can arm new
+notices or spawn children while the cascade runs. A descendant whose cancel fails is logged and does
+not block the parent. The whole subtree loses its armed notices even when a cancel fails, so a
+descendant that keeps running no longer wakes anyone. Reload, replace, rewind, and archive call
+`AgentManager.cancelAgentRun` directly and do not cascade; archive has its own cascade.
+
+### Message queue
+
+The daemon owns each agent's message queue (`packages/server/src/server/agent/agent-message-queue.ts`),
+gated on `server_info.features.agentMessageQueue`. Clients see it as the optional `queue` summary on
+the agent snapshot and change it through the `agent.queue.*` RPCs. The queue starts its head message
+only when a run ends normally: a `running` to `idle` change with no in-flight run. An error end, a
+daemon restart, and a fresh agent load do not drain it. An enqueue and a resume on an idle agent
+start the head message at once, because no run end is left to do it. Stop holds every non-empty
+queue in the stopped subtree before it cancels anything, so the idle state from the cancel cannot
+start the next message; a resume or a promote releases the hold, and an emptied queue drops it.
+Archive holds the queue the same way before its cancel. Drain, promote, and every queue mutation
+for one agent run in order. A direct `send_agent_message_request` and a finish notice do not take
+that order, so a drain starts its message with `replaceRunning: false`: if a run began after the
+idle check, the start fails and the item stays at the head until the next run end. An archived
+agent takes no enqueue, and a send to it fails, because `sendPromptToAgent` with `unarchive: false`
+would skip it silently and the item would be lost.
+
 ## Relationships
 
 Agents can launch other agents via the agent-scoped `create_agent` MCP tool. Agent-scoped creation is always asynchronous and always stamps `paseo.parent-agent-id`, pointing back at the caller. Omit `workspaceId` to use the caller's workspace, or pass an existing workspace ID returned by `create_workspace`. Placement never changes parentage.
@@ -79,6 +108,7 @@ Runtime ownership is resolved from explicit workspace ID and caller context, nev
 Users can also detach an existing subagent from the subagents track. Detach is deliberately a manual lifecycle gesture, not an agent-facing MCP tool. It removes the parent and open-tab lifecycle labels: it does not stop, archive, move, or restart the agent. The agent keeps its current `cwd` and `workspaceId`, leaves the former parent's track, and behaves like a root agent for tab close, workspace activity, and future parent archive.
 
 `notifyOnFinish` defaults to `true` for agent-scoped creation and background prompt follow-ups because most delegated work needs to report back to the creating agent. Set it to `false` only for truly fire-and-forget agents or prompts.
+Finish notices go through one mailbox per caller. Children that settle within `FINISH_NOTICE_WINDOW_MS` (1.5 seconds) of the first pending notice reach the caller as one system message with one section per child, so a fan-out does not interrupt the caller once per child. The same child and reason twice in one window keeps one section with the newest body. A permission request skips the window and the `settled_only` hold, because it blocks the child. The optional `wake` input on `create_agent` and `send_agent_prompt` chooses delivery: `always` (default) steers the batch into a running caller turn, and `settled_only` holds it until the caller's own run ends. The mailbox lives in memory and does not survive a daemon restart.
 Permission requests are notification checkpoints, not the end of that subscription. The caller is notified again after a permission response when the child finishes, errors, or requests another permission.
 The permission notification includes the normalized request plus the child and request IDs, so the caller can inspect it and respond without fetching agent status.
 A watched child that closes before its finish event also notifies the caller so delegated work cannot disappear silently during archive or workspace teardown.

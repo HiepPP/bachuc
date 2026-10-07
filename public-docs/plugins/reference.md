@@ -167,6 +167,22 @@ unsupported or the code exceeds the size cap; render plain text then. Render eac
 `<SyntaxToken token={token} />` inside a `Text`, so it takes the active theme's syntax color.
 Tokenize a whole document rather than single lines, so multi-line strings and comments keep their color.
 
+`<HtmlFrame html={html} height={360} network={false} />` renders a self-contained HTML document
+in the file preview's sandbox: an iframe with `sandbox="allow-scripts"` on web and desktop, and a
+locked-down WebView on native. On web, the page's scripts run in an opaque origin, so they cannot
+read the app's cookies or storage, open popups, or navigate the app. On native, the WebView keeps
+storage, cookies, popups, and navigation off. By default the frame is offline: the page cannot load
+remote resources or call `fetch`. `network: true` allows `https:` scripts, styles, fonts, images,
+and `fetch`; the sandbox stays the same. A number `height` fixes the frame, 360 by default, and
+taller content scrolls inside it. `height="auto"` grows the frame to show the whole page, up to 8000;
+a page sized to the frame, such as one with `100vh`, stops growing after three equal steps and
+scrolls inside it. A page shown before in the same app session starts at its last height, so it
+does not jump when its row mounts again. The frame background is white; style the page with the app theme, which
+it gets as CSS variables: `--paseo-background`, `--paseo-surface`, `--paseo-foreground`,
+`--paseo-muted`, `--paseo-border`, `--paseo-accent`, `--paseo-success`, `--paseo-warning`,
+`--paseo-danger`, `--paseo-font-ui`, and `--paseo-font-mono`. A theme change reloads the page.
+Treat the HTML as untrusted: a page can still navigate its own frame.
+
 ### Cross-platform rules
 
 Client code runs on iOS, Android, and in browsers through React Native Web. A component that works
@@ -1637,6 +1653,72 @@ client.addComposerInterceptor({
 });
 ```
 
+## Selection actions and composer chips
+
+`client.addAssistantSelectionAction({ id, title, onSelect })` adds a button to the toolbar that
+shows over text the user selects in an assistant message, on web and desktop only. Native apps
+show no toolbar. `onSelect` gets `{ serverId, workspaceId, agentId, messageId?, text }`, where
+`text` is the selection as Markdown. The action returns a cleanup function; plugin unload
+removes it too. Two actions with the same `id` in one plugin throw.
+
+`client.addComposerAttachment({ agentId, sourceId, sourceTitle, icon, item, commentable? })` adds a
+chip to an agent's composer draft, or replaces the chip with the same plugin, `sourceId`, and
+`item.id`; a replaced chip keeps the user's comment. Empty `agentId`, `sourceId`, `sourceTitle`,
+or `icon`, or an invalid `item`, throws. `item` is a `PluginAttachmentItem`, the shape an
+[attachment source](#add-a-composer-attachment-source) returns. With `commentable: true`,
+the chip has a comment field; a non-empty comment reaches the agent after the item text as
+`Comment: <comment>`.
+
+`client.revealTimelinePassage({ serverId?, agentId, messageId, text? })` opens the agent and
+scrolls its timeline to the message. `serverId` defaults to the plugin's host. On web and desktop,
+`text` is highlighted for a moment when it matches the rendered message exactly once, ignoring
+case and whitespace. A match stays inside one block, such as a paragraph or a list item, and
+Markdown syntax in `text` does not match the rendered text; without a single match the timeline
+only scrolls. A message that is not loaded in the timeline shows a toast after the agent opens.
+Native apps open the agent but do not scroll yet.
+
+This quote action adds a chip, and a press on the chip jumps back to the quoted passage. The map
+lives in memory, so a chip from an earlier session opens nothing; keep the source in the item when
+it must survive a reload.
+
+```ts
+const passages = new Map<string, PluginTimelinePassage>();
+
+client.addAttachmentSource({
+  id: "quote",
+  title: "Quote",
+  icon: "Quote",
+  onOpen: (item) => {
+    const passage = passages.get(item.id);
+    if (passage) client.revealTimelinePassage(passage);
+  },
+});
+
+client.addAssistantSelectionAction({
+  id: "quote",
+  title: "Quote",
+  onSelect: ({ agentId, messageId, text }) => {
+    const id = crypto.randomUUID();
+    if (messageId) passages.set(id, { agentId, messageId, text });
+    client.addComposerAttachment({
+      agentId,
+      sourceId: "quote",
+      sourceTitle: "Quote",
+      icon: "Quote",
+      item: {
+        id,
+        identifier: "quote",
+        title: text.slice(0, 60),
+        url: "https://example.com/quote",
+        text: `> ${text}`,
+        resourceType: "quote",
+      },
+      commentable: true,
+    });
+  },
+});
+```
+
 ## Button descriptor
 
 These contracts are exported from `@getpaseo/plugin/client`.
@@ -2061,6 +2143,11 @@ export default function contribute(server: PluginServerContext) {
 ```
 
 Paseo owns the composer menu, search picker, selected pill, draft state, and submission. The `text` value is the complete snapshot sent to the agent.
+
+Add `onOpen(item)` to run plugin code when the user presses a chip from the source; without it, a
+press opens `item.url`. A source with `onOpen` and no `search`, `pickerTitle`, or
+`searchPlaceholder` stays out of the picker. Use it to open chips that
+[`addComposerAttachment`](#selection-actions-and-composer-chips) adds with the same `sourceId`.
 
 ## Hosts and lifecycle
 

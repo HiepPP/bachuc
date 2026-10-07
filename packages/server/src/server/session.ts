@@ -18,6 +18,8 @@ import { formatPluginSourceReference } from "@getpaseo/protocol/plugin-source-re
 import {
   serializeAgentStreamEvent,
   type AgentSnapshotPayload,
+  type AgentMessageQueueSummary,
+  type AgentQueuedMessage,
   type AgentAttachment,
   type FirstAgentContext,
   type SessionInboundMessage,
@@ -123,6 +125,7 @@ import { assertPluginTimelineDataSize } from "./agent/agent-timeline-content.js"
 import { parsePluginClientId } from "./plugins/plugin-session-identity.js";
 import { buildAgentForkContextAttachment } from "./agent/activity-curator.js";
 import { buildAgentPrompt } from "./agent/prompt-attachments.js";
+import type { AgentMessageQueue } from "./agent/agent-message-queue.js";
 import type { StructuredGenerationDaemonConfig } from "./agent/structured-generation-providers.js";
 import {
   getAgentStreamEventTurnId,
@@ -347,6 +350,17 @@ export interface SessionRuntimeMetrics {
 }
 
 type FetchAgentsRequestMessage = Extract<SessionInboundMessage, { type: "fetch_agents_request" }>;
+type AgentQueueRequestMessage = Extract<
+  SessionInboundMessage,
+  { type: `agent.queue.${string}.request` }
+>;
+
+interface AgentQueueResponseResult {
+  queue: AgentMessageQueueSummary | null;
+  error: string | null;
+  itemId?: string | null;
+  item?: AgentQueuedMessage | null;
+}
 type FetchAgentHistoryRequestMessage = Extract<
   SessionInboundMessage,
   { type: "fetch_agent_history_request" }
@@ -454,6 +468,8 @@ export interface SessionOptions {
   agentManager: AgentManager;
   agentStorage: AgentStorage;
   messageReceipts: Pick<MessageReceipts, "send">;
+  /** Daemon-wide message queue. Queue RPCs report an error without it. */
+  agentMessageQueue?: AgentMessageQueue;
   creationService: Pick<CreationService, "create" | "subscribe">;
   projectRegistry: ProjectRegistry;
   workspaceRegistry: WorkspaceRegistry;
@@ -785,6 +801,7 @@ export class Session {
   private readonly hubExecutionController: HubExecutionController | null;
   private readonly workspaceScripts: WorkspaceScriptsService;
   private readonly messageReceipts: Pick<MessageReceipts, "send">;
+  private readonly agentMessageQueue: AgentMessageQueue | undefined;
   private readonly createAgentLifecycleDispatch: CreateAgentLifecycleDispatch;
   private readonly creationService: Pick<CreationService, "create" | "subscribe">;
 
@@ -861,6 +878,7 @@ export class Session {
     this.pushNotifications = pushNotifications;
     this.paseoHome = paseoHome;
     this.messageReceipts = options.messageReceipts;
+    this.agentMessageQueue = options.agentMessageQueue;
     this.creationService = options.creationService;
     this.projectIcons = new ProjectIconReader(paseoHome);
     this.worktreesRoot = worktreesRoot;
@@ -2017,6 +2035,14 @@ export class Session {
     const storedRecord = await this.agentStorage.get(payload.id);
     payload.title = storedRecord?.title ?? null;
     payload.archivedAt = storedRecord?.archivedAt ?? null;
+    return this.withAgentQueue(payload);
+  }
+
+  private withAgentQueue(payload: AgentSnapshotPayload): AgentSnapshotPayload {
+    const queue = this.agentMessageQueue?.summary(payload.id);
+    if (queue) {
+      payload.queue = queue;
+    }
     return payload;
   }
 
@@ -2028,7 +2054,7 @@ export class Session {
     record: StoredAgentRecord,
     registeredProviderIds = new Set(this.providerSnapshotManager.listRegisteredProviderIds()),
   ): AgentSnapshotPayload {
-    return buildStoredAgentPayload(record, registeredProviderIds);
+    return this.withAgentQueue(buildStoredAgentPayload(record, registeredProviderIds));
   }
 
   private isProviderVisibleToClient(provider: string): boolean {
@@ -2664,6 +2690,13 @@ export class Session {
       }
       case "agent.fork_context.request":
         return this.handleAgentForkContextRequest(msg);
+      case "agent.queue.enqueue.request":
+      case "agent.queue.edit.request":
+      case "agent.queue.reorder.request":
+      case "agent.queue.cancel.request":
+      case "agent.queue.promote.request":
+      case "agent.queue.resume.request":
+        return this.handleAgentQueueRequest(msg);
       default:
         return undefined;
     }
@@ -8048,6 +8081,118 @@ export class Session {
           error: error instanceof Error ? error.message : String(error),
         },
       });
+    }
+  }
+
+  private async handleAgentQueueRequest(msg: AgentQueueRequestMessage): Promise<void> {
+    const resolved = await this.resolveAgentIdentifier(msg.agentId);
+    if (!resolved.ok) {
+      this.emitAgentQueueResponse(msg, msg.agentId, { queue: null, error: resolved.error });
+      return;
+    }
+    const agentId = resolved.agentId;
+    const queue = this.agentMessageQueue;
+    if (!queue) {
+      this.emitAgentQueueResponse(msg, agentId, {
+        queue: null,
+        error: "This daemon has no message queue",
+      });
+      return;
+    }
+
+    try {
+      switch (msg.type) {
+        case "agent.queue.enqueue.request": {
+          const result = await queue.enqueue(agentId, {
+            text: msg.text,
+            images: msg.images,
+            attachments: msg.attachments,
+          });
+          this.emitAgentQueueResponse(msg, agentId, {
+            queue: result.queue,
+            error: null,
+            itemId: result.itemId,
+          });
+          return;
+        }
+        case "agent.queue.edit.request": {
+          const result = await queue.edit(agentId, msg.itemId, msg.text);
+          this.emitAgentQueueResponse(msg, agentId, { queue: result.queue, error: null });
+          return;
+        }
+        case "agent.queue.reorder.request": {
+          const result = await queue.reorder(agentId, msg.itemId, msg.beforeItemId);
+          this.emitAgentQueueResponse(msg, agentId, { queue: result.queue, error: null });
+          return;
+        }
+        case "agent.queue.cancel.request": {
+          const result = await queue.cancel(agentId, msg.itemId);
+          this.emitAgentQueueResponse(msg, agentId, {
+            queue: result.queue,
+            error: null,
+            item: result.item,
+          });
+          return;
+        }
+        case "agent.queue.promote.request": {
+          const result = await queue.promote(agentId, msg.itemId);
+          this.emitAgentQueueResponse(msg, agentId, { queue: result.queue, error: null });
+          return;
+        }
+        case "agent.queue.resume.request": {
+          const result = await queue.resume(agentId);
+          this.emitAgentQueueResponse(msg, agentId, { queue: result.queue, error: null });
+          return;
+        }
+      }
+    } catch (error) {
+      this.sessionLogger.warn(
+        { err: error, agentId, type: msg.type },
+        "Agent queue request failed",
+      );
+      this.emitAgentQueueResponse(msg, agentId, {
+        queue: null,
+        error: errorToFriendlyMessage(error),
+      });
+    }
+  }
+
+  private emitAgentQueueResponse(
+    msg: AgentQueueRequestMessage,
+    agentId: string,
+    result: AgentQueueResponseResult,
+  ): void {
+    const payload = {
+      requestId: msg.requestId,
+      agentId,
+      queue: result.queue,
+      error: result.error,
+    };
+    switch (msg.type) {
+      case "agent.queue.enqueue.request":
+        this.emit({
+          type: "agent.queue.enqueue.response",
+          payload: { ...payload, itemId: result.itemId ?? null },
+        });
+        return;
+      case "agent.queue.edit.request":
+        this.emit({ type: "agent.queue.edit.response", payload });
+        return;
+      case "agent.queue.reorder.request":
+        this.emit({ type: "agent.queue.reorder.response", payload });
+        return;
+      case "agent.queue.cancel.request":
+        this.emit({
+          type: "agent.queue.cancel.response",
+          payload: { ...payload, item: result.item ?? null },
+        });
+        return;
+      case "agent.queue.promote.request":
+        this.emit({ type: "agent.queue.promote.response", payload });
+        return;
+      case "agent.queue.resume.request":
+        this.emit({ type: "agent.queue.resume.response", payload });
+        return;
     }
   }
 

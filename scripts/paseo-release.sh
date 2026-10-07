@@ -384,8 +384,10 @@ main() {
     # Signed with the self-signed SIGN_IDENTITY in the login keychain. Its designated requirement
     # is the certificate, not the cdhash, so macOS keeps file access grants across builds.
     # hardenedRuntime stays off: there is no Developer ID, and the app died at launch with it on.
+    # timestamp=none: the secure timestamp is a network call per signed file (about 0.5s against
+    # 0.05s without), across hundreds of files. Only notarization needs it.
     run npm run build:desktop -- --dir -c.mac.hardenedRuntime=false -c.mac.notarize=false \
-      -c.mac.identity="$SIGN_IDENTITY"
+      -c.mac.identity="$SIGN_IDENTITY" -c.mac.timestamp=none
   fi
   [ "$DRY_RUN" = 1 ] || start_output_log "$@"
 

@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from "vitest";
-import { findMessageMatches, findRenderedMatches } from "./ranges.web";
+import { findMessageMatches, findRenderedMatches, findUniqueMessageMatch } from "./ranges.web";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -39,6 +39,14 @@ it("collects a message's occurrences across its block rows in row order", () => 
   ).toEqual(["alpha one", "alpha two"]);
   expect(findMessageMatches(root, "message-2", "alpha")).toHaveLength(1);
   expect(findMessageMatches(null, "message-1", "alpha")).toEqual([]);
+});
+it("finds a passage only when it appears once in the message, ignoring whitespace", () => {
+  const root = message("message-1", "alpha  one\nend", "beta", "alpha two");
+  expect(findUniqueMessageMatch(root, "message-1", "alpha one end")?.toString()).toBe(
+    "alpha  one\nend",
+  );
+  expect(findUniqueMessageMatch(root, "message-1", "alpha")).toBeNull();
+  expect(findUniqueMessageMatch(root, "message-1", "gamma")).toBeNull();
 });
 it("finds each actual occurrence across inline formatting with original Unicode offsets", () => {
   const row = content(

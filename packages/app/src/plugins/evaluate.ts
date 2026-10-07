@@ -17,10 +17,13 @@ import {
   type PluginThemeContribution,
 } from "@getpaseo/plugin";
 import {
+  type PluginAssistantSelectionActionContribution,
   type PluginCommandCenterItemContribution,
   type PluginClientContext,
   type PluginClientSlashCommandContribution,
+  type PluginComposerAttachmentInput,
   type PluginComposerInterceptorContribution,
+  type PluginTimelinePassage,
   type PluginSidebarContribution,
   type PluginSidebarProjectFilterContribution,
   type PluginSidebarProjectMenuContribution,
@@ -78,6 +81,80 @@ function requireId(value: string, label: string): string {
   return id;
 }
 
+function requireText(value: unknown, label: string, api = "addComposerAttachment"): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) throw new Error(`${api} needs ${label}`);
+  return text;
+}
+
+// A chip the draft schema rejects would make the whole draft fail to load, so reject it here.
+function parseComposerAttachmentInput(
+  input: PluginComposerAttachmentInput,
+): PluginComposerAttachmentInput {
+  const item = pluginSharedRuntime.PluginAttachmentItemSchema.safeParse(input.item);
+  if (!item.success) throw new Error(`addComposerAttachment has an invalid item: ${item.error}`);
+  return {
+    agentId: requireText(input.agentId, "an agent"),
+    sourceId: requireText(input.sourceId, "a sourceId"),
+    sourceTitle: requireText(input.sourceTitle, "a sourceTitle"),
+    icon: requireText(input.icon, "an icon"),
+    item: item.data,
+    ...(input.commentable ? { commentable: true } : {}),
+  };
+}
+
+function parseTimelinePassage(input: PluginTimelinePassage): PluginTimelinePassage {
+  const text = typeof input.text === "string" ? input.text.trim() : "";
+  const serverId = typeof input.serverId === "string" ? input.serverId.trim() : "";
+  return {
+    ...(serverId ? { serverId } : {}),
+    agentId: requireText(input.agentId, "an agent", "revealTimelinePassage"),
+    messageId: requireText(input.messageId, "a messageId", "revealTimelinePassage"),
+    ...(text ? { text } : {}),
+  };
+}
+
+function requireSourceText(value: string | undefined, id: string, label: string): string {
+  const text = value?.trim();
+  if (!text) throw new Error(`Attachment source ${id} has no ${label}`);
+  return text;
+}
+
+function parsePickerFields(contribution: PluginAttachmentSourceContribution, id: string) {
+  if (!contribution.search) return {};
+  return {
+    pickerTitle: requireSourceText(contribution.pickerTitle, id, "picker title"),
+    searchPlaceholder: requireSourceText(contribution.searchPlaceholder, id, "search placeholder"),
+    search: {
+      ...contribution.search,
+      name: requireSourceText(contribution.search.name, id, "search RPC"),
+    },
+  };
+}
+
+// A source without `search` stays out of the picker; it exists to open chips added from code.
+function parseAttachmentSource(
+  contribution: PluginAttachmentSourceContribution,
+  id: string,
+): PluginAttachmentSourceContribution {
+  const icon = requireSourceText(contribution.icon, id, "icon");
+  resolvePluginIcon(icon);
+  const { onOpen } = contribution;
+  if (onOpen !== undefined && typeof onOpen !== "function") {
+    throw new Error(`Attachment source ${id} has an onOpen that is not a function`);
+  }
+  if (!contribution.search && !onOpen) {
+    throw new Error(`Attachment source ${id} needs a search RPC or onOpen`);
+  }
+  return {
+    id,
+    title: requireSourceText(contribution.title, id, "title"),
+    icon,
+    ...parsePickerFields(contribution, id),
+    ...(onOpen ? { onOpen } : {}),
+  };
+}
+
 export type PluginClientRuntime = Pick<
   PluginClientContext,
   | "paseo"
@@ -88,7 +165,16 @@ export type PluginClientRuntime = Pick<
   | "addComposerPill"
   | "addHeaderButton"
 > &
-  Partial<Pick<PluginClientContext, "setComposerText" | "openNewWorkspace" | "openPluginsPage">> & {
+  Partial<
+    Pick<
+      PluginClientContext,
+      | "setComposerText"
+      | "addComposerAttachment"
+      | "revealTimelinePassage"
+      | "openNewWorkspace"
+      | "openPluginsPage"
+    >
+  > & {
     hosts: ReturnType<typeof createPluginHosts>;
   };
 
@@ -99,6 +185,8 @@ export function runPluginClientBundle(
   onChange: () => void = () => undefined,
 ): EvaluatedPlugin {
   const composerInterceptors: PluginComposerInterceptorContribution[] = [];
+  const assistantSelectionActions: PluginAssistantSelectionActionContribution[] = [];
+  const assistantSelectionActionIds = new Set<string>();
   const sidebarProjectFilters: PluginSidebarProjectFilterContribution[] = [];
   const sidebarProjectMenus: PluginSidebarProjectMenuContribution[] = [];
   const sidebarSections: PluginSidebarSectionContribution[] = [];
@@ -121,6 +209,7 @@ export function runPluginClientBundle(
     timelineTransformers: [],
     timelineRenderers: [],
     composerInterceptors,
+    assistantSelectionActions,
     sidebarProjectFilters,
     sidebarProjectMenus,
     sidebarSections,
@@ -344,31 +433,10 @@ export function runPluginClientBundle(
       if (attachmentSourceIds.has(normalizedId)) {
         throw new Error(`Duplicate attachment source: ${normalizedId}`);
       }
-      const title = contribution.title.trim();
-      const icon = contribution.icon.trim();
-      const pickerTitle = contribution.pickerTitle.trim();
-      const searchPlaceholder = contribution.searchPlaceholder.trim();
-      const method = contribution.search.name.trim();
-      if (!title) throw new Error(`Attachment source ${normalizedId} has no title`);
-      if (!icon) throw new Error(`Attachment source ${normalizedId} has no icon`);
-      if (!pickerTitle) throw new Error(`Attachment source ${normalizedId} has no picker title`);
-      if (!searchPlaceholder) {
-        throw new Error(`Attachment source ${normalizedId} has no search placeholder`);
-      }
-      if (!method) throw new Error(`Attachment source ${normalizedId} has no search RPC`);
-      resolvePluginIcon(icon);
+      const source = parseAttachmentSource(contribution, normalizedId);
       attachmentSourceIds.add(normalizedId);
-      return register(
-        collector.attachmentSources,
-        {
-          id: normalizedId,
-          title,
-          icon,
-          pickerTitle,
-          searchPlaceholder,
-          search: { ...contribution.search, name: method },
-        },
-        () => attachmentSourceIds.delete(normalizedId),
+      return register(collector.attachmentSources, source, () =>
+        attachmentSourceIds.delete(normalizedId),
       );
     },
     addTheme(contribution: PluginThemeContribution) {
@@ -436,6 +504,36 @@ export function runPluginClientBundle(
         { id: interceptorId, intercept: contribution.intercept },
         () => composerInterceptorIds.delete(interceptorId),
       );
+    },
+    addAssistantSelectionAction(contribution) {
+      const actionId = requireId(contribution.id, "assistant selection action id");
+      if (assistantSelectionActionIds.has(actionId)) {
+        throw new Error(`Duplicate assistant selection action: ${actionId}`);
+      }
+      if (!contribution.title?.trim()) {
+        throw new Error(`Assistant selection action ${actionId} has no title`);
+      }
+      if (typeof contribution.onSelect !== "function") {
+        throw new Error(`Assistant selection action ${actionId} has no onSelect function`);
+      }
+      assistantSelectionActionIds.add(actionId);
+      return register(
+        assistantSelectionActions,
+        { id: actionId, title: contribution.title, onSelect: contribution.onSelect },
+        () => assistantSelectionActionIds.delete(actionId),
+      );
+    },
+    addComposerAttachment(input) {
+      if (!runtime.addComposerAttachment) {
+        throw new Error("Composer chips are unavailable on this host");
+      }
+      runtime.addComposerAttachment(parseComposerAttachmentInput(input));
+    },
+    revealTimelinePassage(input) {
+      if (!runtime.revealTimelinePassage) {
+        throw new Error("Timeline reveal is unavailable on this host");
+      }
+      runtime.revealTimelinePassage(parseTimelinePassage(input));
     },
     addSidebarProjectFilter(contribution) {
       const filterId = requireSidebarId(contribution.id, "filter");
@@ -623,6 +721,7 @@ export function runPluginClientBundle(
     timelineTransformers: collector.timelineTransformers,
     timelineRenderers: collector.timelineRenderers,
     composerInterceptors: collector.composerInterceptors,
+    assistantSelectionActions: collector.assistantSelectionActions,
     sidebarProjectFilters: collector.sidebarProjectFilters,
     sidebarProjectMenus: collector.sidebarProjectMenus,
     sidebarSections: collector.sidebarSections,

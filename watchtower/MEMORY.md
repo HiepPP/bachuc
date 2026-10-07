@@ -30,6 +30,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 ## Avoid
 
 - Avoid running sidebar host filters together with an active host while one host is active. Reason: [ADR-0001](watchtower/decisions/ADR-0001-active-host-over-host-filters.md).
+- Avoid an offline-only CSP for HTML reply frames while the owner wants agent pages that load CDN libraries and call APIs. Reason: [ADR-0002](watchtower/decisions/ADR-0002-networked-html-replies-over-offline-only.md).
 
 ## Learnings
 
@@ -41,3 +42,30 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: text a plugin appends in `before("agent.prompt")` must be wrapped in `<paseo-plugin-context>`, because providers replay their own history after a daemon restart.
 - Source: `packages/server/src/server/agent/plugin-prompt-context.ts`
 - Use next time: verify plugin prompt changes after a daemon restart, not only live.
+
+### 2026-10-06 - Autorun 20261006-t3code-orchestration-port
+
+- Learned: the lefthook pre-commit hook format-checks every staged `*.md`, including `watchtower/` plan files. The formatter reads a bare `**` glob as emphasis and rewrites it.
+- Source: `lefthook.yml`; the ADR-0002 Scope line.
+- Use next time: run `npm run format:files` on plan files before staging, and put globs in code spans.
+- Learned: finish notices now wait `FINISH_NOTICE_WINDOW_MS` (1500 ms), but `vi.waitFor` gives up after 1000 ms by default. A fake timer made before `vi.useRealTimers()` never fires.
+- Source: `packages/server/src/server/agent/agent-prompt.ts`; `packages/server/src/server/agent/mcp-server.test.ts`.
+- Use next time: give finish-notice waits a longer timeout, and keep fake timers on through `vi.waitFor`.
+- Learned: `session.test.ts` mocks count `getAgent` calls, so an extra lookup in a lifecycle command fails it even when the code is correct.
+- Source: `packages/server/src/server/session.test.ts` ("cancel_agent_request reports refusal only through its response"); TASK-003 outcome.
+- Use next time: run `session.test.ts` after any change to `packages/server/src/server/agent/lifecycle-command.ts`.
+
+### 2026-10-07 - Autorun 20261006-t3code-orchestration-port
+
+- Learned: after a `packages/plugin` type change, the app typecheck reads stale declarations until the SDK is rebuilt.
+- Source: TASK-006 and TASK-010 outcomes.
+- Use next time: run `npm run build:plugin` before `npm run typecheck`.
+- Learned: app tests that load Expo fail from the repo root with `__DEV__ is not defined`.
+- Source: TASK-006 and TASK-010 runs.
+- Use next time: run app vitest files from `packages/app`, with `--project browser` for `*.browser.test.ts`.
+- Learned: the agent stream view mounts before its authoritative history arrives, and the vitest Lucide stub lacks many icons, such as `Quote`.
+- Source: `packages/app/src/panels/agent-panel.tsx`; `packages/app/test-stubs/lucide-react-native.ts`; TASK-010 outcome.
+- Use next time: wait for `isAuthoritativeHistoryReady` before checking loaded items, and use `Blocks` as the icon in plugin tests.
+- Learned: in vitest browser tests, app sources compile with the classic JSX runtime, and the Unistyles stub ignores `withUnistyles` mappings.
+- Source: `packages/app/src/components/question-form-card.browser.test.tsx`; `packages/app/test-stubs/react-native-unistyles.ts`; TASK-008 outcome.
+- Use next time: call `vi.stubGlobal("React", React)` before rendering app components, and test theme mappings as pure functions.

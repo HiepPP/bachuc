@@ -9,11 +9,15 @@ import { createTestLogger } from "../../test-utils/test-logger.js";
 import { AgentManager } from "./agent-manager.js";
 import { AgentStorage } from "./agent-storage.js";
 import {
+  disarmFinishNotifications,
+  FINISH_NOTICE_WINDOW_MS,
+  type FinishNotificationWake,
   formatSystemNotificationPrompt,
   isSystemInjectedEnvelope,
   setupFinishNotification,
   waitForAgentRunStartWithTimeout,
 } from "./agent-prompt.js";
+import { cancelAgentRunCommand } from "./lifecycle-command.js";
 import type { AgentManagerEvent, ManagedAgent } from "./agent-manager.js";
 import type {
   AgentClient,
@@ -52,10 +56,15 @@ interface FinishNotificationScenarioOptions {
   requireParentOwnership?: boolean;
   parentPromptError?: Error;
   logger?: Logger;
+  gateStorageReads?: boolean;
+  coalesceWindowMs?: number;
 }
 
 interface FinishNotificationScenario {
   startWatchingChild(): void;
+  disarmCallers(callerAgentIds: string[]): void;
+  releaseStorageReads(): void;
+  stopCallerWhileChildRuns(): Promise<void>;
   requestChildPermission(requestId?: string): void;
   resolveChildPermission(requestId?: string): void;
   resolveChildPermissionFromState(requestId?: string): void;
@@ -66,6 +75,12 @@ interface FinishNotificationScenario {
   parentPrompts(): string[];
   steerAttemptCount(): number;
   wasParentPrompted(): boolean;
+}
+
+// The scenario's storage and manager stubs resolve at once, so one macrotask drains
+// every pending notice delivery before an absence assertion.
+async function flushAsyncWork(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function createFinishNotificationScenario(
@@ -124,8 +139,16 @@ function createFinishNotificationScenario(
     throw options?.parentPromptError;
   });
 
+  let releaseStorageReads: () => void = () => {};
+  const storageGate = options?.gateStorageReads
+    ? new Promise<void>((resolve) => {
+        releaseStorageReads = resolve;
+      })
+    : Promise.resolve();
+
   const agentStorage: AgentStorage = Object.create(AgentStorage.prototype);
   Reflect.set(agentStorage, "get", async (agentId: string) => {
+    await storageGate;
     if (agentId === "child-agent") {
       const parentAgentId =
         options?.childParentAgentId === undefined ? "caller-agent" : options.childParentAgentId;
@@ -145,8 +168,36 @@ function createFinishNotificationScenario(
         childAgentId: "child-agent",
         callerAgentId: "caller-agent",
         requireParentOwnership: options?.requireParentOwnership,
+        // These cases cover one child, so no notice waits for a sibling.
+        coalesceWindowMs: options?.coalesceWindowMs ?? 0,
         logger: options?.logger ?? createTestLogger(),
       });
+    },
+    disarmCallers(callerAgentIds) {
+      disarmFinishNotifications({ agentManager, callerAgentIds: new Set(callerAgentIds) });
+    },
+    releaseStorageReads() {
+      releaseStorageReads();
+    },
+    async stopCallerWhileChildRuns() {
+      childAgent.lifecycle = "running";
+      subscriber?.({ type: "agent_state", agent: childAgent });
+      Reflect.set(agentManager, "listAgents", () => [
+        { id: "caller-agent", labels: {} },
+        { id: "child-agent", labels: { "paseo.parent-agent-id": "caller-agent" } },
+      ]);
+      Reflect.set(
+        agentManager,
+        "hasInFlightRun",
+        (agentId: string) => agentId === "child-agent" && childAgent.lifecycle === "running",
+      );
+      // The child settles inside its cancel, which is when a live notice would fire.
+      Reflect.set(agentManager, "cancelAgentRun", async () => {
+        childAgent.lifecycle = "idle";
+        subscriber?.({ type: "agent_state", agent: childAgent });
+        return { status: "settled" };
+      });
+      await cancelAgentRunCommand({ agentManager, logger: createTestLogger() }, "caller-agent");
     },
     requestChildPermission(requestId = "permission-1") {
       childAgent.lifecycle = "running";
@@ -295,6 +346,58 @@ test("finish notifications truncate oversized child responses", async () => {
     `[truncated ${omitted.length} chars; use get_agent_activity for the full response]`,
   );
   expect(parentPrompt).not.toContain("TAIL-MARKER");
+});
+
+test("a disarmed caller gets no notice when its child finishes", () => {
+  const scenario = createFinishNotificationScenario();
+
+  scenario.startWatchingChild();
+  scenario.disarmCallers(["caller-agent"]);
+  scenario.finishChild();
+
+  expect(scenario.wasParentPrompted()).toBe(false);
+});
+
+test("stopping the caller cancels its running child without a finish notice", async () => {
+  const scenario = createFinishNotificationScenario();
+
+  scenario.startWatchingChild();
+  await scenario.stopCallerWhileChildRuns();
+  await flushAsyncWork();
+
+  expect(scenario.wasParentPrompted()).toBe(false);
+});
+
+test("disarm cancels a notice whose delivery is already in flight", async () => {
+  const scenario = createFinishNotificationScenario({ gateStorageReads: true });
+
+  scenario.startWatchingChild();
+  scenario.finishChild();
+  scenario.disarmCallers(["caller-agent"]);
+  scenario.releaseStorageReads();
+  await flushAsyncWork();
+
+  expect(scenario.wasParentPrompted()).toBe(false);
+});
+
+test("an in-flight notice still lands when nobody disarms it", async () => {
+  const scenario = createFinishNotificationScenario({ gateStorageReads: true });
+
+  scenario.startWatchingChild();
+  scenario.finishChild();
+  scenario.releaseStorageReads();
+
+  await vi.waitFor(() => expect(scenario.wasParentPrompted()).toBe(true));
+});
+
+test("disarming another caller keeps the notice armed", async () => {
+  const scenario = createFinishNotificationScenario();
+
+  scenario.startWatchingChild();
+  scenario.disarmCallers(["unrelated-agent"]);
+  const parentPrompt = await scenario.finishChildAndReadParentPrompt();
+
+  expect(parentPrompt).toContain("Agent child-agent (Child Agent) finished.");
 });
 
 test("closing a watched child notifies the caller", async () => {
@@ -761,4 +864,281 @@ test("waiting for a run start still gives up at the run start budget", async () 
     vi.useRealTimers();
     await scenario.cleanup();
   }
+});
+
+interface MailboxScenario {
+  watchChildren(options?: { wake?: FinishNotificationWake }): void;
+  finishChild(childAgentId: string): void;
+  requestPermission(childAgentId: string): void;
+  setCallerRunning(running: boolean): void;
+  disarmCaller(): void;
+  callerPrompts(): string[];
+  subscriberCount(agentId: string): number;
+}
+
+// Several children watched by one caller, to cover the coalescing window.
+function createMailboxScenario(childAgentIds: string[]): MailboxScenario {
+  const subscribers = new Map<string, Set<(event: AgentManagerEvent) => void>>();
+  const callerPrompts: string[] = [];
+  let callerRunning = false;
+
+  function createAgent(id: string, lifecycle: ManagedAgent["lifecycle"]): ManagedAgent {
+    const agent: ManagedAgent = Object.create(null);
+    Reflect.set(agent, "id", id);
+    Reflect.set(agent, "lifecycle", lifecycle);
+    Reflect.set(agent, "config", { title: id });
+    Reflect.set(agent, "pendingPermissions", new Map());
+    return agent;
+  }
+  const children = new Map(childAgentIds.map((id) => [id, createAgent(id, "idle")]));
+  const caller = createAgent("caller-agent", "idle");
+
+  function emit(agentId: string, event: AgentManagerEvent): void {
+    for (const subscriber of Array.from(subscribers.get(agentId) ?? [])) {
+      subscriber(event);
+    }
+  }
+
+  const agentManager = new AgentManager({ clients: {}, logger: createTestLogger() });
+  Reflect.set(agentManager, "getAgent", (agentId: string) =>
+    agentId === "caller-agent" ? caller : (children.get(agentId) ?? null),
+  );
+  Reflect.set(
+    agentManager,
+    "subscribe",
+    (callback: (event: AgentManagerEvent) => void, options: { agentId: string }) => {
+      const set = subscribers.get(options.agentId) ?? new Set();
+      set.add(callback);
+      subscribers.set(options.agentId, set);
+      return () => set.delete(callback);
+    },
+  );
+  Reflect.set(agentManager, "getLastAssistantMessage", async () => null);
+  Reflect.set(agentManager, "tryRunOutOfBand", () => false);
+  Reflect.set(
+    agentManager,
+    "hasInFlightRun",
+    (agentId: string) => agentId === "caller-agent" && callerRunning,
+  );
+  Reflect.set(
+    agentManager,
+    "steerOrReplaceActiveTurn",
+    async (_agentId: string, prompt: string) => {
+      callerPrompts.push(prompt);
+      return { status: "steered" };
+    },
+  );
+  Reflect.set(agentManager, "streamAgent", (_agentId: string, prompt: string) => {
+    callerPrompts.push(prompt);
+    return (async function* noop() {})();
+  });
+
+  const agentStorage: AgentStorage = Object.create(AgentStorage.prototype);
+  Reflect.set(agentStorage, "get", async (agentId: string) =>
+    children.has(agentId) ? { title: agentId, labels: {} } : null,
+  );
+
+  return {
+    watchChildren(options) {
+      for (const childAgentId of childAgentIds) {
+        setupFinishNotification({
+          agentManager,
+          agentStorage,
+          childAgentId,
+          callerAgentId: "caller-agent",
+          wake: options?.wake,
+          logger: createTestLogger(),
+        });
+      }
+    },
+    finishChild(childAgentId) {
+      const child = children.get(childAgentId)!;
+      child.lifecycle = "running";
+      emit(childAgentId, { type: "agent_state", agent: child });
+      child.lifecycle = "idle";
+      emit(childAgentId, { type: "agent_state", agent: child });
+    },
+    requestPermission(childAgentId) {
+      const child = children.get(childAgentId)!;
+      const request = {
+        id: `${childAgentId}-permission`,
+        provider: "claude" as const,
+        kind: "tool" as const,
+        name: "Run command",
+      };
+      child.lifecycle = "running";
+      child.pendingPermissions.set(request.id, request);
+      emit(childAgentId, {
+        type: "agent_stream",
+        agentId: childAgentId,
+        event: { type: "permission_requested", provider: "claude", request },
+      });
+    },
+    setCallerRunning(running) {
+      callerRunning = running;
+      caller.lifecycle = running ? "running" : "idle";
+      emit("caller-agent", { type: "agent_state", agent: caller });
+    },
+    disarmCaller() {
+      disarmFinishNotifications({ agentManager, callerAgentIds: new Set(["caller-agent"]) });
+    },
+    callerPrompts() {
+      return callerPrompts;
+    },
+    subscriberCount(agentId) {
+      return subscribers.get(agentId)?.size ?? 0;
+    },
+  };
+}
+
+async function withFakeTimers(run: () => Promise<void>): Promise<void> {
+  vi.useFakeTimers();
+  try {
+    await run();
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+test("children that finish within the window reach the caller as one notice", async () => {
+  await withFakeTimers(async () => {
+    const scenario = createMailboxScenario(["child-1", "child-2", "child-3"]);
+    scenario.watchChildren();
+
+    scenario.finishChild("child-1");
+    await vi.advanceTimersByTimeAsync(500);
+    scenario.finishChild("child-2");
+    await vi.advanceTimersByTimeAsync(500);
+    scenario.finishChild("child-3");
+    await vi.advanceTimersByTimeAsync(FINISH_NOTICE_WINDOW_MS);
+
+    expect(scenario.callerPrompts()).toHaveLength(1);
+    const [prompt] = scenario.callerPrompts();
+    expect(prompt).toContain("Agent child-1 (child-1) finished.");
+    expect(prompt).toContain("Agent child-2 (child-2) finished.");
+    expect(prompt).toContain("Agent child-3 (child-3) finished.");
+  });
+});
+
+test("children that finish apart reach the caller as separate notices", async () => {
+  await withFakeTimers(async () => {
+    const scenario = createMailboxScenario(["child-1", "child-2"]);
+    scenario.watchChildren();
+
+    scenario.finishChild("child-1");
+    await vi.advanceTimersByTimeAsync(FINISH_NOTICE_WINDOW_MS);
+    await vi.advanceTimersByTimeAsync(5000 - FINISH_NOTICE_WINDOW_MS);
+    scenario.finishChild("child-2");
+    await vi.advanceTimersByTimeAsync(FINISH_NOTICE_WINDOW_MS);
+
+    expect(scenario.callerPrompts()).toHaveLength(2);
+    expect(scenario.callerPrompts()[0]).toContain("Agent child-1 (child-1) finished.");
+    expect(scenario.callerPrompts()[1]).toContain("Agent child-2 (child-2) finished.");
+  });
+});
+
+test("a permission notice skips the coalescing window", async () => {
+  await withFakeTimers(async () => {
+    const scenario = createMailboxScenario(["child-1"]);
+    scenario.watchChildren();
+
+    scenario.requestPermission("child-1");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(scenario.callerPrompts()).toHaveLength(1);
+    expect(scenario.callerPrompts()[0]).toContain("Agent child-1 (child-1) needs permission.");
+  });
+});
+
+test("settled_only holds notices until the caller's run ends", async () => {
+  await withFakeTimers(async () => {
+    const scenario = createMailboxScenario(["child-1", "child-2"]);
+    scenario.setCallerRunning(true);
+    scenario.watchChildren({ wake: "settled_only" });
+
+    scenario.finishChild("child-1");
+    scenario.finishChild("child-2");
+    await vi.advanceTimersByTimeAsync(FINISH_NOTICE_WINDOW_MS * 4);
+    expect(scenario.callerPrompts()).toHaveLength(0);
+
+    scenario.setCallerRunning(false);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(scenario.callerPrompts()).toHaveLength(1);
+    expect(scenario.callerPrompts()[0]).toContain("Agent child-1 (child-1) finished.");
+    expect(scenario.callerPrompts()[0]).toContain("Agent child-2 (child-2) finished.");
+  });
+});
+
+test("settled_only still sends a permission notice to a running caller at once", async () => {
+  await withFakeTimers(async () => {
+    const scenario = createMailboxScenario(["child-1"]);
+    scenario.setCallerRunning(true);
+    scenario.watchChildren({ wake: "settled_only" });
+
+    scenario.requestPermission("child-1");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(scenario.callerPrompts()).toHaveLength(1);
+    expect(scenario.callerPrompts()[0]).toContain("Agent child-1 (child-1) needs permission.");
+  });
+});
+
+test("arming a child again replaces its earlier watch", () => {
+  const scenario = createMailboxScenario(["child-1"]);
+
+  scenario.watchChildren();
+  scenario.watchChildren();
+
+  expect(scenario.subscriberCount("child-1")).toBe(1);
+});
+
+test("disarming the caller drops a held settled_only notice and its listener", async () => {
+  await withFakeTimers(async () => {
+    const scenario = createMailboxScenario(["child-1"]);
+    scenario.setCallerRunning(true);
+    scenario.watchChildren({ wake: "settled_only" });
+
+    scenario.finishChild("child-1");
+    await vi.advanceTimersByTimeAsync(FINISH_NOTICE_WINDOW_MS);
+    expect(scenario.subscriberCount("caller-agent")).toBe(1);
+
+    scenario.disarmCaller();
+    scenario.setCallerRunning(false);
+    await vi.advanceTimersByTimeAsync(FINISH_NOTICE_WINDOW_MS);
+
+    expect(scenario.subscriberCount("caller-agent")).toBe(0);
+    expect(scenario.callerPrompts()).toHaveLength(0);
+  });
+});
+
+test("the same child and reason twice in one window gives one section", async () => {
+  await withFakeTimers(async () => {
+    const scenario = createMailboxScenario(["child-1"]);
+    scenario.watchChildren();
+    scenario.finishChild("child-1");
+    await vi.advanceTimersByTimeAsync(0);
+    scenario.watchChildren();
+    scenario.finishChild("child-1");
+    await vi.advanceTimersByTimeAsync(FINISH_NOTICE_WINDOW_MS);
+
+    expect(scenario.callerPrompts()).toHaveLength(1);
+    expect(
+      scenario.callerPrompts()[0]?.match(/Agent child-1 \(child-1\) finished\./g),
+    ).toHaveLength(1);
+  });
+});
+
+test("disarming the caller drops notices still waiting in the window", async () => {
+  await withFakeTimers(async () => {
+    const scenario = createMailboxScenario(["child-1"]);
+    scenario.watchChildren();
+
+    scenario.finishChild("child-1");
+    await vi.advanceTimersByTimeAsync(0);
+    scenario.disarmCaller();
+    await vi.advanceTimersByTimeAsync(FINISH_NOTICE_WINDOW_MS * 2);
+
+    expect(scenario.callerPrompts()).toHaveLength(0);
+  });
 });

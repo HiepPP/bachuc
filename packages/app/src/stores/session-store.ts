@@ -34,6 +34,7 @@ import type {
   AgentPersistenceHandle,
 } from "@getpaseo/protocol/agent-types";
 import type {
+  AgentMessageQueueSummary,
   ServerInfoStatusPayload,
   ProjectPlacementPayload,
   ServerCapabilities,
@@ -100,6 +101,8 @@ export interface Agent {
   parentAgentId: string | null;
   labels: Record<string, string>;
   projectPlacement?: ProjectPlacementPayload | null;
+  /** Daemon-owned message queue; absent means empty. */
+  queue?: AgentMessageQueueSummary;
 }
 
 export interface WorkspaceDescriptor {

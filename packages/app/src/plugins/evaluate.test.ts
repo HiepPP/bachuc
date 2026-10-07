@@ -33,6 +33,81 @@ function bundle(body: string): string {
 }
 
 describe("evaluatePluginClientBundle", () => {
+  it("registers assistant selection actions and drops them on unload", async () => {
+    const evaluated = evaluatePluginClientBundle(
+      "cite",
+      bundle(`
+      plugin.addAssistantSelectionAction({
+        id: "cite", title: "Cite", onSelect(selection) { globalThis.__citeSelection = selection; }
+      });
+    `),
+    );
+    expect(evaluated.assistantSelectionActions?.map((action) => action.title)).toEqual(["Cite"]);
+    await evaluated.assistantSelectionActions![0].onSelect({
+      serverId: "host",
+      workspaceId: null,
+      agentId: "agent-1",
+      text: "> quoted",
+    });
+    expect(Reflect.get(globalThis, "__citeSelection")).toMatchObject({ text: "> quoted" });
+    Reflect.deleteProperty(globalThis, "__citeSelection");
+    await evaluated.cleanup();
+    expect(evaluated.assistantSelectionActions).toEqual([]);
+  });
+
+  it("rejects a duplicate assistant selection action", () => {
+    expect(() =>
+      evaluatePluginClientBundle(
+        "cite-twice",
+        bundle(`
+        plugin.addAssistantSelectionAction({ id: "cite", title: "Cite", onSelect() {} });
+        plugin.addAssistantSelectionAction({ id: "cite", title: "Cite", onSelect() {} });
+      `),
+      ),
+    ).toThrow("Duplicate assistant selection action: cite");
+  });
+
+  it("forwards composer chips to the host runtime", async () => {
+    const addComposerAttachment = vi.fn();
+    const evaluated = runPluginClientBundle(
+      "cite",
+      bundle(`
+      plugin.addComposerAttachment({
+        agentId: "agent-1", sourceId: "quotes", sourceTitle: "Quote", icon: "Quote",
+        item: { id: "q1", identifier: "q1", title: "Quote", url: "https://example.com/q1",
+          text: "> quoted", resourceType: "quote" },
+        commentable: true,
+      });
+    `),
+      { ...runtime, addComposerAttachment } as PluginClientRuntime,
+    );
+    expect(addComposerAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "agent-1", sourceId: "quotes", commentable: true }),
+    );
+    await evaluated.cleanup();
+  });
+
+  it("rejects a composer chip the draft could not store", () => {
+    const addComposerAttachment = vi.fn();
+    const add = (fields: string) =>
+      runPluginClientBundle(
+        "cite-bad",
+        bundle(`
+        plugin.addComposerAttachment({
+          agentId: "agent-1", sourceId: "quotes", sourceTitle: "Quote", icon: "Quote",
+          item: { id: "q1", identifier: "q1", title: "Quote", url: "https://example.com/q1",
+            text: "> quoted", resourceType: "quote" },
+          ${fields}
+        });
+      `),
+        { ...runtime, addComposerAttachment } as PluginClientRuntime,
+      );
+
+    expect(() => add(`sourceTitle: " "`)).toThrow("addComposerAttachment needs a sourceTitle");
+    expect(() => add(`item: { id: "q1", url: "" }`)).toThrow("invalid item");
+    expect(addComposerAttachment).not.toHaveBeenCalled();
+  });
+
   it("retains the sidebar project addition hook", async () => {
     const evaluated = evaluatePluginClientBundle(
       "spaces",
@@ -691,7 +766,45 @@ describe("evaluatePluginClientBundle", () => {
       })`,
     );
 
-    expect(plugin.attachmentSources.map((source) => source.search.name)).toEqual(["issues.search"]);
+    expect(plugin.attachmentSources.map((source) => source.search?.name)).toEqual([
+      "issues.search",
+    ]);
+  });
+
+  it("accepts a chip-only attachment source with onOpen and no search", () => {
+    const evaluated = evaluatePluginClientBundle(
+      "cite-source",
+      bundle(`
+      plugin.addAttachmentSource({ id: "quote", title: "Quote", icon: "Blocks", onOpen() {} });
+    `),
+    );
+    expect(evaluated.attachmentSources).toEqual([
+      { id: "quote", title: "Quote", icon: "Blocks", onOpen: expect.any(Function) },
+    ]);
+    expect(() =>
+      evaluatePluginClientBundle(
+        "empty-source",
+        bundle(`plugin.addAttachmentSource({ id: "quote", title: "Quote", icon: "Blocks" });`),
+      ),
+    ).toThrow("Attachment source quote needs a search RPC or onOpen");
+  });
+
+  it("forwards a timeline reveal and rejects one with no message", () => {
+    const revealTimelinePassage = vi.fn();
+    const reveal = (fields: string) =>
+      runPluginClientBundle(
+        "cite-reveal",
+        bundle(`plugin.revealTimelinePassage({ agentId: "agent-1", ${fields} });`),
+        { ...runtime, revealTimelinePassage } as PluginClientRuntime,
+      );
+
+    reveal(`messageId: "m1", text: "  quoted  "`);
+    expect(revealTimelinePassage).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      messageId: "m1",
+      text: "quoted",
+    });
+    expect(() => reveal(`messageId: " "`)).toThrow("revealTimelinePassage needs a messageId");
   });
 
   it("rejects modules that are not part of the client runtime", () => {

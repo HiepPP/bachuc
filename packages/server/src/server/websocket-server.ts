@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import type { CreationSnapshot } from "@getpaseo/protocol/messages";
 import { CreationService } from "./creation/index.js";
 import { MessageReceipts } from "./message-receipts/index.js";
+import { AgentMessageQueue } from "./agent/agent-message-queue.js";
 import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage, Server as HTTPServer } from "http";
 import { join } from "path";
@@ -537,6 +538,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly agentManager: AgentManager;
   private readonly agentStorage: AgentStorage;
   private readonly messageReceipts: MessageReceipts;
+  private readonly agentMessageQueue: AgentMessageQueue;
   private readonly creationService: CreationService;
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
@@ -680,6 +682,12 @@ export class VoiceAssistantWebSocketServer {
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
     this.messageReceipts = new MessageReceipts(join(paseoHome, "agent-requests"));
+    this.agentMessageQueue = new AgentMessageQueue({
+      directory: join(paseoHome, "agent-queues"),
+      agentManager,
+      agentStorage,
+      logger: this.logger.child({ module: "agent-message-queue" }),
+    });
     this.creationService = new CreationService(
       join(paseoHome, "creations"),
       this.logger.child({ module: "creation" }),
@@ -1050,6 +1058,10 @@ export class VoiceAssistantWebSocketServer {
 
   public prepareForShutdown(): void {
     this.connectionLifecycle = "stopping";
+    // Shutdown closes running agents, which ends their runs like a normal end. A queue that
+    // still listened would drain into a closing agent and lose the message it already
+    // removed from disk.
+    this.agentMessageQueue.close();
   }
 
   public beginAcceptingConnections(): void {
@@ -1478,6 +1490,7 @@ export class VoiceAssistantWebSocketServer {
       agentManager: this.agentManager,
       agentStorage: this.agentStorage,
       messageReceipts: this.messageReceipts,
+      agentMessageQueue: this.agentMessageQueue,
       creationService: this.creationService,
       projectRegistry: this.projectRegistry,
       workspaceRegistry: this.workspaceRegistry,
@@ -1887,6 +1900,8 @@ export class VoiceAssistantWebSocketServer {
         agentForkContext: true,
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
         agentForkContextCursor: true,
+        // COMPAT(agentMessageQueue): added in v1.0.0-hiep, remove gate after 2027-04-06.
+        agentMessageQueue: true,
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: true,
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain advertisement.

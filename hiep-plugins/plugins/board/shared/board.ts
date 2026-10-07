@@ -10,6 +10,8 @@ export const runSchema = z.object({
   needsInput: z.boolean().optional(),
   // Host read state of a finished run; absent from older hosts. Never persisted.
   unread: z.boolean().optional(),
+  // The thread's edit-diffs.mode label is off. Read from the host; never persisted.
+  diffsOff: z.boolean().optional(),
   project: z.string(),
   projectKey: z.string(),
   projectId: z.string().optional(),
@@ -36,10 +38,10 @@ export const closeRuntimeRpc = defineRpc({
 });
 // The edit-diffs plugin reads this agent label and leaves that thread's edits as Paseo's own rows.
 export const EDIT_DIFFS_MODE_LABEL = "edit-diffs.mode";
-// Turns edit diffs off for one thread. Runs on the thread's host.
-export const editDiffsOffRpc = defineRpc({
-  name: "board.edit-diffs.off",
-  input: z.object({ agentId: z.string().min(1) }),
+// Turns edit diffs on or off for one thread. Runs on the thread's host.
+export const editDiffsModeRpc = defineRpc({
+  name: "board.edit-diffs.set",
+  input: z.object({ agentId: z.string().min(1), off: z.boolean() }),
   output: z.object({}),
 });
 export const boardRpc = defineRpc({
