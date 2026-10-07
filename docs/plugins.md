@@ -204,6 +204,13 @@ variables go after the CSP meta, so the policy stays the first element of the do
 everything after it. The vitest Unistyles stub ignores `withUnistyles` mappings, so the theme
 mapping is tested on its own in `html-frame-theme.test.ts`.
 
+`height="auto"` cannot read the frame's height, because the sandbox gives the page an opaque
+origin. `withPreviewCsp` injects a reporter that posts the content height through `postMessage` on
+web and the `ReactNativeWebView` bridge on native; native gets the bridge only when
+`onFrameMessage` is set, so the file preview never exposes it. The reporter measures the root box,
+never `scrollHeight`, which is at least the frame height and so could never shrink.
+`html-frame-height.ts` clamps each report and freezes a page whose height follows the frame.
+
 ### SDK import boundaries
 
 Classify every SDK export before adding it. All client entry points and implementations live under

@@ -24,7 +24,10 @@ function pageNote(status: "pending" | "error" | "success", missing: boolean): st
   return missing ? "Page not found. Its file may have been removed." : null;
 }
 
-/** The title, then the page in the host's sandboxed frame with network access (ADR-0002). */
+/**
+ * The title, then the whole page in the host's sandboxed frame, sized to its content, with
+ * network access (ADR-0002).
+ */
 export function HtmlReplyCard({ item, theme }: PluginTimelineItemProps<HtmlReplyRow>) {
   const styles = useStyles(theme);
   const readPage = useRpc(getHtmlReplyRpc);
@@ -44,7 +47,7 @@ export function HtmlReplyCard({ item, theme }: PluginTimelineItemProps<HtmlReply
       {note || html === null ? (
         <Text style={styles.note}>{note}</Text>
       ) : (
-        <HtmlFrame html={html} title={title} network />
+        <HtmlFrame html={html} title={title} height="auto" network />
       )}
     </View>
   );

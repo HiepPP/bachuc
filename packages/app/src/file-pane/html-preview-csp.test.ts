@@ -13,6 +13,18 @@ describe("withPreviewCsp options", () => {
     expect(withPreviewCsp("<p>x</p>")).toContain("connect-src 'none'");
   });
 
+  it("adds the height reporter after the policy only when asked", () => {
+    const source = "<p>Reply</p>";
+    const reporting = withPreviewCsp(source, { reportHeight: true });
+
+    expect(withPreviewCsp(source)).not.toContain("paseoHtmlFrameHeight");
+    expect(reporting).toContain("paseoHtmlFrameHeight");
+    expect(reporting.indexOf("Content-Security-Policy")).toBeLessThan(
+      reporting.indexOf("paseoHtmlFrameHeight"),
+    );
+    expect(reporting.endsWith(source)).toBe(true);
+  });
+
   it("allows https scripts, styles, fonts, images, and fetch for a networked frame", () => {
     const document = withPreviewCsp("<p>x</p>", { network: true });
 

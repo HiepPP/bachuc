@@ -173,8 +173,10 @@ locked-down WebView on native. On web, the page's scripts run in an opaque origi
 read the app's cookies or storage, open popups, or navigate the app. On native, the WebView keeps
 storage, cookies, popups, and navigation off. By default the frame is offline: the page cannot load
 remote resources or call `fetch`. `network: true` allows `https:` scripts, styles, fonts, images,
-and `fetch`; the sandbox stays the same. The frame has a fixed `height`, 360 by default, and taller
-content scrolls inside it. The frame background is white; style the page with the app theme, which
+and `fetch`; the sandbox stays the same. A number `height` fixes the frame, 360 by default, and
+taller content scrolls inside it. `height="auto"` grows the frame to show the whole page, up to 8000;
+a page sized to the frame, such as one with `100vh`, stops growing after three equal steps and
+scrolls inside it. The frame background is white; style the page with the app theme, which
 it gets as CSS variables: `--paseo-background`, `--paseo-surface`, `--paseo-foreground`,
 `--paseo-muted`, `--paseo-border`, `--paseo-accent`, `--paseo-success`, `--paseo-warning`,
 `--paseo-danger`, `--paseo-font-ui`, and `--paseo-font-mono`. A theme change reloads the page.

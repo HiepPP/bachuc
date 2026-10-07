@@ -107,8 +107,12 @@ export declare const SyntaxToken: ComponentType<{ token: SyntaxTokenData }>;
 export interface HtmlFrameProps {
   /** A self-contained HTML document. Its scripts run in an opaque origin. */
   html: string;
-  /** Fixed height; taller content scrolls inside the frame. Defaults to 360. */
-  height?: number;
+  /**
+   * A number fixes the height, and taller content scrolls inside the frame. `"auto"` grows the
+   * frame to fit the page, up to 8000; a page sized to the frame, such as one with `100vh`,
+   * stops growing and scrolls instead. Defaults to 360.
+   */
+  height?: number | "auto";
   /** Allows https scripts, styles, fonts, images, and fetch. Defaults to false: offline. */
   network?: boolean;
   /** Accessible title of the web frame. Defaults to "HTML". */

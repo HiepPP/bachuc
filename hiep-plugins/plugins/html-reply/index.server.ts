@@ -21,7 +21,7 @@ export default function contribute(server: PluginServerContext) {
   server.registerTool({
     name: "publish_html",
     description:
-      "Show a self-contained HTML page inline in your thread, for example a chart, table, diagram, or small interactive tool. The page runs in a sandboxed frame with a fixed height and inner scroll; it may load https scripts, styles, fonts, and images and call fetch over https, but it cannot reach the app. Style it with the CSS variables --paseo-background, --paseo-surface, --paseo-foreground, --paseo-muted, --paseo-border, --paseo-accent, --paseo-success, --paseo-warning, --paseo-danger, --paseo-font-ui, and --paseo-font-mono. The HTML may be at most 1 MiB.",
+      "Show a self-contained HTML page inline in your thread, for example a chart, table, diagram, or small interactive tool. The page runs in a sandboxed frame that grows to show the whole page, so let the content set its height and do not size it with 100vh; it may load https scripts, styles, fonts, and images and call fetch over https, but it cannot reach the app. Style it with the CSS variables --paseo-background, --paseo-surface, --paseo-foreground, --paseo-muted, --paseo-border, --paseo-accent, --paseo-success, --paseo-warning, --paseo-danger, --paseo-font-ui, and --paseo-font-mono. The HTML may be at most 1 MiB.",
     inputSchema: z.object({
       title: z.string().min(1).max(MAX_TITLE_LENGTH),
       html: z.string(),

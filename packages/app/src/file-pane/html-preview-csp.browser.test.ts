@@ -74,3 +74,31 @@ it("lets a networked frame fetch over https while storage stays blocked", async 
   const result = await report;
   expect(result).toMatchObject({ ran: true, violations: [], storage: "blocked" });
 });
+
+function renderAutoFrame(html: string): () => number {
+  const container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  flushSync(() => root?.render(createElement(HtmlFrame, { html, height: "auto" })));
+  const frame = container.querySelector("iframe");
+  if (!frame?.parentElement) throw new Error("HtmlFrame rendered no iframe");
+  const body = frame.parentElement;
+  return () => body.getBoundingClientRect().height;
+}
+
+it("grows an auto-height frame to show the whole page without inner scroll", async () => {
+  const height = renderAutoFrame(
+    '<body style="margin:0;padding:10px"><div style="height:900px"></div></body>',
+  );
+
+  await expect.poll(height, { timeout: 3000 }).toBe(920);
+});
+
+it("stops growing a page sized to the frame, such as 100vh", async () => {
+  const height = renderAutoFrame(
+    '<body style="margin:8px"><div style="height:100vh"></div></body>',
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  expect(height()).toBeLessThan(400);
+});

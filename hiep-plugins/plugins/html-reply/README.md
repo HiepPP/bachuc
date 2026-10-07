@@ -18,7 +18,9 @@ tools.
   `sandbox="allow-scripts"` on web and desktop, and a locked-down WebView on native. It may load
   `https:` scripts, styles, fonts, and images and call `fetch` over `https:`, but it cannot reach
   the app's cookies, storage, or windows.
-- The frame is 360 points high, and taller content scrolls inside it.
+- The frame grows to show the whole page, up to 8000 points, with no inner scroll. A page sized
+  to the frame, such as one with `100vh`, stops growing and scrolls inside it instead.
+- Needs a host build with `HtmlFrame` `height="auto"`; an older host renders an empty frame.
 - Style the page with the app theme variables: `--paseo-background`, `--paseo-surface`,
   `--paseo-foreground`, `--paseo-muted`, `--paseo-border`, `--paseo-accent`, `--paseo-success`,
   `--paseo-warning`, `--paseo-danger`, `--paseo-font-ui`, and `--paseo-font-mono`.

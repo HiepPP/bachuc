@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { PREVIEW_SANDBOX, withPreviewCsp } from "./html-preview-csp";
 
@@ -28,12 +28,29 @@ export interface SandboxedHtmlViewProps {
   testID?: string;
   /** Native only: an iframe already scrolls inside a scrolling parent. */
   nestedScroll?: boolean;
+  /** Messages this frame's page posts; never those of another frame. */
+  onFrameMessage?: (data: unknown) => void;
 }
 
 /** The sandboxed frame shared by the file preview and plugin HTML frames. */
-export function SandboxedHtmlView({ document, title, testID }: SandboxedHtmlViewProps) {
+export function SandboxedHtmlView({
+  document,
+  title,
+  testID,
+  onFrameMessage,
+}: SandboxedHtmlViewProps) {
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  useEffect(() => {
+    if (!onFrameMessage) return;
+    const listener = (event: MessageEvent) => {
+      if (event.source === frameRef.current?.contentWindow) onFrameMessage(event.data);
+    };
+    window.addEventListener("message", listener);
+    return () => window.removeEventListener("message", listener);
+  }, [onFrameMessage]);
   return (
     <iframe
+      ref={frameRef}
       data-testid={testID}
       title={title}
       srcDoc={document}

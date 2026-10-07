@@ -88,7 +88,43 @@ export interface PreviewDocumentOptions {
   network?: boolean;
   /** A style element from `cssVariablesStyle`, placed before the document's own markup. */
   themeStyle?: string;
+  /** Posts the content height to the host, so the frame can grow to fit the page. */
+  reportHeight?: boolean;
 }
+
+export const FRAME_HEIGHT_MESSAGE_KEY = "paseoHtmlFrameHeight";
+
+// A sandboxed frame has an opaque origin, so the host cannot read its height; the page reports
+// it instead, through postMessage on web and the WebView bridge on native. It measures the root
+// box plus the body's margins, which collapse outside it, and never `scrollHeight`, which is at
+// least the frame's own height and so could never shrink. The page is untrusted: the host clamps
+// whatever arrives.
+const HEIGHT_REPORTER = `<script>(function () {
+  var last = -1;
+  function send() {
+    var body = document.body;
+    if (!body) return;
+    var style = getComputedStyle(body);
+    var height = Math.ceil(document.documentElement.getBoundingClientRect().height +
+      parseFloat(style.marginTop) + parseFloat(style.marginBottom));
+    if (Math.abs(height - last) < 1) return;
+    last = height;
+    var message = { ${FRAME_HEIGHT_MESSAGE_KEY}: height };
+    if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(message));
+    else parent.postMessage(message, "*");
+  }
+  function start() {
+    send();
+    if (window.ResizeObserver) {
+      var observer = new ResizeObserver(send);
+      observer.observe(document.documentElement);
+      observer.observe(document.body);
+    }
+    window.addEventListener("load", send);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+})();</script>`;
 
 // The policy must reach the parser before any markup the document declares, and it
 // only counts if it lands in `<head>` — once the parser has moved on to `<body>`, a
@@ -114,7 +150,11 @@ const BOM = "\uFEFF";
 
 export function withPreviewCsp(html: string, options: PreviewDocumentOptions = {}): string {
   const prologue = options.network ? `<!doctype html>${meta(NETWORK_POLICY)}` : PROLOGUE;
+  const reporter = options.reportHeight ? HEIGHT_REPORTER : "";
   return (
-    prologue + (options.themeStyle ?? "") + (html.startsWith(BOM) ? html.slice(BOM.length) : html)
+    prologue +
+    (options.themeStyle ?? "") +
+    reporter +
+    (html.startsWith(BOM) ? html.slice(BOM.length) : html)
   );
 }
