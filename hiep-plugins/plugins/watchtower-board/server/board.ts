@@ -14,12 +14,12 @@ function noRunState(): RunState {
   return { questions: [], run: null, proposedAdrs: 0, warnings: [] };
 }
 
-function inside(root: string, target: string): boolean {
+export function inside(root: string, target: string): boolean {
   const relative = path.relative(root, target);
   return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
-async function readFile(root: string, target: string): Promise<string> {
+export async function readFile(root: string, target: string): Promise<string> {
   const actual = await realpath(target);
   if (!inside(root, actual))
     throw new Error("Linked file is outside the workspace Watchtower directory.");
@@ -77,7 +77,7 @@ function cells(line: string): string[] {
     .split(/(?<!\\)\|/)
     .map((value) => value.trim().replace(/\\\|/g, "|"));
 }
-function plain(value: string): string {
+export function plain(value: string): string {
   return value
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/[`*]/g, "")
@@ -85,7 +85,7 @@ function plain(value: string): string {
 }
 
 // Rows of the first table whose header has every required column, keyed by lowercase header.
-function tableRows(markdown: string, required: string[]): Record<string, string>[] {
+export function tableRows(markdown: string, required: string[]): Record<string, string>[] {
   const lines = markdown.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].trim().startsWith("|")) continue;
