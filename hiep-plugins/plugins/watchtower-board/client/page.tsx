@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import { Pressable, type ScrollView as NativeScrollView, Text, View } from "react-native";
 import { WatchtowerBoard } from "./board";
+import { WatchtowerOverview } from "./overview";
 
 // Surfaces have no workspace context, so the sidebar page picks one and reuses the board.
 let lastWorkspaceId: string | null = null;
@@ -107,12 +108,22 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
           );
         })}
       </ScrollView>
-      <WatchtowerBoard
-        {...props}
-        key={workspace.id}
-        source={{ workspaceId: workspace.id }}
-        projectName={workspace.projectDisplayName}
-      />
+      {/* Wide layouts have room for the process overview; compact ones keep the board. */}
+      {layout.compact ? (
+        <WatchtowerBoard
+          {...props}
+          key={workspace.id}
+          source={{ workspaceId: workspace.id }}
+          projectName={workspace.projectDisplayName}
+        />
+      ) : (
+        <WatchtowerOverview
+          {...props}
+          key={workspace.id}
+          workspaceId={workspace.id}
+          projectName={workspace.projectDisplayName}
+        />
+      )}
     </View>
   );
 }
