@@ -934,6 +934,7 @@ export const fr: TranslationResources = {
           title: "Archiver «{{workspaceName}}»?",
           confirm: "Archive",
           cancel: "Annuler",
+          shortcutMessage: "L'archiver archive tous ses agents et ferme ses terminaux.",
           uncommittedChanges: "Modifications non validées",
           uncommittedChangesWithDiff: "Modifications non validées ({{diffStat}})",
           addedLine: "Ligne ajoutée{{count}}",

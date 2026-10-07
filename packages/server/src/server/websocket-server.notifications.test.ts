@@ -363,3 +363,22 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
     expect(pushNotifications.sent).toEqual([]);
   });
 });
+
+describe("VoiceAssistantWebSocketServer shutdown", () => {
+  it("stops the message queue from listening before shutdown closes the agents", () => {
+    const listeners = new Set<unknown>();
+    const { server } = createServer({
+      subscribe: vi.fn((listener: unknown) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      }),
+    });
+    const listening = listeners.size;
+
+    server.prepareForShutdown();
+    server.prepareForShutdown();
+
+    // Closing a running agent reads as a normal run end, which would drain the queue.
+    expect(listeners.size).toBe(listening - 1);
+  });
+});

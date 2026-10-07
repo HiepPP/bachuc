@@ -181,7 +181,7 @@ These are two distinct concepts that used to be conflated:
 | **Tab** (workspace layout) | Per-client | User opens/closes a view   |
 | **Archive** (lifecycle)    | Global     | Explicit lifecycle gesture |
 
-Closing a tab on a **root agent** still archives — the tab is the agent's home, so closing it means "I'm done with this agent." A confirm dialog protects against archiving a running agent by accident.
+Closing a tab on a **root agent** still archives — the tab is the agent's home, so closing it means "I'm done with this agent." A confirm dialog protects against archiving a running agent by accident. The close-tab shortcut (Cmd+W, Ctrl+W, Alt+Shift+W, and the Command Center's close-current-tab action) is the exception: it closes any agent tab layout-only, because the key is easy to press by mistake. The close button and the tab menu's **Close** still archive.
 
 Closing a tab on a **subagent** (any agent with `parentAgentId`) is **layout-only**. The app clears the current client's open-tab label before removing the tab. Another client's open tab remains protected. The agent stays unarchived and stays in its parent's track, so a later parent archive cascades to it when no client still has it open. The user can re-open the tab from the track at any time. Single and bulk tab close apply the same policy.
 
