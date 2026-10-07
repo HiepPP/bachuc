@@ -44,6 +44,9 @@ mac:
   notarize: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
+  # Signing runs one codesign per file, and Electron ships about 220 locale folders. A list
+  # cannot be passed as a -c flag next to --config: each flag merges separately and the last wins.
+  electronLanguages: [en, vi]
   extraResources:
     - from: bin/paseo
       to: bin/paseo
