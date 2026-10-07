@@ -2551,8 +2551,8 @@ function WorkspaceScreenContent({
   );
 
   const handleCloseAgentTab = useCallback(
-    async (input: { tabId: string; agentId: string }) => {
-      const { tabId, agentId } = input;
+    async (input: { tabId: string; agentId: string; fromShortcut?: boolean }) => {
+      const { tabId, agentId, fromShortcut } = input;
       await closeTab(tabId, async () => {
         if (!normalizedServerId) {
           return;
@@ -2560,7 +2560,7 @@ function WorkspaceScreenContent({
 
         const agent =
           useSessionStore.getState().sessions[normalizedServerId]?.agents?.get(agentId) ?? null;
-        let closePolicy = resolveCloseAgentTabPolicy(agent);
+        let closePolicy = resolveCloseAgentTabPolicy(agent, { fromShortcut });
         const isRunning = agent?.status === "running";
 
         if (isRunning && closePolicy.kind === "archive-on-close") {
@@ -2589,7 +2589,7 @@ function WorkspaceScreenContent({
             });
             const latestAgent =
               useSessionStore.getState().sessions[normalizedServerId]?.agents?.get(agentId) ?? null;
-            closePolicy = resolveCloseAgentTabPolicy(latestAgent);
+            closePolicy = resolveCloseAgentTabPolicy(latestAgent, { fromShortcut });
           } catch (error) {
             console.error("[WorkspaceScreen] Failed to close subagent tab", { error, agentId });
             toast.error(t("workspace.tabs.toasts.failedToCloseAgent"));
@@ -2657,7 +2657,7 @@ function WorkspaceScreenContent({
   );
 
   const handleCloseTabById = useCallback(
-    async (tabId: string) => {
+    async (tabId: string, options: { fromShortcut?: boolean } = {}) => {
       const tab = allTabDescriptorsById.get(tabId);
       if (!tab) {
         return;
@@ -2670,7 +2670,11 @@ function WorkspaceScreenContent({
         return;
       }
       if (tab.target.kind === "agent") {
-        await handleCloseAgentTab({ tabId, agentId: tab.target.agentId });
+        await handleCloseAgentTab({
+          tabId,
+          agentId: tab.target.agentId,
+          fromShortcut: options.fromShortcut,
+        });
         return;
       }
       handleClosePassiveTab({ tabId, target: tab.target });
@@ -3146,7 +3150,7 @@ function WorkspaceScreenContent({
           return true;
         case "workspace.tab.close-current":
           if (activeTabId) {
-            void handleCloseTabById(activeTabId);
+            void handleCloseTabById(activeTabId, { fromShortcut: true });
           }
           return true;
         case "workspace.tab.navigate-index": {

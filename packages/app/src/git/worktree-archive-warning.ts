@@ -113,6 +113,22 @@ export function buildWorktreeArchiveConfirmationMessage(
   return reasons.join("\n");
 }
 
+export function buildWorkspaceArchiveConfirmationMessage(
+  input: WorktreeArchiveConfirmationInput & {
+    workspaceKind: string;
+    fromShortcut: boolean;
+    shortcutMessage: string;
+  },
+  labels: WorktreeArchiveWarningLabels = DEFAULT_WORKTREE_ARCHIVE_WARNING_LABELS,
+): string | null {
+  const riskMessage =
+    input.workspaceKind === "worktree"
+      ? buildWorktreeArchiveConfirmationMessage(input, labels)
+      : null;
+  // The shortcut is easy to press by mistake and archives every agent, so it always asks.
+  return riskMessage ?? (input.fromShortcut ? input.shortcutMessage : null);
+}
+
 export async function confirmRiskyWorktreeArchive(
   input: WorktreeArchiveConfirmationInput,
   labels: WorktreeArchiveWarningLabels = DEFAULT_WORKTREE_ARCHIVE_WARNING_LABELS,

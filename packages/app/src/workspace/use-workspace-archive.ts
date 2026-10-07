@@ -3,11 +3,12 @@ import { useTranslation } from "react-i18next";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { useToast } from "@/contexts/toast-context";
 import {
-  confirmRiskyWorktreeArchive,
+  buildWorkspaceArchiveConfirmationMessage,
   DEFAULT_WORKTREE_ARCHIVE_WARNING_LABELS,
   type WorktreeArchiveWarningLabels,
 } from "@/git/worktree-archive-warning";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
+import { confirmDialog } from "@/utils/confirm-dialog";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
 import { archiveWorkspaceOptimistically } from "@/workspace/workspace-archive";
@@ -33,7 +34,7 @@ export interface ArchiveWorkspaceInput {
 }
 
 export interface WorkspaceArchiveController {
-  archive: () => void;
+  archive: (options?: { fromShortcut?: boolean }) => void;
 }
 
 export function useWorkspaceArchive(input: ArchiveWorkspaceInput): WorkspaceArchiveController {
@@ -78,33 +79,47 @@ export function useWorkspaceArchive(input: ArchiveWorkspaceInput): WorkspaceArch
     }
   }, [onArchiveStarted, onSetHiding, serverId, t, toast, workspaceId]);
 
-  const archive = useCallback(() => {
-    void (async () => {
-      if (workspaceKind === "worktree") {
-        const confirmed = await confirmRiskyWorktreeArchive(
+  const archive = useCallback(
+    (options: { fromShortcut?: boolean } = {}) => {
+      void (async () => {
+        const message = buildWorkspaceArchiveConfirmationMessage(
           {
             workspaceName: name,
             isDirty,
             aheadOfOrigin,
             diffStat,
+            workspaceKind,
+            fromShortcut: options.fromShortcut === true,
+            shortcutMessage: t("workspace.git.actions.archiveWarning.shortcutMessage"),
           },
           warningLabels,
         );
-        if (!confirmed) {
-          return;
+        if (message) {
+          const confirmed = await confirmDialog({
+            title: warningLabels.title(name),
+            message,
+            confirmLabel: warningLabels.confirm,
+            cancelLabel: warningLabels.cancel,
+            destructive: true,
+          });
+          if (!confirmed) {
+            return;
+          }
         }
-      }
-      await archiveWorkspaceRecord();
-    })();
-  }, [
-    aheadOfOrigin,
-    archiveWorkspaceRecord,
-    diffStat,
-    isDirty,
-    name,
-    warningLabels,
-    workspaceKind,
-  ]);
+        await archiveWorkspaceRecord();
+      })();
+    },
+    [
+      aheadOfOrigin,
+      archiveWorkspaceRecord,
+      diffStat,
+      isDirty,
+      name,
+      t,
+      warningLabels,
+      workspaceKind,
+    ],
+  );
 
   return {
     archive,

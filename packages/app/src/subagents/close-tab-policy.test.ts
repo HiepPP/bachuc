@@ -14,6 +14,12 @@ describe("resolveCloseAgentTabPolicy", () => {
     });
   });
 
+  it("keeps root agents when a keyboard shortcut closes their tab", () => {
+    expect(resolveCloseAgentTabPolicy({ parentAgentId: null }, { fromShortcut: true })).toEqual({
+      kind: "layout-only",
+    });
+  });
+
   it("preserves the existing archive fallback when the agent is missing", () => {
     expect(resolveCloseAgentTabPolicy(null)).toEqual({ kind: "archive-on-close" });
     expect(resolveCloseAgentTabPolicy(undefined)).toEqual({ kind: "archive-on-close" });
