@@ -22,7 +22,7 @@ RESOURCES_DIR=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)
 
 MACOS_DIR="${RESOURCES_DIR}/../MacOS"
 # The helper is named after productName ("Bachuc" for a release build, else "Bachuc Dev").
-MACOS_HELPER_EXECUTABLE="${RESOURCES_DIR}/../Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper"
+MACOS_HELPER_EXECUTABLE="${RESOURCES_DIR}/../Frameworks/Bachuc Helper.app/Contents/MacOS/Bachuc Helper"
 for HELPER_APP in "${RESOURCES_DIR}/../Frameworks/"*" Helper.app"; do
   HELPER_NAME=$(basename "${HELPER_APP}" .app)
   if [ -x "${HELPER_APP}/Contents/MacOS/${HELPER_NAME}" ]; then

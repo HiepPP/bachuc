@@ -98,3 +98,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the old name `Paseo Fork` stays on purpose in `OLD_APP` (the Trash move of the old app) and `SIGN_IDENTITY` (the `Paseo Fork Local` certificate). The desktop log folder follows `app.name`, so release logs go to `~/Library/Logs/Bachuc/`.
 - Source: `scripts/paseo-release.sh`; `packages/desktop/src/main.ts`; TASK-003 and TASK-008 outcomes.
 - Use next time: grep for `Paseo Fork\.app` to find stale install paths, not for `Paseo Fork`.
+
+### 2026-10-08 - Autorun 20261007-bachuc-rebrand, TASK-009
+
+- Learned: TASK-009 replaced the earlier advice to keep `executableName: Paseo`. The macOS build is now `Bachuc.app` with `Contents/MacOS/Bachuc`, through `mac.executableName`. The top-level `executableName: Paseo` stays, because electron-builder also names the Linux binary and the Windows `.exe` after it.
+- Source: `packages/desktop/electron-builder.yml`; `node_modules/app-builder-lib/out/appInfo.js`; TASK-009 outcome.
+- Use next time: `IS_RELEASE_APP` in `packages/desktop/src/main.ts` must check the install path `/Applications/Bachuc.app/`, because the build output has the same bundle name. The macOS consumers of the executable name use `Bachuc`; the Linux and Windows consumers use `Paseo`.

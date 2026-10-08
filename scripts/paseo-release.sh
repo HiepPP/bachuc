@@ -19,11 +19,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RELEASE_HOME="$HOME/.paseo"
 RELEASE_PORT=6767
 RELEASE_LISTEN="127.0.0.1:$RELEASE_PORT"
-# packages/desktop/src/main.ts gives the release home and port to this bundle name only.
+# packages/desktop/src/main.ts gives the release home and port to this install path only.
 APP="/Applications/Bachuc.app"
 # The release app before the Bachuc rename. The first install replaces it and moves it to the Trash.
 OLD_APP="/Applications/Paseo Fork.app"
-BUILD_APP="$REPO_ROOT/packages/desktop/release/mac-arm64/Paseo.app"
+BUILD_APP="$REPO_ROOT/packages/desktop/release/mac-arm64/Bachuc.app"
 BUILD_BUNDLE_ID="io.github.hieppp.bachuc"
 # Other builds are "Bachuc Dev". main.ts names the release app Bachuc, and the daemon finds its
 # helper app by that name.
