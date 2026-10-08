@@ -62,7 +62,7 @@ PASEO_DEV_RESET_HOME=1 npm run dev            # clear and reseed the derived wor
 
 ### Daemon endpoints
 
-- Release daemon, launched by the installed app (`/Applications/Paseo Fork.app`): `localhost:6767`.
+- Release daemon, launched by the installed app (`/Applications/Bachuc.app`): `localhost:6767`.
 - A build opened in place from `packages/desktop/release`: `localhost:6770`, home `~/.paseo-dev` (set in `packages/desktop/src/main.ts`).
 - Root checkout dev daemon: `localhost:6768`.
 - Root checkout Expo: `http://localhost:8081`.
@@ -73,7 +73,7 @@ In Paseo-managed worktree services, use the injected service environment rather 
 
 ### Installing a release
 
-`scripts/paseo-release.sh` builds a release from this checkout, installs it as `/Applications/Paseo Fork.app`, and restarts the release daemon (`~/.paseo`, `6767`) on it. Stock, the upstream app, is no longer used.
+`scripts/paseo-release.sh` builds a release from this checkout, installs it as `/Applications/Bachuc.app`, links `~/.local/bin/paseo` to its CLI, and restarts the release daemon (`~/.paseo`, `6767`) on it. Stock, the upstream app, is no longer used.
 
 ```bash
 scripts/paseo-release.sh             # build, install, start
@@ -85,7 +85,7 @@ scripts/paseo-release.sh --skip-build  # install the last build again, no new bu
 - Run it from Terminal.app. It stops the daemon that owns every Paseo agent and terminal, so it refuses to run inside one. It also refuses while an agent is mid-turn unless you pass `--force`; it checks before the build and again after it.
 - The build is copied out of `packages/desktop/release` before anything stops, and the previous app goes to the Trash. Nothing in `~/.paseo` is moved or deleted.
 - The release loads plugins from `hiep-plugins/plugins` in this checkout: the script registers each one as a directory install in `~/.paseo/config.json`, keeps the enabled flag of a plugin already listed, and waits until every enabled one runs. A plugin edit reaches release after `PASEO_HOME=~/.paseo paseo plugin reload <plugin-id>`, and unfinished plugin work in the checkout reaches it too. Plugins are not packaged into the app: the daemon compiles a plugin when it loads it and resolves its type imports (`@getpaseo/client`, `@getpaseo/protocol`, React types), which only an installed checkout has.
-- `main.ts` gives `~/.paseo`, port `6767`, and the `Paseo` userData folder only to a bundle named `Paseo Fork.app`. A build under any other name keeps `~/.paseo-dev` and `6770`, so a build opened in place from `packages/desktop/release` runs apart from release.
+- `main.ts` gives `~/.paseo`, port `6767`, and the `Paseo` userData folder only to a bundle named `Bachuc.app`. A build under any other name keeps `~/.paseo-dev` and `6770`, so a build opened in place from `packages/desktop/release` runs apart from release.
 - An install that fails after the daemon stopped rolls back by itself: it puts the previous app back and starts it. The output names the failed step. When the rollback fails too, the last line names what to run. `PASEO_RELEASE_FAIL_STEP="8" scripts/paseo-release.sh --dry-run` rehearses a failure at step 8.
 - From the install on, a real run appends its output, with every command it ran, to `~/Library/Logs/Paseo/release-install.log`; the terminal only mirrors that file. Closing the terminal mid-install triggers the same rollback, and the log shows how it ended.
 - The daemon gets 120 seconds to close its agents (`STOP_TIMEOUT`). The install does not force-kill it: past that, the install fails and rolls back.

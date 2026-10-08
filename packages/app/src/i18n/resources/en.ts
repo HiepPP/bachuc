@@ -2259,6 +2259,7 @@ export const en = {
       title: "About",
       appVersion: "App version",
       whatsNewHint: "Release notes for every version",
+      basedOn: "Based on {{upstream}}",
       thisDevice: "This device",
       connectedHosts: "Connected hosts",
       offline: "Offline",

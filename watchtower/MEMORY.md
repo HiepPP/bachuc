@@ -8,8 +8,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 
 ## Core Intent
 
-- This checkout is the user's own Paseo fork. The user's plugins live in `hiep-plugins/plugins/`.
-- Two instances exist: release, this repo built and installed as the daily app (`PASEO_HOME=~/.paseo`, port 6767), and live, run from source (port 6768). Stock Paseo from the upstream GitHub is no longer used. Plugins install into release and live.
+- This checkout is the user's own Paseo fork, branded Bachuc. Internal names stay `paseo` per [ADR-0004](watchtower/decisions/ADR-0004-display-brand-over-full-rename.md). The user's plugins live in `hiep-plugins/plugins/`.
+- Two instances exist: release, this repo built and installed as the daily app `/Applications/Bachuc.app` (`PASEO_HOME=~/.paseo`, port 6767), and live, run from source (port 6768). Stock Paseo from the upstream GitHub is no longer used. Plugins install into release and live.
 
 ## Planning Rules
 
@@ -89,3 +89,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: `magick` on this machine has no SVG delegate, because `rsvg-convert` is missing, and it writes `.ico` entries as BMP only. `sharp` in `node_modules` bundles librsvg.
 - Source: `magick -list delegate`; TASK-004 outcome.
 - Use next time: render SVG to PNG with `sharp`, give the SVG root a `width` and `height` instead of a density, and pack PNG files into `.ico` with a short script.
+- Learned: CLI tests import `@getpaseo/server` from its `dist`, so after a server change they test the old code and can pass falsely.
+- Source: `packages/server/package.json` exports; `packages/cli/src/commands/daemon/pair.test.ts`; TASK-005 outcome.
+- Use next time: run `npm run build:server` before CLI tests that touch server code.
+- Learned: desktop updates are off through two constants, `APP_UPDATES_ENABLED` in the desktop package and `DESKTOP_APP_UPDATES_ENABLED` in the app. An upstream merge that restores the `publish` block in `electron-builder.yml` does not turn updates on again.
+- Source: `packages/desktop/src/features/app-updates-enabled.ts`; `packages/app/src/desktop/updates/desktop-updates.ts`; TASK-006 outcome.
+- Use next time: after an upstream merge that touches the updater or the About rows, check that both constants are still `false` and still read by `isPackaged` and `shouldShowDesktopUpdateSection`.
+- Learned: the old name `Paseo Fork` stays on purpose in `OLD_APP` (the Trash move of the old app) and `SIGN_IDENTITY` (the `Paseo Fork Local` certificate). The desktop log folder follows `app.name`, so release logs go to `~/Library/Logs/Bachuc/`.
+- Source: `scripts/paseo-release.sh`; `packages/desktop/src/main.ts`; TASK-003 and TASK-008 outcomes.
+- Use next time: grep for `Paseo Fork\.app` to find stale install paths, not for `Paseo Fork`.

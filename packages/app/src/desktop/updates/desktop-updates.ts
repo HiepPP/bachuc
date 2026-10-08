@@ -61,8 +61,12 @@ function toNumberOr(defaultValue: number, value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : defaultValue;
 }
 
+// Bachuc gets new versions only from scripts/paseo-release.sh, so the app offers no update
+// and no upstream download.
+export const DESKTOP_APP_UPDATES_ENABLED = false;
+
 export function shouldShowDesktopUpdateSection(): boolean {
-  return isWeb && isElectronRuntime();
+  return DESKTOP_APP_UPDATES_ENABLED && isWeb && isElectronRuntime();
 }
 
 export function parseLocalDaemonVersionResult(raw: unknown): LocalDaemonVersionResult {
