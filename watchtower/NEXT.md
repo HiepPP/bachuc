@@ -41,7 +41,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: every TASK is DONE. The next autorun iteration runs Finish and updates draft PR #38. The owner answered Q-005, Q-006, and Q-007 on 2026-10-08.
+- Next action: the autorun finished on 2026-10-08 and updated draft review PR #38 to `main`. The owner reviews `bachuc-rebrand`, runs the live checks, answers Q-008 if the default is wrong, and merges PR #38. Then archive the plan.
 - TASK-012 is DONE. The hub docs end the origin order with the `HUB_ORIGIN_REQUIRED` error. It also fixed the origin list in [public-docs/hub/configuration/index.md](public-docs/hub/configuration/index.md), outside its spec `Files:`. The hosted Hub product links stay. TASK-001 is DONE; the owner still checks the mark in [brand/bachuc/mark.svg](brand/bachuc/mark.svg) at 16 px and 1024 px.
 - TASK-011 is DONE. The nix module turns relay off by default, and mode `remote` with `relay.host` is the only relay path. The nix parse check is UNVERIFIED, because nix is not installed here. The spec grep matches `self-hosted` in two daemon descriptions; the exact check for mode `"hosted"` passes.
 - TASK-010 is DONE. The help menu e2e spec expects `Bachuc` and no removed item. Its three help menu tests are `test.fixme`, because the fork hides the Help button through `SHOW_FOOTER_EXTRAS` (Q-008, DEFAULTED). The spec passes with 1 test run and 3 skipped.

@@ -1,10 +1,10 @@
 # Run
 
 - Runner: paseo
-- Schedule: `watchtower-20261007-bachuc-rebrand-2` (second pass, every 5 minutes). The first pass used ed7cdcc5, now deleted.
+- Schedule: `watchtower-20261007-bachuc-rebrand-2` (3bcd9288, second pass, every 5 minutes), deleted at Finish. The first pass used ed7cdcc5, now deleted.
 - Profile: Opus, copied as `claude/claude-opus-5-5`, mode `bypassPermissions`, thinking `xhigh`
 - Started: 2026-10-08 09:59
-- Finished: -
+- Finished: 2026-10-08 12:31. Draft review PR #38 to `main` lists all 12 TASKs. No TASK is blocked, and no question is open.
 - First pass: finished 2026-10-08 11:50 with draft review PR #38 to `main`. The second pass started 2026-10-08 after the owner answered Q-005 to Q-007 and added TASK-009 to TASK-012. Finish reuses draft PR #38.
 
 ## Log
@@ -25,3 +25,4 @@
 | 12:10 | 12:20 | TASK-010 | DONE    | PR to `bachuc-rebrand`; help menu tests fixme, Q-008 defaulted                     |
 | 12:20 | 12:25 | TASK-011 | DONE    | PR to `bachuc-rebrand`; nix parse unverified, nix not installed                    |
 | 12:25 | 12:30 | TASK-012 | DONE    | PR to `bachuc-rebrand`; also fixed the hub configuration origin list               |
+| 12:30 | 12:35 | Finish   | DONE    | second pass: updated draft review PR #38; Q-008 stays DEFAULTED                    |
