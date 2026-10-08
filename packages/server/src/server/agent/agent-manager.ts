@@ -3406,10 +3406,11 @@ export class AgentManager {
         }
         finished = true;
         cleanup();
+        const status = currentStatus;
         void this.getLastAssistantMessage(agentId)
           .then((lastMessage) => {
             resolvePromise({
-              status: currentStatus,
+              status,
               permission,
               lastMessage,
             });
@@ -3428,10 +3429,27 @@ export class AgentManager {
         options.signal.addEventListener("abort", abortHandler, { once: true });
       }
 
-      // Bug #3 Fix: Now subscribe with cleanup handlers already in place
-      // This prevents race condition if callback fires synchronously with replayState: true
+      // A run accepted but not started yet still owns the agent, so the idle state replayed
+      // below is not its finish. If it settles without ever starting, that settle is the finish.
+      const runIsStarting = () =>
+        pendingForegroundRun !== null &&
+        pendingForegroundRun.start.status === "pending" &&
+        !pendingForegroundRun.settled;
+      if (runIsStarting()) {
+        void pendingForegroundRun?.settledPromise.then(() => {
+          if (!hasStarted) {
+            currentStatus = this.agents.get(agentId)?.lifecycle ?? currentStatus;
+            finish(null);
+          }
+          return undefined;
+        });
+      }
+
+      // The replay below calls back synchronously, before subscribe returns an unsubscribe,
+      // so a finish during it is cleaned up right after subscribe.
       unsubscribe = this.subscribe(
         (event) => {
+          if (finished) return;
           if (event.type === "agent_state") {
             currentStatus = event.agent.lifecycle;
             const pending = this.peekPendingPermission(event.agent);
@@ -3441,6 +3459,9 @@ export class AgentManager {
             }
             if (isAgentBusy(event.agent.lifecycle)) {
               hasStarted = true;
+              return;
+            }
+            if (!hasStarted && runIsStarting()) {
               return;
             }
             if (!waitForActive || hasStarted) {
@@ -3472,6 +3493,9 @@ export class AgentManager {
         },
         { agentId, replayState: true },
       );
+      if (finished) {
+        cleanup();
+      }
     });
   }
 

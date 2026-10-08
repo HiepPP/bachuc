@@ -21,6 +21,7 @@ import { getOpenAgentTabLabel, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/
 import { formatSystemNotificationPrompt, startAgentRun } from "./agent-prompt.js";
 import { StaleProviderSessionError } from "./stale-provider-session-error.js";
 import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent-loading.js";
+import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import type { StoredAgentRecord } from "./agent-storage.js";
 import type {
   AgentTimelineFetchOptions,
@@ -1141,8 +1142,20 @@ test("orders a concurrent replacement after a pending accepted steer", async () 
       }
     })();
     await consumeInitial;
-    await vi.waitFor(() => expect(session.startCount).toBe(2));
+    // The replacement's prompt is recorded after its startTurn resolves, so wait for the row
+    // itself rather than for startTurn to be called.
+    await vi.waitFor(() =>
+      expect(
+        manager
+          .fetchTimeline(agent.id, { limit: 0 })
+          .rows.some(
+            (row) =>
+              row.item.type === "user_message" && row.item.clientMessageId === "replacement-client",
+          ),
+      ).toBe(true),
+    );
 
+    expect(session.startCount).toBe(2);
     expect(session.interruptCount).toBe(1);
     expect(
       manager
@@ -6420,6 +6433,33 @@ test("waitForAgentEvent does not resolve idle until foreground turn is finalized
   expect(waited.status).toBe("idle");
 
   await consumePromise;
+});
+
+test("waitForAgentEvent on a dispatched but unstarted run waits for its turn and unsubscribes", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-wait-unstarted-"));
+  const manager = new AgentManager({ clients: createTestAgentClients(), logger });
+  let agentId: string | null = null;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+    // startAgentRun returns once the run is accepted; its turn has not started yet, so the
+    // idle state the wait replays on subscribe is not the turn's finish.
+    await startAgentRun(manager, agent.id, "hello", logger, {});
+    const subscriptionsBeforeWait = manager.subscriptionCount();
+
+    const finished = await manager.waitForAgentEvent(agent.id);
+
+    expect(finished.status).toBe("idle");
+    expect(manager.getTimeline(agent.id).some((item) => item.type === "assistant_message")).toBe(
+      true,
+    );
+    expect(manager.subscriptionCount()).toBeLessThanOrEqual(subscriptionsBeforeWait);
+  } finally {
+    if (agentId) await manager.closeAgent(agentId).catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
 });
 
 test("waitForAgentRunStart resolves while a foreground run is still only pending", async () => {
