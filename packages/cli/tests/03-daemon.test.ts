@@ -217,8 +217,10 @@ try {
     config.daemon = {
       ...config.daemon,
       listen,
-      relay: { ...config.daemon?.relay, enabled: false },
+      // The fork ships no upstream relay default, so live relay state needs an endpoint.
+      relay: { ...config.daemon?.relay, enabled: false, endpoint: "relay.example.invalid:443" },
     };
+    config.app = { ...config.app, baseUrl: "https://app.example.invalid" };
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
     // A supervised daemon owns and heartbeats paseo.pid. Launch the worker
     // directly so this fixture naturally has a reachable daemon without a PID file.

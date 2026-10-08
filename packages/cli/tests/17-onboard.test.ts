@@ -27,6 +27,24 @@ try {
   ]);
   assert.strictEqual(configured.exitCode, 0, configured.stderr);
 
+  // The fork ships no upstream relay or app defaults, so relay pairing needs both set.
+  for (const [path, value] of [
+    ["daemon.relay.endpoint", "relay.example.invalid:443"],
+    ["app.baseUrl", "https://app.example.invalid"],
+  ]) {
+    const set = await runLocalPaseo([
+      "daemon",
+      "config",
+      "set",
+      path,
+      value,
+      "--string",
+      "--home",
+      paseoHome,
+    ]);
+    assert.strictEqual(set.exitCode, 0, set.stderr);
+  }
+
   console.log("Test 1: `paseo` runs blocking onboarding without implicit relay pairing");
   const onboard = await $`PASEO_HOME=${paseoHome} PASEO_PAIRING_QR=0 npx paseo`.nothrow();
 
