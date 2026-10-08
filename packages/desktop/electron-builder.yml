@@ -33,10 +33,6 @@ extraResources:
     to: app-dist
   - from: assets/editor-targets
     to: editor-target-icons
-publish:
-  provider: github
-  owner: getpaseo
-  repo: paseo
 mac:
   artifactName: "Bachuc-${version}-${arch}.${ext}"
   minimumSystemVersion: "13.0.0"

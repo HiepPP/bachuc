@@ -22,6 +22,7 @@ import {
   type AppReleaseChannel,
   type AppUpdateCheckIntent,
 } from "./app-update-rollout.js";
+import { APP_UPDATES_ENABLED } from "./app-updates-enabled.js";
 
 export {
   bucketFromStagingUserId,
@@ -224,7 +225,8 @@ class ElectronAppUpdateRuntime implements AppUpdateRuntime {
 
 const appUpdateService = createAppUpdateService({
   runtime: new ElectronAppUpdateRuntime(),
-  isPackaged: () => app.isPackaged,
+  // With updates off, the service treats the app as unpackaged and never touches electron-updater.
+  isPackaged: () => APP_UPDATES_ENABLED && app.isPackaged,
   now: () => Date.now(),
   bucket: async () => bucketFromStagingUserId(await getStagingUserId()),
   reportCheckError: (error) => {
