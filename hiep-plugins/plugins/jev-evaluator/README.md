@@ -17,7 +17,7 @@ Paseo uses its own Node executable, including the Electron helper on desktop.
 Run `npm run smoke` for a real, billable evaluation of synthetic state through MCP.
 
 ```sh
-cd hiep-plugins/plugins/jev-evaluator   # from the HiepPP/paseo checkout
+cd hiep-plugins/plugins/jev-evaluator   # from the HiepPP/bachuc checkout
 npm ci
 npm run typecheck
 npm run lint

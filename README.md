@@ -1,217 +1,99 @@
 > Bachuc is a personal fork of [Paseo](https://github.com/getpaseo/paseo) by Mohamed Boudra, under the Apache License 2.0. See [NOTICE](NOTICE).
 
 <p align="center">
-  <img src="packages/website/public/logo.svg" width="64" height="64" alt="Paseo logo">
+  <img src="brand/bachuc/mark-1024.png" width="64" height="64" alt="Bachuc logo">
 </p>
 
-<h1 align="center">Paseo</h1>
+<h1 align="center">Bachuc</h1>
 
-> **About this repository:** [HiepPP/paseo](https://github.com/HiepPP/paseo) is an independently maintained fork of [getpaseo/paseo](https://github.com/getpaseo/paseo).
+> **About this repository:** [HiepPP/bachuc](https://github.com/HiepPP/bachuc) is an independently maintained fork of [getpaseo/paseo](https://github.com/getpaseo/paseo).
 > Paseo was created by Mohamed Boudra and developed with its contributors.
 > This fork is not an official Paseo release and does not imply upstream endorsement.
 > The upstream [Apache-2.0 license and copyright notice](LICENSE) are preserved; third-party components retain their respective licenses.
-> HiepPP modified this README to add this attribution notice.
+> HiepPP rewrote this README for Bachuc and kept this attribution notice.
 
-<p align="center">
-  <a href="README.md">English</a> ·
-  <a href="README.zh-CN.md">简体中文</a> ·
-  <a href="README.ja.md">日本語</a> ·
-  <a href="README.ko.md">한국어</a>
-</p>
+Bachuc is Paseo for one user: one interface for Claude Code, Codex, Copilot, OpenCode, and Pi agents, running on your own machine, plus a set of host changes and plugins that only this fork has. The name comes from Ba Chúc, a place in An Giang, Vietnam.
 
-<p align="center">
-  <a href="https://github.com/getpaseo/paseo/stargazers">
-    <img src="https://img.shields.io/github/stars/getpaseo/paseo?style=flat&logo=github" alt="GitHub stars">
-  </a>
-  <a href="https://github.com/getpaseo/paseo/releases">
-    <img src="https://img.shields.io/github/v/release/getpaseo/paseo?style=flat&logo=github" alt="GitHub release">
-  </a>
-  <a href="https://x.com/moboudra">
-    <img src="https://img.shields.io/badge/%40moboudra-555?logo=x" alt="X">
-  </a>
-  <a href="https://discord.gg/jz8T2uahpH">
-    <img src="https://img.shields.io/badge/Discord-555?logo=discord" alt="Discord">
-  </a>
-  <a href="https://www.reddit.com/r/PaseoAI/">
-    <img src="https://img.shields.io/badge/Reddit-555?logo=reddit" alt="Reddit">
-  </a>
-</p>
+Bachuc ships as a macOS desktop app and the web UI that its daemon serves. Everything Paseo does still works; read the [Paseo docs](https://paseo.sh/docs) for the shared features.
 
-<p align="center">One interface for Claude Code, Codex, Copilot, OpenCode, and Pi agents.</p>
+## What only Bachuc has
 
-<p align="center">
-  <img src="https://paseo.sh/hero-mockup.png" alt="Paseo app screenshot" width="100%">
-</p>
+Host changes in `packages/*`:
 
-<p align="center">
-  <img src="https://paseo.sh/mobile-mockup.png" alt="Paseo mobile app" width="100%">
-</p>
-
-Run agents in parallel on your own machines. Ship from your phone or your desk.
-
-- **Self-hosted:** Agents run on your machine with your full dev environment. Use your tools, your configs, and your skills.
-- **Multi-provider:** Claude Code, Codex, Copilot, OpenCode, and Pi through the same interface. Pick the right model for each job.
-- **Voice control:** Dictate tasks or talk through problems in voice mode. Hands-free when you need it.
-- **Cross-device:** iOS, Android, desktop, web, and CLI. Start work at your desk, check in from your phone, script it from the terminal.
-- **Privacy-first:** Paseo doesn't have any telemetry, tracking, or forced log-ins.
+- **Plugin host APIs.** Hooks before `agent.prompt` and `agent.permission`, daemon-served plugin MCP tools, composer pills, sidebar items and actions, workspace header subtitles, navigation, a composer stop button contribution, and calls to a plugin on another connected host. See [docs/plugins.md](docs/plugins.md).
+- **Active machine switch.** The sidebar, aggregated screens, creation defaults, and plugin pages follow one chosen machine.
+- **Orchestration from T3 Code.** Stop cascades to subagents, child finish notices are combined, and the daemon owns the message queue. Host APIs for selection actions, quote reveal, and sandboxed HTML frames back the `pr-watch`, `assistant-cite`, and `html-reply` plugins.
+- **Runtime close without archive.** Close an agent's runtime and keep the thread, by hand or for idle threads.
+- **Composer and app changes.** Composer pills dock in the toolbar, typing anywhere in a thread writes in the composer, and the sidebar footer and badges are quieter.
+- **No upstream services.** No default relay, hosted web app, CORS origin, or Hub origin, and no auto-update from upstream releases. See [ADR-0005](watchtower/decisions/ADR-0005-upstream-services-off-over-self-hosting.md).
+- **Bachuc brand.** The app name, icons, and desktop identity say Bachuc. Internal names, such as the `paseo` CLI and `~/.paseo`, stay `paseo`. See [ADR-0004](watchtower/decisions/ADR-0004-display-brand-over-full-rename.md).
 
 ## Plugins
 
-Add themes, workspace panels, commands, settings screens, and coding-agent providers with trusted
-TypeScript plugins. Install from npm, Git, or a local directory with `paseo plugin install <source>`.
+The plugins live in [hiep-plugins/plugins](hiep-plugins/plugins). Read [hiep-plugins/README.md](hiep-plugins/README.md) and [hiep-plugins/AGENTS.md](hiep-plugins/AGENTS.md) before you change one.
 
-Start with the [plugin quickstart](https://paseo.sh/docs/plugins). Plugins run with access to your daemon
-machine and inside connected clients; install only code you trust.
+| Plugin                  | What it does                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------- |
+| `board`                 | Shows conversations side by side by project, with subagent clusters, stars, and UI scaling. |
+| `workspace-spaces`      | Puts projects in numbered Spaces in the desktop sidebar.                                    |
+| `watchtower-board`      | Shows Watchtower plans and tasks, and attaches a task brief to the next message.            |
+| `next-prompt-actions`   | Lets you edit or send the suggested next prompts in place.                                  |
+| `thread-branch`         | Shows the current Git branch beside the composer, plus a PR pill.                           |
+| `thread-context-attach` | Attaches another thread's last reply to your next message.                                  |
+| `jev-orchestrator`      | Routes one task to a chosen profile and effort level, with optional scoped delegation.      |
+| `jev-evaluator`         | Gives Codex and Claude agents an MCP tool for typed Jev evaluations.                        |
+| `jev-permission-gate`   | Answers shell permission requests with rules and Jev, and leaves uncertain ones to you.     |
+| `workspace-preflight`   | Checks workspace prerequisites, ports, and health endpoints.                                |
+| `pr-watch`              | Wakes an agent when its PR checks finish, someone comments, or a conflict appears.          |
+| `assistant-cite`        | Cites selected assistant text as a composer chip and jumps back to the quote.               |
+| `html-reply`            | Lets an agent publish a sandboxed HTML page that renders inline in its thread.              |
+| `edit-diffs`            | Shows edit tool calls as diffs with line numbers; turn it off per thread.                   |
+| `prompt-translate`      | Shows English translations under Vietnamese prompts and rewrites drafts.                    |
+| `skill-pins`            | Pins skills in the composer, so each turn tells the agent to load them.                     |
+| `thread-janitor`        | Closes the runtimes of threads idle for more than 24 hours and archives empty workspaces.   |
+| `idle-runtime-closer`   | Closes the runtimes of threads idle for more than 30 minutes.                               |
+| `loop-verify`           | Prototype. Retries a goal in fresh child agents until a verify command passes.              |
+| `plugins-nav`           | Adds a sidebar row that opens the Plugins settings page.                                    |
+| `stop-orb`              | Replaces the composer stop button with an animated orb on desktop.                          |
+| `claude-look`           | Adds a Claude Light theme, a 768 px chat column, and taller reply lines.                    |
+| `vscode-warm-light`     | Adds a warm light theme.                                                                    |
 
-## Getting Started
+## Install
 
-Paseo runs a local server called the daemon that manages your coding agents. Clients like the desktop app, mobile app, web app, and CLI connect to it.
+Bachuc has no download. You build it from this checkout on macOS:
 
-### Prerequisites
+1. Install at least one agent CLI with your credentials: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [GitHub Copilot](https://github.com/features/copilot/cli/), [OpenCode](https://github.com/anomalyco/opencode), or [Pi](https://pi.dev).
+2. Create the self-signed code-signing identity `Paseo Fork Local` in your login keychain.
+3. Open Terminal.app, outside Bachuc, and run `scripts/paseo-release.sh`. It builds the app, installs it as `/Applications/Bachuc.app`, links `~/.local/bin/paseo`, and restarts the daemon on `127.0.0.1:6767`.
+4. Keep the checkout in place. The daemon loads the plugins from `hiep-plugins/plugins`.
 
-You need at least one agent CLI installed and configured with your credentials:
-
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- [Codex](https://github.com/openai/codex)
-- [GitHub Copilot](https://github.com/features/copilot/cli/)
-- [OpenCode](https://github.com/anomalyco/opencode)
-- [Pi](https://pi.dev)
-
-### Desktop app (recommended)
-
-Download it from [paseo.sh/download](https://paseo.sh/download) or the [GitHub releases page](https://github.com/getpaseo/paseo/releases). Open the app and the daemon starts automatically. Nothing else to install.
-
-To connect from your phone, open **Settings → your host → Pair Device**.
-
-### CLI / headless
-
-Install the CLI and start Paseo:
-
-```bash
-npm install -g @getpaseo/cli
-paseo
-```
-
-Paseo starts locally, then asks whether to enable the end-to-end encrypted relay for device pairing. If you decline, connect directly over TCP, Tailscale, or another VPN. This path is useful for servers and remote machines.
-
-For full setup and configuration, see:
-
-- [Docs](https://paseo.sh/docs)
-- [Connectivity guide](https://paseo.sh/docs/connectivity)
-- [Configuration reference](https://paseo.sh/docs/configuration)
-
-### Docker
-
-Run the Paseo daemon and self-hosted web UI in Docker:
-
-```bash
-docker run -d --name paseo \
-  -p 6767:6767 \
-  -e PASEO_PASSWORD=change-me \
-  -v "$PWD/paseo-home:/home/paseo" \
-  -v "$PWD:/workspace" \
-  ghcr.io/getpaseo/paseo:latest
-```
-
-Open `http://localhost:6767` after it starts. Extend the base image with the agent CLIs you use, then provide credentials through environment variables or the persistent `/home/paseo` volume. See the [Docker documentation](docs/docker.md) for full setup details.
+The script stops the daemon that runs every agent, so it refuses to run inside Bachuc. `--dry-run` shows the steps first. See [Installing a release](docs/development.md#installing-a-release).
 
 ## CLI
 
-Everything you can do in the app, you can do from the terminal.
+The CLI keeps the name `paseo`:
 
 ```bash
-paseo run --provider claude/opus-4.6 "implement user authentication"
-paseo run --provider codex/gpt-5.5 --worktree feature-x "implement feature X"
-
+paseo run --provider codex/gpt-5.5 "implement user authentication"
 paseo ls                           # list running agents
-paseo attach abc123                # stream live output
 paseo send abc123 "also add tests" # follow-up task
-
-# run on a remote daemon; --cwd is a path on that host
-paseo run --host workstation.local:6767 --cwd /workspace "run the full test suite"
 ```
 
-See the [full CLI reference](https://paseo.sh/docs/cli) for more.
-
-## TypeScript SDK
-
-Build issue integrations, dashboards, and orchestration services with `@getpaseo/client`:
-
-```ts
-import { createPaseoClient } from "@getpaseo/client";
-
-const client = createPaseoClient({ url: "ws://127.0.0.1:6767/ws" });
-await client.connect();
-
-const agent = await client.agents.create({
-  config: { provider: "codex/gpt-5.5" },
-  cwd: "/Users/me/dev/storefront",
-  prompt: "Review the current diff and name the riskiest change.",
-});
-
-const result = await agent.waitForFinish();
-console.log(result.lastMessage);
-
-await client.close();
-```
-
-See the [SDK quickstart](https://paseo.sh/docs/sdk/quickstart), [recipes](https://paseo.sh/docs/sdk/recipes), and [API reference](https://paseo.sh/docs/sdk/reference).
-
-## Skills
-
-Skills teach your agent to use Paseo to orchestrate other agents.
-
-```bash
-npx skills add getpaseo/paseo
-```
-
-Then use them in any agent conversation:
-
-- `/paseo-handoff` — hand off work between agents. I use this to plan with Claude and then handoff to Codex to implement.
-- `/paseo-advisor` — spin up a single agent as an advisor for a second opinion, without delegating the work itself.
-- `/paseo-committee` — form a committee of two contrasting agents to step back, do root cause analysis, and produce a plan.
+See the [Paseo CLI reference](https://paseo.sh/docs/cli).
 
 ## Development
 
-Quick monorepo package map:
-
-- `packages/server`: Paseo daemon (agent process orchestration, WebSocket API, MCP server)
-- `packages/app`: Expo client (iOS, Android, web)
-- `packages/cli`: `paseo` CLI for daemon and agent workflows
-- `packages/desktop`: Electron desktop app
-- `packages/relay`: Relay transport and encryption used by the daemon and clients
-- `packages/website`: Marketing site and documentation (`paseo.sh`)
-
-Common commands:
+Two instances run side by side: **release** (the installed app, port 6767) and **live** (this checkout from source, port 6768). Test changes on live:
 
 ```bash
-# run all local dev services
-npm run dev
-
-# run individual surfaces
-npm run dev:server
-npm run dev:app
-npm run dev:desktop
-npm run dev:website
-
-# build the server stack
-npm run build:server
-
-# repo-wide checks
+npm run dev          # live daemon
+npm run dev:desktop  # live desktop app
 npm run typecheck
+npm run lint
 ```
 
-## Sponsors
-
-Paseo is built by one person and funded by the people who use it. Support the work on [GitHub Sponsors](https://github.com/sponsors/boudra). Companies can [sponsor Paseo](https://paseo.sh/sponsor#spot) monthly and have their logo shown here and on the paseo.sh homepage.
-
-<!-- Sponsor logos go here, in the same order as packages/website/src/data/sponsors.ts -->
-
-## Related projects
-
-- [getpaseo/paseo-relay](https://github.com/getpaseo/paseo-relay) — official distributed relay, written in Elixir
-- [paseo-vscode](https://marketplace.visualstudio.com/items?itemName=hinnes.paseo-vscode) — VS Code extension
+Start with [CLAUDE.md](CLAUDE.md) and [docs/development.md](docs/development.md). Durable decisions live in [watchtower/DECISIONS.md](watchtower/DECISIONS.md).
 
 ## License
 
-Apache-2.0
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
