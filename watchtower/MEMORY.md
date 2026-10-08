@@ -29,6 +29,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 
 ## Avoid
 
+- Avoid editing "Paseo" to "Bachuc" in the locale files while the fork merges upstream. Reason: [ADR-0006](watchtower/decisions/ADR-0006-brand-transform-over-locale-edits.md).
+- Avoid the macOS executable name `Paseo` and a top-level `executableName` change while Linux and Windows launchers expect `Paseo`. Reason: [ADR-0007](watchtower/decisions/ADR-0007-bachuc-executable-over-paseo.md).
+- Avoid a new desktop bundle ID, such as `vn.bachuc.desktop`, while the owner does not own a Bachuc domain. Reason: [ADR-0008](watchtower/decisions/ADR-0008-github-bundle-id-over-bachuc-domain.md).
 - Avoid running sidebar host filters together with an active host while one host is active. Reason: [ADR-0001](watchtower/decisions/ADR-0001-active-host-over-host-filters.md).
 - Avoid an offline-only CSP for HTML reply frames while the owner wants agent pages that load CDN libraries and call APIs. Reason: [ADR-0002](watchtower/decisions/ADR-0002-networked-html-replies-over-offline-only.md).
 - Avoid renaming internal identifiers (the `paseo` CLI, `PASEO_*` env vars, `~/.paseo`, the `@getpaseo/*` scope, the plugin API, and `paseo://`) and a mobile rebrand while the fork merges upstream and plugins depend on these names. Reason: [ADR-0004](watchtower/decisions/ADR-0004-display-brand-over-full-rename.md).

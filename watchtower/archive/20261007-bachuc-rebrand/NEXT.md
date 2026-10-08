@@ -4,7 +4,7 @@
 
 - Title: Rebrand the fork as Bachuc
 - Slug: 20261007-bachuc-rebrand
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-08
 
 ## Tracker
@@ -63,3 +63,4 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 - [watchtower/archive/20260930-plugin-host-apis/](watchtower/archive/20260930-plugin-host-apis/)
 - [watchtower/archive/20261006-t3code-orchestration-port/](watchtower/archive/20261006-t3code-orchestration-port/)
 - [watchtower/archive/20261007-watchtower-process-overview/](watchtower/archive/20261007-watchtower-process-overview/)
+- Archived: 2026-10-08 -> watchtower/archive/20261007-bachuc-rebrand/
