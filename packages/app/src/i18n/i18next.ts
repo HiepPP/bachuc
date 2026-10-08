@@ -1,5 +1,6 @@
 import { createInstance } from "i18next";
 import { initReactI18next } from "react-i18next";
+import { withBrandName } from "@/brand";
 import { observeI18nInit } from "./init";
 import { ar } from "./resources/ar";
 import { en } from "./resources/en";
@@ -18,7 +19,7 @@ observeI18nInit(
     compatibilityJSON: "v4",
     fallbackLng: "en",
     lng: "en",
-    resources: {
+    resources: withBrandName({
       ar: { translation: ar },
       en: { translation: en },
       es: { translation: es },
@@ -28,7 +29,7 @@ observeI18nInit(
       "pt-BR": { translation: ptBR },
       ru: { translation: ru },
       "zh-CN": { translation: zhCN },
-    },
+    }),
     interpolation: {
       escapeValue: false,
     },

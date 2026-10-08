@@ -14,7 +14,7 @@ One row per TASK. Group ties together items that write the same files.
 | Order | TASK                                          | Group | Status | Spec                                                                                             | Deps               | Context                                        | Notes                              |
 | ----- | --------------------------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------ | ------------------ | ---------------------------------------------- | ---------------------------------- |
 | 1     | TASK-001 Logo concepts with Codex             | A     | DONE   | [watchtower/tasks/TASK-001-logo-concepts.md](watchtower/tasks/TASK-001-logo-concepts.md)         | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending        |
-| 2     | TASK-002 Bachuc name in the app UI            | B     | TODO   | [watchtower/tasks/TASK-002-app-ui-name.md](watchtower/tasks/TASK-002-app-ui-name.md)             | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Locale files stay unchanged.       |
+| 2     | TASK-002 Bachuc name in the app UI            | B     | DONE   | [watchtower/tasks/TASK-002-app-ui-name.md](watchtower/tasks/TASK-002-app-ui-name.md)             | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending        |
 | 3     | TASK-003 Desktop identity and release install | C     | TODO   | [watchtower/tasks/TASK-003-desktop-identity.md](watchtower/tasks/TASK-003-desktop-identity.md)   | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | The owner runs the release script. |
 | 4     | TASK-004 Apply the mark to icons and logo     | D     | TODO   | [watchtower/tasks/TASK-004-apply-icons.md](watchtower/tasks/TASK-004-apply-icons.md)             | TASK-001           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Uses the TASK-001 mark.            |
 | 5     | TASK-005 Remove upstream network defaults     | E     | TODO   | [watchtower/tasks/TASK-005-network-defaults.md](watchtower/tasks/TASK-005-network-defaults.md)   | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Relay, web app, CORS, and hub.     |
@@ -37,7 +37,8 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: the autorun schedule builds TASK-002. TASK-001 is DONE; the owner still checks the mark in [brand/bachuc/mark.svg](brand/bachuc/mark.svg) at 16 px and 1024 px.
+- Next action: the autorun schedule builds TASK-003. TASK-001 is DONE; the owner still checks the mark in [brand/bachuc/mark.svg](brand/bachuc/mark.svg) at 16 px and 1024 px.
+- TASK-002 is DONE. The owner still checks on live that Settings, the help menu, the welcome screen, and the tab title say Bachuc, and that the `$PASEO_PORT` hint is unchanged.
 - After implement, the owner runs `scripts/paseo-release.sh` from Terminal.app. The agent never runs it.
 - After the first Bachuc install, the owner grants macOS permissions again (microphone, screen recording, accessibility, automation), because the bundle ID changes.
 - After the first Bachuc install, the owner removes the `app.baseUrl` key from `~/.paseo/config.json` and `.dev/paseo-home/config.json`. Both may still hold `https://app.paseo.sh`.
