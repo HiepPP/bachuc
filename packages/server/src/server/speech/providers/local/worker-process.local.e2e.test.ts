@@ -18,7 +18,7 @@ import type {
 import { bufferToWorkerBytes } from "./worker-bytes.js";
 
 const modelsDir =
-  process.env.PASEO_LOCAL_MODELS_DIR ?? path.join(homedir(), ".paseo", "models", "local-speech");
+  process.env.PASEO_LOCAL_MODELS_DIR ?? path.join(homedir(), ".bachuc", "models", "local-speech");
 const shouldDownload = process.env.PASEO_SPEECH_E2E_DOWNLOAD === "1";
 const workerSpeechTest = hasParakeetModel(modelsDir) || shouldDownload ? test : test.skip;
 

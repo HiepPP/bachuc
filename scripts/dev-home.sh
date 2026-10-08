@@ -31,7 +31,7 @@ has_files() {
 }
 
 seed_worktree_paseo_home() {
-  local source_home="${PASEO_DEV_SEED_HOME:-$HOME/.paseo}"
+  local source_home="${PASEO_DEV_SEED_HOME:-$HOME/.bachuc}"
   local target_home="$1"
 
   if [ ! -d "$source_home" ]; then
@@ -97,8 +97,10 @@ resolve_dev_daemon_endpoint() {
 
 configure_dev_paseo_home() {
   # Agents launched by the stable app inherit its PASEO_HOME. A dev command must never adopt the
-  # stable home, so drop it and fall through to the repo dev home.
-  if [ -n "${PASEO_HOME:-}" ] && [ "${PASEO_HOME%/}" = "$HOME/.paseo" ]; then
+  # stable home, so drop it and fall through to the repo dev home. ~/.paseo is the release home
+  # from before the Bachuc move to ~/.bachuc.
+  if [ -n "${PASEO_HOME:-}" ] &&
+    { [ "${PASEO_HOME%/}" = "$HOME/.bachuc" ] || [ "${PASEO_HOME%/}" = "$HOME/.paseo" ]; }; then
     echo "dev-home: ignoring inherited PASEO_HOME=$PASEO_HOME (stable home)" >&2
     unset PASEO_HOME
   fi

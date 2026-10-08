@@ -1,6 +1,6 @@
 # ADR-0004 Display brand over full rename
 
-Status: accepted
+Status: superseded by ADR-0009
 Date: 2026-10-07
 Supersedes: -
 Scope: `packages/app/src/i18n/**`, `packages/app/app.config.js`, `packages/app/public/**`, `packages/app/assets/**`, `packages/desktop/electron-builder.yml`, `packages/desktop/src/main.ts`, `packages/desktop/assets/**`, `scripts/paseo-release.sh`, `packages/cli/**`, `packages/plugin/**`

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds a release from this checkout, installs it as "Bachuc.app", links ~/.local/bin/paseo to
-# its CLI, and restarts the release daemon (~/.paseo on 127.0.0.1:6767) on it.
+# its CLI, and restarts the release daemon (~/.bachuc on 127.0.0.1:6767) on it. The first install
+# clones the old home ~/.paseo and the app folder "Paseo" to the new names and keeps the originals.
 #
 #   scripts/paseo-release.sh             build, install, start
 #   scripts/paseo-release.sh --dry-run   print every change without making it
@@ -16,7 +17,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RELEASE_HOME="$HOME/.paseo"
+RELEASE_HOME="$HOME/.bachuc"
+# The release home before the Bachuc move. The first install clones it to RELEASE_HOME.
+OLD_HOME="$HOME/.paseo"
+# packages/desktop/src/main.ts gives the release app this userData folder.
+RELEASE_USER_DATA="$HOME/Library/Application Support/Bachuc"
+OLD_USER_DATA="$HOME/Library/Application Support/Paseo"
 RELEASE_PORT=6767
 RELEASE_LISTEN="127.0.0.1:$RELEASE_PORT"
 # packages/desktop/src/main.ts gives the release home and port to this install path only.
@@ -54,6 +60,9 @@ PREVIOUS_APP=""
 PREVIOUS_CLI_LINK=""
 IN_ROLLBACK=0
 MIRROR_PID=""
+# Set when this run cloned the old home or userData folder, so a rollback moves the clone aside.
+CLONED_HOME=0
+CLONED_USER_DATA=0
 
 log() { printf '%s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -142,10 +151,19 @@ app_stopped() { [ -z "$(app_pid "$1")" ]; }
 
 listener_pid() { lsof -nP -t -iTCP:"$RELEASE_PORT" -sTCP:LISTEN 2>/dev/null | head -1 || true; }
 port_free() { [ -z "$(listener_pid)" ]; }
-supervisor_pid() { jq -r '.pid // empty' "$RELEASE_HOME/paseo.pid" 2>/dev/null || true; }
+# The home the release app uses now: the new one once it exists, else the one before the move.
+live_home() {
+  if [ -f "$RELEASE_HOME/config.json" ]; then
+    printf '%s' "$RELEASE_HOME"
+  else
+    printf '%s' "$OLD_HOME"
+  fi
+}
 
-# Runs a CLI against the release home whatever the calling shell exported.
-release_cli() { env -u PASEO_LISTEN -u PASEO_HOST PASEO_HOME="$RELEASE_HOME" "$@"; }
+supervisor_pid() { jq -r '.pid // empty' "$(live_home)/paseo.pid" 2>/dev/null || true; }
+
+# Runs a CLI against the live release home whatever the calling shell exported.
+release_cli() { env -u PASEO_LISTEN -u PASEO_HOST PASEO_HOME="$(live_home)" "$@"; }
 
 # The installed release app: this install path, else the app before the rename, else none.
 current_app() {
@@ -200,8 +218,19 @@ repo_plugin_ids() {
 # Everything that can be checked before a build is spent.
 preflight_home() {
   command -v jq >/dev/null 2>&1 || problem "jq is not on PATH"
-  [ -f "$RELEASE_HOME/config.json" ] ||
-    problem "no $RELEASE_HOME/config.json: the plugins cannot be registered"
+  [ -f "$(live_home)/config.json" ] ||
+    problem "no $(live_home)/config.json: the plugins cannot be registered"
+  [ ! -e "$RELEASE_HOME.tmp" ] ||
+    problem "$RELEASE_HOME.tmp exists from an earlier run; move it away first"
+  [ ! -e "$RELEASE_USER_DATA.tmp" ] ||
+    problem "$RELEASE_USER_DATA.tmp exists from an earlier run; move it away first"
+  # The clone step skips an existing home, so a partial one would fail the plugin step.
+  [ ! -e "$RELEASE_HOME" ] || [ -f "$RELEASE_HOME/config.json" ] ||
+    problem "$RELEASE_HOME exists without config.json; move it away first"
+  # The app before the rename writes only to the old home, so a clone next to it is stale.
+  if [ "$(current_app)" = "$OLD_APP" ] && [ -e "$RELEASE_HOME" ]; then
+    problem "$RELEASE_HOME is a clone from a failed run; move it to the Trash, so this run clones again"
+  fi
   [ -n "$(repo_plugin_ids)" ] || problem "no plugins found in $PLUGINS_DIR"
   [ -w "$(dirname "$APP")" ] || problem "$(dirname "$APP") is not writable"
   [ ! -e "$CLI_LINK" ] || [ -L "$CLI_LINK" ] || problem "$CLI_LINK exists and is not a link"
@@ -247,6 +276,35 @@ register_repo_plugins() {
   mv "$config.tmp" "$config"
 }
 
+# Agent records keep absolute paths into the home, such as MCP server env values.
+rewrite_home_paths() {
+  local root="$1" file
+  # grep exits 1 when no file matches, which pipefail would turn into a failed step.
+  { grep -rlF --include='*.json' "$OLD_HOME/" "$root" 2>/dev/null || true; } | while IFS= read -r file; do
+    OLD="$OLD_HOME/" NEW="$RELEASE_HOME/" perl -pi -e 's/\Q$ENV{OLD}\E/$ENV{NEW}/g' "$file"
+  done
+}
+
+# Clones the home and the app's userData folder from before the Bachuc move, once, after the old
+# daemon stopped. The originals stay untouched, so a rollback runs the previous app on them.
+clone_old_home() {
+  if [ ! -e "$RELEASE_HOME" ] && [ -d "$OLD_HOME" ]; then
+    CLONED_HOME=1
+    # -c clones on APFS, so the copy takes no extra space until a file changes.
+    run cp -Rpc "$OLD_HOME" "$RELEASE_HOME.tmp"
+    run rm -f "$RELEASE_HOME.tmp/paseo.pid"
+    run rewrite_home_paths "$RELEASE_HOME.tmp"
+    move "$RELEASE_HOME.tmp" "$RELEASE_HOME"
+  else
+    log "    $RELEASE_HOME exists; nothing to clone"
+  fi
+  if [ ! -e "$RELEASE_USER_DATA" ] && [ -d "$OLD_USER_DATA" ]; then
+    CLONED_USER_DATA=1
+    run cp -Rpc "$OLD_USER_DATA" "$RELEASE_USER_DATA.tmp"
+    move "$RELEASE_USER_DATA.tmp" "$RELEASE_USER_DATA"
+  fi
+}
+
 check_running_agents() {
   local cli="$1" agents running
   port_free && return 0
@@ -289,7 +347,7 @@ daemon_matches() {
   status="$(release_cli "$(app_cli "$1")" daemon status --json 2>/dev/null || true)"
   [ -n "$status" ] || return 1
   printf '%s' "$status" | jq -e --arg version "$(app_version "$1")" --arg listen "$RELEASE_LISTEN" \
-    --arg home "$RELEASE_HOME" \
+    --arg home "$(live_home)" \
     '.localDaemon == "running" and .daemonVersion == $version and .listen == $listen and .home == $home' \
     >/dev/null 2>&1
 }
@@ -309,7 +367,7 @@ plugins_ready() {
 # start_and_verify <app>
 start_and_verify() {
   run open -n "$1"
-  wait_for 120 "daemon $(app_version "$1") on $RELEASE_LISTEN (see $RELEASE_HOME/daemon.log)" \
+  wait_for 120 "daemon $(app_version "$1") on $RELEASE_LISTEN (see $(live_home)/daemon.log)" \
     daemon_matches "$1"
 }
 
@@ -336,6 +394,21 @@ rollback() {
       fi
     fi
   fi
+  # The previous app runs on the old home. Moving this run's clone aside makes the next run clone
+  # again from the old home, which the previous app keeps writing to.
+  # A dry run creates no clone, but still prints the moves it would make.
+  if [ "$CLONED_HOME" = 1 ] && { [ "$DRY_RUN" = 1 ] || [ -e "$RELEASE_HOME" ]; }; then
+    step "rollback: move the cloned home aside"
+    move "$RELEASE_HOME" "$HOME/.Trash/bachuc home failed $STAMP"
+  fi
+  if [ "$CLONED_USER_DATA" = 1 ] && { [ "$DRY_RUN" = 1 ] || [ -e "$RELEASE_USER_DATA" ]; }; then
+    move "$RELEASE_USER_DATA" "$HOME/.Trash/Bachuc userData failed $STAMP"
+  fi
+  # A clone cut off mid-copy leaves its temp folder, which the next preflight would refuse.
+  [ "$CLONED_HOME" = 0 ] || [ ! -e "$RELEASE_HOME.tmp" ] ||
+    move "$RELEASE_HOME.tmp" "$HOME/.Trash/bachuc home partial $STAMP"
+  [ "$CLONED_USER_DATA" = 0 ] || [ ! -e "$RELEASE_USER_DATA.tmp" ] ||
+    move "$RELEASE_USER_DATA.tmp" "$HOME/.Trash/Bachuc userData partial $STAMP"
   [ -d "$app" ] || die "no previous app to go back to"
   step "rollback: start the previous app and wait for its daemon"
   start_and_verify "$app"
@@ -452,6 +525,8 @@ main() {
   STOPPED=1
   step "stop the app and daemon on the release home"
   stop_release "$cli"
+  step "clone $OLD_HOME to $RELEASE_HOME and the app folder, once"
+  clone_old_home
   step "register the plugins in $PLUGINS_DIR in the release home"
   run register_repo_plugins
   step "install $APP"
@@ -477,6 +552,10 @@ main() {
   fi
   log "Release $(show_version "$version") is installed and runs on $RELEASE_LISTEN."
   [ -z "$PREVIOUS_APP" ] || log "The previous app is at $PREVIOUS_APP."
+  if [ "$CLONED_HOME" = 1 ]; then
+    log "The release now uses $RELEASE_HOME. $OLD_HOME and $OLD_USER_DATA stay as a backup;"
+    log "delete them yourself once Bachuc runs well."
+  fi
   # macOS ties privacy grants to the bundle ID, so a new bundle ID starts without them.
   if [ "$previous_id" != "$BUILD_BUNDLE_ID" ]; then
     log "The bundle ID is new: grant Bachuc microphone, screen recording, accessibility, and"

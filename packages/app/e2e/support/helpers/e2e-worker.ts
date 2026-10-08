@@ -20,7 +20,7 @@ export interface E2EWorkerOptions {
 function resolveOptionalHome(value: string | undefined): string | null {
   const trimmed = value?.trim();
   if (!trimmed) return null;
-  return resolvePaseoHomePath(trimmed === "current" ? "~/.paseo" : trimmed);
+  return resolvePaseoHomePath(trimmed === "current" ? "~/.bachuc" : trimmed);
 }
 
 async function createFakeEditorBin(): Promise<string> {

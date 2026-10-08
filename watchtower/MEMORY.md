@@ -8,8 +8,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 
 ## Core Intent
 
-- This checkout is the user's own Paseo fork, branded Bachuc. Internal names stay `paseo` per [ADR-0004](watchtower/decisions/ADR-0004-display-brand-over-full-rename.md). The user's plugins live in `hiep-plugins/plugins/`.
-- Two instances exist: release, this repo built and installed as the daily app `/Applications/Bachuc.app` (`PASEO_HOME=~/.paseo`, port 6767), and live, run from source (port 6768). Stock Paseo from the upstream GitHub is no longer used. Plugins install into release and live.
+- This checkout is the user's own Paseo fork, branded Bachuc. The release home is `~/.bachuc`; other internal names stay `paseo` per [ADR-0009](watchtower/decisions/ADR-0009-bachuc-home-over-paseo-home.md). The user's plugins live in `hiep-plugins/plugins/`.
+- Two instances exist: release, this repo built and installed as the daily app `/Applications/Bachuc.app` (`PASEO_HOME=~/.bachuc`, port 6767), and live, run from source (port 6768). Stock Paseo from the upstream GitHub is no longer used. Plugins install into release and live.
 
 ## Planning Rules
 
@@ -34,7 +34,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a new desktop bundle ID, such as `vn.bachuc.desktop`, while the owner does not own a Bachuc domain. Reason: [ADR-0008](watchtower/decisions/ADR-0008-github-bundle-id-over-bachuc-domain.md).
 - Avoid running sidebar host filters together with an active host while one host is active. Reason: [ADR-0001](watchtower/decisions/ADR-0001-active-host-over-host-filters.md).
 - Avoid an offline-only CSP for HTML reply frames while the owner wants agent pages that load CDN libraries and call APIs. Reason: [ADR-0002](watchtower/decisions/ADR-0002-networked-html-replies-over-offline-only.md).
-- Avoid renaming internal identifiers (the `paseo` CLI, `PASEO_*` env vars, `~/.paseo`, the `@getpaseo/*` scope, the plugin API, and `paseo://`) and a mobile rebrand while the fork merges upstream and plugins depend on these names. Reason: [ADR-0004](watchtower/decisions/ADR-0004-display-brand-over-full-rename.md).
+- Avoid renaming internal identifiers (the `paseo` CLI, `PASEO_*` env vars, the `@getpaseo/*` scope, the plugin API, and `paseo://`), a move of the old `~/.paseo` instead of a clone, and a mobile rebrand while the fork merges upstream and plugins depend on these names. Reason: [ADR-0009](watchtower/decisions/ADR-0009-bachuc-home-over-paseo-home.md).
 - Avoid upstream hosted services (relay, web app, hub, update feed, EAS) and a self-hosted relay while the owner reaches the host over LAN or Tailscale. Reason: [ADR-0005](watchtower/decisions/ADR-0005-upstream-services-off-over-self-hosting.md).
 
 ## Learnings

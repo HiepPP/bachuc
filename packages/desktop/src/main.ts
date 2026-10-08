@@ -116,19 +116,24 @@ const DISABLE_SINGLE_INSTANCE_LOCK = process.env.PASEO_DISABLE_SINGLE_INSTANCE_L
 const PASEO_DEV_HOME = path.join(os.homedir(), ".paseo-dev");
 const PASEO_DEV_LISTEN = "127.0.0.1:6770";
 // scripts/paseo-release.sh installs a release as /Applications/Bachuc.app. That copy keeps
-// ~/.paseo and its port, with the userData folder that belongs to them. The build output is
+// ~/.bachuc and its port, with the userData folder that belongs to them. The build output is
 // Bachuc.app too, so only the install path counts.
 const IS_RELEASE_APP = app.isPackaged && process.execPath.startsWith("/Applications/Bachuc.app/");
 // The release script builds with productName Bachuc, so the helper apps carry the same name.
 const APP_NAME =
   process.env.PASEO_TEST_APP_NAME?.trim() || (IS_RELEASE_APP ? "Bachuc" : "Bachuc Dev");
-const RELEASE_USER_DATA = path.join(app.getPath("appData"), "Paseo");
+// scripts/paseo-release.sh clones the old "Paseo" folder here once.
+const RELEASE_USER_DATA = path.join(app.getPath("appData"), "Bachuc");
 const FORCED_USER_DATA = process.env.PASEO_ELECTRON_USER_DATA_DIR?.trim();
-// Any other packaged build must never adopt the release's daemon (~/.paseo on 6767): a version
+// Any other packaged build must never adopt the release's daemon (~/.bachuc on 6767): a version
 // mismatch would restart it. An inherited release home counts as unset; an explicit other home
 // (e.g. packaged smoke) wins. Managed launches strip PASEO_LISTEN, so the port lives in the dev
-// home's config.json.
-if (app.isPackaged && !IS_RELEASE_APP && resolvePaseoHome(process.env) === resolvePaseoHome({})) {
+// home's config.json. ~/.paseo is the release home from before the Bachuc move, which shells
+// started by the old release still export.
+const INHERITED_HOME = resolvePaseoHome(process.env);
+const IS_RELEASE_HOME =
+  INHERITED_HOME === resolvePaseoHome({}) || INHERITED_HOME === path.join(os.homedir(), ".paseo");
+if (app.isPackaged && !IS_RELEASE_APP && IS_RELEASE_HOME) {
   process.env.PASEO_HOME = PASEO_DEV_HOME;
   seedPaseoDevListen();
 }

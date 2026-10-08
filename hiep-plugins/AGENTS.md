@@ -123,8 +123,8 @@ cd plugins/<plugin-id>
 npm install
 npm run typecheck
 # Run the plugin's declared lint and focused test scripts, if present.
-PASEO_HOME=~/.paseo paseo plugin install "$PWD" --id <plugin-id>
-PASEO_HOME=~/.paseo paseo plugin ls <plugin-id> --json
+PASEO_HOME=~/.bachuc paseo plugin install "$PWD" --id <plugin-id>
+PASEO_HOME=~/.bachuc paseo plugin ls <plugin-id> --json
 ```
 
 `init` scaffolds files but does not install dependencies. Keep lockfiles committed.
@@ -136,13 +136,13 @@ Prompts name the two Paseo instances on this machine **release** and **live**
 
 | Name        | Daemon | `PASEO_HOME`      | Plugins here                      |
 | ----------- | ------ | ----------------- | --------------------------------- |
-| **release** | `6767` | `~/.paseo`        | Yes. Never restart its daemon     |
+| **release** | `6767` | `~/.bachuc`       | Yes. Never restart its daemon     |
 | **live**    | `6768` | `.dev/paseo-home` | Yes. Run from the Paseo repo root |
 
 ```sh
 # release — install, reload, inspect
-PASEO_HOME=~/.paseo paseo daemon status --json   # home must be ~/.paseo
-PASEO_HOME=~/.paseo paseo plugin reload <plugin-id>
+PASEO_HOME=~/.bachuc paseo daemon status --json   # home must be ~/.bachuc
+PASEO_HOME=~/.bachuc paseo plugin reload <plugin-id>
 # live — from the Paseo repo root
 npm run cli -- plugin install "$PWD/hiep-plugins/plugins/<plugin-id>" --id <plugin-id>
 npm run cli -- plugin reload <plugin-id>
@@ -158,9 +158,9 @@ If plugins are disabled, explain the unsandboxed access and obtain permission be
 After edits, run the plugin's formatter, typecheck, lint, and affected tests. Then:
 
 ```sh
-PASEO_HOME=~/.paseo paseo plugin reload <plugin-id>
-PASEO_HOME=~/.paseo paseo plugin ls <plugin-id> --json
-PASEO_HOME=~/.paseo paseo plugin logs <plugin-id>
+PASEO_HOME=~/.bachuc paseo plugin reload <plugin-id>
+PASEO_HOME=~/.bachuc paseo plugin ls <plugin-id> --json
+PASEO_HOME=~/.bachuc paseo plugin logs <plugin-id>
 ```
 
 Require `running` with no load error and exercise the changed contribution. Reload recompiles
