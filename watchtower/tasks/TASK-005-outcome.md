@@ -2,9 +2,9 @@
 
 ## Outcome
 
-Status: BLOCKED
+Status: TODO
 
-Blocked: anti-goal FAIL, 104 changed lines against the limit of 60 (Q-007). The code is built, reviewed, and verified on the branch `auto/TASK-005-network-defaults` at `243160fa4`, pushed for review and not merged.
+Unblocked: Q-007 was answered on 2026-10-08, and the limit is now 104. The first pass stopped at 104 changed lines against the old limit of 60. The code is built, reviewed, and verified on the branch `auto/TASK-005-network-defaults` at `243160fa4`, pushed and not merged yet.
 
 Changed (on `auto/TASK-005-network-defaults` only):
 

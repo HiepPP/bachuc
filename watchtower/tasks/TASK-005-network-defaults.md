@@ -21,6 +21,7 @@ Boundaries:
 - Hub: `paseo hub` commands need `--hub` or `PASEO_HUB_URL`. `paseo hub init` drops the `hub.paseo.sh` choice.
 - `paseo onboard` stops listing `https://app.paseo.sh`.
 - Never restart or stop the release daemon on port 6767. Test on the live daemon only.
+- Q-007, answered 2026-10-08: the anti-goal limit is 104. The code is built and reviewed on `auto/TASK-005-network-defaults` at `243160fa4`. Do not build it again. Check out that branch and merge `bachuc-rebrand` into it, with no rebase and no force-push. Run Verify again, then ship the branch with a PR to `bachuc-rebrand`.
 
 How:
 
@@ -46,7 +47,7 @@ Expected result:
 - A hub command without `--hub` and `PASEO_HUB_URL` prints how to set the origin, and makes no network call.
 - The live app still connects to the live daemon on `127.0.0.1:6768`.
 
-Anti-goal: changed lines in non-test upstream files stay at or below 60; drift gauge; read with the numstat command in Verify before changes (0), after the server edits, and at completion.
+Anti-goal: changed lines in non-test upstream files stay at or below 104 (Q-007 raised the limit from 60); drift gauge; read with the numstat command in Verify before changes (0), after the server edits, and at completion.
 
 ## Verify
 
@@ -56,4 +57,4 @@ Anti-goal: changed lines in non-test upstream files stay at or below 60; drift g
 - `npm run typecheck` -> exit 0.
 - `npm run lint -- <changed files>` -> exit 0.
 - Live check: restart `npm run dev` (live, port 6768 only). The live app connects, and the daemon log shows relay off.
-- Anti-goal: `git diff --numstat main -- packages/server/src packages/cli/src ':(exclude)**/*.test.ts'` -> the sum of added and removed lines is 60 or less.
+- Anti-goal: `git diff --numstat main -- packages/server/src packages/cli/src ':(exclude)**/*.test.ts'` -> the sum of added and removed lines is 104 or less.
