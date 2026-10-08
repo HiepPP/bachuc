@@ -113,12 +113,14 @@ const DEV_SERVER_URL = process.env.EXPO_DEV_URL ?? "http://localhost:8081";
 const APP_SCHEME = "paseo";
 const PASEO_DEBUG = process.env.PASEO_DEBUG === "1";
 const DISABLE_SINGLE_INSTANCE_LOCK = process.env.PASEO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
-const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || "Paseo Dev";
 const PASEO_DEV_HOME = path.join(os.homedir(), ".paseo-dev");
 const PASEO_DEV_LISTEN = "127.0.0.1:6770";
-// scripts/paseo-release.sh installs a release as "Paseo Fork.app". That copy keeps ~/.paseo and
+// scripts/paseo-release.sh installs a release as "Bachuc.app". That copy keeps ~/.paseo and
 // its port, with the userData folder that belongs to them.
-const IS_RELEASE_APP = app.isPackaged && process.execPath.includes("/Paseo Fork.app/");
+const IS_RELEASE_APP = app.isPackaged && process.execPath.includes("/Bachuc.app/");
+// The release script builds with productName Bachuc, so the helper apps carry the same name.
+const APP_NAME =
+  process.env.PASEO_TEST_APP_NAME?.trim() || (IS_RELEASE_APP ? "Bachuc" : "Bachuc Dev");
 const RELEASE_USER_DATA = path.join(app.getPath("appData"), "Paseo");
 const FORCED_USER_DATA = process.env.PASEO_ELECTRON_USER_DATA_DIR?.trim();
 // Any other packaged build must never adopt the release's daemon (~/.paseo on 6767): a version

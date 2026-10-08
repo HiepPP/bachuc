@@ -77,3 +77,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: a plugin `lint` script without `--disable-nested-config` fails before it reads any file. oxlint treats the repo root `.oxlintrc.json` as a nested config and rejects its `options.typeAware` key.
 - Source: `hiep-plugins/plugins/watchtower-board/package.json`; `hiep-plugins/plugins/pr-watch/package.json`; TASK-001 outcome.
 - Use next time: give every plugin `lint` script the `--disable-nested-config` flag.
+
+### 2026-10-08 - Autorun 20261007-bachuc-rebrand
+
+- Learned: electron-builder names the macOS bundle after `executableName`, and names `CFBundleName` and the helper apps after `productName`. The packaging hooks and the nix build expect `Paseo.app`.
+- Source: `node_modules/app-builder-lib/out/appInfo.js`; `packages/desktop/scripts/after-pack.js`; TASK-003 outcome.
+- Use next time: keep `executableName: Paseo`, and check that `IS_RELEASE_APP` cannot match the build output path.
+- Learned: the desktop daemon starts through `<name> Helper.app`, found by the executable name, `app.name`, or the one helper in Frameworks. The release script builds with `-c.productName=Bachuc`.
+- Source: `packages/desktop/src/daemon/runtime-paths.ts`; `scripts/paseo-release.sh`.
+- Use next time: when an app name changes, check that the daemon still finds its helper app.

@@ -3,13 +3,16 @@ import { resolveNodeExecPath } from "./runtime-paths";
 
 const mocks = vi.hoisted(() => ({
   existsSync: vi.fn(),
+  readdirSync: vi.fn(),
   app: {
     isPackaged: true,
+    name: "Paseo",
   },
 }));
 
 vi.mock("node:fs", () => ({
   existsSync: mocks.existsSync,
+  readdirSync: mocks.readdirSync,
   readFileSync: vi.fn(),
 }));
 
@@ -47,7 +50,9 @@ function setProcessRuntime(input: {
 describe("runtime-paths", () => {
   beforeEach(() => {
     mocks.app.isPackaged = true;
+    mocks.app.name = "Paseo";
     mocks.existsSync.mockReturnValue(true);
+    mocks.readdirSync.mockReturnValue([]);
     setProcessRuntime({
       platform: "darwin",
       execPath: "/Applications/Paseo.app/Contents/MacOS/Paseo",
@@ -68,5 +73,17 @@ describe("runtime-paths", () => {
     expect(resolveNodeExecPath()).toBe(
       "/Applications/Paseo.app/Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper",
     );
+  });
+
+  it("finds the bundled Helper when neither the executable nor the app name matches it", () => {
+    const helperPath =
+      "/Applications/Paseo.app/Contents/Frameworks/Bachuc Helper.app/Contents/MacOS/Bachuc Helper";
+    mocks.app.name = "Bachuc Dev";
+    mocks.readdirSync.mockReturnValue(["Bachuc Helper (GPU).app", "Bachuc Helper.app"]);
+    mocks.existsSync.mockImplementation(
+      (candidate: string) => candidate.endsWith("/Frameworks") || candidate === helperPath,
+    );
+
+    expect(resolveNodeExecPath()).toBe(helperPath);
   });
 });
