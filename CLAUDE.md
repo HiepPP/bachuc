@@ -16,14 +16,14 @@ This is an npm workspace monorepo:
 - `packages/website` — Marketing site (paseo.sh)
 - `hiep-plugins` — The user's own Paseo plugins (`hiep-plugins/plugins/*`), with their own `AGENTS.md`
 
-The fork's product brand is Bachuc. Internal names, such as the `paseo` CLI and `~/.paseo`, stay `paseo` per [ADR-0004](watchtower/decisions/ADR-0004-display-brand-over-full-rename.md).
+The fork's product brand is Bachuc, and its release home is `~/.bachuc`. Other internal names, such as the `paseo` CLI and `PASEO_*` env vars, stay `paseo` per [ADR-0009](watchtower/decisions/ADR-0009-bachuc-home-over-paseo-home.md).
 
 This fork is dedicated to one user; it is not meant for other Paseo users. Extend it through plugins:
 
 - "Code a plugin" means editing `hiep-plugins/plugins/<plugin-id>`, not core plugin code in `packages/*` or `plugin-examples/`. Read `hiep-plugins/AGENTS.md` first. `hiep-plugins` is the only plugin source; the old repo `~/Projects/hiep-paseo-plugin` is frozen, so never edit it or install from it.
 - When a plugin cannot reach deep enough, add the smallest generic host API in `packages/*` that unblocks it, then build the feature in the plugin. Keep host changes thin (a hook, a contribution point, a context field), never the feature itself, so upstream merges stay cheap.
 - Plugins may require the fork version; supporting stock Paseo is not a goal.
-- Install and reload these plugins in **release** (`PASEO_HOME=~/.paseo paseo plugin ...`) and **live** (`npm run cli -- plugin ...`).
+- Install and reload these plugins in **release** (`PASEO_HOME=~/.bachuc paseo plugin ...`) and **live** (`npm run cli -- plugin ...`).
 
 ## Docs
 
@@ -114,18 +114,18 @@ npm run format:check                 # Check formatting without writing
 
 Two Paseo instances run side by side on this machine. Prompts name them **release** and **live**; each name means exactly one daemon, home, and app. "Release", "the release version", and "build" in a prompt all mean **release**: this repo built from source and installed as the daily app, at a fork version such as `hiep-1.0.0`. The upstream app from the Paseo GitHub is **stock**; it is no longer used. Cutting a version is a separate subject, in [docs/release.md](docs/release.md).
 
-| Name        | What it is                                                  | Daemon listen    | `PASEO_HOME`      | Electron userData                     | Logs                                            |
-| ----------- | ----------------------------------------------------------- | ---------------- | ----------------- | ------------------------------------- | ----------------------------------------------- |
-| **release** | This repo built and installed as `/Applications/Bachuc.app` | `127.0.0.1:6767` | `~/.paseo`        | `~/Library/Application Support/Paseo` | `~/.paseo/daemon.log`, `~/Library/Logs/Bachuc/` |
-| **live**    | This repo run from source, no build                         | `127.0.0.1:6768` | `.dev/paseo-home` | `.dev/user-data`                      | `.dev/paseo-home/daemon.log`                    |
+| Name        | What it is                                                  | Daemon listen    | `PASEO_HOME`      | Electron userData                      | Logs                                             |
+| ----------- | ----------------------------------------------------------- | ---------------- | ----------------- | -------------------------------------- | ------------------------------------------------ |
+| **release** | This repo built and installed as `/Applications/Bachuc.app` | `127.0.0.1:6767` | `~/.bachuc`       | `~/Library/Application Support/Bachuc` | `~/.bachuc/daemon.log`, `~/Library/Logs/Bachuc/` |
+| **live**    | This repo run from source, no build                         | `127.0.0.1:6768` | `.dev/paseo-home` | `.dev/user-data`                       | `.dev/paseo-home/daemon.log`                     |
 
 Commands per name:
 
 ```bash
 # release — the daily app. Its daemon owns every running agent: never restart or stop it.
 # Only the user installs a new build, with scripts/paseo-release.sh from Terminal.app.
-PASEO_HOME=~/.paseo paseo daemon status
-PASEO_HOME=~/.paseo paseo plugin reload <plugin-id>
+PASEO_HOME=~/.bachuc paseo daemon status
+PASEO_HOME=~/.bachuc paseo plugin reload <plugin-id>
 # Build only when the prompt asks for a release build. This does not install it.
 npm run build:desktop -- --dir -c.mac.hardenedRuntime=false -c.mac.notarize=false
 
@@ -139,9 +139,10 @@ npm run cli -- plugin reload <plugin-id>
 
 - **Test source changes on live; do not build a release unless the prompt asks for one.** App changes reach the live Electron window within seconds, and `protocol`/`client` rebuild through `tsc --watch`. The live daemon does not restart on a server change: restart `npm run dev` yourself, and restart `npm run dev:desktop` after a `packages/desktop/src` change. `npm run build:desktop` costs over a minute per run, and its clean steps delete the `dist` folders a running live instance uses.
 - **A source change reaches release only through a new build.** `scripts/paseo-release.sh` builds, installs the build as `/Applications/Bachuc.app`, and restarts the daemon on `6767`. That stops every running agent, so the script refuses to run inside Paseo; the user runs it from Terminal.app. See [Installing a release](docs/development.md#installing-a-release).
-- An agent shell inside Paseo inherits `PASEO_HOME=~/.paseo`, and the `paseo` on `PATH` is release's CLI, so a bare `paseo ...` targets release. `scripts/dev-home.sh` ignores that value, so `npm run dev`, `npm run dev:desktop`, and `npm run cli` use `.dev/paseo-home`; check that the startup banner shows `Home: …/.dev/paseo-home`.
+- An agent shell inside Bachuc inherits `PASEO_HOME=~/.bachuc`, and the `paseo` on `PATH` is release's CLI, so a bare `paseo ...` targets release. `scripts/dev-home.sh` ignores that value and the old `~/.paseo`, so `npm run dev`, `npm run dev:desktop`, and `npm run cli` use `.dev/paseo-home`; check that the startup banner shows `Home: …/.dev/paseo-home`.
 - The app loads only the active host's plugins, so a plugin change needs `plugin reload` on the host you are looking at; reload release and live to keep them in step.
-- The build output, `packages/desktop/release/mac-arm64/Bachuc.app`, is not release until it is installed. Opened in place it runs apart from release, on `~/.paseo-dev` and `127.0.0.1:6770` with userData `~/Library/Application Support/Bachuc Dev`: `packages/desktop/src/main.ts` gives `~/.paseo` and `6767` only to the install path `/Applications/Bachuc.app`.
+- The build output, `packages/desktop/release/mac-arm64/Bachuc.app`, is not release until it is installed. Opened in place it runs apart from release, on `~/.paseo-dev` and `127.0.0.1:6770` with userData `~/Library/Application Support/Bachuc Dev`: `packages/desktop/src/main.ts` gives `~/.bachuc` and `6767` only to the install path `/Applications/Bachuc.app`.
+- The first Bachuc install cloned `~/.paseo` to `~/.bachuc` and `~/Library/Application Support/Paseo` to `Bachuc`. The old folders stay as a backup; nothing reads them, and only the user deletes them.
 - Do not assume `/Applications/Paseo.app` exists. The old stock app and its data sit in `~/.paseo-switch`; nothing reads that folder, and only the user deletes it.
 - Daemon state inside a home: `config.json` (settings, profiles, plugin sources), `agents/`, `projects/`, `schedules/`, `plugin-data/`, `plugin-settings/`, `desktop-attachments/`, `models/`, plus identity files `server-id` and `daemon-keypair.json`.
 - `~/.paseo-dev` was cloned from `~/.paseo` on 2026-09-28, keeping its own `server-id` and keypair. Server IDs in `projects/`, `plugin-settings/`, and `plugin-data/` were rewritten to its own ID. The previous copy is at `~/.paseo-dev.bak-20260928-145243`. Electron Local Storage was not cloned, because its host registry points at `6767`.

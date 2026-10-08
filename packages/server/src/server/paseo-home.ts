@@ -11,8 +11,11 @@ function expandHomeDir(input: string): string {
   return input;
 }
 
+// Bachuc keeps its daemon home in ~/.bachuc. scripts/paseo-release.sh clones ~/.paseo there once.
+export const DEFAULT_PASEO_HOME = "~/.bachuc";
+
 export function resolvePaseoHome(env: NodeJS.ProcessEnv = process.env): string {
-  const raw = env.PASEO_HOME ?? "~/.paseo";
+  const raw = env.PASEO_HOME ?? DEFAULT_PASEO_HOME;
   const resolved = path.resolve(expandHomeDir(raw));
   return resolved;
 }
