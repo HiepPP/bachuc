@@ -2,7 +2,7 @@ npmRebuild: false
 appId: io.github.hieppp.bachuc
 # scripts/paseo-release.sh builds the release with productName Bachuc.
 productName: Bachuc Dev
-# The macOS bundle is named after the executable, and the packaging hooks expect Paseo.app.
+# Linux and Windows keep the upstream executable name: their launchers expect Paseo.
 executableName: Paseo
 protocols:
   - name: Bachuc agent link
@@ -34,6 +34,8 @@ extraResources:
   - from: assets/editor-targets
     to: editor-target-icons
 mac:
+  # The bundle is named after the executable: Bachuc.app with Contents/MacOS/Bachuc.
+  executableName: Bachuc
   artifactName: "Bachuc-${version}-${arch}.${ext}"
   minimumSystemVersion: "13.0.0"
   category: public.app-category.developer-tools

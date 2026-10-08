@@ -203,14 +203,14 @@ buildNpmPackage {
     ''}
 
     ${lib.optionalString stdenv.hostPlatform.isDarwin ''
-      app="$(find packages/desktop/release -maxdepth 3 -type d -name Paseo.app -print -quit)"
+      app="$(find packages/desktop/release -maxdepth 3 -type d -name Bachuc.app -print -quit)"
       if [ -z "$app" ]; then
-        echo "electron-builder did not produce Paseo.app" >&2
+        echo "electron-builder did not produce Bachuc.app" >&2
         exit 1
       fi
       mkdir -p "$out/Applications"
-      cp -R "$app" "$out/Applications/Paseo.app"
-      ln -s ../Applications/Paseo.app/Contents/MacOS/Paseo "$out/bin/paseo-desktop"
+      cp -R "$app" "$out/Applications/Bachuc.app"
+      ln -s ../Applications/Bachuc.app/Contents/MacOS/Bachuc "$out/bin/paseo-desktop"
     ''}
 
     runHook postInstall

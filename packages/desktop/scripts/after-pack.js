@@ -5,7 +5,8 @@ const { smokePackagedDesktopApp } = require("../e2e/packaged-app-smoke.js");
 
 const { installLinuxLauncher } = require("./linux-sandbox");
 
-const EXECUTABLE_NAME = "Paseo";
+// The macOS executableName in electron-builder.yml; the bundle is named after it.
+const EXECUTABLE_NAME = "Bachuc";
 
 // electron-builder arch enum → Node.js arch string
 const ARCH_MAP = { 0: "ia32", 1: "x64", 2: "armv7l", 3: "arm64", 4: "universal" };
