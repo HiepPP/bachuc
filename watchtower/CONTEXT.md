@@ -21,6 +21,7 @@
 ## Decisions
 
 - The display name is `Bachuc` by default (Q-001).
+- The macOS executable is renamed to `Bachuc` too (Q-005, answered 2026-10-08). TASK-009 does it.
 - TASK-002 brands UI text with one transform at i18n init in [packages/app/src/i18n/i18next.ts](packages/app/src/i18n/i18next.ts). It does not edit locale files. Reason: 38 English strings hold "Paseo", and the 8 other locales hold the same Latin word. No locale has a transliteration (checked 2026-10-07).
 - The attribution line passes "Paseo" as an i18n interpolation value. The transform changes resource strings only, so the line keeps "Paseo".
 - The desktop bundle ID is `io.github.hieppp.bachuc` by default (Q-003).

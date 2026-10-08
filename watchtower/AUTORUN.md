@@ -26,7 +26,7 @@ paseo_profile: Opus
 - Run only the test files a TASK changes, with `--bail=1` for vitest. Run app vitest files from `packages/app`.
 - Run GitNexus `impact` before you edit a symbol. Run `detect_changes` before each commit, per the root `CLAUDE.md`.
 - The gate has no `formatter` line: oxfmt 0.46.0 rejects `--check` together with `--stdin-filepath`. Format with `npm run format:files -- <changed files>` before you stage. This includes `watchtower/` markdown, because the lefthook pre-commit hook checks the format of every staged `*.md` file. Put path globs in code spans first; the formatter reads a bare `**` as emphasis.
-- The plan files were written before Start and are not committed yet. Ship them with the first iteration's commit. This includes the archive move of `20261007-watchtower-process-overview`. These uncommitted `watchtower/` changes belong to this run: do not pause the schedule for them.
+- The first pass committed the plan files. The second pass starts from a clean `bachuc-rebrand`.
 - The Start session for this run is a Paseo agent in this checkout. It stays idle. Only an agent with status `running` blocks an iteration.
 - TASK-001: the three concepts in `/tmp/bachuc-logo/` and the owner's pick (Q-002) were made before Start. Write the SVG by hand in the iteration; it needs no image tool.
 - The schedule and each handoff agent use the `Opus` profile with thinking `xhigh` (owner answer, 2026-10-08). This overrides the `high` of the profile.

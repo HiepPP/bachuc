@@ -1,10 +1,11 @@
 # Run
 
 - Runner: paseo
-- Schedule: ed7cdcc5 (`watchtower-20261007-bachuc-rebrand`, every 5 minutes)
+- Schedule: `watchtower-20261007-bachuc-rebrand-2` (second pass, every 5 minutes). The first pass used ed7cdcc5, now deleted.
 - Profile: Opus, copied as `claude/claude-opus-5-5`, mode `bypassPermissions`, thinking `xhigh`
 - Started: 2026-10-08 09:59
-- Finished: 2026-10-08 11:50, draft review PR #38 to `main`; schedule ed7cdcc5 deleted
+- Finished: -
+- First pass: finished 2026-10-08 11:50 with draft review PR #38 to `main`. The second pass started 2026-10-08 after the owner answered Q-005 to Q-007 and added TASK-009 to TASK-012. Finish reuses draft PR #38.
 
 ## Log
 
