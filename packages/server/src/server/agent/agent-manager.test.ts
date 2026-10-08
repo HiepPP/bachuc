@@ -823,6 +823,62 @@ test("a failed history replay leaves the committed timeline intact", async () =>
   }
 });
 
+test("a live row recorded while history replays lands after the whole replay", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-timeline-replay-live-"));
+  const historyTexts = ["h1", "h2", "h3", "h4", "h5"];
+  class HistorySession extends TestAgentSession {
+    override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+      for (const text of historyTexts) {
+        yield { type: "timeline", provider: "codex", item: { type: "user_message", text } };
+      }
+    }
+  }
+  class HistoryClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new HistorySession(config);
+    }
+
+    override async resumeSession(
+      _handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ): Promise<AgentSession> {
+      return new HistorySession({ provider: "codex", cwd: config?.cwd ?? workdir });
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new HistoryClient() },
+    durableTimelineStore: new RecordingTimelineStore(),
+    logger,
+  });
+  let agentId: string | null = null;
+  // Every slice check sees 20ms pass, so the replay yields after each row.
+  let clock = 0;
+  const now = vi.spyOn(performance, "now").mockImplementation(() => (clock += 20));
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+    await manager.reloadAgentSession(agent.id, undefined, { rehydrateFromDisk: true });
+
+    const hydrating = manager.hydrateTimelineFromProvider(agent.id, { broadcast: true });
+    while (manager.getTimeline(agent.id).length === 0) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(manager.getTimeline(agent.id).length).toBeLessThan(historyTexts.length);
+    await manager.appendTimelineItem(agent.id, { type: "user_message", text: "live" });
+    await hydrating;
+
+    expect(manager.getTimeline(agent.id)).toEqual(
+      [...historyTexts, "live"].map((text) => ({ type: "user_message", text })),
+    );
+  } finally {
+    now.mockRestore();
+    if (agentId) await manager.closeAgent(agentId).catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("retries provider history hydration after a stream failure", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-history-retry-"));
   let attempts = 0;

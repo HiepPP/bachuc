@@ -96,6 +96,13 @@ import { extractAttention } from "../persistence-hooks.js";
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
 const IMPORTABLE_SESSION_LIST_TIMEOUT_MS = 90_000;
+const TIMELINE_REPLAY_SLICE_MS = 10;
+
+interface TimelineRowOptions {
+  timestamp?: string;
+  providerMessageId?: string;
+  turnId?: string;
+}
 const STORED_AGENT_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: false,
   supportsSessionPersistence: true,
@@ -735,6 +742,8 @@ export class AgentManager {
   private readonly registry?: AgentStorage;
   private readonly durableTimelineStore?: AgentTimelineStore;
   private readonly previousStatuses = new Map<string, AgentLifecycleStatus>();
+  /** agentId -> records the rest of an in-progress history replay synchronously. */
+  private readonly pendingTimelineReplays = new Map<string, () => void>();
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
@@ -4086,6 +4095,8 @@ export class AgentManager {
     const deferredBroadcast = typeof broadcast === "function";
     const historyEvents: Extract<AgentStreamEvent, { type: "timeline" }>[] = [];
     const historySubagentEvents: Extract<AgentStreamEvent, { type: "provider_subagent" }>[] = [];
+    // Collecting the replay below cannot yield, so its time counts toward the first slice.
+    let sliceStartedAt = performance.now();
     agent.historyPrimed = false;
     try {
       // Collect the whole replay before touching either store. A stream that fails
@@ -4119,29 +4130,58 @@ export class AgentManager {
       row: AgentTimelineRow;
     }> = [];
     const providerSubagentEvents: AgentManagerEvent[] = [];
-    for (const event of historySubagentEvents) {
-      const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
-      const managerEvent: AgentManagerEvent = { type: "provider_subagent", event: update };
-      if (deferredBroadcast) {
-        providerSubagentEvents.push(managerEvent);
-      } else if (broadcast) {
-        this.dispatch(managerEvent);
+    let nextHistoryEvent = 0;
+    const recordHistoryEvents = (until: number) => {
+      while (nextHistoryEvent < until) {
+        // Advance before dispatching, so a re-entrant flush never records the same event twice.
+        const event = historyEvents[nextHistoryEvent++];
+        if (!event) continue;
+        const row = this.appendTimelineRow(
+          agent.id,
+          event.item,
+          event.timestamp ? { timestamp: event.timestamp } : undefined,
+        );
+        if (deferredBroadcast) {
+          timelineEvents.push({ event, row });
+        } else if (broadcast) {
+          this.dispatchStream(agent.id, event, {
+            seq: row.seq,
+            epoch: this.timelineStore.getEpoch(agent.id),
+            timestamp: row.timestamp,
+          });
+        }
       }
-    }
-    for (const event of historyEvents) {
-      const row = this.recordTimeline(
-        agent.id,
-        event.item,
-        event.timestamp ? { timestamp: event.timestamp } : undefined,
-      );
-      if (deferredBroadcast) {
-        timelineEvents.push({ event, row });
-      } else if (broadcast) {
-        this.dispatchStream(agent.id, event, {
-          seq: row.seq,
-          epoch: this.timelineStore.getEpoch(agent.id),
-          timestamp: row.timestamp,
-        });
+    };
+    // Applying and recording a long replay took ~30ms in one task, so both yield between slices.
+    // A live row recorded meanwhile flushes the rest first, so it still lands after the replay.
+    const flushHistory = () => {
+      this.pendingTimelineReplays.delete(agent.id);
+      recordHistoryEvents(historyEvents.length);
+    };
+    this.pendingTimelineReplays.set(agent.id, flushHistory);
+    try {
+      const pause = async () => {
+        if (performance.now() - sliceStartedAt < TIMELINE_REPLAY_SLICE_MS) return;
+        await new Promise<void>((done) => setImmediate(done));
+        sliceStartedAt = performance.now();
+      };
+      for (const event of historySubagentEvents) {
+        const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
+        const managerEvent: AgentManagerEvent = { type: "provider_subagent", event: update };
+        if (deferredBroadcast) {
+          providerSubagentEvents.push(managerEvent);
+        } else if (broadcast) {
+          this.dispatch(managerEvent);
+        }
+        await pause();
+      }
+      while (nextHistoryEvent < historyEvents.length) {
+        recordHistoryEvents(nextHistoryEvent + 1);
+        await pause();
+      }
+    } finally {
+      if (this.pendingTimelineReplays.get(agent.id) === flushHistory) {
+        this.pendingTimelineReplays.delete(agent.id);
       }
     }
     agent.historyPrimed = true;
@@ -4845,11 +4885,16 @@ export class AgentManager {
   private recordTimeline(
     agentId: string,
     item: AgentTimelineItem,
-    options?: {
-      timestamp?: string;
-      providerMessageId?: string;
-      turnId?: string;
-    },
+    options?: TimelineRowOptions,
+  ): AgentTimelineRow {
+    this.pendingTimelineReplays.get(agentId)?.();
+    return this.appendTimelineRow(agentId, item, options);
+  }
+
+  private appendTimelineRow(
+    agentId: string,
+    item: AgentTimelineItem,
+    options?: TimelineRowOptions,
   ): AgentTimelineRow {
     item = limitAgentTimelineItemContent(item);
     const row = this.timelineStore.append(agentId, item, options);
