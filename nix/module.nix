@@ -80,25 +80,24 @@ in
     relay = {
       enable = lib.mkOption {
         type = lib.types.bool;
-        default = true;
+        default = false;
         description = ''
-          Whether to enable relay-based remote access. When false, the daemon
-          runs with `--no-relay` and only accepts direct (LAN/loopback)
-          connections.
+          Whether to enable relay-based remote access through the relay at
+          `relay.host`. When false (the default), the daemon runs with
+          `--no-relay` and only accepts direct (LAN/loopback) connections.
         '';
       };
 
       mode = lib.mkOption {
-        type = lib.types.enum [ "hosted" "remote" ];
-        default = "hosted";
+        type = lib.types.enum [ "remote" ];
+        default = "remote";
         description = ''
           How the daemon reaches the relay when `relay.enable = true`:
 
-          - `"hosted"` (default): use the upstream `app.paseo.sh` relay.
-            Preserves the current behavior; no extra options needed.
-          - `"remote"`: connect to a self-hosted relay at
+          - `"remote"` (the default and only mode): connect to the relay at
             `relay.host:relay.port`. Sets `PASEO_RELAY_ENDPOINT` and
-            `PASEO_RELAY_USE_TLS` for the daemon.
+            `PASEO_RELAY_USE_TLS` for the daemon. There is no default relay,
+            so `relay.host` is required.
 
           A `"local"` mode (running a relay on the same host as a systemd
           unit) is not yet implemented — the relay package currently only
@@ -159,7 +158,7 @@ in
       default = { };
       example = lib.literalExpression ''
         {
-          PASEO_RELAY_ENDPOINT = "relay.paseo.sh:443";
+          PASEO_RELAY_ENDPOINT = "relay.example.com:443";
         }
       '';
       description = "Extra environment variables for the Paseo daemon.";
