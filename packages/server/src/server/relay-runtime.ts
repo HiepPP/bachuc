@@ -37,6 +37,10 @@ export function createRelayRuntime(options: RelayRuntimeOptions): RelayRuntime {
 
   function start(): void {
     if (transport) return;
+    if (!config.endpoint) {
+      options.logger.warn("Relay stays off: set PASEO_RELAY_ENDPOINT or daemon.relay.endpoint.");
+      return;
+    }
     transport = startTransport({
       logger: options.logger,
       attachSocket: options.attachSocket,

@@ -2,9 +2,11 @@
 
 ## Outcome
 
-Status: TODO
+Status: DONE (auto: manual checks pending)
 
-Unblocked: Q-007 was answered on 2026-10-08, and the limit is now 104. The first pass stopped at 104 changed lines against the old limit of 60. The code is built, reviewed, and verified on the branch `auto/TASK-005-network-defaults` at `243160fa4`, pushed and not merged yet.
+Unblocked: Q-007 was answered on 2026-10-08, and the limit is now 104. The first pass stopped at 104 changed lines against the old limit of 60. The code was built, reviewed, and verified on the branch `auto/TASK-005-network-defaults` at `243160fa4`.
+
+Second pass, 2026-10-08: the branch took `bachuc-rebrand` as merge commit `f7c6265e8`, with no rebase and no force-push. The merge had no conflict, because the integration branch changed none of the TASK files. The code was not built again, and the first-pass review stands. The branch shipped with a PR to `bachuc-rebrand`.
 
 Changed (on `auto/TASK-005-network-defaults` only):
 
@@ -34,7 +36,16 @@ Verified:
 - `npm run typecheck` -> exit 0. `npm run lint -- <17 changed files>` -> 0 warnings, 0 errors. `npm run format:check:files -- <17 changed files>` -> exit 0.
 - `rg -n "relay\.paseo\.sh|app\.paseo\.sh|hub\.paseo\.sh" packages/server/src packages/cli/src --glob '!**/*.test.*'` -> 4 matches, all explicit fixture values with relay off in the test harnesses `packages/server/src/server/test-utils/paseo-daemon.ts` and `packages/server/src/server/hub/test-utils/relationship-harness.ts`. No default and no runtime code matches. The Verify glob does not exclude `test-utils`.
 - UNVERIFIED (autonomous run): the live check. The live daemon was not running, and the run does not start live.
-- Review: one `reviewer` pass found 4 issues. Fixed: the relay consent loop in the app and `paseo daemon pair`, `hub init` ignoring a new URL while a login is active, and the relay status before the runtime starts. Not fixed, outside this TASK: `nix/module.nix` line 92 still defaults to relay mode `hosted`, which now means relay off. An explicit `relay.paseo.sh:443` without `useTls` now uses `ws://`. `docs/hub.md`, `public-docs/cli.md`, `public-docs/hub/daemons.md`, and `public-docs/hub/api.md` still name the `hub.paseo.sh` fallback.
+- Review: one `reviewer` pass found 4 issues. Fixed: the relay consent loop in the app and `paseo daemon pair`, `hub init` ignoring a new URL while a login is active, and the relay status before the runtime starts. Not fixed, outside this TASK: `nix/module.nix` line 92 still defaults to relay mode `hosted`, which now means relay off. An explicit `relay.paseo.sh:443` without `useTls` now uses `ws://`. `docs/hub.md`, `public-docs/cli.md`, `public-docs/hub/daemons.md`, and `public-docs/hub/api.md` still name the `hub.paseo.sh` fallback. TASK-011 and TASK-012 take the nix and docs items.
+
+Verified again after the merge (second pass, 11:56 to 12:00):
+
+- `cd packages/server && npx vitest run src/server/config-relay.test.ts src/server/persisted-config.test.ts src/server/relay-runtime.test.ts --bail=1` -> 75 passed.
+- `npm run build:server`, then `cd packages/cli && npx vitest run` on `hub/origin`, `hub/init-flow`, `hub/credentials`, `hub/commands`, and `daemon/pair` tests -> 45 passed.
+- `npm run typecheck` -> exit 0. `npm run lint -- <17 TASK files>` -> 0 warnings, 0 errors. `npm run format:check:files -- <17 TASK files>` -> exit 0.
+- The `rg` line -> the same 4 test-harness fixture matches as the first pass. No runtime code matches.
+- Plan Verify: the license notices are unchanged against `main`. The plugin diff against `main` is empty.
+- UNVERIFIED (autonomous run): the live check. Nothing listened on port 6768, and the run does not start live.
 
 Anti-goal:
 
@@ -42,9 +53,12 @@ Anti-goal:
 - After the server edits: same command -> 53, 11:00.
 - Before review: same command -> 85, 11:06.
 - Final, after the review fixes: same command -> 104, 11:16. The `hub init` prompt is 39 of it.
-- Result: FAIL (104, limit 60). The spec scope needs about 80 lines at least, so the limit cannot pass without cutting a Boundary.
+- First-pass result: FAIL (104, limit 60). The spec scope needs about 80 lines at least, so the limit cannot pass without cutting a Boundary.
+- After the merge: same command -> 104 (43 added, 61 removed), 11:58.
+- Result: PASS (104, limit 104 per Q-007).
 
 Lessons:
 
 - CLI tests import `@getpaseo/server` from its `dist`. After a server change, run `npm run build:server` before CLI tests, or they test the old code and pass.
 - The app shows the relay consent screen whenever a pairing offer says relay is off. A relay that is on but cannot pair must report relay on with an empty link.
+- The agent shell is zsh, and zsh does not split an unquoted `$FILES` into words. `npm run lint -- $FILES` then passes one argument, and oxlint reports "No files found to lint". Use `${=FILES}`.
