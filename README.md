@@ -1,3 +1,5 @@
+> Bachuc is a personal fork of [Paseo](https://github.com/getpaseo/paseo) by Mohamed Boudra, under the Apache License 2.0. See [NOTICE](NOTICE).
+
 <p align="center">
   <img src="packages/website/public/logo.svg" width="64" height="64" alt="Paseo logo">
 </p>

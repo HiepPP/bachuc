@@ -19,7 +19,7 @@ One row per TASK. Group ties together items that write the same files.
 | 4     | TASK-004 Apply the mark to icons and logo     | D     | DONE    | [watchtower/tasks/TASK-004-apply-icons.md](watchtower/tasks/TASK-004-apply-icons.md)             | TASK-001           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending   |
 | 5     | TASK-005 Remove upstream network defaults     | E     | BLOCKED | [watchtower/tasks/TASK-005-network-defaults.md](watchtower/tasks/TASK-005-network-defaults.md)   | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Q-007: anti-goal 104 over 60. |
 | 6     | TASK-006 Turn off desktop auto-update         | C     | DONE    | [watchtower/tasks/TASK-006-auto-update-off.md](watchtower/tasks/TASK-006-auto-update-off.md)     | TASK-003           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending   |
-| 7     | TASK-007 Attribution and upstream links       | F     | TODO    | [watchtower/tasks/TASK-007-attribution-links.md](watchtower/tasks/TASK-007-attribution-links.md) | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | NOTICE, README, and About.    |
+| 7     | TASK-007 Attribution and upstream links       | F     | DONE    | [watchtower/tasks/TASK-007-attribution-links.md](watchtower/tasks/TASK-007-attribution-links.md) | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending   |
 | 8     | TASK-008 Docs for the Bachuc names            | G     | TODO    | [watchtower/tasks/TASK-008-docs.md](watchtower/tasks/TASK-008-docs.md)                           | TASK-003, TASK-006 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Instance names and log paths. |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
@@ -37,7 +37,8 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: the autorun schedule builds TASK-007. TASK-001 is DONE; the owner still checks the mark in [brand/bachuc/mark.svg](brand/bachuc/mark.svg) at 16 px and 1024 px.
+- Next action: the autorun schedule builds TASK-008. TASK-001 is DONE; the owner still checks the mark in [brand/bachuc/mark.svg](brand/bachuc/mark.svg) at 16 px and 1024 px.
+- TASK-007 is DONE. The owner still checks on live that Settings > About shows "Based on Paseo", and that the sidebar help menu, the open project screen, and Settings show no Discord, Sponsors, upstream GitHub, or changelog link. The e2e spec [packages/app/e2e/browser/sidebar-help.spec.ts](packages/app/e2e/browser/sidebar-help.spec.ts) still asserts the removed items.
 - TASK-005 is BLOCKED on Q-007. Its code is built, reviewed, and verified on the branch `auto/TASK-005-network-defaults`, not merged. The final diff is 104 changed lines in non-test upstream files, over the 60-line anti-goal. If the owner raises the limit, a later iteration ships that branch.
 - TASK-006 is DONE. Updates are off through two constants: `APP_UPDATES_ENABLED` in [packages/desktop/src/features/app-updates-enabled.ts](packages/desktop/src/features/app-updates-enabled.ts) and `DESKTOP_APP_UPDATES_ENABLED` in [packages/app/src/desktop/updates/desktop-updates.ts](packages/app/src/desktop/updates/desktop-updates.ts). The owner still checks on live that Settings > About has no "App updates" or "Release channel" rows. After the next release install, the owner checks that the desktop log has no update check.
 - TASK-004 is DONE. The owner still checks on live that the welcome screen, the startup splash, the open project screen, the tab favicon in its three states, and the Dock icon show the mark. The dev icon carries a `</>` badge (Q-006, DEFAULTED).

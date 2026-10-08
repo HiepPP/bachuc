@@ -2174,6 +2174,7 @@ export const ru: TranslationResources = {
       title: "О приложении",
       appVersion: "Версия приложения",
       whatsNewHint: "Заметки о выпуске для каждой версии",
+      basedOn: "Основано на {{upstream}}",
       thisDevice: "Это устройство",
       connectedHosts: "Подключенные хосты",
       offline: "Оффлайн",
