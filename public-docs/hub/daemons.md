@@ -42,7 +42,7 @@ For unattended setup, pass an organization API key without storing it:
 PASEO_HUB_URL=https://hub.example.com PASEO_HUB_API_KEY=paseo_pk_... paseo hub connect
 ```
 
-Origin precedence is explicit `[origin]`, `PASEO_HUB_URL`, active stored login, then `https://hub.paseo.sh`. An explicit `--api-key <secret>` takes precedence over the environment and an exact-origin stored login.
+Origin precedence is explicit `[origin]`, `PASEO_HUB_URL`, then active stored login. With none of these, the command fails with `HUB_ORIGIN_REQUIRED`. An explicit `--api-key <secret>` takes precedence over the environment and an exact-origin stored login.
 
 Check and undo:
 
