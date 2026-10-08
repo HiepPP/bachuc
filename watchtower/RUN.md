@@ -23,3 +23,4 @@
 | 11:54 | 12:05 | TASK-005 | DONE    | second pass: merged the existing branch after Q-007; PR to `bachuc-rebrand`        |
 | 12:00 | 12:10 | TASK-009 | DONE    | PR to `bachuc-rebrand`; the reviewer found 2 defects, both fixed                   |
 | 12:10 | 12:20 | TASK-010 | DONE    | PR to `bachuc-rebrand`; help menu tests fixme, Q-008 defaulted                     |
+| 12:20 | 12:25 | TASK-011 | DONE    | PR to `bachuc-rebrand`; nix parse unverified, nix not installed                    |
