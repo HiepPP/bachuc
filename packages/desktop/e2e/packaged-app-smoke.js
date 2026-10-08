@@ -8,6 +8,8 @@ const { chromium } = require("playwright");
 const { extractFile } = require("@electron/asar");
 
 const EXECUTABLE_NAME = "Paseo";
+// electron-builder.yml overrides executableName for macOS only.
+const MAC_EXECUTABLE_NAME = "Bachuc";
 const SMOKE_TIMEOUT_MS = 60_000;
 const EXIT_TIMEOUT_MS = 10_000;
 const TERMINAL_CAPTURE_ATTEMPTS = 20;
@@ -42,7 +44,7 @@ function assertExecutable(filePath, label) {
 
 function getExecutablePath(appPath) {
   if (process.platform === "darwin") {
-    return path.join(appPath, "Contents", "MacOS", EXECUTABLE_NAME);
+    return path.join(appPath, "Contents", "MacOS", MAC_EXECUTABLE_NAME);
   }
 
   if (process.platform === "win32") {
@@ -65,7 +67,7 @@ function getCliShimPath(appPath) {
 }
 
 function getMacMainExecutablePath(appPath) {
-  return path.join(appPath, "Contents", "MacOS", EXECUTABLE_NAME);
+  return path.join(appPath, "Contents", "MacOS", MAC_EXECUTABLE_NAME);
 }
 
 function getLaunchCommand(executablePath, args) {
@@ -961,7 +963,7 @@ if (require.main === module) {
   const appIndex = process.argv.indexOf("--app");
   const appPath = appIndex >= 0 ? process.argv[appIndex + 1] : null;
   if (!appPath) {
-    process.stderr.write("Usage: node smoke-packaged-desktop-app.js --app <Paseo.app>\n");
+    process.stderr.write("Usage: node smoke-packaged-desktop-app.js --app <Bachuc.app>\n");
     process.exit(2);
   }
 

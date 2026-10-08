@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { app } from "electron";
@@ -80,13 +80,23 @@ export function resolveNodeExecPath(): string {
     const markerIndex = process.execPath.indexOf(marker);
     if (markerIndex !== -1) {
       const bundleRoot = process.execPath.substring(0, markerIndex + ".app".length);
+      const frameworksDir = path.posix.join(bundleRoot, "Contents", "Frameworks");
       // Helpers are named after productName, which can differ from the executable
-      // name (Paseo Dev ships executable "Paseo" with "Paseo Dev Helper.app").
-      for (const name of new Set([path.basename(process.execPath), app.name])) {
+      // name and from app.name: the release script builds with productName "Bachuc",
+      // and that build opened in place is named "Bachuc Dev". Like bin/paseo, fall
+      // back to the "* Helper.app" found in Frameworks.
+      const bundledHelperNames = existsSync(frameworksDir)
+        ? readdirSync(frameworksDir)
+            .filter((entry) => entry.endsWith(" Helper.app"))
+            .map((entry) => entry.slice(0, -" Helper.app".length))
+        : [];
+      for (const name of new Set([
+        path.basename(process.execPath),
+        app.name,
+        ...bundledHelperNames,
+      ])) {
         const helperPath = path.posix.join(
-          bundleRoot,
-          "Contents",
-          "Frameworks",
+          frameworksDir,
           `${name} Helper.app`,
           "Contents",
           "MacOS",

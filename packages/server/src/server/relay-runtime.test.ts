@@ -40,6 +40,31 @@ describe("RelayRuntime", () => {
     expect(runtime.getConfig().enabled).toBe(false);
   });
 
+  test("does not start transport without a relay endpoint", () => {
+    const starts: string[] = [];
+    const runtime = createRelayRuntime({
+      config: {
+        enabled: true,
+        endpoint: "",
+        publicEndpoint: "",
+        useTls: false,
+        publicUseTls: false,
+      },
+      logger: pino({ level: "silent" }),
+      attachSocket: async () => undefined,
+      serverId: "relay-runtime-test",
+      daemonKeyPair: generateKeyPair(),
+      startTransport: (options) => {
+        starts.push(options.relayEndpoint);
+        return { stop: async () => undefined };
+      },
+    });
+
+    runtime.setEnabled(false);
+    runtime.setEnabled(true);
+    expect(starts).toEqual([]);
+  });
+
   test("keeps relay disabled when transport startup fails", () => {
     const runtime = createRelayRuntime({
       config: {

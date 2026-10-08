@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds a release from this checkout, installs it as "Paseo Fork.app", and restarts the release
-# daemon (~/.paseo on 127.0.0.1:6767) on it.
+# Builds a release from this checkout, installs it as "Bachuc.app", links ~/.local/bin/paseo to
+# its CLI, and restarts the release daemon (~/.paseo on 127.0.0.1:6767) on it.
 #
 #   scripts/paseo-release.sh             build, install, start
 #   scripts/paseo-release.sh --dry-run   print every change without making it
@@ -19,11 +19,18 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RELEASE_HOME="$HOME/.paseo"
 RELEASE_PORT=6767
 RELEASE_LISTEN="127.0.0.1:$RELEASE_PORT"
-# packages/desktop/src/main.ts gives the release home and port to this bundle name only.
-APP="/Applications/Paseo Fork.app"
-BUILD_APP="$REPO_ROOT/packages/desktop/release/mac-arm64/Paseo.app"
-BUILD_BUNDLE_ID="sh.paseo.desktop.dev"
+# packages/desktop/src/main.ts gives the release home and port to this install path only.
+APP="/Applications/Bachuc.app"
+# The release app before the Bachuc rename. The first install replaces it and moves it to the Trash.
+OLD_APP="/Applications/Paseo Fork.app"
+BUILD_APP="$REPO_ROOT/packages/desktop/release/mac-arm64/Bachuc.app"
+BUILD_BUNDLE_ID="io.github.hieppp.bachuc"
+# Other builds are "Bachuc Dev". main.ts names the release app Bachuc, and the daemon finds its
+# helper app by that name.
+BUILD_NAME="Bachuc"
 SIGN_IDENTITY="Paseo Fork Local"
+# Agents call the paseo CLI through this link.
+CLI_LINK="$HOME/.local/bin/paseo"
 # The release loads hiep-plugins from this folder, as directory installs. The daemon compiles a
 # plugin at load time and needs its type dependencies, which only a full checkout has.
 PLUGINS_DIR="$REPO_ROOT/hiep-plugins/plugins"
@@ -40,8 +47,11 @@ STEP=""
 STEP_NUMBER=0
 # Set once the daemon is being stopped: from then on a failure can leave the home without one.
 STOPPED=0
-# Where the app that ran before waits once the new one takes its place; empty until then.
+# The app that ran before: where it ran, and where it waits once the new one takes its place.
+# Both are empty when no app ran.
+PREVIOUS_PATH=""
 PREVIOUS_APP=""
+PREVIOUS_CLI_LINK=""
 IN_ROLLBACK=0
 MIRROR_PID=""
 
@@ -126,7 +136,8 @@ app_version() { plist "$1/Contents/Info.plist" CFBundleShortVersionString; }
 show_version() { printf '%s' "$1" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+)-hiep$/hiep-\1/'; }
 app_cli() { printf '%s' "$1/Contents/Resources/bin/paseo"; }
 # -a: pgrep skips its own ancestors by default, which would hide the app from guard_outside_paseo.
-app_pid() { pgrep -a -f "^$1/Contents/MacOS/Paseo( |\$)" 2>/dev/null | head -1 || true; }
+# Matches the main executable whatever its name; the helper apps live under Contents/Frameworks.
+app_pid() { pgrep -a -f "^$1/Contents/MacOS/[^/ ]+( |\$)" 2>/dev/null | head -1 || true; }
 app_stopped() { [ -z "$(app_pid "$1")" ]; }
 
 listener_pid() { lsof -nP -t -iTCP:"$RELEASE_PORT" -sTCP:LISTEN 2>/dev/null | head -1 || true; }
@@ -136,9 +147,24 @@ supervisor_pid() { jq -r '.pid // empty' "$RELEASE_HOME/paseo.pid" 2>/dev/null |
 # Runs a CLI against the release home whatever the calling shell exported.
 release_cli() { env -u PASEO_LISTEN -u PASEO_HOST PASEO_HOME="$RELEASE_HOME" "$@"; }
 
+# The installed release app: this install path, else the app before the rename, else none.
+current_app() {
+  if [ -d "$APP" ]; then
+    printf '%s' "$APP"
+  elif [ -d "$OLD_APP" ]; then
+    printf '%s' "$OLD_APP"
+  fi
+}
+
 # The CLI of the installed app; the build's before the first install.
 installed_cli() {
-  if [ -x "$(app_cli "$APP")" ]; then app_cli "$APP"; else app_cli "$BUILD_APP"; fi
+  local current
+  current="$(current_app)"
+  if [ -n "$current" ] && [ -x "$(app_cli "$current")" ]; then
+    app_cli "$current"
+  else
+    app_cli "$BUILD_APP"
+  fi
 }
 
 guard_outside_paseo() {
@@ -146,7 +172,7 @@ guard_outside_paseo() {
   if [ -n "${PASEO_AGENT_ID:-}" ]; then
     reason="PASEO_AGENT_ID is set, so this shell belongs to a Paseo agent"
   else
-    owners="$(app_pid "$APP") $(supervisor_pid) $(listener_pid)"
+    owners="$(app_pid "$APP") $(app_pid "$OLD_APP") $(supervisor_pid) $(listener_pid)"
     pid=$$
     while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
       for owner in $owners; do
@@ -178,6 +204,7 @@ preflight_home() {
     problem "no $RELEASE_HOME/config.json: the plugins cannot be registered"
   [ -n "$(repo_plugin_ids)" ] || problem "no plugins found in $PLUGINS_DIR"
   [ -w "$(dirname "$APP")" ] || problem "$(dirname "$APP") is not writable"
+  [ ! -e "$CLI_LINK" ] || [ -L "$CLI_LINK" ] || problem "$CLI_LINK exists and is not a link"
   # The previous app goes to the Trash by rename, which is atomic only inside one volume.
   [ "$(stat -f %d "$HOME")" = "$(stat -f %d "$(dirname "$APP")")" ] ||
     problem "$HOME and $(dirname "$APP") are on different volumes"
@@ -190,6 +217,8 @@ preflight_build() {
   fi
   [ "$(plist "$BUILD_APP/Contents/Info.plist" CFBundleIdentifier)" = "$BUILD_BUNDLE_ID" ] ||
     problem "build bundle ID is not $BUILD_BUNDLE_ID"
+  [ "$(plist "$BUILD_APP/Contents/Info.plist" CFBundleName)" = "$BUILD_NAME" ] ||
+    problem "build is not named $BUILD_NAME; build it with this script, not with --skip-build"
   [ -x "$(app_cli "$BUILD_APP")" ] || problem "build has no CLI at $(app_cli "$BUILD_APP")"
   # A reused build can be ad-hoc signed or cut off mid-signing; either loses the file access grants.
   case "$(codesign -dvv "$BUILD_APP" 2>&1 || true)" in
@@ -235,13 +264,14 @@ check_running_agents() {
 }
 
 stop_release() {
-  local cli="$1" pid
-  pid="$(app_pid "$APP")"
-  if [ -n "$pid" ]; then
-    log "    quitting $APP (PID $pid)"
+  local cli="$1" app pid
+  for app in "$APP" "$OLD_APP"; do
+    pid="$(app_pid "$app")"
+    [ -n "$pid" ] || continue
+    log "    quitting $app (PID $pid)"
     run kill -TERM "$pid"
-    wait_for 60 "$APP to quit" app_stopped "$APP"
-  fi
+    wait_for 60 "$app to quit" app_stopped "$app"
+  done
   # The app stops its own daemon unless "keep running after quit" is on; this covers that case.
   # The exit code is not trusted: the free port below is the proof.
   [ ! -x "$cli" ] || run release_cli "$cli" daemon stop --timeout "$STOP_TIMEOUT" || true
@@ -276,27 +306,39 @@ plugins_ready() {
     >/dev/null 2>&1
 }
 
+# start_and_verify <app>
 start_and_verify() {
-  run open -n "$APP"
-  wait_for 120 "daemon $(app_version "$APP") on $RELEASE_LISTEN (see $RELEASE_HOME/daemon.log)" \
-    daemon_matches "$APP"
+  run open -n "$1"
+  wait_for 120 "daemon $(app_version "$1") on $RELEASE_LISTEN (see $RELEASE_HOME/daemon.log)" \
+    daemon_matches "$1"
 }
 
-# Puts back the app that ran before and starts it. Safe from any point after the daemon stopped.
+# Puts back the app that ran before and its CLI link, and starts it. Safe from any point after the
+# daemon stopped.
 rollback() {
-  local cli
+  local cli app="${PREVIOUS_PATH:-$APP}"
   cli="$(app_cli "$APP")"
   [ -x "$cli" ] || cli="$(app_cli "$PREVIOUS_APP")"
   step "rollback: stop whatever the failed install started"
   stop_release "$cli"
-  if [ -n "$PREVIOUS_APP" ]; then
+  if [ -n "$PREVIOUS_PATH" ]; then
     step "rollback: put the previous app back"
-    [ ! -e "$APP" ] || move "$APP" "$HOME/.Trash/Paseo Fork failed $STAMP.app"
-    move "$PREVIOUS_APP" "$APP"
+    # $APP is the failed install unless the previous app still waits there.
+    [ "$PREVIOUS_APP" = "$APP" ] || [ ! -e "$APP" ] ||
+      move "$APP" "$HOME/.Trash/Bachuc failed $STAMP.app"
+    [ "$PREVIOUS_APP" = "$PREVIOUS_PATH" ] || move "$PREVIOUS_APP" "$PREVIOUS_PATH"
+    # Preflight refuses a CLI path that is not a link, so rm only removes the link this run made.
+    if [ "$(readlink "$CLI_LINK" || true)" != "$PREVIOUS_CLI_LINK" ]; then
+      if [ -n "$PREVIOUS_CLI_LINK" ]; then
+        run ln -sfn "$PREVIOUS_CLI_LINK" "$CLI_LINK"
+      else
+        run rm -f "$CLI_LINK"
+      fi
+    fi
   fi
-  [ -d "$APP" ] || die "no previous app to go back to"
+  [ -d "$app" ] || die "no previous app to go back to"
   step "rollback: start the previous app and wait for its daemon"
-  start_and_verify
+  start_and_verify "$app"
 }
 
 start_output_log() {
@@ -343,7 +385,7 @@ on_exit() {
       if [ "$rolled" = 0 ]; then
         log "Rolled back. The release home runs the previous app."
       else
-        printf 'error: rollback did not finish, so the release home may have no daemon. No data was deleted. Open %s, or run again: scripts/paseo-release.sh\n' "$APP" >&2
+        printf 'error: rollback did not finish, so the release home may have no daemon. No data was deleted. Open %s, or run again: scripts/paseo-release.sh\n' "${PREVIOUS_PATH:-$APP}" >&2
       fi
     fi
   fi
@@ -352,7 +394,7 @@ on_exit() {
 }
 
 main() {
-  local arg cli version staging="$APP.new"
+  local arg cli version previous_id staging="$APP.new"
   for arg in "$@"; do
     case "$arg" in
       --dry-run) DRY_RUN=1 ;;
@@ -386,7 +428,8 @@ main() {
     # hardenedRuntime stays off: there is no Developer ID, and the app died at launch with it on.
     # timestamp=none: the secure timestamp is a network call per signed file (about 0.5s against
     # 0.05s without), across hundreds of files. Only notarization needs it.
-    run npm run build:desktop -- --dir -c.mac.hardenedRuntime=false -c.mac.notarize=false \
+    run npm run build:desktop -- --dir -c.productName="$BUILD_NAME" \
+      -c.mac.hardenedRuntime=false -c.mac.notarize=false \
       -c.mac.identity="$SIGN_IDENTITY" -c.mac.timestamp=none
   fi
   [ "$DRY_RUN" = 1 ] || start_output_log "$@"
@@ -398,9 +441,13 @@ main() {
   version="$(app_version "$BUILD_APP")"
 
   step "copy release $version to $staging"
-  [ ! -e "$staging" ] || move "$staging" "$HOME/.Trash/Paseo Fork staging $STAMP.app"
+  [ ! -e "$staging" ] || move "$staging" "$HOME/.Trash/Bachuc staging $STAMP.app"
   run ditto "$BUILD_APP" "$staging"
 
+  PREVIOUS_PATH="$(current_app)"
+  PREVIOUS_APP="$PREVIOUS_PATH"
+  PREVIOUS_CLI_LINK="$(readlink "$CLI_LINK" || true)"
+  previous_id="$(plist "$PREVIOUS_PATH/Contents/Info.plist" CFBundleIdentifier)"
   # From here the release home has no daemon until a start succeeds, so a failure rolls back.
   STOPPED=1
   step "stop the app and daemon on the release home"
@@ -408,18 +455,33 @@ main() {
   step "register the plugins in $PLUGINS_DIR in the release home"
   run register_repo_plugins
   step "install $APP"
-  if [ -e "$APP" ]; then
-    move "$APP" "$HOME/.Trash/Paseo Fork $STAMP.app"
-    PREVIOUS_APP="$HOME/.Trash/Paseo Fork $STAMP.app"
+  if [ "$PREVIOUS_PATH" = "$APP" ]; then
+    move "$APP" "$HOME/.Trash/Bachuc $STAMP.app"
+    PREVIOUS_APP="$HOME/.Trash/Bachuc $STAMP.app"
   fi
   move "$staging" "$APP"
   step "start the app and wait for daemon $version"
-  start_and_verify
+  start_and_verify "$APP"
   step "wait for the plugins to run"
   wait_for 120 "plugins to run (check: paseo plugin ls, and $RELEASE_HOME/daemon.log)" plugins_ready
+  step "link $CLI_LINK to the CLI of $APP"
+  run mkdir -p "$(dirname "$CLI_LINK")"
+  run ln -sfn "$(app_cli "$APP")" "$CLI_LINK"
   STOPPED=0
+  # The new release runs, so a failure from here does not roll back. Run from a stale copy, the
+  # old app would take the release home and restart the daemon on its older version.
+  step "move the app before the rename to the Trash"
+  if [ -e "$OLD_APP" ]; then
+    move "$OLD_APP" "$HOME/.Trash/Paseo Fork $STAMP.app"
+    [ "$PREVIOUS_PATH" != "$OLD_APP" ] || PREVIOUS_APP="$HOME/.Trash/Paseo Fork $STAMP.app"
+  fi
   log "Release $(show_version "$version") is installed and runs on $RELEASE_LISTEN."
   [ -z "$PREVIOUS_APP" ] || log "The previous app is at $PREVIOUS_APP."
+  # macOS ties privacy grants to the bundle ID, so a new bundle ID starts without them.
+  if [ "$previous_id" != "$BUILD_BUNDLE_ID" ]; then
+    log "The bundle ID is new: grant Bachuc microphone, screen recording, accessibility, and"
+    log "automation again in System Settings > Privacy & Security."
+  fi
 }
 
 # Sourcing the file loads the functions without running a command.

@@ -2,40 +2,43 @@
 
 ## Outcome
 
-Status: DONE
+Status: DONE (auto: manual checks pending)
 
 Changed:
 
-- Added [hiep-plugins/plugins/watchtower-board/client/timeline.ts](hiep-plugins/plugins/watchtower-board/client/timeline.ts) with `buildTimeline`, `barEnd`, `DEFAULT_TASK_MINUTES`, and the timeline types.
-- Added [hiep-plugins/plugins/watchtower-board/tests/timeline.test.ts](hiep-plugins/plugins/watchtower-board/tests/timeline.test.ts) with 7 tests, built on the mid-run state of the design mock.
-- Spec refinement 1: a running bar holds its lane, and planned bars wait, until the later of `now` and its expected end. A task already over the average cannot end in the past.
-- Spec refinement 2: planned bars never start before `now`.
-- Spec refinement 3: when every open task is running, `finishMinute` is the latest running expected end, not `null`. `null` stays for a plan with every task `DONE`.
+- [packages/app/assets/images](packages/app/assets/images): `icon.png`, `favicon.png`, `splash-icon.png`, and the six `favicon-*` PNGs show the mark as a full-bleed rounded square, as the old black squares did. `notification-icon.png` and `android-icon-foreground.png` show a white palm on transparent, at the old glyph size.
+- The six `favicon-*.svg` files draw the mark and keep the old status dots: blue `#3b82f6` for running, green `#22c55e` for attention. Dark and light stay identical, as before. The favicon PNGs are rendered from these SVGs.
+- [packages/app/public](packages/app/public): `apple-touch-icon.png`, `pwa-icon-192.png`, and `pwa-icon-512.png` show the full-bleed mark.
+- [packages/desktop/assets](packages/desktop/assets): `icon.png`, the four size PNGs, `icon.icns`, and `icon.ico` show the mark on the macOS grid (824 px body at offset 100 in 1024), as the old desktop icons did. `icon-dev.png` adds a cream `</>` badge at the bottom right.
+- [packages/app/src/components/icons/paseo-logo.tsx](packages/app/src/components/icons/paseo-logo.tsx): draws the palm from [brand/bachuc/mark.svg](brand/bachuc/mark.svg) without its rounded square, one `Path` per shape. The name `PaseoLogo`, its props, and the single-color fill stay (ADR-0004), so the splash mask still works.
+- Deleted `butterfly-green.svg` and `butterfly-white.svg`. Nothing imported them.
 
 Contract:
 
-- `buildTimeline({ tasks, run, questions })` returns `bars`, `edges`, `laneCount`, `axis`, `stats`, `finishMinute`, and `deadlines`.
-- Bar kinds: `done` (from the latest `DONE` log row of a `DONE` task), `running`, `planned`, and `blocked`.
-- The average is the rounded mean of done bar lengths, or 20 minutes.
-- Lanes pack by start time. A task takes its first dep's lane when that lane is free.
-- Ticks fall on whole clock hours from `Started:`. With no start time, ticks read `+1h`, `+2h`, and so on.
-- A deadline is the planned start of the earliest planned or blocked task that an `OPEN` question blocks.
+- Baseline dimensions: `icon.png` 1024x1024, the seven favicon PNGs 48x48, `splash-icon.png` 200x200, `notification-icon.png` 96x96, `android-icon-foreground.png` 1024x1024, `apple-touch-icon.png` 180x180, `pwa-icon-192.png` 192x192, `pwa-icon-512.png` 512x512. Desktop: `icon.png` 512x512, `icon-dev.png` 1024x1024, `32x32.png`, `64x64.png`, `128x128.png`, and `128x128@2x.png` 256x256. `icon.ico` held PNG entries at 16, 24, 32, 48, 64, 128, and 256. `icon.icns` held the ten standard sizes.
+- Q-006, DEFAULTED: the spec says to keep `icon-dev.png` different "as the old pair is". The old desktop `icon.png` and `icon-dev.png` were the same orange "Paseo Dev" image (RMSE 0.007). The default marks the dev icon with a `</>` badge, so live and release still differ in the Dock.
+- Tools: `magick` here has no SVG delegate (`rsvg-convert` is missing), so the PNGs are rendered with `sharp` from `node_modules`, which bundles librsvg 2.61. `magick` writes only BMP entries into `.ico` (372 KB), so a short script packed the PNG exports into `icon.ico`. `iconutil` built `icon.icns`.
+- GitNexus `impact` on `PaseoLogo`: CRITICAL by reach (31 dependents, the welcome and open project screens). The API does not change, so no caller changes. No symbol-level impact applies to the image files.
 
 Verified:
 
-- `npx tsx --test tests/timeline.test.ts` -> 7 pass, 0 fail. The mock case gives 2 lanes, a finish at minute 194 (02:06), and a Q-008 deadline at minute 176 (01:48).
-- `npm test` in the plugin folder -> 41 pass, 0 fail.
-- `npm run typecheck` -> exit 0. `npm run lint` -> exit 0, 0 warnings.
-- `rg -n "react-native|from \"react\"" client/timeline.ts` -> no match.
+- `magick identify -format "%f %wx%h\n"` on each replaced PNG -> each matches the baseline above.
+- `iconutil -c iconset packages/desktop/assets/icon.icns -o /tmp/bachuc.iconset` -> exit 0, ten images, each shows the mark.
+- `magick identify packages/desktop/assets/icon.ico` -> seven PNG entries, 16 to 256.
+- `rg -n "butterfly-(green|white)" packages/app/src` -> no match.
+- A contact sheet of all replaced icons and a render of the new `PaseoLogo` paths show the mark, centered.
+- `npm run typecheck` -> exit 0.
+- `npm run lint -- packages/app/src/components/icons/paseo-logo.tsx` -> 0 warnings, 0 errors.
+- Plan Verify: the license diff exits 0, and the plugin diff has no output.
+- UNVERIFIED (autonomous run): the human check on live (welcome screen, startup splash, open project screen, the tab favicon in its three states, and the Dock icon). The run does not start or restart live.
 
 Anti-goal:
 
-- Before lane packing: 0.1713 ms average over 50 runs, 200 tasks and 200 log rows; the timing test with lane packing switched off, 2026-10-07 12:49.
-- After lane packing: 0.2230 ms; same test, 2026-10-07 12:49.
-- Final: 0.2230 ms; same test after formatting, 2026-10-07 12:50.
-- Result: PASS against 10 ms.
+- Before changes: `du -ck <replaced files>` -> 2756 KB, 2026-10-08 10:46. The baseline includes the two deleted butterfly SVGs.
+- Final: `du -ck <replaced files>` -> 636 KB, 10:50.
+- Result: PASS (0.23 of the baseline, limit 1.25).
 
 Lessons:
 
-- The timeline works in minutes from `Started:`. A view converts a minute to a clock time with the run start; see `hourTicks` in [hiep-plugins/plugins/watchtower-board/client/timeline.ts](hiep-plugins/plugins/watchtower-board/client/timeline.ts).
-- Use `barEnd(bar)` for where a bar stops taking room. A running bar's `end` is `now`, but its lane stays busy until its expected end.
+- `magick` on this machine cannot render SVG and writes `.ico` entries as BMP. Render SVG with `sharp` from `node_modules`, and pack PNG files into `.ico` by hand.
+- The desktop `icon.png` and `icon-dev.png` were identical before this TASK. The dev icon now carries a badge.

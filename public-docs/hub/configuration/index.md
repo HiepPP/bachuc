@@ -100,7 +100,8 @@ Origin precedence:
 1. `--hub`
 2. `PASEO_HUB_URL`
 3. Active stored login
-4. `https://hub.paseo.sh`
+
+With none of these, the command fails with `HUB_ORIGIN_REQUIRED`.
 
 Credential precedence:
 

@@ -13,12 +13,12 @@ interface ResolveHubInput {
   credentials: HubCredentialStore;
 }
 
-export const DEFAULT_HUB_ORIGIN = "https://hub.paseo.sh";
-
 export function resolveHubOrigin(input: ResolveHubInput): string {
   const configuredOrigin = input.options.origin ?? input.env.PASEO_HUB_URL;
-  const selectedOrigin =
-    configuredOrigin ?? input.credentials.active()?.origin ?? DEFAULT_HUB_ORIGIN;
+  const selectedOrigin = configuredOrigin ?? input.credentials.active()?.origin;
+  if (selectedOrigin === undefined) {
+    throw new HubCommandError("HUB_ORIGIN_REQUIRED", "Pass a Hub origin or set PASEO_HUB_URL.");
+  }
   return normalizeHubOrigin(selectedOrigin);
 }
 

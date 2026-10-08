@@ -81,7 +81,6 @@ import { KeyboardShortcutsSection } from "@/screens/settings/keyboard-shortcuts-
 import { EditorSection } from "@/screens/settings/editor-section";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { CommunityLinks } from "@/components/community-links";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissions-section";
@@ -92,7 +91,7 @@ import { isElectronRuntime } from "@/desktop/host";
 import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
 import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
 import { resolveAppVersion } from "@/utils/app-version";
-import { openChangelog } from "@/changelog";
+import { openExternalUrl } from "@/utils/open-external-url";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
 import { settingsStyles } from "@/styles/settings";
 import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
@@ -464,34 +463,40 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
             </View>
             <Text style={styles.aboutValue}>{appVersionText}</Text>
           </View>
-          <WhatsNewRow />
+          <BasedOnRow />
           {isDesktopApp ? <DesktopAppUpdateRow /> : null}
         </View>
       </SettingsSection>
       <ConnectedHostsSection clientVersion={appVersion} />
-      <View style={styles.aboutCommunity}>
-        <CommunityLinks />
-      </View>
     </>
   );
 }
 
-function WhatsNewRow() {
+const UPSTREAM_REPO_URL = "https://github.com/getpaseo/paseo";
+
+function openUpstreamRepo() {
+  void openExternalUrl(UPSTREAM_REPO_URL);
+}
+
+function BasedOnRow() {
   const { t } = useTranslation();
   const { theme } = useUnistyles();
 
   return (
     <Pressable
       style={[settingsStyles.row, settingsStyles.rowBorder]}
-      onPress={openChangelog}
-      accessibilityRole="button"
-      testID="settings-whats-new"
+      onPress={openUpstreamRepo}
+      accessibilityRole="link"
+      testID="settings-based-on"
     >
       {({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => (
         <>
           <View style={settingsStyles.rowContent}>
-            <Text style={settingsStyles.rowTitle}>{t("changelog.title")}</Text>
-            <Text style={settingsStyles.rowHint}>{t("settings.about.whatsNewHint")}</Text>
+            {/* "Paseo" goes in as a value, so the brand transform keeps the upstream name. */}
+            <Text style={settingsStyles.rowTitle}>
+              {t("settings.about.basedOn", { upstream: "Paseo" })}
+            </Text>
+            <Text style={settingsStyles.rowHint}>github.com/getpaseo/paseo</Text>
           </View>
           <ChevronRight
             size={theme.iconSize.sm}
@@ -1569,9 +1574,6 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.palette.red[300],
     fontSize: theme.fontSize.sm,
     marginTop: theme.spacing[1],
-  },
-  aboutCommunity: {
-    marginTop: theme.spacing[4],
   },
   aboutUpdateActions: {
     flexDirection: "row",

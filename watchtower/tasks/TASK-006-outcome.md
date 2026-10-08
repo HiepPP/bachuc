@@ -6,35 +6,42 @@ Status: DONE
 
 Changed:
 
-- Added [hiep-plugins/plugins/watchtower-board/client/overview-cells.tsx](hiep-plugins/plugins/watchtower-board/client/overview-cells.tsx) with `LifecycleStepper`, `NeedsYouCell`, `RunLogCell`, `ManualChecksCell`, and `HistoryCell`.
-- The file also exports `OverviewCell`, the bordered frame with a title row that every cell uses, so TASK-007 can wrap the timeline in the same frame. It also exports `LIST_LIMIT`, `StatusCounts`, and `RunningTask`.
-- Needs you copies `"<meta>: <title>"` with `copyText` and shows "Copied" on that row (Q-001, read-only). A cell with a blocking question gets a warning border and tint.
-- The run log shows the newest log rows plus one `now` row per running task, 5 rows in total. Running tasks come from props, because `RUN.md` logs only finished iterations.
-- Decisions and history shows at most 3 ADRs, proposed first, and at most 3 archived plans, then one "<n> more" line. This is below the 5-row limit, so the cell fits the bento row.
+- [packages/desktop/electron-builder.yml](packages/desktop/electron-builder.yml): the `publish` block is gone, so builds ship no `app-update.yml`.
+- [packages/desktop/src/features/app-updates-enabled.ts](packages/desktop/src/features/app-updates-enabled.ts) is new. It holds the desktop gate `APP_UPDATES_ENABLED = false`. A separate module lets the test turn the gate on and off with `vi.mock`.
+- [packages/desktop/src/features/auto-updater.ts](packages/desktop/src/features/auto-updater.ts): the update service gets `isPackaged: () => APP_UPDATES_ENABLED && app.isPackaged`. The service then returns "no update" from check, download, and install-on-quit, and never calls electron-updater. The updater module stays.
+- [packages/app/src/desktop/updates/desktop-updates.ts](packages/app/src/desktop/updates/desktop-updates.ts): the new app gate `DESKTOP_APP_UPDATES_ENABLED = false` makes `shouldShowDesktopUpdateSection()` return false. That one function feeds `useDesktopAppUpdater`. So the "Release channel" and "App updates" rows, the automatic update checks, and the update callout are all off.
+- [packages/app/src/desktop/updates/rosetta-callout-source.tsx](packages/app/src/desktop/updates/rosetta-callout-source.tsx): the Rosetta warning stays, but it has no Download button. That button was the only user of `RELEASE_DOWNLOAD_BASE_URL` and of the `paseo.sh/download` fallback.
+- [packages/desktop/src/features/auto-updater.test.ts](packages/desktop/src/features/auto-updater.test.ts): a new case turns the gate off. Check, download, and install-on-quit then make no call to `checkForUpdates`, `downloadUpdate`, or `quitAndInstall`.
+- Not changed: [packages/desktop/src/main.ts](packages/desktop/src/main.ts) and [packages/app/src/desktop/components/desktop-updates-section.tsx](packages/app/src/desktop/components/desktop-updates-section.tsx). The About rows live in `DesktopAppUpdateRow` in [packages/app/src/screens/settings-screen.tsx](packages/app/src/screens/settings-screen.tsx). That row already returns `null` when `useDesktopAppUpdater` reports `isDesktopApp: false`, so that file needs no edit.
 
 Contract:
 
-- Props only. Cells call no data hook. Lists stop at 5 rows and add a "<n> more" line.
-- `RunLogCell` takes `run` and `running: { id, minutes }[]`. `LifecycleStepper` takes `phases` and `counts: { done, running, blocked, todo }`.
-- Icons are Lucide names through the host `Icon`: `FileText`, `Play`, `ShieldCheck`, `GitPullRequest`, `Archive`, `CircleCheck`, `CircleAlert`, `MessageCircleQuestion`, `Scale`, `ClipboardCheck`, and `Copy`.
+- The desktop app never checks, downloads, or installs an update. Each entry point goes through the service `isPackaged` dep, so the gate lives in one place per package.
+- Settings > About keeps "App version" and "What's new". The "Release channel" and "App updates" rows are hidden.
+- To turn updates on again, set both constants to `true` and restore the `publish` block. A merge that brings back only the `publish` block does not turn updates on.
+- GitNexus impact: `shouldShowDesktopUpdateSection` is CRITICAL (5 modules). Its only direct caller is `useDesktopAppUpdater`, and every caller already handles `false`, as on plain web. That reach is the goal of this TASK. `configure` is UNKNOWN in the index. A text search shows that its only caller is [packages/desktop/src/features/app-update-service.ts](packages/desktop/src/features/app-update-service.ts), and this TASK does not edit it.
 
 Verified:
 
-- `npm run typecheck` -> exit 0. `npm run lint` -> exit 0, 0 warnings.
-- `rg -n "useQuery|useRpc" client/overview-cells.tsx` -> no match.
-- `rg -n "—" client/overview-cells.tsx` -> no match.
-- `rg -c "export function (LifecycleStepper|NeedsYouCell|RunLogCell|ManualChecksCell|HistoryCell)"` -> 5.
-- `npm test` in the plugin folder -> 46 pass, 0 fail.
-- Every icon name exists in the installed `lucide-react-native`. `MessageCircleQuestion` is an alias of `message-circle-question-mark.js`.
-- The rendered cells: UNVERIFIED (autonomous run). Plan Verify checks them on live after TASK-008.
+- `npx vitest run packages/desktop/src/features/auto-updater.test.ts --bail=1` -> 13 passed, including the new case. The old cases pass with the gate on, and the new case passes with it off, so the mock toggles the gate for real.
+- `rg -n "^publish:" packages/desktop/electron-builder.yml` -> no match.
+- `npm run typecheck` -> exit 0.
+- `npm run lint -- <6 changed files>` -> 0 warnings, 0 errors.
+- `npm run format:check:files -- <6 changed files>` -> all files use the correct format.
+- `npx vitest run src/desktop/updates/desktop-updates.test.ts --bail=1` from `packages/app` -> 11 passed.
+- `rg -n "getpaseo/paseo|github.com/getpaseo" packages/desktop/electron-builder.yml packages/desktop/src --glob '!**/*.test.*'` -> no match.
+- Plan Verify: the license notice diff against `main` -> exit 0. The plugin diff stat -> no output.
+- Human check on live desktop: Settings > About shows the app version and no "App updates" or "Release channel" rows. UNVERIFIED (autonomous run).
+- Owner check after the next release install: the desktop log has no line that checks for updates. UNVERIFIED (autonomous run).
 
 Anti-goal:
 
-- Before the first edit: 0 data hooks; the file did not exist, 2026-10-07 12:58.
-- After the first cell (`OverviewCell` and `LifecycleStepper`): 0; `rg -c "useQuery|useRpc"`, 2026-10-07 12:59.
-- Final: 0; same command, 2026-10-07 12:59.
-- Result: PASS against 0 data hooks.
+- Before changes: 52 lines from earlier TASKs (TASK-003 and TASK-004), so TASK-006 had used 0; `git diff --numstat main -- packages/desktop packages/app/src/desktop ':(exclude)**/*.test.ts'`, 2026-10-08 11:21.
+- After the gate: 83 lines, so TASK-006 used 31; same command, 2026-10-08 11:24.
+- Final: 31 lines in existing upstream files (`desktop-updates.ts` 6, `rosetta-callout-source.tsx` 17, `electron-builder.yml` 4, `auto-updater.ts` 4), plus the new 3-line `app-updates-enabled.ts`, so 34 in all; `git diff --numstat HEAD`, 2026-10-08 11:25.
+- Result: PASS against 40.
 
 Lessons:
 
-- Lucide icons go through `Reflect.get(LucideIcons, name)` in the host, so PascalCase aliases such as `MessageCircleQuestion` work. Check names in `node_modules/lucide-react-native/dist/esm/lucide-react-native.js`.
+- The Bash tool runs zsh, and zsh does not split an unquoted `$VAR`. `npm run lint -- $F` then passes one long path and reports "No files found". Use an array: `npm run lint -- "${F[@]}"`.
+- A vitest `vi.mock` factory with a getter, `get APP_UPDATES_ENABLED() { return gate.enabled; }`, lets one test file flip a module constant per test. Source: [packages/desktop/src/features/auto-updater.test.ts](packages/desktop/src/features/auto-updater.test.ts).

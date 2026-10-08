@@ -2,50 +2,64 @@
 
 ## Current Active Plan
 
-- Title: Watchtower process overview screen
-- Slug: 20261007-watchtower-process-overview
+- Title: Rebrand the fork as Bachuc
+- Slug: 20261007-bachuc-rebrand
 - Status: DONE
-- Updated: 2026-10-07
+- Updated: 2026-10-08
 
 ## Tracker
 
 One row per TASK. Group ties together items that write the same files.
 
-| Order | TASK                                            | Group | Status | Spec                                                                                                   | Deps               | Context                                        | Notes                                                     |
-| ----- | ----------------------------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------------ | ------------------ | ---------------------------------------------- | --------------------------------------------------------- |
-| 1     | TASK-001 Overview plan data reader              | A     | DONE   | [watchtower/tasks/TASK-001-overview-plan-reader.md](watchtower/tasks/TASK-001-overview-plan-reader.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: no manual check. Also fixed the plugin lint script. |
-| 2     | TASK-002 Overview run, questions, and history   | A     | DONE   | [watchtower/tasks/TASK-002-overview-run-history.md](watchtower/tasks/TASK-002-overview-run-history.md) | TASK-001           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: no manual check. Overview tasks drop `brief`.       |
-| 3     | TASK-003 Lifecycle and needs-you model          | B     | DONE   | [watchtower/tasks/TASK-003-lifecycle-model.md](watchtower/tasks/TASK-003-lifecycle-model.md)           | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: no manual check.                                    |
-| 4     | TASK-004 Branch timeline model                  | C     | DONE   | [watchtower/tasks/TASK-004-timeline-model.md](watchtower/tasks/TASK-004-timeline-model.md)             | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: no manual check.                                    |
-| 5     | TASK-005 Branch timeline view                   | D     | DONE   | [watchtower/tasks/TASK-005-timeline-view.md](watchtower/tasks/TASK-005-timeline-view.md)               | TASK-004           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending (render on live).             |
-| 6     | TASK-006 Overview cells                         | E     | DONE   | [watchtower/tasks/TASK-006-overview-cells.md](watchtower/tasks/TASK-006-overview-cells.md)             | TASK-003           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending (render on live).             |
-| 7     | TASK-007 Overview screen                        | F     | DONE   | [watchtower/tasks/TASK-007-overview-screen.md](watchtower/tasks/TASK-007-overview-screen.md)           | TASK-005, TASK-006 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending (render on live).             |
-| 8     | TASK-008 Full-screen surface shows the overview | G     | DONE   | [watchtower/tasks/TASK-008-surface-switch.md](watchtower/tasks/TASK-008-surface-switch.md)             | TASK-007           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending (live was down).              |
-| 9     | TASK-009 Composer pill entry                    | H     | DONE   | [watchtower/tasks/TASK-009-composer-pill.md](watchtower/tasks/TASK-009-composer-pill.md)               | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending (live was down).              |
-| 10    | TASK-010 README for the overview and pill       | I     | DONE   | [watchtower/tasks/TASK-010-readme.md](watchtower/tasks/TASK-010-readme.md)                             | TASK-008, TASK-009 | -                                              | auto: no manual check.                                    |
+| Order | TASK                                            | Group | Status | Spec                                                                                             | Deps               | Context                                        | Notes                       |
+| ----- | ----------------------------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------ | ------------------ | ---------------------------------------------- | --------------------------- |
+| 1     | TASK-001 Logo concepts with Codex               | A     | DONE   | [watchtower/tasks/TASK-001-logo-concepts.md](watchtower/tasks/TASK-001-logo-concepts.md)         | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 2     | TASK-002 Bachuc name in the app UI              | B     | DONE   | [watchtower/tasks/TASK-002-app-ui-name.md](watchtower/tasks/TASK-002-app-ui-name.md)             | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 3     | TASK-003 Desktop identity and release install   | C     | DONE   | [watchtower/tasks/TASK-003-desktop-identity.md](watchtower/tasks/TASK-003-desktop-identity.md)   | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 4     | TASK-004 Apply the mark to icons and logo       | D     | DONE   | [watchtower/tasks/TASK-004-apply-icons.md](watchtower/tasks/TASK-004-apply-icons.md)             | TASK-001           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 5     | TASK-005 Remove upstream network defaults       | E     | DONE   | [watchtower/tasks/TASK-005-network-defaults.md](watchtower/tasks/TASK-005-network-defaults.md)   | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 6     | TASK-006 Turn off desktop auto-update           | C     | DONE   | [watchtower/tasks/TASK-006-auto-update-off.md](watchtower/tasks/TASK-006-auto-update-off.md)     | TASK-003           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 7     | TASK-007 Attribution and upstream links         | F     | DONE   | [watchtower/tasks/TASK-007-attribution-links.md](watchtower/tasks/TASK-007-attribution-links.md) | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 8     | TASK-008 Docs for the Bachuc names              | G     | DONE   | [watchtower/tasks/TASK-008-docs.md](watchtower/tasks/TASK-008-docs.md)                           | TASK-003, TASK-006 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 9     | TASK-009 Rename the macOS executable to Bachuc  | C+G   | DONE   | [watchtower/tasks/TASK-009-executable-name.md](watchtower/tasks/TASK-009-executable-name.md)     | TASK-008           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 10    | TASK-010 Update the help menu e2e spec          | I     | DONE   | [watchtower/tasks/TASK-010-help-menu-e2e.md](watchtower/tasks/TASK-010-help-menu-e2e.md)         | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 11    | TASK-011 Nix relay without the upstream default | J     | DONE   | [watchtower/tasks/TASK-011-nix-relay.md](watchtower/tasks/TASK-011-nix-relay.md)                 | TASK-005           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 12    | TASK-012 Hub docs without the hosted fallback   | K     | DONE   | [watchtower/tasks/TASK-012-hub-docs.md](watchtower/tasks/TASK-012-hub-docs.md)                   | TASK-005           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
 
 ## Plan Verify
 
-- In `hiep-plugins/plugins/watchtower-board`: `npm test` -> exit 0, and `tests/board.test.ts` still has 10 passing tests.
-- In `hiep-plugins/plugins/watchtower-board`: `npm run typecheck` and `npm run lint` -> exit 0.
-- From the repo root: `npm run format:check:files -- <changed plugin files>` -> exit 0.
-- Live host check, when the live daemon on port 6768 is up: `npm run cli -- plugin reload watchtower-board` -> the plugin reloads without an error. When live is down, record it as `UNVERIFIED (autonomous run)`.
-- Manual check, needs a human on live: click the Watchtower pill above an agent composer. The full-screen surface opens on that workspace and shows the lifecycle, the branch timeline, Needs you, the run log, manual checks, and decisions and history.
+- `npm run typecheck` -> exit 0.
+- `npm run lint -- <changed files>` -> exit 0.
+- License notices stay unchanged: `git diff --exit-code main -- LICENSE packages/expo-two-way-audio/LICENSE packages/highlight/src/astro/LICENSE packages/desktop/src/features/browser-automation/aria-snapshot-script.ts packages/app/src/terminal/local-links/terminal-local-link-provider.ts packages/app/src/terminal/local-links/terminal-local-link-parsing.ts` -> exit 0.
+- `rg -n "relay\.paseo\.sh|app\.paseo\.sh|hub\.paseo\.sh" packages/server/src packages/cli/src --glob '!**/*.test.*'` -> each match is a comment or the parser for old pairing links.
+- `git diff --stat main -- 'hiep-plugins/plugins/*/package.json' packages/plugin/src` -> no output. Plugins keep working without change.
+- Human check on live (`npm run dev`, then `npm run dev:desktop`): the window, menu, Settings, and welcome screen say Bachuc and show the new mark. Settings > About says the app is based on Paseo.
+- Owner check after the next release install, run from Terminal.app: `/Applications/Bachuc.app` starts. `PASEO_HOME=~/.paseo paseo daemon status` shows home `~/.paseo` on `127.0.0.1:6767`. `readlink ~/.local/bin/paseo` points into `/Applications/Bachuc.app`.
 
 ## Handoff
 
-- Next action: All TASKs are DONE. The owner reviews draft PR #24 from `watchtower-overview` to `main`, after the manual checks below. PR #13 should merge first, because this branch starts from `t3code-port`.
-- Plan Verify on 2026-10-07 13:16: `npm test` 49 pass, `tests/board.test.ts` 10 of 10, typecheck and lint exit 0, and the format check passes on all 22 changed plugin files. The live reload check is `UNVERIFIED (autonomous run)`, because the live daemon was stopped.
-- Manual check pending: start live, reload `watchtower-board`, and look at an agent composer. The Watchtower pill shows the plan progress beside Tasks and Subagents (TASK-009).
-- Manual check pending: on a wide window, click the pill. The page opens on that workspace and shows the lifecycle, the branch timeline, Needs you, the run log, manual checks, and decisions and history (TASK-005, TASK-006, TASK-007, TASK-008).
-- Manual check pending: make the window narrower than 720 px. The Watchtower page shows the board, as before (TASK-008).
-- Manual check pending: on New workspace, the pill reads `Watchtower` and opens the Watchtower page (TASK-009).
+- Next action: the autorun finished on 2026-10-08 and updated draft review PR #38 to `main`. The owner reviews `bachuc-rebrand`, runs the live checks, answers Q-008 if the default is wrong, and merges PR #38. Then archive the plan.
+- TASK-012 is DONE. The hub docs end the origin order with the `HUB_ORIGIN_REQUIRED` error. It also fixed the origin list in [public-docs/hub/configuration/index.md](public-docs/hub/configuration/index.md), outside its spec `Files:`. The hosted Hub product links stay. TASK-001 is DONE; the owner still checks the mark in [brand/bachuc/mark.svg](brand/bachuc/mark.svg) at 16 px and 1024 px.
+- TASK-011 is DONE. The nix module turns relay off by default, and mode `remote` with `relay.host` is the only relay path. The nix parse check is UNVERIFIED, because nix is not installed here. The spec grep matches `self-hosted` in two daemon descriptions; the exact check for mode `"hosted"` passes.
+- TASK-010 is DONE. The help menu e2e spec expects `Bachuc` and no removed item. Its three help menu tests are `test.fixme`, because the fork hides the Help button through `SHOW_FOOTER_EXTRAS` (Q-008, DEFAULTED). The spec passes with 1 test run and 3 skipped.
+- TASK-009 is DONE. The macOS build is `packages/desktop/release/mac-arm64/Bachuc.app` with `Contents/MacOS/Bachuc`, through `mac.executableName`. Linux and Windows keep the executable `Paseo`. `IS_RELEASE_APP` needs the path `/Applications/Bachuc.app/`. After the next release install, the owner checks that Activity Monitor shows `Bachuc` and that release runs on `~/.paseo` and `6767`. Two follow-ups are in its outcome: `paseo open` looks for `/Applications/Paseo.app`, and the nix CI job expects the old bundle ID.
+- TASK-008 is DONE. [CLAUDE.md](CLAUDE.md) and [docs/development.md](docs/development.md) name `/Applications/Bachuc.app`, the log folder `~/Library/Logs/Bachuc/`, and the userData folder `Bachuc Dev` of an opened build. The signing identity `Paseo Fork Local` stays, because the release script still uses it.
+- TASK-007 is DONE. The owner still checks on live that Settings > About shows "Based on Paseo", and that the sidebar help menu, the open project screen, and Settings show no Discord, Sponsors, upstream GitHub, or changelog link. The e2e spec [packages/app/e2e/browser/sidebar-help.spec.ts](packages/app/e2e/browser/sidebar-help.spec.ts) still asserts the removed items.
+- TASK-005 is DONE. Q-007 raised the limit to 104, and the branch `auto/TASK-005-network-defaults` merged into `bachuc-rebrand`. A new home has no relay endpoint, no CORS origin, no app base URL, and no hub origin. Hub commands need `--hub` or `PASEO_HUB_URL`. The owner still checks on live that the app connects on `127.0.0.1:6768` and that the daemon log shows relay off.
+- TASK-006 is DONE. Updates are off through two constants: `APP_UPDATES_ENABLED` in [packages/desktop/src/features/app-updates-enabled.ts](packages/desktop/src/features/app-updates-enabled.ts) and `DESKTOP_APP_UPDATES_ENABLED` in [packages/app/src/desktop/updates/desktop-updates.ts](packages/app/src/desktop/updates/desktop-updates.ts). The owner still checks on live that Settings > About has no "App updates" or "Release channel" rows. After the next release install, the owner checks that the desktop log has no update check.
+- TASK-004 is DONE. The owner still checks on live that the welcome screen, the startup splash, the open project screen, the tab favicon in its three states, and the Dock icon show the mark. The dev icon carries a `</>` badge (Q-006, answered: keep it).
+- TASK-003 is DONE. It kept the macOS executable `Paseo`; Q-005 asked for `Bachuc`, and TASK-009 renamed it. The owner still checks the live window title and the first release install. In-app browser logins may reset after that install, because the app name changes.
+- TASK-002 is DONE. The owner still checks on live that Settings, the help menu, the welcome screen, and the tab title say Bachuc, and that the `$PASEO_PORT` hint is unchanged.
+- After implement, the owner runs `scripts/paseo-release.sh` from Terminal.app. The agent never runs it.
+- After the first Bachuc install, the owner grants macOS permissions again (microphone, screen recording, accessibility, automation), because the bundle ID changes.
+- After the first Bachuc install, the owner removes the `app.baseUrl` key from `~/.paseo/config.json` and `.dev/paseo-home/config.json`. Both may still hold `https://app.paseo.sh`.
 
 ## Archive
 
 - [watchtower/archive/20260930-active-machine-switch/](watchtower/archive/20260930-active-machine-switch/)
 - [watchtower/archive/20260930-plugin-host-apis/](watchtower/archive/20260930-plugin-host-apis/)
 - [watchtower/archive/20261006-t3code-orchestration-port/](watchtower/archive/20261006-t3code-orchestration-port/)
+- [watchtower/archive/20261007-watchtower-process-overview/](watchtower/archive/20261007-watchtower-process-overview/)

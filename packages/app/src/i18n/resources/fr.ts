@@ -2192,6 +2192,7 @@ export const fr: TranslationResources = {
       title: "À propos",
       appVersion: "Version de l'application",
       whatsNewHint: "Notes de version pour chaque release",
+      basedOn: "Basé sur {{upstream}}",
       thisDevice: "Cet appareil",
       connectedHosts: "Hôtes connectés",
       offline: "Hors ligne",

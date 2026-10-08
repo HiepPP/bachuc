@@ -117,7 +117,7 @@ function printNextSteps(pairingUrl: string | null, paseoHome: string, richUi: bo
     pairingUrl
       ? "1. Open Paseo and scan the QR code above, or paste the pairing link."
       : "1. Open Paseo and connect to your daemon.",
-    "2. Web app: https://app.paseo.sh",
+    "2. Other devices: connect directly over your LAN or Tailscale.",
     "3. Desktop app: https://github.com/getpaseo/paseo/releases/latest",
     "4. Docs: https://paseo.sh/docs",
     `5. Example: paseo run --home ${JSON.stringify(paseoHome)} --output-schema schema.json "extract fields"`,

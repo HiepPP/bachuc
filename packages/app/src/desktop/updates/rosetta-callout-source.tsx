@@ -4,6 +4,7 @@ import { SidebarCalloutDescriptionText } from "@/components/sidebar-callout";
 import { getIsElectronMac } from "@/constants/platform";
 import { useSidebarCallouts } from "@/contexts/sidebar-callout-context";
 import {
+  DESKTOP_APP_UPDATES_ENABLED,
   buildMacAppleSiliconDownloadUrl,
   getDesktopRuntimeInfo,
   type DesktopRuntimeInfo,
@@ -71,13 +72,15 @@ export function RosettaCalloutSource() {
       description: <RosettaCalloutDescription t={t} />,
       variant: "error",
       dismissible: false,
-      actions: [
-        {
-          label: t("desktop.rosetta.download"),
-          onPress: openDownload,
-          variant: "primary",
-        },
-      ],
+      actions: DESKTOP_APP_UPDATES_ENABLED
+        ? [
+            {
+              label: t("desktop.rosetta.download"),
+              onPress: openDownload,
+              variant: "primary",
+            },
+          ]
+        : undefined,
       testID: "rosetta-callout",
     });
   }, [callouts, isElectronMac, openDownload, runtimeInfo, t]);

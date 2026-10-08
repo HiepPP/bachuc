@@ -271,6 +271,33 @@ describe("Hub guided setup continuation", () => {
     });
   });
 
+  it("asks for a Hub URL without a hosted Hub choice, even with an active login", async () => {
+    const cwd = await temporaryDirectory();
+    const credentials = new MemoryCredentials();
+    credentials.save({ origin: "https://old.test", credential: "secret" });
+    const prompts = new PromptAnswers([], [], ["https://hub.test"]);
+
+    await assert.rejects(
+      runHubGuidedSetup(
+        setupEnvironment(cwd, credentials, new SetupDaemon(), prompts, [], {
+          configurationResources: {
+            daemons: [{ id: "daemon-1", slug: "macbook" }],
+            github: [],
+            slack: [],
+            discord: [],
+            linear: [],
+          },
+        }),
+        { daemonId: "daemon-1", deploy: true },
+      ),
+      /No Hub app connection is ready for this trigger/u,
+    );
+
+    assert.equal(prompts.selections.includes("Hub endpoint"), false);
+    assert.equal(prompts.selectionOptions.flat().includes("hub.paseo.sh"), false);
+    assert.equal(credentials.active()?.origin, "https://hub.test");
+  });
+
   it("does not offer an agent runtime that cannot author the required execution mode", async () => {
     const cwd = await temporaryDirectory();
     const credentials = new MemoryCredentials();

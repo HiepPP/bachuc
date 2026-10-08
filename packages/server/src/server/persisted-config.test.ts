@@ -673,6 +673,17 @@ describe("loadPersistedConfig", () => {
     }
   });
 
+  test("materializes no CORS origin and no app base URL for a new Paseo home", () => {
+    const home = createTempHome();
+    try {
+      const config = loadPersistedConfig(home);
+      expect(config.daemon?.cors?.allowedOrigins).toBeUndefined();
+      expect(config.app?.baseUrl).toBeUndefined();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   test("accepts the documented config schema marker", () => {
     const home = createTempHome();
     const configPath = path.join(home, "config.json");
