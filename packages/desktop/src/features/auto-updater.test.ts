@@ -4,9 +4,10 @@ import path from "node:path";
 import { UUID } from "builder-util-runtime";
 import { describe, expect, it, vi } from "vitest";
 
-const { autoUpdaterMock } = vi.hoisted(() => {
+const { autoUpdaterMock, updatesGate } = vi.hoisted(() => {
   const handlers = new Map<string, (value: unknown) => void>();
   return {
+    updatesGate: { enabled: true },
     autoUpdaterMock: {
       handlers,
       logger: {
@@ -36,10 +37,18 @@ vi.mock("electron-updater", () => ({
   autoUpdater: autoUpdaterMock,
 }));
 
+vi.mock("./app-updates-enabled.js", () => ({
+  get APP_UPDATES_ENABLED() {
+    return updatesGate.enabled;
+  },
+}));
+
 import {
   bucketFromStagingUserId,
   checkForAppUpdate,
   createAppUpdateLifecycleLogger,
+  downloadAndInstallUpdate,
+  installAppUpdateOnQuit,
   resolveStagingUserId,
   rolloutManifestSchema,
   shouldAdmitToRollout,
@@ -95,6 +104,32 @@ describe("checkForAppUpdate", () => {
     expect(result.errorMessage).toBe("network down");
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  it("never calls electron-updater while app updates are off", async () => {
+    updatesGate.enabled = false;
+    autoUpdaterMock.checkForUpdates.mockClear();
+    autoUpdaterMock.downloadUpdate.mockClear();
+    autoUpdaterMock.quitAndInstall.mockClear();
+    const input = { currentVersion: "1.0.0-hiep", releaseChannel: "stable" as const };
+
+    try {
+      const result = await checkForAppUpdate({ ...input, intent: "automatic" });
+      const install = await downloadAndInstallUpdate(input);
+      const installedOnQuit = await installAppUpdateOnQuit({
+        ...input,
+        signal: new AbortController().signal,
+      });
+
+      expect(result.hasUpdate).toBe(false);
+      expect(install.installed).toBe(false);
+      expect(installedOnQuit).toBe(false);
+      expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
+      expect(autoUpdaterMock.downloadUpdate).not.toHaveBeenCalled();
+      expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+    } finally {
+      updatesGate.enabled = true;
+    }
   });
 
   it("logs the update handoff with current and selected target versions", () => {
