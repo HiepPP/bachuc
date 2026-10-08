@@ -52,6 +52,7 @@ import {
   observeReplaySubagents,
   parseClaudeSubagentMeta,
   type ClaudeReplayParentFacts,
+  type ClaudeReplaySubagentInput,
   type ClaudeSubagentMeta,
 } from "./subagents/replay-source.js";
 import { foldSubagentObservations, type SubagentObservation } from "./subagents/observation.js";
@@ -83,11 +84,7 @@ import {
 } from "./rewind.js";
 import { normalizeProviderReplayTimestamp } from "../../provider-history-timestamps.js";
 import { claudeConfigDir, claudeProjectDirSync } from "./project-dir.js";
-import {
-  parseClaudeHistoryRecords,
-  readClaudeHistoryRecords,
-  type ClaudeHistoryRecord,
-} from "./history-records.js";
+import { readClaudeHistoryRecordFiles, type ClaudeHistoryRecord } from "./history-records.js";
 import { THINKING_APPLIES_NEXT_TURN_NOTICE } from "../../provider-notices.js";
 import {
   isProviderImageMarkdown,
@@ -4908,10 +4905,12 @@ class ClaudeAgentSession implements AgentSession {
         return;
       }
       // Transcripts reach 100MB+; reading and parsing them synchronously stalled the daemon
-      // event loop for over a second, so the parent file is parsed once, off the main thread.
-      const [records, sidechains] = await Promise.all([
-        readClaudeHistoryRecords(historyPath),
-        readClaudeSidechainHistory(historyPath),
+      // event loop for over a second, so the parent and subagent transcripts are parsed once,
+      // off the main thread.
+      const sidechains = await readClaudeSidechainHistory(historyPath);
+      const [records = [], ...sidechainRecordsByFile] = await readClaudeHistoryRecordFiles([
+        historyPath,
+        ...sidechains.files.map((file) => file.path),
       ]);
       // A rewind or fresh conversation may have replaced the session while the files were read.
       if (this.claudeSessionId !== sessionId) {
@@ -4921,7 +4920,12 @@ class ClaudeAgentSession implements AgentSession {
       // Converting a large transcript takes hundreds of ms; yield so terminal and agent traffic
       // keep flowing. resumeSession and rewind both await the load before using the session.
       const pause = createHistoryIngestPause();
-      const replay = await this.ingestPersistedSidechains(records, sidechains, pause);
+      const replay = await this.ingestPersistedSidechains(
+        records,
+        sidechains,
+        sidechainRecordsByFile,
+        pause,
+      );
       if (this.claudeSessionId !== sessionId) {
         return;
       }
@@ -4958,24 +4962,53 @@ class ClaudeAgentSession implements AgentSession {
   private async ingestPersistedSidechains(
     parentRecords: ClaudeHistoryRecord[],
     sidechains: ClaudeSidechainHistory,
+    sidechainRecordsByFile: ClaudeHistoryRecord[][],
     pause: HistoryIngestPause,
   ): Promise<ClaudeReplayOwnership> {
-    const parentEntries = parentRecords.filter((entry) => entry.isSidechain !== true);
-    const sidechainEntries = [
-      ...parentRecords,
-      ...sidechains.contents.flatMap(parseClaudeHistoryRecords),
-    ].filter((entry) => entry.isSidechain === true && typeof entry.agentId === "string");
+    const parentEntries: ClaudeHistoryRecord[] = [];
+    const sidechainEntries: ClaudeHistoryRecord[] = [];
+    for (const entry of parentRecords) {
+      if (entry.isSidechain !== true) {
+        parentEntries.push(entry);
+      } else if (typeof entry.agentId === "string") {
+        sidechainEntries.push(entry);
+      }
+      await pause();
+    }
+    const workflowEntriesByRunId = new Map<string, ClaudeHistoryRecord[]>();
+    for (const [index, file] of sidechains.files.entries()) {
+      const records = sidechainRecordsByFile[index] ?? [];
+      if (!file.workflowRunId) {
+        for (const entry of records) {
+          if (entry.isSidechain === true && typeof entry.agentId === "string") {
+            sidechainEntries.push(entry);
+          }
+          await pause();
+        }
+        continue;
+      }
+      const workflowEntries = workflowEntriesByRunId.get(file.workflowRunId) ?? [];
+      workflowEntriesByRunId.set(file.workflowRunId, workflowEntries);
+      for (const entry of records) {
+        if (entry.type !== "user" || isToolResultUserEntry(entry)) workflowEntries.push(entry);
+        await pause();
+      }
+    }
 
     // Replay produces the same observations the live task protocol produces, then folds them
     // with the same function, so identity and status are derived once for both paths.
-    const subagentReplay = await observeReplaySubagents({
-      subagents: [...groupClaudeSidechainEntries(sidechainEntries)].map(([agentId, entries]) => ({
+    const subagents: ClaudeReplaySubagentInput[] = [];
+    for (const [agentId, entries] of groupClaudeSidechainEntries(sidechainEntries)) {
+      subagents.push({
         agentId,
         meta: sidechains.metaByAgentId.get(agentId) ?? null,
         entries,
-        parentFacts: readClaudeReplayParentFacts(entries as ClaudeHistoryEntry[]),
-      })),
-      parent: readClaudeReplayParentFacts(parentEntries),
+        parentFacts: await readClaudeReplayParentFacts(entries, pause),
+      });
+    }
+    const subagentReplay = await observeReplaySubagents({
+      subagents,
+      parent: await readClaudeReplayParentFacts(parentEntries, pause),
       convertEntry: (entry) => this.convertHistoryEntry(entry as ClaudeHistoryEntry),
       pause,
     });
@@ -4986,14 +5019,7 @@ class ClaudeAgentSession implements AgentSession {
           .map(parseClaudeWorkflowRun)
           .filter((workflow) => workflow !== null),
         parentEntries,
-        entriesByRunId: new Map(
-          [...sidechains.workflowSidechainContentsByRunId].map(([runId, contents]) => [
-            runId,
-            contents
-              .flatMap(parseClaudeHistoryRecords)
-              .filter((entry) => entry.type !== "user" || isToolResultUserEntry(entry)),
-          ]),
-        ),
+        entriesByRunId: workflowEntriesByRunId,
         convertEntry: (entry) => this.convertHistoryEntry(entry as ClaudeHistoryEntry),
       }),
     ];
@@ -5794,9 +5820,12 @@ function normalizeHistoryBlocks(content: unknown): ClaudeContentChunk[] | null {
  * source consumes. The agentId scrape is kept only as a fallback for sessions recorded before
  * Claude Code wrote the meta sidecar.
  */
-function readClaudeReplayParentFacts(parentEntries: ClaudeHistoryEntry[]): ClaudeReplayParentFacts {
+async function readClaudeReplayParentFacts(
+  parentEntries: ClaudeHistoryEntry[],
+  pause: HistoryIngestPause,
+): Promise<ClaudeReplayParentFacts> {
   const toolCalls = new Map<string, { title?: string; description?: string }>();
-  for (const [id, call] of readClaudeHistoricalSubagentToolCalls(parentEntries)) {
+  for (const [id, call] of await readClaudeHistoricalSubagentToolCalls(parentEntries, pause)) {
     toolCalls.set(id, {
       ...((call.name ?? call.subagentType) ? { title: call.name ?? call.subagentType } : {}),
       ...(call.description ? { description: call.description } : {}),
@@ -5808,26 +5837,34 @@ function readClaudeReplayParentFacts(parentEntries: ClaudeHistoryEntry[]): Claud
   const outcomesByToolCallId = new Map<string, { failed: boolean }>();
   for (const entry of parentEntries) {
     const content = toObjectRecord(entry.message)?.content;
-    if (!Array.isArray(content)) continue;
-    for (const value of content) {
-      const block = toObjectRecord(value);
-      if (block?.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
-      if (!toolCalls.has(block.tool_use_id)) continue;
-      outcomesByToolCallId.set(block.tool_use_id, { failed: block.is_error === true });
+    if (Array.isArray(content)) {
+      for (const value of content) {
+        const block = toObjectRecord(value);
+        if (block?.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+        if (!toolCalls.has(block.tool_use_id)) continue;
+        outcomesByToolCallId.set(block.tool_use_id, { failed: block.is_error === true });
+      }
     }
+    await pause();
   }
 
   return {
     toolCalls,
-    linksByAgentId: readClaudeHistoricalSubagentToolResults(parentEntries),
+    linksByAgentId: await readClaudeHistoricalSubagentToolResults(parentEntries, pause),
     outcomesByToolCallId,
   };
 }
 
+interface ClaudeSidechainFile {
+  path: string;
+  /** Set for a workflow child's transcript, which replays under its workflow run. */
+  workflowRunId?: string;
+}
+
 interface ClaudeSidechainHistory {
-  contents: string[];
+  /** Subagent transcripts in directory order; their records are parsed with the parent's. */
+  files: ClaudeSidechainFile[];
   workflowContents: string[];
-  workflowSidechainContentsByRunId: Map<string, string[]>;
   /** agentId -> sidecar metadata, when Claude Code wrote one next to the transcript. */
   metaByAgentId: Map<string, ClaudeSubagentMeta>;
 }
@@ -5841,9 +5878,8 @@ async function readClaudeSidechainHistory(historyPath: string): Promise<ClaudeSi
   );
   const sidechainDirectory = path.join(sessionDirectory, "subagents");
   const history: ClaudeSidechainHistory = {
-    contents: [],
+    files: [],
     workflowContents: [],
-    workflowSidechainContentsByRunId: new Map(),
     metaByAgentId: new Map(),
   };
   const workflowDirectory = path.join(sessionDirectory, "workflows");
@@ -5873,7 +5909,12 @@ async function readClaudeSidechainHistory(historyPath: string): Promise<ClaudeSi
       }
       if (!entry.isFile()) continue;
       if (entry.name.endsWith(".jsonl")) {
-        await recordClaudeSidechainContents(history, sidechainDirectory, entryPath);
+        const relativeParts = path.relative(sidechainDirectory, entryPath).split(path.sep);
+        const workflowRunId =
+          relativeParts[0] === "workflows" && relativeParts.length >= 3
+            ? relativeParts[1]
+            : undefined;
+        history.files.push({ path: entryPath, ...(workflowRunId ? { workflowRunId } : {}) });
         continue;
       }
       // The sidecar carries the Task tool_use id, which is the same id the live stream keys on.
@@ -5891,36 +5932,19 @@ async function readClaudeSidechainHistory(historyPath: string): Promise<ClaudeSi
   return history;
 }
 
-async function recordClaudeSidechainContents(
-  history: ClaudeSidechainHistory,
-  sidechainDirectory: string,
-  entryPath: string,
-): Promise<void> {
-  const contents = await fsPromises.readFile(entryPath, "utf8");
-  const relativeParts = path.relative(sidechainDirectory, entryPath).split(path.sep);
-  const workflowRunId =
-    relativeParts[0] === "workflows" && relativeParts.length >= 3 ? relativeParts[1] : undefined;
-  if (!workflowRunId) {
-    history.contents.push(contents);
-    return;
-  }
-
-  const workflowContents = history.workflowSidechainContentsByRunId.get(workflowRunId) ?? [];
-  workflowContents.push(contents);
-  history.workflowSidechainContentsByRunId.set(workflowRunId, workflowContents);
-}
-
 interface ClaudeHistoricalSubagentToolCall {
   name?: string;
   subagentType?: string;
   description?: string;
 }
 
-function readClaudeHistoricalSubagentToolCalls(
+async function readClaudeHistoricalSubagentToolCalls(
   entries: ClaudeHistoryEntry[],
-): Map<string, ClaudeHistoricalSubagentToolCall> {
+  pause: HistoryIngestPause,
+): Promise<Map<string, ClaudeHistoricalSubagentToolCall>> {
   const toolCalls = new Map<string, ClaudeHistoricalSubagentToolCall>();
   for (const entry of entries) {
+    await pause();
     const content = toObjectRecord(entry.message)?.content;
     if (!Array.isArray(content)) continue;
     for (const value of content) {
@@ -5946,11 +5970,13 @@ function readClaudeHistoricalSubagentToolCalls(
   return toolCalls;
 }
 
-function readClaudeHistoricalSubagentToolResults(
+async function readClaudeHistoricalSubagentToolResults(
   entries: ClaudeHistoryEntry[],
-): Map<string, { toolCallId: string; failed: boolean }> {
+  pause: HistoryIngestPause,
+): Promise<Map<string, { toolCallId: string; failed: boolean }>> {
   const results = new Map<string, { toolCallId: string; failed: boolean }>();
   for (const entry of entries) {
+    await pause();
     const content = toObjectRecord(entry.message)?.content;
     if (!Array.isArray(content)) continue;
     for (const value of content) {

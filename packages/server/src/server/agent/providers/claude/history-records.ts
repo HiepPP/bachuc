@@ -16,8 +16,9 @@ const WORKER_BATCH_BYTES = 4 * 1024 * 1024;
 const PARSE_WORKER_SOURCE = `
 const { parentPort, workerData } = require("node:worker_threads");
 const { readFile } = require("node:fs/promises");
-readFile(workerData.filePath, "utf8").then(
-  (content) => {
+async function parseFiles() {
+  for (let file = 0; file < workerData.filePaths.length; file++) {
+    const content = await readFile(workerData.filePaths[file], "utf8");
     let records = [];
     let batchBytes = 0;
     for (const line of content.split(/\\r?\\n/)) {
@@ -32,19 +33,20 @@ readFile(workerData.filePath, "utf8").then(
         continue;
       }
       if (batchBytes >= workerData.batchBytes) {
-        parentPort.postMessage({ type: "records", records });
+        parentPort.postMessage({ type: "records", file, records });
         records = [];
         batchBytes = 0;
       }
     }
-    if (records.length > 0) parentPort.postMessage({ type: "records", records });
-    parentPort.postMessage({ type: "done" });
-  },
-  (error) =>
-    parentPort.postMessage({
-      type: "error",
-      error: String(error && error.message ? error.message : error),
-    }),
+    if (records.length > 0) parentPort.postMessage({ type: "records", file, records });
+  }
+  parentPort.postMessage({ type: "done" });
+}
+parseFiles().catch((error) =>
+  parentPort.postMessage({
+    type: "error",
+    error: String(error && error.message ? error.message : error),
+  }),
 );
 `;
 
@@ -71,30 +73,39 @@ export interface ReadClaudeHistoryRecordsOptions {
 }
 
 type ParseWorkerMessage =
-  | { type: "records"; records: ClaudeHistoryRecord[] }
+  | { type: "records"; file: number; records: ClaudeHistoryRecord[] }
   | { type: "done" }
   | { type: "error"; error: string };
 
-/** Reads a Claude JSONL transcript; large files are read and parsed off the main thread. */
-export async function readClaudeHistoryRecords(
-  filePath: string,
+/**
+ * Reads Claude JSONL transcripts and returns each file's records in input order. When the files
+ * are large together, one worker reads and parses all of them off the main thread.
+ */
+export async function readClaudeHistoryRecordFiles(
+  filePaths: readonly string[],
   options: ReadClaudeHistoryRecordsOptions = {},
-): Promise<ClaudeHistoryRecord[]> {
-  const { size } = await stat(filePath);
-  if (size < (options.workerThresholdBytes ?? WORKER_THRESHOLD_BYTES)) {
-    return parseClaudeHistoryRecords(await readFile(filePath, "utf8"));
+): Promise<ClaudeHistoryRecord[][]> {
+  const sizes = await Promise.all(filePaths.map(async (filePath) => (await stat(filePath)).size));
+  const totalBytes = sizes.reduce((sum, size) => sum + size, 0);
+  if (totalBytes < (options.workerThresholdBytes ?? WORKER_THRESHOLD_BYTES)) {
+    const recordsByFile: ClaudeHistoryRecord[][] = [];
+    for (const filePath of filePaths) {
+      recordsByFile.push(parseClaudeHistoryRecords(await readFile(filePath, "utf8")));
+    }
+    return recordsByFile;
   }
   return new Promise((resolve, reject) => {
-    const records: ClaudeHistoryRecord[] = [];
+    const recordsByFile: ClaudeHistoryRecord[][] = filePaths.map(() => []);
     const worker = new Worker(PARSE_WORKER_SOURCE, {
       eval: true,
-      workerData: { filePath, batchBytes: options.workerBatchBytes ?? WORKER_BATCH_BYTES },
+      workerData: { filePaths, batchBytes: options.workerBatchBytes ?? WORKER_BATCH_BYTES },
     });
     worker.on("message", (message: ParseWorkerMessage) => {
       if (message.type === "records") {
-        for (const record of message.records) records.push(record);
+        const records = recordsByFile[message.file];
+        for (const record of message.records) records?.push(record);
       } else if (message.type === "done") {
-        resolve(records);
+        resolve(recordsByFile);
       } else {
         reject(new Error(message.error));
       }
