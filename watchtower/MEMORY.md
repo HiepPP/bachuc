@@ -89,3 +89,6 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: `magick` on this machine has no SVG delegate, because `rsvg-convert` is missing, and it writes `.ico` entries as BMP only. `sharp` in `node_modules` bundles librsvg.
 - Source: `magick -list delegate`; TASK-004 outcome.
 - Use next time: render SVG to PNG with `sharp`, give the SVG root a `width` and `height` instead of a density, and pack PNG files into `.ico` with a short script.
+- Learned: CLI tests import `@getpaseo/server` from its `dist`, so after a server change they test the old code and can pass falsely.
+- Source: `packages/server/package.json` exports; `packages/cli/src/commands/daemon/pair.test.ts`; TASK-005 outcome.
+- Use next time: run `npm run build:server` before CLI tests that touch server code.
