@@ -83,6 +83,11 @@ import {
 } from "./rewind.js";
 import { normalizeProviderReplayTimestamp } from "../../provider-history-timestamps.js";
 import { claudeConfigDir, claudeProjectDirSync } from "./project-dir.js";
+import {
+  parseClaudeHistoryRecords,
+  readClaudeHistoryRecords,
+  type ClaudeHistoryRecord,
+} from "./history-records.js";
 import { THINKING_APPLIES_NEXT_TURN_NOTICE } from "../../provider-notices.js";
 import {
   isProviderImageMarkdown,
@@ -146,6 +151,7 @@ import { execCommand } from "../../../../utils/spawn.js";
 import { composeSystemPromptParts } from "../../system-prompt.js";
 
 const fsPromises = promises;
+const HISTORY_INGEST_SLICE_MS = 10;
 const CLAUDE_SETTING_SOURCES: NonNullable<ClaudeOptions["settingSources"]> = [
   "user",
   "project",
@@ -1557,7 +1563,7 @@ export class ClaudeAgentClient implements AgentClient {
       cwd: merged.cwd,
     };
     const claudeConfig = this.assertConfig(mergedConfig);
-    return new ClaudeAgentSession(claudeConfig, {
+    const session = new ClaudeAgentSession(claudeConfig, {
       defaults: this.defaults,
       runtimeSettings: this.runtimeSettings,
       handle,
@@ -1568,6 +1574,10 @@ export class ClaudeAgentClient implements AgentClient {
       resolveBinary: this.resolveBinary,
       rewindSdk: this.rewindSdk,
     });
+    if (handle.sessionId) {
+      await session.loadPersistedHistory(handle.sessionId);
+    }
+    return session;
   }
 
   async getCatalogCacheKey(_options: FetchCatalogOptions): Promise<string> {
@@ -2142,7 +2152,6 @@ class ClaudeAgentSession implements AgentSession {
       }
       this.claudeSessionId = handle.sessionId;
       this.persistence = handle;
-      this.loadPersistedHistory(handle.sessionId);
     } else {
       this.claudeSessionId = null;
       this.persistence = null;
@@ -2775,9 +2784,7 @@ class ClaudeAgentSession implements AgentSession {
       sessionId: this.claudeSessionId,
       messageId: target.messageId,
       resolveMessageId: (messageId) => this.resolveClaudeMessageId(messageId),
-      setSessionId: (sessionId) => {
-        this.rebindConversationSession(sessionId);
-      },
+      setSessionId: (sessionId) => this.rebindConversationSession(sessionId),
     });
   }
 
@@ -2956,7 +2963,7 @@ class ClaudeAgentSession implements AgentSession {
     return candidates;
   }
 
-  private rebindConversationSession(sessionId: string): void {
+  private async rebindConversationSession(sessionId: string): Promise<void> {
     const oldSessionId = this.claudeSessionId;
     this.claudeSessionId = sessionId;
     this.pendingFreshSessionId = null;
@@ -2970,7 +2977,7 @@ class ClaudeAgentSession implements AgentSession {
     this.emittedUserMessageIds.clear();
     this.rewindTurnAnchors.length = 0;
     this.taskState.reset();
-    this.loadPersistedHistory(sessionId);
+    await this.loadPersistedHistory(sessionId);
     if (oldSessionId && oldSessionId !== sessionId) {
       this.dispatchEvents([
         {
@@ -4875,32 +4882,49 @@ class ClaudeAgentSession implements AgentSession {
     }
   }
 
-  private loadPersistedHistory(sessionId: string): void {
+  /** Called by resumeSession before the session is handed out, and by rewind. */
+  async loadPersistedHistory(sessionId: string): Promise<void> {
     try {
-      this.taskState.reset();
       const historyPath = this.resolveHistoryPath(sessionId);
       if (!historyPath || !fs.existsSync(historyPath)) {
         return;
       }
-      const content = fs.readFileSync(historyPath, "utf8");
-      const replay = this.ingestPersistedSidechains(
-        content,
+      // Transcripts reach 100MB+; reading and parsing them synchronously stalled the daemon
+      // event loop for over a second, so the parent file is parsed once, off the main thread.
+      const [records, sidechains] = await Promise.all([
+        readClaudeHistoryRecords(historyPath),
         readClaudeSidechainHistory(historyPath),
-      );
-      this.ingestPersistedHistory(content, replay);
+      ]);
+      // A rewind or fresh conversation may have replaced the session while the files were read.
+      if (this.claudeSessionId !== sessionId) {
+        return;
+      }
+      this.taskState.reset();
+      const replay = this.ingestPersistedSidechains(records, sidechains);
+      await this.ingestPersistedHistory(records, replay, sessionId);
     } catch {
       // ignore history load failures
     }
   }
 
-  private ingestPersistedHistory(content: string, replay: ClaudeReplayOwnership): void {
-    if (!content) {
-      return;
-    }
-
+  private async ingestPersistedHistory(
+    records: ClaudeHistoryRecord[],
+    replay: ClaudeReplayOwnership,
+    sessionId: string,
+  ): Promise<void> {
     const timeline: PersistedTimelineEntry[] = [];
-    for (const line of content.split(/\r?\n/)) {
-      this.ingestPersistedHistoryLine(line, timeline, replay);
+    let sliceStartedAt = performance.now();
+    for (const entry of records) {
+      this.ingestPersistedHistoryEntry(entry, timeline, replay);
+      // Converting a large transcript takes hundreds of ms; yield so terminal and agent traffic
+      // keep flowing. resumeSession and rewind both await the load before using the session.
+      if (performance.now() - sliceStartedAt >= HISTORY_INGEST_SLICE_MS) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (this.claudeSessionId !== sessionId) {
+          return;
+        }
+        sliceStartedAt = performance.now();
+      }
     }
 
     if (timeline.length > 0) {
@@ -4910,15 +4934,14 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   private ingestPersistedSidechains(
-    parentContent: string,
+    parentRecords: ClaudeHistoryRecord[],
     sidechains: ClaudeSidechainHistory,
   ): ClaudeReplayOwnership {
-    const parentEntries = parseClaudeHistoryRecords(parentContent).filter(
-      (entry) => entry.isSidechain !== true,
-    );
-    const sidechainEntries = [parentContent, ...sidechains.contents]
-      .flatMap(parseClaudeHistoryRecords)
-      .filter((entry) => entry.isSidechain === true && typeof entry.agentId === "string");
+    const parentEntries = parentRecords.filter((entry) => entry.isSidechain !== true);
+    const sidechainEntries = [
+      ...parentRecords,
+      ...sidechains.contents.flatMap(parseClaudeHistoryRecords),
+    ].filter((entry) => entry.isSidechain === true && typeof entry.agentId === "string");
 
     // Replay produces the same observations the live task protocol produces, then folds them
     // with the same function, so identity and status are derived once for both paths.
@@ -4974,28 +4997,11 @@ class ClaudeAgentSession implements AgentSession {
     return replay;
   }
 
-  private ingestPersistedHistoryLine(
-    line: string,
+  private ingestPersistedHistoryEntry(
+    entry: ClaudeHistoryRecord,
     timeline: PersistedTimelineEntry[],
     replay: ClaudeReplayOwnership,
   ): void {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      return;
-    }
-
-    let entry: Record<string, unknown>;
-    try {
-      const parsed: unknown = JSON.parse(trimmed);
-      const record = toObjectRecord(parsed);
-      if (!record) {
-        return;
-      }
-      entry = record;
-    } catch {
-      return;
-    }
-
     if (entry.isSidechain) {
       return;
     }
@@ -5759,21 +5765,6 @@ function normalizeHistoryBlocks(content: unknown): ClaudeContentChunk[] | null {
   return null;
 }
 
-function parseClaudeHistoryRecords(content: string): ClaudeHistoryEntry[] {
-  const entries: ClaudeHistoryEntry[] = [];
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const entry = toObjectRecord(JSON.parse(trimmed));
-      if (entry) entries.push(entry);
-    } catch {
-      // Ignore individual corrupt history rows, matching the parent history replay behavior.
-    }
-  }
-  return entries;
-}
-
 /**
  * Collect what the parent transcript knows about its Task calls, in the shape the shared replay
  * source consumes. The agentId scrape is kept only as a fallback for sessions recorded before
@@ -5819,7 +5810,7 @@ interface ClaudeSidechainHistory {
 
 const CLAUDE_SUBAGENT_META_FILE = /^agent-(.+)\.meta\.json$/;
 
-function readClaudeSidechainHistory(historyPath: string): ClaudeSidechainHistory {
+async function readClaudeSidechainHistory(historyPath: string): Promise<ClaudeSidechainHistory> {
   const sessionDirectory = path.join(
     path.dirname(historyPath),
     path.basename(historyPath, ".jsonl"),
@@ -5833,11 +5824,11 @@ function readClaudeSidechainHistory(historyPath: string): ClaudeSidechainHistory
   };
   const workflowDirectory = path.join(sessionDirectory, "workflows");
   if (fs.existsSync(workflowDirectory)) {
-    for (const entry of fs.readdirSync(workflowDirectory, { withFileTypes: true })) {
+    for (const entry of await fsPromises.readdir(workflowDirectory, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
       try {
         history.workflowContents.push(
-          fs.readFileSync(path.join(workflowDirectory, entry.name), "utf8"),
+          await fsPromises.readFile(path.join(workflowDirectory, entry.name), "utf8"),
         );
       } catch {
         // A partial or unreadable run summary must not fail the rest of history ingestion.
@@ -5850,7 +5841,7 @@ function readClaudeSidechainHistory(historyPath: string): ClaudeSidechainHistory
   while (directories.length > 0) {
     const directory = directories.pop();
     if (!directory) continue;
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    for (const entry of await fsPromises.readdir(directory, { withFileTypes: true })) {
       const entryPath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
         directories.push(entryPath);
@@ -5858,7 +5849,7 @@ function readClaudeSidechainHistory(historyPath: string): ClaudeSidechainHistory
       }
       if (!entry.isFile()) continue;
       if (entry.name.endsWith(".jsonl")) {
-        recordClaudeSidechainContents(history, sidechainDirectory, entryPath);
+        await recordClaudeSidechainContents(history, sidechainDirectory, entryPath);
         continue;
       }
       // The sidecar carries the Task tool_use id, which is the same id the live stream keys on.
@@ -5866,7 +5857,7 @@ function readClaudeSidechainHistory(historyPath: string): ClaudeSidechainHistory
       const metaMatch = CLAUDE_SUBAGENT_META_FILE.exec(entry.name);
       if (!metaMatch?.[1]) continue;
       try {
-        const meta = parseClaudeSubagentMeta(fs.readFileSync(entryPath, "utf8"));
+        const meta = parseClaudeSubagentMeta(await fsPromises.readFile(entryPath, "utf8"));
         if (meta) history.metaByAgentId.set(metaMatch[1], meta);
       } catch {
         // Undocumented internals: a missing or unreadable sidecar must never fail ingestion.
@@ -5876,12 +5867,12 @@ function readClaudeSidechainHistory(historyPath: string): ClaudeSidechainHistory
   return history;
 }
 
-function recordClaudeSidechainContents(
+async function recordClaudeSidechainContents(
   history: ClaudeSidechainHistory,
   sidechainDirectory: string,
   entryPath: string,
-): void {
-  const contents = fs.readFileSync(entryPath, "utf8");
+): Promise<void> {
+  const contents = await fsPromises.readFile(entryPath, "utf8");
   const relativeParts = path.relative(sidechainDirectory, entryPath).split(path.sep);
   const workflowRunId =
     relativeParts[0] === "workflows" && relativeParts.length >= 3 ? relativeParts[1] : undefined;
