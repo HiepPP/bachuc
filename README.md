@@ -12,9 +12,14 @@
 > The upstream [Apache-2.0 license and copyright notice](LICENSE) are preserved; third-party components retain their respective licenses.
 > HiepPP rewrote this README for Bachuc and kept this attribution notice.
 
-Bachuc is Paseo for one user: one interface for Claude Code, Codex, Copilot, OpenCode, and Pi agents, running on your own machine, plus a set of host changes and plugins that only this fork has. The name comes from Ba Chúc, a place in An Giang, Vietnam.
+Bachuc is Paseo for one user: one interface for Claude Code, Codex, Copilot, OpenCode, and Pi agents, running on your own machine, plus a set of host changes and plugins that only this fork has. The name comes from Ba Chúc, a place in An Giang, Vietnam, and the logo is its 300-year-old tree.
 
 Bachuc ships as a macOS desktop app and the web UI that its daemon serves. Everything Paseo does still works; read the [Paseo docs](https://paseo.sh/docs) for the shared features.
+
+<p align="center">
+  <img src="brand/bachuc/screenshots/thread-watchtower.png" alt="A Bachuc thread with an edit diff, composer pills, and the Watchtower panel" width="100%">
+</p>
+<p align="center"><sub>A thread with an edit diff (<code>edit-diffs</code>), the Watchtower and branch pills in the composer, and the Watchtower plan panel. Demo data.</sub></p>
 
 ## What only Bachuc has
 
@@ -26,11 +31,21 @@ Host changes in `packages/*`:
 - **Runtime close without archive.** Close an agent's runtime and keep the thread, by hand or for idle threads.
 - **Composer and app changes.** Composer pills dock in the toolbar, typing anywhere in a thread writes in the composer, and the sidebar footer and badges are quieter.
 - **No upstream services.** No default relay, hosted web app, CORS origin, or Hub origin, and no auto-update from upstream releases. See [ADR-0005](watchtower/decisions/ADR-0005-upstream-services-off-over-self-hosting.md).
-- **Bachuc brand.** The app name, icons, and desktop identity say Bachuc. Internal names, such as the `paseo` CLI and `~/.paseo`, stay `paseo`. See [ADR-0004](watchtower/decisions/ADR-0004-display-brand-over-full-rename.md).
+- **Bachuc brand.** The app name, icons, desktop identity, and release home `~/.bachuc` say Bachuc. Other internal names, such as the `paseo` CLI and `PASEO_*` env vars, stay `paseo`. See [ADR-0009](watchtower/decisions/ADR-0009-bachuc-home-over-paseo-home.md).
 
 ## Plugins
 
 The plugins live in [hiep-plugins/plugins](hiep-plugins/plugins). Read [hiep-plugins/README.md](hiep-plugins/README.md) and [hiep-plugins/AGENTS.md](hiep-plugins/AGENTS.md) before you change one.
+
+<p align="center">
+  <img src="brand/bachuc/screenshots/watchtower-overview.png" alt="The Watchtower overview: plan lifecycle, branch timeline, and questions that need you" width="100%">
+</p>
+<p align="center"><sub><code>watchtower-board</code>: one plan's lifecycle, branch timeline, run log, and the questions that need you. Demo data.</sub></p>
+
+<p align="center">
+  <img src="brand/bachuc/screenshots/board.png" alt="The Board: running and just finished conversations across projects" width="100%">
+</p>
+<p align="center"><sub><code>board</code>: running and just finished conversations across projects. Demo data.</sub></p>
 
 | Plugin                  | What it does                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------------- |

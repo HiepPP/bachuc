@@ -1,36 +1,16 @@
-import Svg, { Path } from "react-native-svg";
-import { useUnistyles } from "react-native-unistyles";
+import { useMemo } from "react";
+import { Image } from "react-native";
 
 interface PaseoLogoProps {
   size?: number;
+  // Kept for callers; the Bachuc logo is a full-color image, so it ignores the color.
   color?: string;
 }
 
-// The Bachuc sugar palm from brand/bachuc/mark.svg, without its rounded square.
-// Each shape is its own Path, so overlapping shapes never cancel under the fill rule.
-const PALM_PATHS = [
-  "M546 880C538 760 480 610 484 440L540 440C540 600 610 760 670 880Z",
-  "M530 440L523 262L501 262L494 440Z",
-  "M512 150L524 198L552 158L546 207L587 179L564 223L612 212L574 244L624 252L577 268L620 293L570 291L601 329L556 310L571 357L535 323L533 372L512 327L491 372L489 323L453 357L468 310L423 329L454 291L404 293L447 268L400 252L450 244L412 212L460 223L437 179L478 207L472 158L500 198Z",
-  "M523 426L365 317L351 335L501 454Z",
-  "M282 270L322 285L314 243L344 273L355 232L368 272L396 240L390 282L429 265L406 301L449 302L412 324L450 344L408 348L434 382L394 367L402 409L372 379L361 420L348 380L320 412L326 370L287 387L310 351L267 350L304 328L266 308L308 304Z",
-  "M522 455L672 347L660 329L502 425Z",
-  "M744 286L717 319L759 325L720 343L755 367L713 366L734 403L696 383L699 426L673 392L658 432L649 390L618 419L628 377L588 390L615 357L573 351L612 333L577 309L619 310L598 273L636 293L633 250L659 284L674 244L683 286L714 257L704 299Z",
-  "M507 423L365 476L371 496L517 457Z",
-  "M280 514L315 491L277 473L318 467L291 435L331 447L321 407L352 435L360 394L375 433L401 400L398 442L435 423L414 459L456 458L421 481L459 499L418 505L445 537L405 525L415 565L384 537L376 578L361 539L335 572L338 530L301 549L322 513Z",
-  "M506 457L652 504L660 484L518 423Z",
-  "M742 526L701 523L720 560L683 540L684 581L661 547L644 585L637 544L605 571L617 531L577 541L605 511L564 502L603 487L570 462L611 465L592 428L629 448L628 407L651 441L668 403L675 444L707 417L695 457L735 447L707 477L748 486L709 501Z",
-];
+// The Ba Chuc tree on its green rounded square, the same image as the app icon.
+const LOGO_SOURCE = require("../../../assets/images/icon.png");
 
-export function PaseoLogo({ size = 64, color }: PaseoLogoProps) {
-  const { theme } = useUnistyles();
-  const fill = color ?? theme.colors.foreground;
-
-  return (
-    <Svg width={size} height={size} viewBox="37.5 40 950 950" fill="none">
-      {PALM_PATHS.map((d) => (
-        <Path key={d} d={d} fill={fill} />
-      ))}
-    </Svg>
-  );
+export function PaseoLogo({ size = 64 }: PaseoLogoProps) {
+  const style = useMemo(() => ({ width: size, height: size }), [size]);
+  return <Image source={LOGO_SOURCE} style={style} accessibilityIgnoresInvertColors />;
 }
