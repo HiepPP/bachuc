@@ -180,6 +180,13 @@ function outputPairingResult(
   options: PairOptions,
   output: PairCommandOutput,
 ): void {
+  if (pairing.relayEnabled && !pairing.url) {
+    const message = "Relay pairing needs daemon.relay.endpoint and app.baseUrl in config.json.";
+    const line = options.json ? JSON.stringify({ code: "RELAY_UNCONFIGURED", message }) : message;
+    output.writeStderr(`${line}\n`);
+    output.setExitCode(1);
+    return;
+  }
   if (!pairing.relayEnabled || !pairing.url) {
     if (options.json) {
       output.writeStderr(

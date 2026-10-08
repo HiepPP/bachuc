@@ -36,8 +36,6 @@ export {
 } from "./persisted-config.js";
 
 const DEFAULT_PORT = 6767;
-const DEFAULT_RELAY_ENDPOINT = "relay.paseo.sh:443";
-const DEFAULT_APP_BASE_URL = "https://app.paseo.sh";
 const DEFAULT_TRUSTED_PROXIES = ["loopback"];
 
 interface ResolveBundledWebUiDistDirInput {
@@ -275,8 +273,8 @@ interface ResolveRelayInput {
 interface ResolvedRelay {
   enabled: boolean;
   enabledMutable: boolean;
-  endpoint: string;
-  publicEndpoint: string;
+  endpoint: string | undefined;
+  publicEndpoint: string | undefined;
   useTls: boolean;
   publicUseTls: boolean;
 }
@@ -306,21 +304,14 @@ function resolveRelayConfig(input: ResolveRelayInput): ResolvedRelay {
     environmentEnabled ??
     input.persisted.daemon?.relay?.enabled ??
     input.enabledFallback;
-  const endpoint =
-    input.env.PASEO_RELAY_ENDPOINT ??
-    input.persisted.daemon?.relay?.endpoint ??
-    DEFAULT_RELAY_ENDPOINT;
+  const endpoint = input.env.PASEO_RELAY_ENDPOINT ?? input.persisted.daemon?.relay?.endpoint;
   const publicEndpoint =
     input.env.PASEO_RELAY_PUBLIC_ENDPOINT ??
     input.persisted.daemon?.relay?.publicEndpoint ??
     endpoint;
   const useTls =
     input.cliRelayUseTls ??
-    resolveTlsFromEnv(
-      input.env.PASEO_RELAY_USE_TLS,
-      input.persisted.daemon?.relay?.useTls,
-      endpoint === DEFAULT_RELAY_ENDPOINT,
-    );
+    resolveTlsFromEnv(input.env.PASEO_RELAY_USE_TLS, input.persisted.daemon?.relay?.useTls, false);
   const publicUseTls = resolveTlsFromEnv(
     input.env.PASEO_RELAY_PUBLIC_USE_TLS,
     input.persisted.daemon?.relay?.publicUseTls,
@@ -548,7 +539,7 @@ function resolveStaticLoadConfigSettings(
       cli?.hostnames,
     ]),
     trustedProxies: resolveTrustedProxiesConfig(env, persisted),
-    appBaseUrl: env.PASEO_APP_BASE_URL ?? persisted.app?.baseUrl ?? DEFAULT_APP_BASE_URL,
+    appBaseUrl: env.PASEO_APP_BASE_URL ?? persisted.app?.baseUrl,
   };
 }
 

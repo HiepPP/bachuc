@@ -21,6 +21,14 @@ describe("daemon relay config", () => {
     await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   });
 
+  test("has no default relay endpoint", async () => {
+    const home = await createPaseoHome({ version: 1, daemon: { relay: { enabled: true } } });
+    const config = loadConfig(home, { env: {} });
+    expect(config.relayEndpoint).toBeUndefined();
+    expect(config.relayPublicEndpoint).toBeUndefined();
+    expect(config.relayUseTls).toBe(false);
+  });
+
   test("preserves implicit relay-on for a legacy config without enabled", async () => {
     const home = await createPaseoHome({ version: 1, daemon: { relay: {} } });
     expect(loadConfig(home, { env: {} }).relayEnabled).toBe(true);
@@ -92,7 +100,7 @@ describe("daemon relay config", () => {
     },
   );
 
-  test("loads relay TLS from env, persisted config, and hosted relay fallback", async () => {
+  test("loads relay TLS from env and persisted config, and keeps it off without a setting", async () => {
     const persistedHome = await createPaseoHome({
       version: 1,
       daemon: {
@@ -115,16 +123,15 @@ describe("daemon relay config", () => {
     });
     expect(loadConfig(envHome, { env: { PASEO_RELAY_USE_TLS: "true" } }).relayUseTls).toBe(true);
 
-    const hostedHome = await createPaseoHome({
+    const unsetHome = await createPaseoHome({
       version: 1,
       daemon: { relay: {} },
     });
-    expect(loadConfig(hostedHome, { env: {} }).relayUseTls).toBe(true);
+    expect(loadConfig(unsetHome, { env: {} }).relayUseTls).toBe(false);
   });
 
   test("relayPublicUseTls falls back to relayUseTls when unset", async () => {
-    const home = await createPaseoHome({ version: 1, daemon: { relay: {} } });
-    // Default: both true (hosted relay)
+    const home = await createPaseoHome({ version: 1, daemon: { relay: { useTls: true } } });
     expect(loadConfig(home, { env: {} }).relayPublicUseTls).toBe(true);
   });
 
