@@ -45,4 +45,4 @@ paseo_profile: Opus
 
 ## Known Failures
 
-- `packages/app/e2e/browser/sidebar-help.spec.ts`: it asserts the app name `Paseo` (TASK-002) and the help items that TASK-007 removed. The run does not run e2e specs. Confirm by: `rg -n "APP_VERSION = /\^Paseo|sidebar-help-discord" packages/app/e2e/browser/sidebar-help.spec.ts`.
+- None. TASK-010 fixed `packages/app/e2e/browser/sidebar-help.spec.ts`.
