@@ -21,7 +21,7 @@ These are the canonical reference endpoints for the hosted Paseo Hub. A self-hos
 
 ## Authentication
 
-Run `paseo hub login [origin]` for interactive CLI access. After browser approval, Paseo stores a durable, revocable organization credential under `PASEO_HOME` for that exact origin. Without an explicit origin, the CLI uses `PASEO_HUB_URL`, then the active stored login, then `https://hub.paseo.sh`.
+Run `paseo hub login [origin]` for interactive CLI access. After browser approval, Paseo stores a durable, revocable organization credential under `PASEO_HOME` for that exact origin. Without an explicit origin, the CLI uses `PASEO_HUB_URL`, then the active stored login. With neither, it fails with `HUB_ORIGIN_REQUIRED`.
 
 For automation, create an organization API key from the Hub dashboard under **API keys**. Both credential types are bearer tokens:
 

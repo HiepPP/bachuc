@@ -4,27 +4,27 @@
 
 - Title: Rebrand the fork as Bachuc
 - Slug: 20261007-bachuc-rebrand
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-08
 
 ## Tracker
 
 One row per TASK. Group ties together items that write the same files.
 
-| Order | TASK                                            | Group | Status | Spec                                                                                             | Deps               | Context                                        | Notes                             |
-| ----- | ----------------------------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------ | ------------------ | ---------------------------------------------- | --------------------------------- |
-| 1     | TASK-001 Logo concepts with Codex               | A     | DONE   | [watchtower/tasks/TASK-001-logo-concepts.md](watchtower/tasks/TASK-001-logo-concepts.md)         | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending       |
-| 2     | TASK-002 Bachuc name in the app UI              | B     | DONE   | [watchtower/tasks/TASK-002-app-ui-name.md](watchtower/tasks/TASK-002-app-ui-name.md)             | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending       |
-| 3     | TASK-003 Desktop identity and release install   | C     | DONE   | [watchtower/tasks/TASK-003-desktop-identity.md](watchtower/tasks/TASK-003-desktop-identity.md)   | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending       |
-| 4     | TASK-004 Apply the mark to icons and logo       | D     | DONE   | [watchtower/tasks/TASK-004-apply-icons.md](watchtower/tasks/TASK-004-apply-icons.md)             | TASK-001           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending       |
-| 5     | TASK-005 Remove upstream network defaults       | E     | DONE   | [watchtower/tasks/TASK-005-network-defaults.md](watchtower/tasks/TASK-005-network-defaults.md)   | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending       |
-| 6     | TASK-006 Turn off desktop auto-update           | C     | DONE   | [watchtower/tasks/TASK-006-auto-update-off.md](watchtower/tasks/TASK-006-auto-update-off.md)     | TASK-003           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending       |
-| 7     | TASK-007 Attribution and upstream links         | F     | DONE   | [watchtower/tasks/TASK-007-attribution-links.md](watchtower/tasks/TASK-007-attribution-links.md) | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending       |
-| 8     | TASK-008 Docs for the Bachuc names              | G     | DONE   | [watchtower/tasks/TASK-008-docs.md](watchtower/tasks/TASK-008-docs.md)                           | TASK-003, TASK-006 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending       |
-| 9     | TASK-009 Rename the macOS executable to Bachuc  | C+G   | DONE   | [watchtower/tasks/TASK-009-executable-name.md](watchtower/tasks/TASK-009-executable-name.md)     | TASK-008           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending       |
-| 10    | TASK-010 Update the help menu e2e spec          | I     | DONE   | [watchtower/tasks/TASK-010-help-menu-e2e.md](watchtower/tasks/TASK-010-help-menu-e2e.md)         | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending       |
-| 11    | TASK-011 Nix relay without the upstream default | J     | DONE   | [watchtower/tasks/TASK-011-nix-relay.md](watchtower/tasks/TASK-011-nix-relay.md)                 | TASK-005           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending       |
-| 12    | TASK-012 Hub docs without the hosted fallback   | K     | TODO   | [watchtower/tasks/TASK-012-hub-docs.md](watchtower/tasks/TASK-012-hub-docs.md)                   | TASK-005           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Follow-up of the TASK-005 review. |
+| Order | TASK                                            | Group | Status | Spec                                                                                             | Deps               | Context                                        | Notes                       |
+| ----- | ----------------------------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------ | ------------------ | ---------------------------------------------- | --------------------------- |
+| 1     | TASK-001 Logo concepts with Codex               | A     | DONE   | [watchtower/tasks/TASK-001-logo-concepts.md](watchtower/tasks/TASK-001-logo-concepts.md)         | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 2     | TASK-002 Bachuc name in the app UI              | B     | DONE   | [watchtower/tasks/TASK-002-app-ui-name.md](watchtower/tasks/TASK-002-app-ui-name.md)             | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 3     | TASK-003 Desktop identity and release install   | C     | DONE   | [watchtower/tasks/TASK-003-desktop-identity.md](watchtower/tasks/TASK-003-desktop-identity.md)   | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 4     | TASK-004 Apply the mark to icons and logo       | D     | DONE   | [watchtower/tasks/TASK-004-apply-icons.md](watchtower/tasks/TASK-004-apply-icons.md)             | TASK-001           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 5     | TASK-005 Remove upstream network defaults       | E     | DONE   | [watchtower/tasks/TASK-005-network-defaults.md](watchtower/tasks/TASK-005-network-defaults.md)   | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 6     | TASK-006 Turn off desktop auto-update           | C     | DONE   | [watchtower/tasks/TASK-006-auto-update-off.md](watchtower/tasks/TASK-006-auto-update-off.md)     | TASK-003           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 7     | TASK-007 Attribution and upstream links         | F     | DONE   | [watchtower/tasks/TASK-007-attribution-links.md](watchtower/tasks/TASK-007-attribution-links.md) | TASK-002           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 8     | TASK-008 Docs for the Bachuc names              | G     | DONE   | [watchtower/tasks/TASK-008-docs.md](watchtower/tasks/TASK-008-docs.md)                           | TASK-003, TASK-006 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 9     | TASK-009 Rename the macOS executable to Bachuc  | C+G   | DONE   | [watchtower/tasks/TASK-009-executable-name.md](watchtower/tasks/TASK-009-executable-name.md)     | TASK-008           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 10    | TASK-010 Update the help menu e2e spec          | I     | DONE   | [watchtower/tasks/TASK-010-help-menu-e2e.md](watchtower/tasks/TASK-010-help-menu-e2e.md)         | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 11    | TASK-011 Nix relay without the upstream default | J     | DONE   | [watchtower/tasks/TASK-011-nix-relay.md](watchtower/tasks/TASK-011-nix-relay.md)                 | TASK-005           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
+| 12    | TASK-012 Hub docs without the hosted fallback   | K     | DONE   | [watchtower/tasks/TASK-012-hub-docs.md](watchtower/tasks/TASK-012-hub-docs.md)                   | TASK-005           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
@@ -41,7 +41,8 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: the second autorun pass builds TASK-012. The owner answered Q-005, Q-006, and Q-007 on 2026-10-08. Finish updates draft PR #38. TASK-001 is DONE; the owner still checks the mark in [brand/bachuc/mark.svg](brand/bachuc/mark.svg) at 16 px and 1024 px.
+- Next action: every TASK is DONE. The next autorun iteration runs Finish and updates draft PR #38. The owner answered Q-005, Q-006, and Q-007 on 2026-10-08.
+- TASK-012 is DONE. The hub docs end the origin order with the `HUB_ORIGIN_REQUIRED` error. It also fixed the origin list in [public-docs/hub/configuration/index.md](public-docs/hub/configuration/index.md), outside its spec `Files:`. The hosted Hub product links stay. TASK-001 is DONE; the owner still checks the mark in [brand/bachuc/mark.svg](brand/bachuc/mark.svg) at 16 px and 1024 px.
 - TASK-011 is DONE. The nix module turns relay off by default, and mode `remote` with `relay.host` is the only relay path. The nix parse check is UNVERIFIED, because nix is not installed here. The spec grep matches `self-hosted` in two daemon descriptions; the exact check for mode `"hosted"` passes.
 - TASK-010 is DONE. The help menu e2e spec expects `Bachuc` and no removed item. Its three help menu tests are `test.fixme`, because the fork hides the Help button through `SHOW_FOOTER_EXTRAS` (Q-008, DEFAULTED). The spec passes with 1 test run and 3 skipped.
 - TASK-009 is DONE. The macOS build is `packages/desktop/release/mac-arm64/Bachuc.app` with `Contents/MacOS/Bachuc`, through `mac.executableName`. Linux and Windows keep the executable `Paseo`. `IS_RELEASE_APP` needs the path `/Applications/Bachuc.app/`. After the next release install, the owner checks that Activity Monitor shows `Bachuc` and that release runs on `~/.paseo` and `6767`. Two follow-ups are in its outcome: `paseo open` looks for `/Applications/Paseo.app`, and the nix CI job expects the old bundle ID.
