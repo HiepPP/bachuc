@@ -86,3 +86,6 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the desktop daemon starts through `<name> Helper.app`, found by the executable name, `app.name`, or the one helper in Frameworks. The release script builds with `-c.productName=Bachuc`.
 - Source: `packages/desktop/src/daemon/runtime-paths.ts`; `scripts/paseo-release.sh`.
 - Use next time: when an app name changes, check that the daemon still finds its helper app.
+- Learned: `magick` on this machine has no SVG delegate, because `rsvg-convert` is missing, and it writes `.ico` entries as BMP only. `sharp` in `node_modules` bundles librsvg.
+- Source: `magick -list delegate`; TASK-004 outcome.
+- Use next time: render SVG to PNG with `sharp`, give the SVG root a `width` and `height` instead of a density, and pack PNG files into `.ico` with a short script.
