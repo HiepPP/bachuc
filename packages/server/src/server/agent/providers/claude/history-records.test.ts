@@ -43,6 +43,12 @@ describe("readClaudeHistoryRecords", () => {
     );
   });
 
+  test("keeps record order when the worker posts several batches", async () => {
+    await expect(
+      readClaudeHistoryRecords(filePath, { workerThresholdBytes: 0, workerBatchBytes: 1 }),
+    ).resolves.toEqual(EXPECTED);
+  });
+
   test("rejects when the transcript is missing", async () => {
     await expect(
       readClaudeHistoryRecords(path.join(tempRoot, "missing.jsonl"), { workerThresholdBytes: 0 }),

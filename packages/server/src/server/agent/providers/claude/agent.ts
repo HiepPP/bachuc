@@ -152,6 +152,24 @@ import { composeSystemPromptParts } from "../../system-prompt.js";
 
 const fsPromises = promises;
 const HISTORY_INGEST_SLICE_MS = 10;
+
+/** Returns a promise to await once the current slice has run for HISTORY_INGEST_SLICE_MS. */
+type HistoryIngestPause = () => Promise<void> | undefined;
+
+function createHistoryIngestPause(): HistoryIngestPause {
+  let sliceStartedAt = performance.now();
+  return () => {
+    if (performance.now() - sliceStartedAt < HISTORY_INGEST_SLICE_MS) {
+      return undefined;
+    }
+    return new Promise<void>((resolve) => {
+      setImmediate(() => {
+        sliceStartedAt = performance.now();
+        resolve();
+      });
+    });
+  };
+}
 const CLAUDE_SETTING_SOURCES: NonNullable<ClaudeOptions["settingSources"]> = [
   "user",
   "project",
@@ -4900,8 +4918,14 @@ class ClaudeAgentSession implements AgentSession {
         return;
       }
       this.taskState.reset();
-      const replay = this.ingestPersistedSidechains(records, sidechains);
-      await this.ingestPersistedHistory(records, replay, sessionId);
+      // Converting a large transcript takes hundreds of ms; yield so terminal and agent traffic
+      // keep flowing. resumeSession and rewind both await the load before using the session.
+      const pause = createHistoryIngestPause();
+      const replay = await this.ingestPersistedSidechains(records, sidechains, pause);
+      if (this.claudeSessionId !== sessionId) {
+        return;
+      }
+      await this.ingestPersistedHistory(records, replay, sessionId, pause);
     } catch {
       // ignore history load failures
     }
@@ -4911,19 +4935,17 @@ class ClaudeAgentSession implements AgentSession {
     records: ClaudeHistoryRecord[],
     replay: ClaudeReplayOwnership,
     sessionId: string,
+    pause: HistoryIngestPause,
   ): Promise<void> {
     const timeline: PersistedTimelineEntry[] = [];
-    let sliceStartedAt = performance.now();
     for (const entry of records) {
       this.ingestPersistedHistoryEntry(entry, timeline, replay);
-      // Converting a large transcript takes hundreds of ms; yield so terminal and agent traffic
-      // keep flowing. resumeSession and rewind both await the load before using the session.
-      if (performance.now() - sliceStartedAt >= HISTORY_INGEST_SLICE_MS) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
+      const paused = pause();
+      if (paused) {
+        await paused;
         if (this.claudeSessionId !== sessionId) {
           return;
         }
-        sliceStartedAt = performance.now();
       }
     }
 
@@ -4933,10 +4955,11 @@ class ClaudeAgentSession implements AgentSession {
     }
   }
 
-  private ingestPersistedSidechains(
+  private async ingestPersistedSidechains(
     parentRecords: ClaudeHistoryRecord[],
     sidechains: ClaudeSidechainHistory,
-  ): ClaudeReplayOwnership {
+    pause: HistoryIngestPause,
+  ): Promise<ClaudeReplayOwnership> {
     const parentEntries = parentRecords.filter((entry) => entry.isSidechain !== true);
     const sidechainEntries = [
       ...parentRecords,
@@ -4945,7 +4968,7 @@ class ClaudeAgentSession implements AgentSession {
 
     // Replay produces the same observations the live task protocol produces, then folds them
     // with the same function, so identity and status are derived once for both paths.
-    const subagentReplay = observeReplaySubagents({
+    const subagentReplay = await observeReplaySubagents({
       subagents: [...groupClaudeSidechainEntries(sidechainEntries)].map(([agentId, entries]) => ({
         agentId,
         meta: sidechains.metaByAgentId.get(agentId) ?? null,
@@ -4954,6 +4977,7 @@ class ClaudeAgentSession implements AgentSession {
       })),
       parent: readClaudeReplayParentFacts(parentEntries),
       convertEntry: (entry) => this.convertHistoryEntry(entry as ClaudeHistoryEntry),
+      pause,
     });
     const observations = [
       ...subagentReplay.observations,

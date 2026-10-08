@@ -66,7 +66,7 @@ const ClaudeSpeakToolDetailSchema = z
     } satisfies ToolCallDetail;
   });
 
-const ClaudeToolDetailPass2Schema = z.union([
+const CLAUDE_TOOL_DETAIL_BRANCHES = [
   toolDetailBranchByName("Bash", ToolShellInputSchema, ToolShellOutputSchema, toShellToolDetail),
   toolDetailBranchByName("bash", ToolShellInputSchema, ToolShellOutputSchema, toShellToolDetail),
   toolDetailBranchByName("shell", ToolShellInputSchema, ToolShellOutputSchema, toShellToolDetail),
@@ -212,7 +212,14 @@ const ClaudeToolDetailPass2Schema = z.union([
     },
   ),
   ClaudeSpeakToolDetailSchema,
-]);
+];
+
+// Every branch matches one literal tool name, so dispatch on the name instead of a z.union.
+// The union tried each earlier branch and built issue objects for every miss; replaying a
+// long transcript spent most of its conversion time there.
+const ClaudeToolDetailBranchByName = new Map<string, z.ZodType<ToolCallDetail | undefined>>(
+  CLAUDE_TOOL_DETAIL_BRANCHES.map((branch) => [branch.in.shape.name.value, branch]),
+);
 
 export function deriveClaudeToolDetail(
   name: string,
@@ -232,8 +239,8 @@ export function deriveClaudeToolDetail(
     };
   }
 
-  const pass2 = ClaudeToolDetailPass2Schema.safeParse(pass1.data);
-  if (pass2.success && pass2.data) {
+  const pass2 = ClaudeToolDetailBranchByName.get(pass1.data.name)?.safeParse(pass1.data);
+  if (pass2?.success && pass2.data) {
     return pass2.data;
   }
 

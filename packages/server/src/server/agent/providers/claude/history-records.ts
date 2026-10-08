@@ -6,26 +6,45 @@ export type ClaudeHistoryRecord = Record<string, unknown>;
 // Large transcripts (100MB+ is common for long sessions) cost over a second of read and
 // JSON.parse; below this size a worker's startup costs more than parsing inline.
 const WORKER_THRESHOLD_BYTES = 4 * 1024 * 1024;
+// Decoding one structured-clone message runs on the main thread in a single task. Posting the
+// records of ~4MB of transcript per message keeps each decode short, where one message for a
+// 115MB transcript blocked the daemon for ~185ms.
+const WORKER_BATCH_BYTES = 4 * 1024 * 1024;
 
 // The worker is evaluated from a string so it runs the same from TS source (tsx, vitest) and
 // from the compiled dist, without a separate entry file or loader.
 const PARSE_WORKER_SOURCE = `
 const { parentPort, workerData } = require("node:worker_threads");
 const { readFile } = require("node:fs/promises");
-readFile(workerData, "utf8").then(
+readFile(workerData.filePath, "utf8").then(
   (content) => {
-    const records = [];
+    let records = [];
+    let batchBytes = 0;
     for (const line of content.split(/\\r?\\n/)) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
         const value = JSON.parse(trimmed);
-        if (value && typeof value === "object" && !Array.isArray(value)) records.push(value);
-      } catch {}
+        if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+        records.push(value);
+        batchBytes += trimmed.length;
+      } catch {
+        continue;
+      }
+      if (batchBytes >= workerData.batchBytes) {
+        parentPort.postMessage({ type: "records", records });
+        records = [];
+        batchBytes = 0;
+      }
     }
-    parentPort.postMessage({ records });
+    if (records.length > 0) parentPort.postMessage({ type: "records", records });
+    parentPort.postMessage({ type: "done" });
   },
-  (error) => parentPort.postMessage({ error: String(error && error.message ? error.message : error) }),
+  (error) =>
+    parentPort.postMessage({
+      type: "error",
+      error: String(error && error.message ? error.message : error),
+    }),
 );
 `;
 
@@ -48,12 +67,13 @@ export function parseClaudeHistoryRecords(content: string): ClaudeHistoryRecord[
 
 export interface ReadClaudeHistoryRecordsOptions {
   workerThresholdBytes?: number;
+  workerBatchBytes?: number;
 }
 
-interface ParseWorkerMessage {
-  records?: ClaudeHistoryRecord[];
-  error?: string;
-}
+type ParseWorkerMessage =
+  | { type: "records"; records: ClaudeHistoryRecord[] }
+  | { type: "done" }
+  | { type: "error"; error: string };
 
 /** Reads a Claude JSONL transcript; large files are read and parsed off the main thread. */
 export async function readClaudeHistoryRecords(
@@ -65,12 +85,18 @@ export async function readClaudeHistoryRecords(
     return parseClaudeHistoryRecords(await readFile(filePath, "utf8"));
   }
   return new Promise((resolve, reject) => {
-    const worker = new Worker(PARSE_WORKER_SOURCE, { eval: true, workerData: filePath });
-    worker.once("message", (message: ParseWorkerMessage) => {
-      if (message.records) {
-        resolve(message.records);
+    const records: ClaudeHistoryRecord[] = [];
+    const worker = new Worker(PARSE_WORKER_SOURCE, {
+      eval: true,
+      workerData: { filePath, batchBytes: options.workerBatchBytes ?? WORKER_BATCH_BYTES },
+    });
+    worker.on("message", (message: ParseWorkerMessage) => {
+      if (message.type === "records") {
+        for (const record of message.records) records.push(record);
+      } else if (message.type === "done") {
+        resolve(records);
       } else {
-        reject(new Error(message.error ?? "Claude history worker failed"));
+        reject(new Error(message.error));
       }
     });
     worker.once("error", reject);

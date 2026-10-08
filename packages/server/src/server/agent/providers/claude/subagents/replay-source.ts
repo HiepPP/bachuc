@@ -274,12 +274,12 @@ function observeSubtitle(
   };
 }
 
-function observeSubagent(
+async function observeSubagent(
   subagent: ClaudeReplaySubagentInput,
   parent: ClaudeReplayParentFacts,
-  convertEntry: (entry: ClaudeReplayEntry) => AgentTimelineItem[],
+  convert: ClaudeReplayConversion,
   parentSubagentId?: string,
-): SubagentObservation[] {
+): Promise<SubagentObservation[]> {
   const link = resolveParentLink(subagent, parent);
   if (!link) return [];
   const toolCall = parent.toolCalls.get(link.toolCallId);
@@ -292,7 +292,7 @@ function observeSubagent(
 
   for (const entry of subagent.entries) {
     const timestamp = normalizeProviderReplayTimestamp(entry.timestamp);
-    for (const item of convertEntry(entry)) {
+    for (const item of convert.convertEntry(entry)) {
       observations.push({
         kind: "timeline",
         id: link.id,
@@ -300,6 +300,7 @@ function observeSubagent(
         ...(timestamp ? { timestamp } : {}),
       });
     }
+    await convert.pause?.();
   }
 
   // Prefer the parent's result because it carries failure. If that result is missing, the child's
@@ -333,11 +334,25 @@ function recordReplayToolOwners(
   }
 }
 
-export function observeReplaySubagents(input: {
+export interface ClaudeReplayConversion {
+  convertEntry: (entry: ClaudeReplayEntry) => AgentTimelineItem[];
+  /** Called after each converted entry; return a promise to yield the event loop. */
+  pause?: () => Promise<void> | undefined;
+}
+
+export interface ObserveReplaySubagentsInput extends ClaudeReplayConversion {
   subagents: readonly ClaudeReplaySubagentInput[];
   parent: ClaudeReplayParentFacts;
-  convertEntry: (entry: ClaudeReplayEntry) => AgentTimelineItem[];
-}): { observations: SubagentObservation[]; toolOwners: ReadonlyMap<string, string> } {
+}
+
+export interface ObservedReplaySubagents {
+  observations: SubagentObservation[];
+  toolOwners: ReadonlyMap<string, string>;
+}
+
+export async function observeReplaySubagents(
+  input: ObserveReplaySubagentsInput,
+): Promise<ObservedReplaySubagents> {
   const observations: SubagentObservation[] = [];
   const toolOwners = new Map<string, string>();
   const unresolved = [...input.subagents].sort(
@@ -360,7 +375,7 @@ export function observeReplaySubagents(input: {
 
       // Only proven descendants may own notifications; ambient sidecars cannot claim them.
       recordReplayToolOwners(toolOwners, subagent.entries, link.id);
-      observations.push(...observeSubagent(subagent, parent, input.convertEntry, ownerId));
+      observations.push(...(await observeSubagent(subagent, parent, input, ownerId)));
       if (subagent.parentFacts) resolvedParents.set(link.id, subagent.parentFacts);
       unresolved.splice(index, 1);
       madeProgress = true;
