@@ -37,7 +37,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: no TASK qualifies, so the next autorun iteration runs Finish. Only TASK-005 is open, and it waits on Q-007. TASK-001 is DONE; the owner still checks the mark in [brand/bachuc/mark.svg](brand/bachuc/mark.svg) at 16 px and 1024 px.
+- Next action: the autorun finished on 2026-10-08. The owner reviews draft PR #38 from `bachuc-rebrand` to `main` and answers Q-007. Only TASK-005 is open. TASK-001 is DONE; the owner still checks the mark in [brand/bachuc/mark.svg](brand/bachuc/mark.svg) at 16 px and 1024 px.
 - TASK-008 is DONE. [CLAUDE.md](CLAUDE.md) and [docs/development.md](docs/development.md) name `/Applications/Bachuc.app`, the log folder `~/Library/Logs/Bachuc/`, and the userData folder `Bachuc Dev` of an opened build. The signing identity `Paseo Fork Local` stays, because the release script still uses it.
 - TASK-007 is DONE. The owner still checks on live that Settings > About shows "Based on Paseo", and that the sidebar help menu, the open project screen, and Settings show no Discord, Sponsors, upstream GitHub, or changelog link. The e2e spec [packages/app/e2e/browser/sidebar-help.spec.ts](packages/app/e2e/browser/sidebar-help.spec.ts) still asserts the removed items.
 - TASK-005 is BLOCKED on Q-007. Its code is built, reviewed, and verified on the branch `auto/TASK-005-network-defaults`, not merged. The final diff is 104 changed lines in non-test upstream files, over the 60-line anti-goal. If the owner raises the limit, a later iteration ships that branch.
