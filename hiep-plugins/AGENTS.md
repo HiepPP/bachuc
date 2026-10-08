@@ -47,7 +47,7 @@ in the installed host. Declare the supported range in `paseo-plugin.json` under
 
 ## Dedicated fork and host changes
 
-This folder lives inside `HiepPP/paseo`, a Paseo fork dedicated to one user. It is the only plugin
+This folder lives inside `HiepPP/bachuc`, a Paseo fork dedicated to one user. It is the only plugin
 source: "code a plugin" means editing `hiep-plugins/plugins/<plugin-id>`. The old standalone repo
 `HiepPP/hiep-paseo-plugin` is frozen; never edit it or install from it.
 
