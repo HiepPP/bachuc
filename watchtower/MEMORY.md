@@ -31,6 +31,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 
 - Avoid running sidebar host filters together with an active host while one host is active. Reason: [ADR-0001](watchtower/decisions/ADR-0001-active-host-over-host-filters.md).
 - Avoid an offline-only CSP for HTML reply frames while the owner wants agent pages that load CDN libraries and call APIs. Reason: [ADR-0002](watchtower/decisions/ADR-0002-networked-html-replies-over-offline-only.md).
+- Avoid renaming internal identifiers (the `paseo` CLI, `PASEO_*` env vars, `~/.paseo`, the `@getpaseo/*` scope, the plugin API, and `paseo://`) and a mobile rebrand while the fork merges upstream and plugins depend on these names. Reason: [ADR-0004](watchtower/decisions/ADR-0004-display-brand-over-full-rename.md).
+- Avoid upstream hosted services (relay, web app, hub, update feed, EAS) and a self-hosted relay while the owner reaches the host over LAN or Tailscale. Reason: [ADR-0005](watchtower/decisions/ADR-0005-upstream-services-off-over-self-hosting.md).
 
 ## Learnings
 
