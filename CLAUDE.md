@@ -240,7 +240,7 @@ Find the complete daemon logs and traces in the $PASEO_HOME/daemon.log
 
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **paseo** (125700 symbols, 460986 relationships, 1270 execution flows).
+This project is indexed by GitNexus as **bachuc** (125700 symbols, 460986 relationships, 1270 execution flows).
 
 > Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
 
@@ -262,12 +262,12 @@ This project is indexed by GitNexus as **paseo** (125700 symbols, 460986 relatio
 
 ## Resources
 
-| Resource                               | Use for                                  |
-| -------------------------------------- | ---------------------------------------- |
-| `gitnexus://repo/paseo/context`        | Codebase overview, check index freshness |
-| `gitnexus://repo/paseo/clusters`       | All functional areas                     |
-| `gitnexus://repo/paseo/processes`      | All execution flows                      |
-| `gitnexus://repo/paseo/process/{name}` | Step-by-step execution trace             |
+| Resource                                | Use for                                  |
+| --------------------------------------- | ---------------------------------------- |
+| `gitnexus://repo/bachuc/context`        | Codebase overview, check index freshness |
+| `gitnexus://repo/bachuc/clusters`       | All functional areas                     |
+| `gitnexus://repo/bachuc/processes`      | All execution flows                      |
+| `gitnexus://repo/bachuc/process/{name}` | Step-by-step execution trace             |
 
 ## CLI
 
