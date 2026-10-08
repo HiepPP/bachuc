@@ -2157,6 +2157,7 @@ export const ja: TranslationResources = {
       title: "アプリ情報",
       appVersion: "アプリバージョン",
       whatsNewHint: "各バージョンのリリースノート",
+      basedOn: "{{upstream}} がベースです",
       thisDevice: "このデバイス",
       connectedHosts: "接続されているホスト",
       offline: "オフライン",

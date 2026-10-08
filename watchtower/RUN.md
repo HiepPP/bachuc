@@ -16,3 +16,4 @@
 | 10:45 | 10:55 | TASK-004 | DONE    | #33                                                                                |
 | 10:55 | 11:20 | TASK-005 | BLOCKED | Q-007: anti-goal 104 over 60; code on `auto/TASK-005-network-defaults`, not merged |
 | 11:20 | 11:30 | TASK-006 | DONE    | #35                                                                                |
+| 11:30 | 11:40 | TASK-007 | DONE    | #36                                                                                |
