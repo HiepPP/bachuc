@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import pino from "pino";
@@ -34,7 +35,16 @@ describe("bootstrap provider availability", () => {
     })
       .split(/\r?\n/)[0]
       .trim();
-    process.env.PATH = path.dirname(gitPath);
+    // git's own directory can also hold provider CLIs (for example ~/.local/bin),
+    // so expose git alone through an isolated bin directory.
+    if (process.platform === "win32") {
+      process.env.PATH = path.dirname(gitPath);
+    } else {
+      const isolatedBin = path.join(root, "bin");
+      await mkdir(isolatedBin);
+      await symlink(realpathSync(gitPath), path.join(isolatedBin, "git"));
+      process.env.PATH = isolatedBin;
+    }
     expect(execFileSync("git", ["--version"], { encoding: "utf8" })).toMatch(/git version/i);
     const paseoHome = path.join(root, ".paseo");
     const staticDir = path.join(root, "static");
