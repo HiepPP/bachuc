@@ -7,7 +7,7 @@ import type {
   PluginHostProps,
 } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { useCallback, useMemo, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useId, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { AlertCircle, ChevronDown, MoreHorizontal } from "lucide-react-native";
@@ -309,9 +309,13 @@ function ButtonControl({ view }: { view: ButtonView }) {
   let contextKey: string | undefined;
   if (entry.context.context === "agent") contextKey = entry.context.agentId;
   if (entry.context.context === "draft") contextKey = entry.context.draft.id;
+  // The same agent's pill can be mounted more than once, and a hidden copy measures its trigger
+  // at 0,0, which drew a second menu in the window's top-left corner. Only the pressed copy opens.
+  const owner = useId();
+  const open = entry.open && entry.openOwner === owner;
   const setOpen = useCallback(
-    (open: boolean) => pluginButtonStore.setOpen(entry.key, open, contextKey),
-    [contextKey, entry.key],
+    (next: boolean) => pluginButtonStore.setOpen(entry.key, next, contextKey, owner),
+    [contextKey, entry.key, owner],
   );
   const buttonStyle = useCallback(
     ({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) =>
@@ -320,21 +324,12 @@ function ButtonControl({ view }: { view: ButtonView }) {
             toolbar
               ? styles.toolbarButton
               : [composerPillStyles.body, corner ? styles.cornerButton : styles.button],
-            (hovered || pressed || entry.open) && styles.active,
+            (hovered || pressed || open) && styles.active,
             disabled && styles.disabled,
             color !== undefined && { borderColor: color },
           ]
-        : headerButtonStyle(props.layout.compact, { hovered, pressed, open: entry.open }, disabled),
-    [
-      composer,
-      toolbar,
-      composerPillStyles,
-      corner,
-      color,
-      disabled,
-      entry.open,
-      props.layout.compact,
-    ],
+        : headerButtonStyle(props.layout.compact, { hovered, pressed, open }, disabled),
+    [composer, toolbar, composerPillStyles, corner, color, disabled, open, props.layout.compact],
   );
   const labelStyle = useMemo(
     () => [resolveLabelStyle(composer, toolbar), color !== undefined && { color }],
@@ -389,7 +384,7 @@ function ButtonControl({ view }: { view: ButtonView }) {
   );
   const pages = useMemo(() => buttonPages(view, button.behavior), [view, button.behavior]);
   return (
-    <MenuRoot compactMode="sheet" open={entry.open} onOpenChange={setOpen}>
+    <MenuRoot compactMode="sheet" open={open} onOpenChange={setOpen}>
       <Tooltip enabledOnMobile={false}>
         <TooltipTrigger asChild>{trigger}</TooltipTrigger>
         <TooltipContent>

@@ -221,6 +221,25 @@ describe("plugin buttons", () => {
     expect(resolveButtonForContext(shared, "workspace", "agent-2").open).toBe(false);
   });
 
+  it("remembers which mounted pill opened the menu until it closes", () => {
+    const buttons = store();
+    buttons.addComposerPill(installation(), {
+      id: "skills",
+      button: {
+        title: "Skills",
+        icon: "Scan",
+        behavior: { kind: "menu", items: [] },
+      },
+    });
+    const key = buttons.getSnapshot()[0].key;
+    buttons.setOpen(key, true, "agent-1", "pill-a");
+    expect(resolveButtonForContext(buttons.getSnapshot()[0], "workspace", "agent-1")).toMatchObject(
+      { open: true, openOwner: "pill-a" },
+    );
+    buttons.setOpen(key, false, "agent-1", "pill-a");
+    expect(buttons.getSnapshot()[0].openOwner).toBeUndefined();
+  });
+
   it("keeps a toolbar pill in the toolbar on wide layouts and in the track bar on compact", () => {
     const buttons = store();
     const plugin = installation();

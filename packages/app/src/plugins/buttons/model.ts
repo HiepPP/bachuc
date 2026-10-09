@@ -30,6 +30,8 @@ export interface RegisteredPluginButton {
   open: boolean;
   /** For shared composer pills, the agent whose menu is open. */
   openContextKey?: string;
+  /** The mounted pill that opened the menu; other copies of it stay closed. */
+  openOwner?: string;
 }
 
 /** Shared composer pills store "" for an omitted workspace or agent. */
@@ -138,11 +140,15 @@ export class PluginButtonStore {
     };
   }
 
-  setOpen(key: number, open: boolean, contextKey?: string): void {
+  setOpen(key: number, open: boolean, contextKey?: string, owner?: string): void {
     const entry = this.entries.find((candidate) => candidate.key === key);
     if (!entry) return;
     if (open && (!entry.button.visible || entry.button.disabled || entry.pending)) return;
-    this.replace(key, { open, openContextKey: open ? contextKey : undefined });
+    this.replace(key, {
+      open,
+      openContextKey: open ? contextKey : undefined,
+      openOwner: open ? owner : undefined,
+    });
   }
 
   async run(
@@ -164,7 +170,9 @@ export class PluginButtonStore {
 
   private replace(
     key: number,
-    patch: Partial<Pick<RegisteredPluginButton, "button" | "open" | "openContextKey" | "pending">>,
+    patch: Partial<
+      Pick<RegisteredPluginButton, "button" | "open" | "openContextKey" | "openOwner" | "pending">
+    >,
   ): void {
     if (!this.entries.some((entry) => entry.key === key)) return;
     this.publish(this.entries.map((entry) => (entry.key === key ? { ...entry, ...patch } : entry)));
