@@ -95,6 +95,14 @@ export function connector(
   ];
 }
 
+// A tick label is 36 px wide. Keep every nth hour so neighbouring labels never touch.
+const MIN_TICK_GAP = 44;
+function spacedTicks<T extends { x: number }>(ticks: T[]): T[] {
+  if (ticks.length < 2) return ticks;
+  const step = Math.ceil(MIN_TICK_GAP / Math.max(ticks[1].x - ticks[0].x, 1));
+  return ticks.filter((_, index) => index % step === 0);
+}
+
 export function timelineGeometry(
   model: Timeline,
   width: number,
@@ -128,8 +136,16 @@ export function timelineGeometry(
     };
   });
 
-  // A label that would cross the now line moves to its right, or to its left near the edge. A
-  // label that would touch the previous label in its lane then moves below its bar.
+  const segments = model.edges.flatMap((edge) => {
+    const kind = byId.get(edge.from)?.kind;
+    const tone: SegmentTone = kind === "done" ? "done" : kind === "running" ? "active" : "pending";
+    return connector(x(edge.fromMinute), edge.fromLane, x(edge.toMinute), edge.toLane, tone);
+  });
+  const verticals = segments.filter((segment) => segment.height > LINE);
+
+  // A label that would cross a link's vertical part moves to its right. A label that would cross
+  // the now line moves to its right, or to its left near the edge. A label that would touch the
+  // previous label in its lane then moves below its bar.
   const nowX = nowMinute === null ? null : x(nowMinute);
   const labelEnds = new Map<number, number>();
   const labels: LabelPosition[] = [];
@@ -138,6 +154,12 @@ export function timelineGeometry(
     const text = shortId(rect.id);
     const labelWidth = text.length * CHAR_WIDTH;
     let left = rect.x;
+    const top = laneTop(lane);
+    for (const line of verticals) {
+      const crossesRow = line.y < top + LABEL_HEIGHT && top < line.y + line.height;
+      if (crossesRow && left - LABEL_GAP <= line.x + LINE && line.x <= left + labelWidth)
+        left = line.x + LINE + LABEL_GAP;
+    }
     if (nowX !== null && left - NOW_GAP <= nowX && nowX <= left + labelWidth + NOW_GAP) {
       left = nowX + NOW_GAP + labelWidth <= width ? nowX + NOW_GAP : nowX - NOW_GAP - labelWidth;
     }
@@ -153,12 +175,6 @@ export function timelineGeometry(
     if (!below) labelEnds.set(lane, left + labelWidth);
   }
 
-  const segments = model.edges.flatMap((edge) => {
-    const kind = byId.get(edge.from)?.kind;
-    const tone: SegmentTone = kind === "done" ? "done" : kind === "running" ? "active" : "pending";
-    return connector(x(edge.fromMinute), edge.fromLane, x(edge.toMinute), edge.toLane, tone);
-  });
-
   const axisY = laneTop(Math.max(model.laneCount, 1)) + 2;
   return {
     width,
@@ -167,7 +183,7 @@ export function timelineGeometry(
     labels,
     segments,
     nowX,
-    ticks: model.axis.ticks.map((tick) => ({ x: x(tick.minute), label: tick.label })),
+    ticks: spacedTicks(model.axis.ticks.map((tick) => ({ x: x(tick.minute), label: tick.label }))),
     axisY,
   };
 }

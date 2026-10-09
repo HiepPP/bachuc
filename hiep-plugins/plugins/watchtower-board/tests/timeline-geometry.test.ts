@@ -172,3 +172,37 @@ test("the timeline stays light on the mock data", (t) => {
   t.diagnostic(`positioned views: ${count}, limit ${limit}`);
   assert.ok(count <= limit, `${count} views`);
 });
+
+test("a label moves off the vertical part of a link into its lane", () => {
+  const model: Timeline = {
+    ...mock,
+    bars: [
+      { id: "TASK-001", kind: "done", start: 0, end: 20, expectedEnd: null, lane: 0 },
+      { id: "TASK-002", kind: "done", start: 19, end: 50, expectedEnd: null, lane: 1 },
+    ],
+    edges: [
+      { from: "TASK-001", to: "TASK-002", fromLane: 0, toLane: 1, fromMinute: 20, toMinute: 19 },
+    ],
+    laneCount: 2,
+    axis: { start: 0, end: 100, ticks: [] },
+  };
+  const geometry = timelineGeometry(model, 100 + PAD_X * 2, null);
+  const vertical = geometry.segments.find((segment) => segment.height > 2)!;
+  const label = geometry.labels.find((entry) => entry.id === "TASK-002")!;
+  assert.ok(label.x > vertical.x + vertical.width);
+  assert.equal(label.below, false);
+});
+
+test("hour ticks thin out so their labels never touch", () => {
+  const ticks = Array.from({ length: 48 }, (_, hour) => ({
+    minute: hour * 60,
+    label: `${hour}`,
+  }));
+  const model: Timeline = { ...mock, axis: { start: 0, end: 47 * 60, ticks } };
+  const geometry = timelineGeometry(model, 600, null);
+  assert.ok(geometry.ticks.length < ticks.length);
+  assert.equal(geometry.ticks[0].label, "0");
+  for (let index = 1; index < geometry.ticks.length; index += 1) {
+    assert.ok(geometry.ticks[index].x - geometry.ticks[index - 1].x >= 44);
+  }
+});

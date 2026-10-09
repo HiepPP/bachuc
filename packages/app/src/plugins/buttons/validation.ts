@@ -48,6 +48,11 @@ function validateBehavior(
     case "action":
       if (typeof behavior.onPress !== "function")
         throw new Error("Plugin button action needs onPress");
+      if (
+        behavior.newWorkspacePanel !== undefined &&
+        typeof behavior.newWorkspacePanel !== "string"
+      )
+        throw new Error("Plugin button newWorkspacePanel must be a panel id");
       return { ...behavior };
     case "popover":
       if (!isComponent(behavior.Content)) throw new Error("Plugin button popover needs Content");

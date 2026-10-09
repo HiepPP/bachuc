@@ -798,8 +798,8 @@ hides the row when the project name repeats the workspace title on a wide layout
 `client.addNewWorkspacePanel({ id, title, icon, Component })` adds a panel to the side panel of the
 new workspace screen, for projects on the plugin's host. The screen has no workspace yet, so the
 component receives the surface props plus `projectId` and `cwd`, the chosen project's directory.
-The side panel shows on wide layouts only, one panel at a time: the one a sidebar row's
-`newWorkspacePanel` asked for, or the host's first. It opens with the screen unless the user turns
+The side panel shows on wide layouts only, one panel at a time: the one a sidebar row's or draft
+pill's `newWorkspacePanel` asked for, or the host's first. It opens with the screen unless the user turns
 off **Settings → General → New workspace → Open the side panel**; the header toggle shows or hides
 it.
 
@@ -1735,12 +1735,14 @@ These contracts are exported from `@getpaseo/plugin/client`.
 
 ```tsx
 type PluginButtonBehavior =
-  | { kind: "action"; onPress(): void | Promise<void> }
+  | { kind: "action"; onPress(): void | Promise<void>; newWorkspacePanel?: string }
   | { kind: "menu"; items: readonly PluginButtonMenuEntry[] }
   | { kind: "popover"; Content: React.ComponentType<PluginButtonContentProps>; flush?: boolean };
 ```
 
-An action runs on the client. Paseo marks the button busy until its promise settles, blocks repeated
+An action runs on the client. On a draft composer pill, `newWorkspacePanel` names one of the
+plugin's [new workspace panels](#new-workspace-panel); on a wide layout a press shows it instead of
+running `onPress`. Paseo marks the button busy until its promise settles, blocks repeated
 presses, and shows failures in a toast. A failed action can be retried. Use the client's `paseo` for
 ordinary operations and `rpc` for plugin-specific backend work.
 

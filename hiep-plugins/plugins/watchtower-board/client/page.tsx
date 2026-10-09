@@ -1,12 +1,11 @@
 import { type PluginSurfaceProps, usePaseo } from "@getpaseo/plugin/client";
-import { ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
-import { Pressable, type ScrollView as NativeScrollView, Text, View } from "react-native";
+import { useMemo } from "react";
+import { Text, View } from "react-native";
 import { WatchtowerBoard } from "./board";
 import { WatchtowerOverview } from "./overview";
 
-// Surfaces have no workspace context, so the sidebar page picks one and reuses the board.
+// Surfaces have no workspace context, so the opener names the workspace before it opens the page.
 let lastWorkspaceId: string | null = null;
 
 /** Picks the workspace the page shows when it next mounts. */
@@ -14,6 +13,8 @@ export function preselectWorkspace(workspaceId: string) {
   lastWorkspaceId = workspaceId;
 }
 
+// The page shows one workspace's board only: the one its opener named, or, when opened from the
+// mobile sidebar, the most recently active workspace.
 export function WatchtowerPage(props: PluginSurfaceProps) {
   const { host, theme, layout } = props;
   const paseo = usePaseo();
@@ -22,35 +23,14 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
     queryFn: async () =>
       (await paseo.workspaces.list({ sort: [{ key: "activity_at", direction: "desc" }] })).entries,
   });
-  const [picked, setPicked] = useState(lastWorkspaceId);
   const entries = workspaces.data ?? [];
-  const workspace = entries.find((entry) => entry.id === picked) ?? entries[0] ?? null;
-  const picker = useRef<NativeScrollView>(null);
-  const revealed = useRef(false);
-  const inset = layout.compact ? 12 : 16;
+  const workspace = entries.find((entry) => entry.id === lastWorkspaceId) ?? entries[0] ?? null;
   const styles = useMemo(
     () => ({
       screen: { flex: 1, backgroundColor: theme.colors.surface0 },
-      picker: {
-        flexGrow: 0,
-        borderBottomWidth: 1,
-        borderBottomColor: theme.colors.border,
-      },
-      pickerContent: { padding: inset, gap: 8 },
-      chip: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        borderRadius: 999,
-        backgroundColor: theme.colors.surface1,
-      },
-      chipSelected: { borderColor: theme.colors.accent, backgroundColor: theme.colors.surface2 },
-      chipText: { color: theme.colors.foreground, fontSize: 13 },
-      chipMuted: { color: theme.colors.foregroundMuted },
       message: { padding: layout.compact ? 16 : 24, color: theme.colors.foregroundMuted },
     }),
-    [theme, layout.compact, inset],
+    [theme, layout.compact],
   );
 
   if (!workspace) {
@@ -68,46 +48,6 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
 
   return (
     <View style={styles.screen}>
-      <ScrollView
-        ref={picker}
-        horizontal
-        style={styles.picker}
-        contentContainerStyle={styles.pickerContent}
-      >
-        {entries.map((entry) => {
-          const selected = entry.id === workspace.id;
-          return (
-            <Pressable
-              key={entry.id}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              accessibilityLabel={`Show Watchtower for ${entry.projectDisplayName} ${entry.name}`}
-              onPress={() => {
-                lastWorkspaceId = entry.id;
-                setPicked(entry.id);
-              }}
-              // Bring the open workspace's chip into view once when the page opens. A chip the
-              // user taps is already visible, so later picks keep the scroll position.
-              onLayout={
-                selected
-                  ? (event) => {
-                      if (revealed.current) return;
-                      revealed.current = true;
-                      const x = Math.max(0, event.nativeEvent.layout.x - inset);
-                      picker.current?.scrollTo({ x, animated: false });
-                    }
-                  : undefined
-              }
-              style={[styles.chip, selected && styles.chipSelected]}
-            >
-              <Text style={styles.chipText} numberOfLines={1}>
-                {entry.projectDisplayName}
-                <Text style={styles.chipMuted}> · {entry.name}</Text>
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
       {/* Wide layouts have room for the process overview; compact ones keep the board. */}
       {layout.compact ? (
         <WatchtowerBoard

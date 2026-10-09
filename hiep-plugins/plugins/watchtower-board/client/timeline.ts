@@ -210,7 +210,12 @@ export function buildTimeline({ tasks, run, questions }: TimelineInput): Timelin
     bars,
     edges,
     laneCount,
-    axis: { start: 0, end: axisEnd, ticks: hourTicks(run?.started, axisEnd) },
+    // A row logged a minute before `Started:` has a negative start.
+    axis: {
+      start: Math.min(0, ...bars.map((bar) => bar.start)),
+      end: axisEnd,
+      ticks: hourTicks(run?.started, axisEnd),
+    },
     stats: { averageMinutes: average, longest, overAverage, maxParallel: maxParallel(bars) },
     finishMinute,
     deadlines,

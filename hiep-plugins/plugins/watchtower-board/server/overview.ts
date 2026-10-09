@@ -72,8 +72,9 @@ export function parseManualChecks(handoff: string | null): ManualCheck[] {
     });
 }
 
-// Log times are clock times with no date. Walking the rows in order, a time earlier than the one
-// before it starts the next day.
+// Log times are clock times with no date. Walking the rows in order, a time over 12 hours earlier
+// than the one before it starts the next day. A smaller step back is an overlap, such as a row that
+// starts a minute before `Started:` or before the previous row ended, and stays on the same day.
 export function parseOverviewRun(markdown: string, now = new Date()): OverviewRun {
   const started = field(markdown, "Started");
   const finished = field(markdown, "Finished");
@@ -87,7 +88,7 @@ export function parseOverviewRun(markdown: string, now = new Date()): OverviewRu
     if (minutes === null) return null;
     origin ??= minutes;
     previous ??= minutes;
-    if (minutes < previous) dayOffset += DAY_MINUTES;
+    if (minutes < previous - DAY_MINUTES / 2) dayOffset += DAY_MINUTES;
     previous = minutes;
     return dayOffset + minutes - origin;
   };

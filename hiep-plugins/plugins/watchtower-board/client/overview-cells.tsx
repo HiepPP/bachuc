@@ -48,6 +48,8 @@ export function OverviewCell({
   return (
     <View
       style={{
+        // Fills its grid column, so cards in one row end on the same line.
+        flexGrow: 1,
         borderWidth: 1,
         borderColor: tone === "warning" ? colors.statusWarning : colors.border,
         borderRadius: 12,

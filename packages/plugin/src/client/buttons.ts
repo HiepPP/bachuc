@@ -26,7 +26,12 @@ export type PluginButtonLabelProps = PluginHostProps & PluginButtonContext;
 export type PluginButtonLabel = string | ComponentType<PluginButtonLabelProps>;
 
 export type PluginButtonBehavior =
-  | { kind: "action"; onPress(context?: PluginButtonContext): void | Promise<void> }
+  | {
+      kind: "action";
+      onPress(context?: PluginButtonContext): void | Promise<void>;
+      /** On New workspace, a press shows this plugin's new workspace panel instead of onPress. */
+      newWorkspacePanel?: string;
+    }
   | { kind: "menu"; items: readonly PluginButtonMenuEntry[] }
   | {
       kind: "popover";

@@ -210,6 +210,31 @@ test("run log times become minutes from the start across midnight", () => {
   assert.equal(parseOverviewRun("# Run\n").stopped, false);
 });
 
+test("rows that overlap by a few minutes stay on the same day", () => {
+  const run = parseOverviewRun(
+    `# Run
+
+- Started: 2026-10-09 14:20
+- Finished: 2026-10-09 16:10
+
+## Log
+
+| Start | End | TASK | Result | PR or reason |
+| --- | --- | --- | --- | --- |
+| 14:19 | 14:40 | TASK-001 | DONE | #1 |
+| 14:39 | 15:10 | TASK-002 | DONE | #2 |
+`,
+  );
+  assert.deepEqual(
+    run.log.map((row) => [row.startMinute, row.endMinute]),
+    [
+      [-1, 20],
+      [19, 50],
+    ],
+  );
+  assert.equal(run.nowMinute, 110);
+});
+
 test("a run with no finish and no log activity for over two hours has stopped", () => {
   // The last logged activity ends at 00:21, minute 89.
   const recent = parseOverviewRun(runLog, new Date(2026, 9, 7, 2, 21));

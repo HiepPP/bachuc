@@ -13,7 +13,8 @@ chosen project opens in the side panel; it reads the project root and has no att
 On desktop and web the sidebar item is disabled elsewhere outside a thread, such as on the Board
 page. In a web window narrower than 720 px, the compact Explorer has no plugin tabs, so the sidebar
 item opens the Watchtower page on the current workspace instead.
-Mobile keeps a sidebar page that picks a workspace from a row sorted by recent activity.
+The Watchtower page shows one workspace only, with no workspace picker. Mobile's sidebar page
+shows the most recently active workspace.
 The header identifies its project. Each workspace keeps its own board and task selection.
 The board reads `watchtower/NEXT.md` in that workspace, not another checkout or its parent repository.
 The panel summarizes completion and counts for Active, Blocked, Todo, and Done tasks.
@@ -26,7 +27,7 @@ dependencies, class, blocking questions, blocker, and file error. Refresh to rea
 The **Watchtower** pill above every agent composer, beside Tasks and Subagents, opens the
 Watchtower page on that composer's workspace. It reads `Watchtower 5/10`, adds `, 1 question`
 while an open question blocks a task, and reads `Watchtower` on New workspace, which has no
-workspace yet. The page keeps the board on compact layouts. On wider layouts it shows the process
+workspace yet; there a press shows the chosen project's board in the side panel. The page keeps the board on compact layouts. On wider layouts it shows the process
 overview, read in one `watchtower.overview.read` call:
 
 - the lifecycle: Plan, Implement, Verify, Review, and Archive, with the current step marked;

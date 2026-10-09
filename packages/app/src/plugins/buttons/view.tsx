@@ -35,6 +35,10 @@ import { ToastApiProvider, useToast } from "@/contexts/toast-context";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
 import { createPluginClientStateSource } from "../client-state/source";
+import {
+  newWorkspacePanelKey,
+  useNewWorkspaceSidePanelStore,
+} from "../new-workspace-side-panel/store";
 import { Icon } from "../icons";
 import { PluginRuntimeBoundary } from "../runtime-boundary";
 import { SurfaceErrorBoundary } from "../surface-error-boundary";
@@ -135,6 +139,20 @@ function renderCustomLabel(CustomLabel: Exclude<PluginButtonLabel, string>, view
 }
 
 function pressButton(view: ButtonView, path: readonly string[]) {
+  const { behavior } = view.entry.button;
+  const panelId = behavior.kind === "action" ? behavior.newWorkspacePanel : undefined;
+  // The new workspace side panel exists on wide layouts only; compact ones run onPress.
+  if (
+    path.length === 0 &&
+    panelId &&
+    view.entry.context.context === "draft" &&
+    !view.props.layout.compact
+  ) {
+    useNewWorkspaceSidePanelStore
+      .getState()
+      .show(newWorkspacePanelKey(view.entry.installation.id, panelId));
+    return;
+  }
   void pluginButtonStore.run(view.entry.key, path, view.entry.context).catch((error: unknown) => {
     view.toast.error(error instanceof Error ? error.message : String(error));
   });
@@ -819,7 +837,13 @@ export function PluginHeaderButtons({
 }
 
 const styles = StyleSheet.create((theme) => ({
-  draftPills: { flexDirection: "row", gap: theme.spacing[1], paddingBottom: theme.spacing[2] },
+  // The inset matches the composer's own horizontal padding, so the pills line up with its border.
+  draftPills: {
+    flexDirection: "row",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[4],
+    paddingBottom: theme.spacing[2],
+  },
   cornerPills: {
     position: "absolute",
     top: theme.spacing[3],
