@@ -72,7 +72,7 @@ symbol.
 4. Read host implementation in `packages/`: `plugin/` (SDK contracts and types),
    `server/src/server/plugins/` (daemon plugin host), `app/src/plugins/` (client
    contributions and UI), `protocol/` (message schemas).
-5. Use GitNexus repo `paseo` for flows and callers, and `rg` for text. Check index freshness
+5. Use GitNexus repo `bachuc` for flows and callers, and `rg` for text. Check index freshness
    first; verify graph results against source.
 
 Record host facts a design depends on with the Paseo version or commit SHA, for example in the

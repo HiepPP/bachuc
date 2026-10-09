@@ -16,5 +16,5 @@ Discrepancy: 2 found. Both plugins shipped, but one plan assumption about the si
 
 ## Lessons
 
-- Before planning a UI-facing plugin, confirm what the target UI lists and what context the host passes, using the Paseo source in `~/Projects/paseo`.
+- Before planning a UI-facing plugin, confirm what the target UI lists and what context the host passes, using the Paseo source in `~/Projects/bachuc`.
 - Workspace archive in Paseo also archives its agents and kills its terminals, and it can remove Paseo-owned worktrees. Guard against all three.
