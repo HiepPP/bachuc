@@ -305,32 +305,53 @@ export interface RunningTask {
 
 const logColumns = [44, 44, 36] as const;
 
+// The columns keep their width, and the detail gets its own line, so a long detail never squeezes
+// the times together.
 function LogLine({
   cells,
   tail,
   strong,
   tone,
+  first,
   theme,
 }: {
   cells: readonly [string, string, string, string];
   tail: string;
   strong?: boolean;
   tone?: "active" | "warning";
+  first: boolean;
 } & ThemeProps) {
   const { colors } = theme;
-  const text = { fontFamily: MONO, fontSize: 11, lineHeight: 19 };
+  const text = { fontFamily: MONO, fontSize: 11, lineHeight: 18 };
   const base = strong ? colors.foreground : colors.foregroundMuted;
   const resultColor =
     tone === "active" ? colors.accent : tone === "warning" ? colors.statusWarning : base;
   return (
-    <View style={{ flexDirection: "row", alignItems: "center" }}>
-      {logColumns.map((width, index) => (
-        <Text key={width + index} style={{ ...text, width, color: base }}>
-          {cells[index]}
+    <View
+      style={{
+        paddingVertical: 6,
+        borderTopWidth: first ? 0 : 1,
+        borderTopColor: colors.border,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        {logColumns.map((width, index) => (
+          <Text key={width + index} style={{ ...text, width, flexShrink: 0, color: base }}>
+            {cells[index]}
+          </Text>
+        ))}
+        <Text numberOfLines={1} style={{ ...text, flex: 1, color: resultColor }}>
+          {cells[3]}
         </Text>
-      ))}
-      <Text style={{ ...text, flex: 1, color: resultColor }}>{cells[3]}</Text>
-      <Text style={{ ...text, color: tail.startsWith("#") ? colors.accent : base }}>{tail}</Text>
+      </View>
+      {tail ? (
+        <Text
+          numberOfLines={2}
+          style={{ ...text, color: tail.startsWith("#") ? colors.accent : base }}
+        >
+          {tail}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -355,10 +376,11 @@ export function RunLogCell({
           key={`${row.task}-${row.start}-${index}`}
           cells={[row.start, row.end, row.task.replace(/^TASK-/, ""), row.result.toLowerCase()]}
           tail={row.detail}
+          first={index === 0}
           theme={theme}
         />
       ))}
-      {live.map((task) => {
+      {live.map((task, index) => {
         const line = runningLogLine(task, Boolean(run?.stopped));
         return (
           <LogLine
@@ -367,6 +389,7 @@ export function RunLogCell({
             tail={line.tail}
             strong
             tone={line.tone}
+            first={recent.length === 0 && index === 0}
             theme={theme}
           />
         );
