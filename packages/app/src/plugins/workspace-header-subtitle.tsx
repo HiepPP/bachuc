@@ -39,7 +39,8 @@ function Subtitle({ serverId, workspaceId, projectDisplayName, children, theme }
   );
   const contribution = plugin?.workspaceHeaderSubtitles?.[0];
   const client = useHostRuntimeClient(serverId);
-  const projectId = useWorkspace(serverId, workspaceId)?.projectId;
+  const workspace = useWorkspace(serverId, workspaceId);
+  const projectId = workspace?.projectId;
   const hosts = useHosts();
   const compact = useIsCompactFormFactor();
   const label = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
@@ -58,6 +59,7 @@ function Subtitle({ serverId, workspaceId, projectDisplayName, children, theme }
           workspaceId={workspaceId}
           projectId={projectId}
           projectDisplayName={projectDisplayName}
+          projectRootPath={workspace?.projectRootPath}
         />
       </PluginRuntimeBoundary>
     </SurfaceErrorBoundary>

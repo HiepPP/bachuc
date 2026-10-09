@@ -227,6 +227,8 @@ export interface PluginWorkspaceHeaderSubtitleProps extends PluginHostProps {
   workspaceId: string;
   projectId: string;
   projectDisplayName: string;
+  /** The project's root directory, for `openNewWorkspace`. */
+  projectRootPath?: string;
 }
 
 export interface PluginWorkspaceHeaderSubtitleContribution {
