@@ -7,7 +7,10 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { CheckoutSnapshotFacts, CheckoutStatusGit } from "../utils/checkout-git.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { createFileObserver } from "./file-observer/index.js";
-import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
+import {
+  WORKSPACE_GIT_WATCHER_SUBSCRIBE_TIMEOUT_MS,
+  WorkspaceGitServiceImpl,
+} from "./workspace-git-service.js";
 import type { FileChange, FileObserver, SubscribeToFileChanges } from "./file-observer/index.js";
 
 function createLogger(): pino.Logger {
@@ -17,6 +20,15 @@ function createLogger(): pino.Logger {
     warn: vi.fn(),
   };
   return logger as unknown as pino.Logger;
+}
+
+// Names the logged setup failures so a timeout separates a slow setup from a failed one.
+function describeSetupWarnings(logger: pino.Logger): string {
+  const warnings = vi.mocked(logger.warn).mock.calls.map(([context, message]) => {
+    const err = (context as { err?: unknown } | undefined)?.err;
+    return `${String(message)}${err === undefined ? "" : `: ${String(err)}`}`;
+  });
+  return `setup warnings: ${warnings.length > 0 ? warnings.join("; ") : "none"}`;
 }
 
 function createFacts(cwd: string): CheckoutSnapshotFacts {
@@ -64,6 +76,11 @@ afterEach(async () => {
     await cleanup.pop()?.();
   }
 });
+
+// Setup subscribes the working tree, then the Git dir. Each subscribe awaits a full
+// inventory and may take up to the service's own deadline under a loaded test run.
+// The test timeout below (50s) is this budget plus 30s for the steps after setup.
+const SETUP_BUDGET_MS = 2 * WORKSPACE_GIT_WATCHER_SUBSCRIBE_TIMEOUT_MS;
 
 test("recursive observation updates tracked state and prunes ignored storms", async () => {
   const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "paseo-git-observation-")));
@@ -172,8 +189,9 @@ test("recursive observation updates tracked state and prunes ignored storms", as
     }
     throw new Error(`Unexpected Git command: ${args.join(" ")}`);
   });
+  const serviceLogger = createLogger();
   const service = new WorkspaceGitServiceImpl({
-    logger: createLogger(),
+    logger: serviceLogger,
     paseoHome: path.join(tempDir, "paseo-home"),
     fileObserver,
     deps: {
@@ -209,7 +227,7 @@ test("recursive observation updates tracked state and prunes ignored storms", as
 
   await vi.waitFor(
     () => {
-      expect(activeWatcherCount).toBe(2);
+      expect(activeWatcherCount, describeSetupWarnings(serviceLogger)).toBe(2);
       expect(service.peekSnapshot(repoDir)).not.toBeNull();
       expect(service.getMetrics()).toMatchObject({
         workspaceObservationSetupInFlightCount: 0,
@@ -217,7 +235,7 @@ test("recursive observation updates tracked state and prunes ignored storms", as
         workspaceRefreshQueuedCount: 0,
       });
     },
-    { timeout: 5_000 },
+    { timeout: SETUP_BUDGET_MS },
   );
 
   writeFileSync(trackedPath, "base\n");
@@ -415,7 +433,7 @@ test("recursive observation updates tracked state and prunes ignored storms", as
   expect(getCheckoutWorktreeState).not.toHaveBeenCalled();
   expect(getCheckoutDiff).not.toHaveBeenCalled();
   expect(service.getMetrics().workspaceRefreshQueuedCount).toBe(0);
-}, 30_000);
+}, 50_000);
 
 test("a late Git-ignored tree is pruned while tracked changes still notify consumers", async () => {
   const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "paseo-real-ignore-")));
