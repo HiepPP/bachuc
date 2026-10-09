@@ -90,17 +90,6 @@ no task was submitted. Jev routing consumes API quota.
 
 [Explore Jev routing →](plugins/jev-orchestrator/README.md)
 
-## Bring a warmer palette to Paseo
-
-VS Code Light+ (Warm) adds a warm neutral theme through Paseo's theme API.
-Choose it in **Settings → Appearance**; typography and layout remain Paseo's.
-
-<img src="docs/images/vscode-warm-light.png" alt="Theme picker listing VS Code Light+ (Warm), with the existing Light theme still selected." width="640">
-
-The picker confirms the theme is available; this capture keeps Light selected.
-
-[Install the warm theme →](plugins/vscode-warm-light/README.md)
-
 ## Find missing prerequisites before starting work
 
 Workspace preflight checks runtime requirements, dependency presence, configured
@@ -151,7 +140,6 @@ status alone does not prove every plugin action works.
 
 | Plugin                                                           | Purpose                                                                                                                                |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| [vscode-warm-light](plugins/vscode-warm-light/README.md)         | Apply the warm, customized VS Code Light+ palette through Paseo's theme API.                                                           |
 | [claude-look](plugins/claude-look/README.md)                     | Claude Light theme, Claude desktop's 768px chat column, and its 1.5 reply line-height.                                                 |
 | [edit-diffs](plugins/edit-diffs/README.md)                       | Show edit tool calls as diffs with file line numbers, open by default like Claude Code.                                                |
 | [stop-orb](plugins/stop-orb/README.md)                           | Replace the composer stop button with the animated solving thinking orb on desktop.                                                    |

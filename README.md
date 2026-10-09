@@ -71,7 +71,6 @@ The plugins live in [hiep-plugins/plugins](hiep-plugins/plugins). Read [hiep-plu
 | `plugins-nav`           | Adds a sidebar row that opens the Plugins settings page.                                    |
 | `stop-orb`              | Replaces the composer stop button with an animated orb on desktop.                          |
 | `claude-look`           | Adds a Claude Light theme, a 768 px chat column, and taller reply lines.                    |
-| `vscode-warm-light`     | Adds a warm light theme.                                                                    |
 
 ## Install
 
