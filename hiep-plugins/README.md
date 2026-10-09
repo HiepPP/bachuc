@@ -90,22 +90,10 @@ no task was submitted. Jev routing consumes API quota.
 
 [Explore Jev routing →](plugins/jev-orchestrator/README.md)
 
-## Find missing prerequisites before starting work
-
-Workspace preflight checks runtime requirements, dependency presence, configured
-ports, and local health endpoints. Measurements stay separate from assumptions:
-this repository-root capture shows unknown coverage, so missing configuration
-never looks like a pass. Suggestions never execute automatically.
-
-<img src="docs/images/preflight.png" alt="Workspace preflight reporting four unknown checks with explanations of missing requirements and configuration." width="420">
-
-[Configure preflight checks →](plugins/workspace-preflight/README.md)
-
 ## Ask a focused second opinion
 
 Jev gives Codex and Claude agents a typed evaluation tool: boolean, choice, and
-score questions over state you choose to share. Pair it with preflight to evaluate
-which evidence matters for the task. Your coding agent remains in control.
+score questions over state you choose to share. Your coding agent remains in control.
 
 ![Installed plugin cards including Jev evaluator and orchestrator, with local paths redacted.](docs/images/jev.png)
 
@@ -152,12 +140,10 @@ status alone does not prove every plugin action works.
 | [Board](plugins/board/README.md)                                 | Group conversations by project with pastel colors, avatars, parent/subagent clusters, stars, and UI scaling.                           |
 | [jev-evaluator](plugins/jev-evaluator/README.md)                 | Expose Jev evaluations as an MCP tool for Codex and Claude agents.                                                                     |
 | [watchtower-board](plugins/watchtower-board/README.md)           | Browse read-only Watchtower tasks and attach task briefs in the composer.                                                              |
-| [workspace-preflight](plugins/workspace-preflight/README.md)     | Discover workspace prerequisites, expose read-only MCP evidence, and optionally ask Jev for task relevance.                            |
 | [workspace-spaces](plugins/workspace-spaces/README.md)           | Group projects with numbered Spaces in the desktop sidebar; standalone fallback on other clients.                                      |
 | [thread-janitor](plugins/thread-janitor/README.md)               | Close the runtimes of stale threads so their processes exit.                                                                           |
 | [idle-runtime-closer](plugins/idle-runtime-closer/README.md)     | Close the processes of idle threads automatically; the threads stay and resume on the next prompt.                                     |
 | [thread-context-attach](plugins/thread-context-attach/README.md) | Attach the last reply of another Paseo thread to your next message.                                                                    |
-| [loop-verify](plugins/loop-verify/README.md)                     | Prototype: retry a labeled agent's goal in fresh child agents until a verify command passes, up to 5 rounds.                           |
 | [pr-watch](plugins/pr-watch/README.md)                           | Let an agent watch its GitHub PR and wake it when checks fail or pass, someone comments, or a conflict appears.                        |
 | [assistant-cite](plugins/assistant-cite/README.md)               | Cite selected assistant text as a composer chip with an optional comment, and jump back to the quote from the chip.                    |
 | [html-reply](plugins/html-reply/README.md)                       | Let an agent publish a sandboxed, themed HTML page that renders inline in its thread.                                                  |

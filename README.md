@@ -58,7 +58,6 @@ The plugins live in [hiep-plugins/plugins](hiep-plugins/plugins). Read [hiep-plu
 | `jev-orchestrator`      | Routes one task to a chosen profile and effort level, with optional scoped delegation.      |
 | `jev-evaluator`         | Gives Codex and Claude agents an MCP tool for typed Jev evaluations.                        |
 | `jev-permission-gate`   | Answers shell permission requests with rules and Jev, and leaves uncertain ones to you.     |
-| `workspace-preflight`   | Checks workspace prerequisites, ports, and health endpoints.                                |
 | `pr-watch`              | Wakes an agent when its PR checks finish, someone comments, or a conflict appears.          |
 | `assistant-cite`        | Cites selected assistant text as a composer chip and jumps back to the quote.               |
 | `html-reply`            | Lets an agent publish a sandboxed HTML page that renders inline in its thread.              |
@@ -67,7 +66,6 @@ The plugins live in [hiep-plugins/plugins](hiep-plugins/plugins). Read [hiep-plu
 | `skill-pins`            | Pins skills in the composer, so each turn tells the agent to load them.                     |
 | `thread-janitor`        | Closes the runtimes of threads idle for more than 24 hours and archives empty workspaces.   |
 | `idle-runtime-closer`   | Closes the runtimes of threads idle for more than 30 minutes.                               |
-| `loop-verify`           | Prototype. Retries a goal in fresh child agents until a verify command passes.              |
 | `plugins-nav`           | Adds a sidebar row that opens the Plugins settings page.                                    |
 | `stop-orb`              | Replaces the composer stop button with an animated orb on desktop.                          |
 | `claude-look`           | Adds a Claude Light theme, a 768 px chat column, and taller reply lines.                    |

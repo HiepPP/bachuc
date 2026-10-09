@@ -100,24 +100,3 @@ and spaces remaining requests 65 seconds apart. It never retries an answer to im
 Report choice accuracy, boolean accuracy/Brier, and ordinal score error separately. Option
 probabilities and TypeSafe confidence are different fields. Results from this small, correlated,
 synthetic set are not production calibration or a universal reliability estimate.
-
-## Optional task-aware preflight
-
-Install [workspace-preflight](../workspace-preflight/README.md) independently to give new Paseo
-Codex/Claude agents `workspace_preflight` alongside `jev_evaluate`. Neither plugin imports the other.
-Collect task requirements, call preflight with `{}`, preserve raw measurements, then send only
-sanitized necessary evidence to Jev. Use a `nextStep` question with `type: "choice"` and criteria:
-
-```json
-{
-  "proceed": "All task-critical prerequisites are evidenced; unrelated failures may remain.",
-  "prepare_environment": "A known failure blocks a task-critical prerequisite.",
-  "need_more_evidence": "Required evidence or task coverage is missing or unknown."
-}
-```
-
-Include required check IDs, their task relevance and coverage gaps in shared `state` alongside
-sanitized observations. Never put credentials, unrelated repository text or private paths in state.
-Jev cannot modify measurements, execute repairs or approve permissions. Missing tool, timeout,
-API error or invalid choice means evaluation unavailable, never an implicit `proceed`.
-The preflight panel remains usable without Jev; no per-turn evaluation loop is installed.
