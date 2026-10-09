@@ -18,7 +18,7 @@ test("the linux backend fails the observation when the classification queue over
   const notifications = new EventEmitter();
   const observer = createFileObserver();
   let active = true;
-  let failure: Error | null = null;
+  let failure = null as Error | null;
   const backend = createLinuxBackend(
     {
       root,
@@ -73,7 +73,7 @@ test("an ignore update drains classifications queued below the new excluded root
   // The backend is injected for deterministic queue admission, but its real
   // temporary root uses the host filesystem's path format.
   const paths = createObserverPaths(process.platform);
-  let onRootChange: ((eventType: string, filename: string | null) => void) | null = null;
+  let onRootChange = null as ((eventType: string, filename: string | null) => void) | null;
   const observer = createFileObserver();
   let active = true;
   let ignoreGenerated = false;

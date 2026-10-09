@@ -27,7 +27,7 @@ describe("OpenCodeEventConsumer", () => {
       arm: () => () => undefined,
       get wait() {
         closePromise = consumer.close();
-        return async (_delayMs, signal) => {
+        return async (_delayMs: number, signal: AbortSignal) => {
           observedAlreadyAborted = signal.aborted;
           if (signal.aborted) throw signal.reason;
         };

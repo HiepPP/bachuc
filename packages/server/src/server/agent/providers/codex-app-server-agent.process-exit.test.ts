@@ -673,7 +673,9 @@ test("session close disposes a provider that arrives from an in-flight reconnect
 
     await expect(turnStart).rejects.toThrow("Codex app-server session is closed");
     await expect(lateExit).resolves.toBeUndefined();
-    expect(events.filter((event) => event.event.type === "turn_failed")).toHaveLength(0);
+    expect(
+      events.filter((event) => event.type === "agent_stream" && event.event.type === "turn_failed"),
+    ).toHaveLength(0);
 
     await expect(session.connect()).rejects.toThrow("Codex app-server session is closed");
     expect(spawnCount).toBe(2);

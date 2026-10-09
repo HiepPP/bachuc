@@ -94,8 +94,7 @@ describe("live hosted relay", () => {
         projection: "canonical",
       });
       const assistantText = timeline.entries
-        .filter((entry) => entry.item.type === "assistant_message")
-        .map((entry) => entry.item.text)
+        .flatMap((entry) => (entry.item.type === "assistant_message" ? [entry.item.text] : []))
         .join("");
 
       expect(initialAgents.entries).toEqual([]);

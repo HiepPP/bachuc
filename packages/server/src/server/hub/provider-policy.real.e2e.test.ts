@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { AgentStreamEvent } from "@getpaseo/protocol/agent-types";
+import type { AgentStreamEvent, ProviderOptions } from "@getpaseo/protocol/agent-types";
 import type { HubExecutionAgentCreateResponse } from "@getpaseo/protocol/messages";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -24,7 +24,7 @@ interface ScenarioEvidence {
   scenario: "classifier" | "replying_worker" | "native_sandbox";
   agentId: string;
   turnIds: string[];
-  providerOptions: Record<string, unknown>;
+  providerOptions: ProviderOptions;
   actions: HubActionSink["calls"];
   permissionsRequested: string[];
   toolOutcomes: ToolOutcome[];
@@ -326,7 +326,7 @@ describe.skipIf(!RUN_REAL_HUB_POLICY)("Hub provider policy (real providers)", ()
   );
 });
 
-function classifierProviderOptions(provider: Provider): Record<string, unknown> {
+function classifierProviderOptions(provider: Provider): ProviderOptions {
   if (provider === "codex") {
     return { approval_policy: "never", sandbox_mode: "read-only", web_search: "disabled" };
   }
@@ -353,7 +353,7 @@ function classifierProviderOptions(provider: Provider): Record<string, unknown> 
   };
 }
 
-function workerProviderOptions(provider: Provider): Record<string, unknown> {
+function workerProviderOptions(provider: Provider): ProviderOptions {
   if (provider === "codex") return classifierProviderOptions(provider);
   const options = classifierProviderOptions(provider);
   return {
@@ -381,7 +381,7 @@ async function createExecution(
     provider: Provider;
     executionId: string;
     prompt: string;
-    providerOptions: Record<string, unknown>;
+    providerOptions: ProviderOptions;
     sink: HubActionSink;
     grants: Array<"finish_execution" | "reply">;
   },
@@ -442,9 +442,15 @@ interface ToolOutcome {
   error?: string;
 }
 
+function toolErrorMessage(error: unknown): string | null {
+  if (typeof error !== "object" || error === null || !("message" in error)) return null;
+  return typeof error.message === "string" && error.message ? error.message : null;
+}
+
 function toolOutcomes(events: AgentStreamEvent[]): ToolOutcome[] {
   return events.flatMap((event) => {
     if (event.type !== "timeline" || event.item.type !== "tool_call") return [];
+    const errorMessage = toolErrorMessage(event.item.error);
     return [
       {
         name: event.item.name,
@@ -453,23 +459,23 @@ function toolOutcomes(events: AgentStreamEvent[]): ToolOutcome[] {
         ...(event.item.detail.type === "shell"
           ? { exitCode: event.item.detail.exitCode ?? null }
           : {}),
-        ...(event.item.error?.message ? { error: event.item.error.message } : {}),
+        ...(errorMessage ? { error: errorMessage } : {}),
       },
     ];
   });
 }
 
-function noBroadNativeApproval(options: Record<string, unknown>): boolean {
+function noBroadNativeApproval(options: ProviderOptions): boolean {
   const allowedTools = Array.isArray(options.allowedTools) ? options.allowedTools : [];
   return !allowedTools.some((tool) => ["Bash", "Write", "Edit"].includes(String(tool)));
 }
 
-function redactWritableRoots(options: Record<string, unknown>): Record<string, unknown> {
+function redactWritableRoots(options: ProviderOptions): ProviderOptions {
   return JSON.parse(
     JSON.stringify(options, (_key, value) =>
       typeof value === "string" && value.startsWith(tmpdir()) ? "<isolated-root>" : value,
     ),
-  ) as Record<string, unknown>;
+  ) as ProviderOptions;
 }
 
 function redactToolOutcomes(outcomes: ToolOutcome[], paths: string[]): ToolOutcome[] {

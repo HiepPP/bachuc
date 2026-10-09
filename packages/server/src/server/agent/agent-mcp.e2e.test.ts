@@ -71,7 +71,7 @@ function getStructuredContent(result: McpToolResult): StructuredContent | null {
   }
   const content = result.content?.[0];
   if (content && typeof content === "object" && "structuredContent" in content) {
-    if (content.structuredContent) return content.structuredContent;
+    if (content.structuredContent) return content.structuredContent as StructuredContent;
   }
   if (content && typeof content === "object") {
     return content;

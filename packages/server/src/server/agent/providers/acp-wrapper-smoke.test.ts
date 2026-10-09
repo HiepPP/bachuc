@@ -32,9 +32,7 @@ const capabilities: AgentCapabilityFlags = {
   supportsToolInvocations: true,
 };
 
-interface SmokeLogger extends Logger {
-  warn: ReturnType<typeof vi.fn>;
-}
+type SmokeLogger = Logger & { warn: ReturnType<typeof vi.fn> };
 
 interface WrapperSmokeConfig {
   id: "claude-acp" | "codex-acp";
@@ -231,7 +229,7 @@ function summarizeEvents(events: AgentStreamEvent[]): unknown[] {
 function installWireCapture(trace: SmokeTrace): void {
   const originalNewSession = ClientSideConnection.prototype.newSession;
   vi.spyOn(ClientSideConnection.prototype, "newSession").mockImplementation(
-    async function (params) {
+    async function (this: ClientSideConnection, params) {
       trace.rpc.push({ direction: "out", method: "session/new", payload: params });
       try {
         const response = await originalNewSession.call(this, params);
@@ -250,7 +248,7 @@ function installWireCapture(trace: SmokeTrace): void {
 
   const originalSetMode = ClientSideConnection.prototype.setSessionMode;
   vi.spyOn(ClientSideConnection.prototype, "setSessionMode").mockImplementation(
-    async function (params) {
+    async function (this: ClientSideConnection, params) {
       trace.rpc.push({ direction: "out", method: "session/setMode", payload: params });
       try {
         const response = await originalSetMode.call(this, params);
@@ -269,7 +267,7 @@ function installWireCapture(trace: SmokeTrace): void {
 
   const originalSetModel = ClientSideConnection.prototype.unstable_setSessionModel;
   vi.spyOn(ClientSideConnection.prototype, "unstable_setSessionModel").mockImplementation(
-    async function (params) {
+    async function (this: ClientSideConnection, params) {
       trace.rpc.push({ direction: "out", method: "session/setModel", payload: params });
       try {
         const response = await originalSetModel.call(this, params);
@@ -288,7 +286,7 @@ function installWireCapture(trace: SmokeTrace): void {
 
   const originalSetConfig = ClientSideConnection.prototype.setSessionConfigOption;
   vi.spyOn(ClientSideConnection.prototype, "setSessionConfigOption").mockImplementation(
-    async function (params) {
+    async function (this: ClientSideConnection, params) {
       trace.rpc.push({ direction: "out", method: "session/setConfigOption", payload: params });
       try {
         const response = await originalSetConfig.call(this, params);
@@ -312,20 +310,27 @@ function installWireCapture(trace: SmokeTrace): void {
   );
 
   const originalPrompt = ClientSideConnection.prototype.prompt;
-  vi.spyOn(ClientSideConnection.prototype, "prompt").mockImplementation(async function (params) {
-    trace.rpc.push({ direction: "out", method: "session/prompt", payload: params });
-    try {
-      const response: PromptResponse = await originalPrompt.call(this, params);
-      trace.rpc.push({ direction: "in", method: "session/prompt", payload: response });
-      return response;
-    } catch (error) {
-      trace.rpc.push({ direction: "error", method: "session/prompt", payload: formatError(error) });
-      throw error;
-    }
-  });
+  vi.spyOn(ClientSideConnection.prototype, "prompt").mockImplementation(
+    async function (this: ClientSideConnection, params) {
+      trace.rpc.push({ direction: "out", method: "session/prompt", payload: params });
+      try {
+        const response: PromptResponse = await originalPrompt.call(this, params);
+        trace.rpc.push({ direction: "in", method: "session/prompt", payload: response });
+        return response;
+      } catch (error) {
+        trace.rpc.push({
+          direction: "error",
+          method: "session/prompt",
+          payload: formatError(error),
+        });
+        throw error;
+      }
+    },
+  );
 
   const originalSessionUpdate = ACPAgentSession.prototype.sessionUpdate;
   vi.spyOn(ACPAgentSession.prototype, "sessionUpdate").mockImplementation(async function (
+    this: ACPAgentSession,
     params: SessionNotification,
   ) {
     trace.notifications.push({

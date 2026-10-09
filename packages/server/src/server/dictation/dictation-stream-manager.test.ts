@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import pino from "pino";
 
 import { DictationStreamManager } from "./dictation-stream-manager.js";
-import { PersistedConfigSchema } from "../persisted-config.js";
+import { PersistedConfigSchema, type PersistedConfig } from "../persisted-config.js";
 import { resolveSpeechConfig } from "../speech/speech-config-resolver.js";
 import type {
   SpeechToTextProvider,
@@ -134,9 +134,13 @@ describe("DictationStreamManager (provider-agnostic provider)", () => {
     const result = resolveSpeechConfig({
       paseoHome: "/tmp/paseo-home",
       env: params.env ?? ({} as NodeJS.ProcessEnv),
-      persisted: PersistedConfigSchema.parse(params.persisted ?? {}),
+      persisted: PersistedConfigSchema.parse(params.persisted ?? {}) as PersistedConfig,
     });
-    return result.speech.sttLanguages.dictation;
+    const { sttLanguages } = result.speech;
+    if (!sttLanguages) {
+      throw new Error("resolveSpeechConfig returned no sttLanguages");
+    }
+    return sttLanguages.dictation;
   }
 
   async function startWithResolvedDictationLanguage(params: {

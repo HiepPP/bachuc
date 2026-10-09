@@ -5,13 +5,16 @@ import path from "node:path";
 import pino from "pino";
 
 import { createTestPaseoDaemon } from "../test-utils/paseo-daemon.js";
-import { DaemonClient, type WaitForFinishResult } from "../test-utils/daemon-client.js";
+import { DaemonClient } from "../test-utils/daemon-client.js";
 import { createMessageCollector } from "../test-utils/message-collector.js";
 import { canRunRealProvider, createRealProviderClients } from "./real-provider-test-config.js";
 import type { AgentPermissionRequest } from "../agent/agent-sdk-types.js";
 import type { SessionOutboundMessage } from "../messages.js";
 
 const SYSTEM_ERROR_SNIPPET = "A foreground turn is already active";
+
+type WaitForFinishResult = Awaited<ReturnType<DaemonClient["waitForFinish"]>>;
+type TimelineEntries = Awaited<ReturnType<DaemonClient["fetchAgentTimeline"]>>["entries"];
 
 function tmpCwd(): string {
   return mkdtempSync(path.join(tmpdir(), "daemon-real-opencode-send-interrupt-"));
@@ -34,15 +37,23 @@ function hasRunningBashToolCall(messages: SessionOutboundMessage[], agentId: str
 }
 
 function getAssistantTexts(messages: SessionOutboundMessage[], agentId: string): string[] {
-  return messages
-    .filter(
-      (message) =>
-        message.type === "agent_stream" &&
-        message.payload.agentId === agentId &&
-        message.payload.event.type === "timeline" &&
-        message.payload.event.item.type === "assistant_message",
+  return messages.flatMap((message) => {
+    if (message.type !== "agent_stream" || message.payload.agentId !== agentId) return [];
+    const { event } = message.payload;
+    return event.type === "timeline" && event.item.type === "assistant_message"
+      ? [event.item.text]
+      : [];
+  });
+}
+
+function recentToolCalls(entries: TimelineEntries | undefined, count: number) {
+  return (entries ?? [])
+    .flatMap((entry) =>
+      entry.item.type === "tool_call"
+        ? [{ name: entry.item.name, status: entry.item.status, callId: entry.item.callId }]
+        : [],
     )
-    .map((message) => message.payload.event.item.text);
+    .slice(-count);
 }
 
 function findSystemErrorText(texts: string[]): string | null {
@@ -52,9 +63,9 @@ function findSystemErrorText(texts: string[]): string | null {
 function getTimelineAssistantTexts(
   timeline: Awaited<ReturnType<DaemonClient["fetchAgentTimeline"]>>,
 ): string[] {
-  return timeline.entries
-    .filter((entry) => entry.item.type === "assistant_message")
-    .map((entry) => entry.item.text);
+  return timeline.entries.flatMap((entry) =>
+    entry.item.type === "assistant_message" ? [entry.item.text] : [],
+  );
 }
 
 function findSleepToolCall(
@@ -91,7 +102,6 @@ async function allowPermission(
   }
   await client.respondToPermission(agentId, permission.id, {
     behavior: "allow",
-    message: "Approved by integration test",
   });
 }
 
@@ -152,18 +162,10 @@ async function waitForRunningBashToolCall(
   }
 
   const timeline = await client.fetchAgentTimeline(agentId, { limit: 120 }).catch(() => null);
-  const recentToolCalls =
-    timeline?.entries
-      .filter((entry) => entry.item.type === "tool_call")
-      .slice(-10)
-      .map((entry) => ({
-        name: entry.item.name,
-        status: entry.item.status,
-        callId: entry.item.callId,
-      })) ?? [];
+  const recentToolCallSummaries = recentToolCalls(timeline?.entries, 10);
   const recentAssistantTexts = timeline ? getTimelineAssistantTexts(timeline).slice(-6) : [];
   throw new Error(
-    `Timed out waiting for running bash/shell tool call. recentToolCalls=${JSON.stringify(recentToolCalls)} recentAssistantTexts=${JSON.stringify(recentAssistantTexts)}`,
+    `Timed out waiting for running bash/shell tool call. recentToolCalls=${JSON.stringify(recentToolCallSummaries)} recentAssistantTexts=${JSON.stringify(recentAssistantTexts)}`,
   );
 }
 
@@ -186,17 +188,9 @@ async function waitForSleepToolCallTerminal(
   }
 
   const timeline = await client.fetchAgentTimeline(agentId, { limit: 200 }).catch(() => null);
-  const recentToolCalls =
-    timeline?.entries
-      .filter((entry) => entry.item.type === "tool_call")
-      .slice(-10)
-      .map((entry) => ({
-        callId: entry.item.callId,
-        name: entry.item.name,
-        status: entry.item.status,
-      })) ?? [];
+  const recentToolCallSummaries = recentToolCalls(timeline?.entries, 10);
   throw new Error(
-    `Timed out waiting for interrupted sleep tool call to become terminal. recentToolCalls=${JSON.stringify(recentToolCalls)}`,
+    `Timed out waiting for interrupted sleep tool call to become terminal. recentToolCalls=${JSON.stringify(recentToolCallSummaries)}`,
   );
 }
 
@@ -281,7 +275,7 @@ describe("daemon E2E (real opencode) - send while working and interrupt", () => 
 
     try {
       const modelList = await client.listProviderModels("opencode");
-      expect(modelList.models.length).toBeGreaterThan(0);
+      expect(modelList.models?.length ?? 0).toBeGreaterThan(0);
 
       const agent = await client.createAgent({
         provider: "opencode",
@@ -341,7 +335,7 @@ describe("daemon E2E (real opencode) - send while working and interrupt", () => 
 
     try {
       const modelList = await client.listProviderModels("opencode");
-      expect(modelList.models.length).toBeGreaterThan(0);
+      expect(modelList.models?.length ?? 0).toBeGreaterThan(0);
 
       const agent = await client.createAgent({
         provider: "opencode",

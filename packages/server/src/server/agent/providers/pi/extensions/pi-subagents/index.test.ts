@@ -14,6 +14,11 @@ import { PiRpcAgentClient } from "../../agent.js";
 import { FakePi } from "../../test-utils/fake-pi.js";
 import type { AgentStreamEvent } from "../../../../agent-sdk-types.js";
 
+function hasNonEmptyResults(details: unknown): boolean {
+  if (!details || typeof details !== "object" || !("results" in details)) return false;
+  return Array.isArray(details.results) && details.results.length > 0;
+}
+
 function mapping(toolCall: PiTrackedToolCall, result: PiToolResult) {
   return createPiExtensionHost().mapToolCall({
     callId: "test-call",
@@ -54,8 +59,7 @@ describe("pi-subagents adapter", () => {
         event.result &&
         typeof event.result === "object" &&
         "details" in event.result &&
-        Array.isArray(event.result.details?.results) &&
-        event.result.details.results.length > 0,
+        hasNonEmptyResults(event.result.details),
     );
     if (!result || result.type !== "tool_execution_end")
       throw new Error("Missing captured child session");

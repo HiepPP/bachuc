@@ -9,6 +9,12 @@ import {
 } from "./agent-response-loop.js";
 import type { AgentManager } from "./agent-manager.js";
 
+// The fallback runner is generic over the schema result. These cases always pass a schema
+// that expects a summary, so the generic result is fixed here.
+function summaryResult<TResult>(): TResult {
+  return { summary: "ok" } as TResult;
+}
+
 function createScriptedCaller(responses: string[]) {
   const prompts: string[] = [];
   const caller: AgentCaller = async (prompt) => {
@@ -177,7 +183,7 @@ describe("generateStructuredAgentResponseWithFallback", () => {
           model: options.agentConfig.model ?? undefined,
           persistSession: options.persistSession,
         });
-        return { summary: "ok" };
+        return summaryResult();
       },
     });
 
@@ -208,7 +214,7 @@ describe("generateStructuredAgentResponseWithFallback", () => {
           provider: options.agentConfig.provider,
           model: options.agentConfig.model ?? undefined,
         });
-        return { summary: "ok" };
+        return summaryResult();
       },
     });
 
@@ -242,7 +248,7 @@ describe("generateStructuredAgentResponseWithFallback", () => {
         if (options.agentConfig.provider === "claude") {
           throw new Error("claude failed");
         }
-        return { summary: "ok" };
+        return summaryResult();
       },
     });
 

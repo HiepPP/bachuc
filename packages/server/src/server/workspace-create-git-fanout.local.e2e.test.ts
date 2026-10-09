@@ -218,11 +218,12 @@ function waitForWorkspaceGitRuntime(
 }
 
 function countGitOperations(commands: GitCommandSubmissionMetric[]): Record<string, number> {
-  return Object.fromEntries(
-    [...Map.groupBy(commands, (command) => command.args[0] ?? "").entries()]
-      .map(([operation, matchingCommands]) => [operation, matchingCommands.length] as const)
-      .sort(([left], [right]) => left.localeCompare(right)),
-  );
+  const counts = new Map<string, number>();
+  for (const command of commands) {
+    const operation = command.args[0] ?? "";
+    counts.set(operation, (counts.get(operation) ?? 0) + 1);
+  }
+  return Object.fromEntries([...counts].sort(([left], [right]) => left.localeCompare(right)));
 }
 
 async function settleGitCommands(): Promise<void> {

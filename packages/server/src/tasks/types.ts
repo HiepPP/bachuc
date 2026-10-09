@@ -41,6 +41,7 @@ export interface TaskStore {
   getDepTree(id: string): Promise<Task[]>; // all descendants in dep graph
   getAncestors(id: string): Promise<Task[]>; // parent chain from immediate parent to root
   getChildren(id: string): Promise<Task[]>; // direct children of a task
+  getDescendants(id: string): Promise<Task[]>; // all tasks below a task in the parent tree
   getReady(scopeId?: string): Promise<Task[]>; // open + all deps done, optionally scoped
   getBlocked(scopeId?: string): Promise<Task[]>; // open/in_progress but has unresolved deps
   getClosed(scopeId?: string): Promise<Task[]>; // done tasks, optionally scoped

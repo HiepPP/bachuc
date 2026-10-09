@@ -469,6 +469,7 @@ const routedToolCases = [
   command: BrowserToolsExecuteInput["command"];
   payload: Extract<BrowserToolsResponsePayload, { ok: true }>;
   content: PaseoToolResult["content"];
+  structuredResult?: unknown;
 }>;
 
 const brokerErrorCases = [

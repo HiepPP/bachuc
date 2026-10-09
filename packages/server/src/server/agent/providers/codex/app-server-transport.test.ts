@@ -45,7 +45,7 @@ describe("Codex app-server transport", () => {
         await vi.advanceTimersByTimeAsync(3_000);
         await closing;
       }
-      child.exitCode = 0;
+      Object.assign(child, { exitCode: 0 });
       child.emit("exit", 0, null);
       await expect(client.dispose()).resolves.toBeUndefined();
     } finally {

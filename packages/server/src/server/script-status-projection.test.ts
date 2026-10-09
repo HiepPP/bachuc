@@ -4,6 +4,13 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { ScriptRouteStore } from "./script-proxy.js";
+import type { ServiceProxySubsystem } from "./service-proxy.js";
+import { asInternals } from "./test-utils/class-mocks.js";
+
+// The projection reads only the route registry part of the service proxy.
+function asServiceProxy(store: ScriptRouteStore): ServiceProxySubsystem {
+  return asInternals<ServiceProxySubsystem>(store);
+}
 import {
   buildWorkspaceScriptPayloads,
   createScriptStatusEmitter,
@@ -67,7 +74,7 @@ function buildPayloads(input: {
   const { routeStore, serviceProxy, ...rest } = input;
   return buildWorkspaceScriptPayloads({
     ...rest,
-    serviceProxy: serviceProxy ?? routeStore ?? new ScriptRouteStore(),
+    serviceProxy: asServiceProxy(serviceProxy ?? routeStore ?? new ScriptRouteStore()),
     paseoConfig,
   });
 }
@@ -541,7 +548,7 @@ describe("script-status-projection", () => {
     const session = { emit: vi.fn() };
     const emitUpdate = createScriptStatusEmitter({
       sessions: () => [session],
-      serviceProxy: routeStore,
+      serviceProxy: asServiceProxy(routeStore),
       runtimeStore,
       daemonPort: 6767,
       resolveWorkspaceDirectory: async (requestedWorkspaceId) =>

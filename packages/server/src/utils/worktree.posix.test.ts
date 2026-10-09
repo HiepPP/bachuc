@@ -19,7 +19,7 @@ import {
   runWorktreeSetupCommands,
   type CreateWorktreeOptions,
   type WorktreeConfig,
-} from "./worktree";
+} from "./worktree.js";
 import type { PaseoConfig } from "@getpaseo/protocol/paseo-config-schema";
 import { getPaseoWorktreeMetadataPath, readPaseoWorktreeMetadata } from "./worktree-metadata.js";
 import {

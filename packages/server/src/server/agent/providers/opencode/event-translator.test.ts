@@ -1,4 +1,5 @@
 import type { SessionMessageAssistant, SessionMessageUser } from "@opencode/client";
+import type { Event as OpenCodeEvent } from "@opencode-ai/sdk/v2/client";
 import { V2Timeline } from "./v2/timeline.js";
 import { describe, expect, it } from "vitest";
 
@@ -39,10 +40,21 @@ function createState(sessionId = "session-1"): OpenCodeEventTranslationState {
   };
 }
 
+// Fixtures carry only the fields the translator reads. Full SDK events need
+// many unrelated required fields, so only the event type is checked here.
+interface OpenCodeEventFixture {
+  type: OpenCodeEvent["type"];
+  properties: unknown;
+}
+
+function translate(event: OpenCodeEventFixture, state: OpenCodeEventTranslationState) {
+  return translateOpenCodeEvent(event as OpenCodeEvent, state);
+}
+
 describe("translateOpenCodeEvent", () => {
   it("emits only the missing suffix from a final full text part", () => {
     const state = createState();
-    translateOpenCodeEvent(
+    translate(
       {
         type: "message.updated",
         properties: {
@@ -51,7 +63,7 @@ describe("translateOpenCodeEvent", () => {
       },
       state,
     );
-    const first = translateOpenCodeEvent(
+    const first = translate(
       {
         type: "message.part.delta",
         properties: {
@@ -64,7 +76,7 @@ describe("translateOpenCodeEvent", () => {
       },
       state,
     );
-    const incomplete = translateOpenCodeEvent(
+    const incomplete = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -80,7 +92,7 @@ describe("translateOpenCodeEvent", () => {
       },
       state,
     );
-    const second = translateOpenCodeEvent(
+    const second = translate(
       {
         type: "message.part.delta",
         properties: {
@@ -93,7 +105,7 @@ describe("translateOpenCodeEvent", () => {
       },
       state,
     );
-    const final = translateOpenCodeEvent(
+    const final = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -117,7 +129,7 @@ describe("translateOpenCodeEvent", () => {
       { item: { text: "!" } },
     ]);
     expect(
-      translateOpenCodeEvent(
+      translate(
         {
           type: "message.part.delta",
           properties: {
@@ -144,7 +156,7 @@ describe("translateOpenCodeEvent", () => {
     });
 
     expect(
-      translateOpenCodeEvent(
+      translate(
         {
           type: "message.part.updated",
           properties: {
@@ -172,7 +184,7 @@ describe("translateOpenCodeEvent", () => {
       resolvedContextWindowMaxTokens.push(contextWindowMaxTokens);
     };
 
-    translateOpenCodeEvent(
+    translate(
       {
         type: "message.updated",
         properties: {
@@ -194,7 +206,7 @@ describe("translateOpenCodeEvent", () => {
   it("does not duplicate assistant output when completed part echoes streamed delta", () => {
     const state = createState();
 
-    translateOpenCodeEvent(
+    translate(
       {
         type: "message.updated",
         properties: {
@@ -208,7 +220,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    const streamed = translateOpenCodeEvent(
+    const streamed = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -225,7 +237,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    const completed = translateOpenCodeEvent(
+    const completed = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -262,7 +274,7 @@ describe("translateOpenCodeEvent", () => {
   it("emits completed assistant text when no delta was streamed", () => {
     const state = createState();
 
-    translateOpenCodeEvent(
+    translate(
       {
         type: "message.updated",
         properties: {
@@ -276,7 +288,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    const completed = translateOpenCodeEvent(
+    const completed = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -305,7 +317,7 @@ describe("translateOpenCodeEvent", () => {
   it("does not duplicate reasoning output when completed part echoes streamed delta", () => {
     const state = createState();
 
-    const streamed = translateOpenCodeEvent(
+    const streamed = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -322,7 +334,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    const completed = translateOpenCodeEvent(
+    const completed = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -356,7 +368,7 @@ describe("translateOpenCodeEvent", () => {
     const state = createState();
 
     // Register message role
-    translateOpenCodeEvent(
+    translate(
       {
         type: "message.updated",
         properties: {
@@ -367,7 +379,7 @@ describe("translateOpenCodeEvent", () => {
     );
 
     // OpenCode v2 can send streaming text as message.part.delta
-    const delta1 = translateOpenCodeEvent(
+    const delta1 = translate(
       {
         type: "message.part.delta",
         properties: {
@@ -381,7 +393,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    const delta2 = translateOpenCodeEvent(
+    const delta2 = translate(
       {
         type: "message.part.delta",
         properties: {
@@ -412,7 +424,7 @@ describe("translateOpenCodeEvent", () => {
   it("uses the part id when an assistant delta omits its message id", () => {
     const state = createState();
 
-    const events = translateOpenCodeEvent(
+    const events = translate(
       {
         type: "message.part.delta",
         properties: {
@@ -442,7 +454,7 @@ describe("translateOpenCodeEvent", () => {
     const state = createState();
     state.suppressAssistantMessagesUntilIdle = { active: true };
 
-    const events = translateOpenCodeEvent(
+    const events = translate(
       {
         type: "message.part.delta",
         properties: {
@@ -462,7 +474,7 @@ describe("translateOpenCodeEvent", () => {
   it("humanizes permission requests and includes shell detail when command metadata exists", () => {
     const state = createState();
 
-    const result = translateOpenCodeEvent(
+    const result = translate(
       {
         type: "permission.asked",
         properties: {
@@ -519,7 +531,7 @@ describe("translateOpenCodeEvent", () => {
   it("falls back to unknown permission detail when command metadata is absent", () => {
     const state = createState();
 
-    const result = translateOpenCodeEvent(
+    const result = translate(
       {
         type: "permission.asked",
         properties: {
@@ -572,7 +584,7 @@ describe("translateOpenCodeEvent", () => {
   it("forwards permission requests from linked OpenCode subagent sessions", () => {
     const state = createState();
 
-    translateOpenCodeEvent(
+    translate(
       {
         type: "message.part.updated",
         properties: {
@@ -595,7 +607,7 @@ describe("translateOpenCodeEvent", () => {
       },
       state,
     );
-    translateOpenCodeEvent(
+    translate(
       {
         type: "session.created",
         properties: {
@@ -609,7 +621,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    const result = translateOpenCodeEvent(
+    const result = translate(
       {
         type: "permission.asked",
         properties: {
@@ -664,7 +676,7 @@ describe("translateOpenCodeEvent", () => {
     const state = createState();
     state.accumulatedUsage.contextWindowMaxTokens = 400_000;
 
-    const events = translateOpenCodeEvent(
+    const events = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -720,7 +732,7 @@ describe("translateOpenCodeEvent", () => {
     state.accumulatedUsage.contextWindowMaxTokens = 400_000;
     state.sessionTotalCostUsd = 0.5;
 
-    const events = translateOpenCodeEvent(
+    const events = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -763,7 +775,7 @@ describe("translateOpenCodeEvent", () => {
   it("seeds cumulative session cost from OpenCode session updates", () => {
     const state = createState();
 
-    translateOpenCodeEvent(
+    translate(
       {
         type: "session.updated",
         properties: {
@@ -773,7 +785,7 @@ describe("translateOpenCodeEvent", () => {
             cost: 1.25,
           },
         },
-      } as Parameters<typeof translateOpenCodeEvent>[0],
+      },
       state,
     );
 
@@ -784,7 +796,7 @@ describe("translateOpenCodeEvent", () => {
   it("emits normalized todo timeline items from todo.updated", () => {
     const state = createState();
 
-    const events = translateOpenCodeEvent(
+    const events = translate(
       {
         type: "todo.updated",
         properties: {
@@ -817,7 +829,7 @@ describe("translateOpenCodeEvent", () => {
   it("suppresses live todowrite tool parts because OpenCode emits todo.updated separately", () => {
     const state = createState();
 
-    const events = translateOpenCodeEvent(
+    const events = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -878,7 +890,7 @@ describe("translateOpenCodeEvent", () => {
         },
       },
     ].flatMap((part) =>
-      translateOpenCodeEvent(
+      translate(
         {
           type: "message.part.updated",
           properties: {
@@ -954,7 +966,7 @@ describe("translateOpenCodeEvent", () => {
   it("emits compaction loading timeline items from compaction parts", () => {
     const state = createState();
 
-    const events = translateOpenCodeEvent(
+    const events = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -986,7 +998,7 @@ describe("translateOpenCodeEvent", () => {
   it("does not render OpenCode compaction summaries as assistant messages", () => {
     const state = createState();
 
-    const loading = translateOpenCodeEvent(
+    const loading = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -1002,7 +1014,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    translateOpenCodeEvent(
+    translate(
       {
         type: "message.updated",
         properties: {
@@ -1019,7 +1031,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    const summaryText = translateOpenCodeEvent(
+    const summaryText = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -1036,7 +1048,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    const duplicateLoading = translateOpenCodeEvent(
+    const duplicateLoading = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -1053,7 +1065,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    const completed = translateOpenCodeEvent(
+    const completed = translate(
       {
         type: "session.compacted",
         properties: {
@@ -1087,7 +1099,7 @@ describe("translateOpenCodeEvent", () => {
   it("emits compaction completed timeline items from session.compacted", () => {
     const state = createState();
 
-    const events = translateOpenCodeEvent(
+    const events = translate(
       {
         type: "session.compacted",
         properties: {
@@ -1112,7 +1124,7 @@ describe("translateOpenCodeEvent", () => {
   it("emits reasoning from message.part.delta events", () => {
     const state = createState();
 
-    const delta = translateOpenCodeEvent(
+    const delta = translate(
       {
         type: "message.part.delta",
         properties: {
@@ -1139,7 +1151,7 @@ describe("translateOpenCodeEvent", () => {
     const state = createState();
 
     // Part created as reasoning (message.part.updated fires before deltas)
-    translateOpenCodeEvent(
+    translate(
       {
         type: "message.part.updated",
         properties: {
@@ -1156,7 +1168,7 @@ describe("translateOpenCodeEvent", () => {
     );
 
     // Deltas arrive with field="text" (the field name on ReasoningPart)
-    const delta1 = translateOpenCodeEvent(
+    const delta1 = translate(
       {
         type: "message.part.delta",
         properties: {
@@ -1171,7 +1183,7 @@ describe("translateOpenCodeEvent", () => {
     );
 
     // Completed reasoning part should be deduped
-    const completed = translateOpenCodeEvent(
+    const completed = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -1202,7 +1214,7 @@ describe("translateOpenCodeEvent", () => {
   it("deduplicates when message.part.delta is followed by completed message.part.updated", () => {
     const state = createState();
 
-    translateOpenCodeEvent(
+    translate(
       {
         type: "message.updated",
         properties: {
@@ -1213,7 +1225,7 @@ describe("translateOpenCodeEvent", () => {
     );
 
     // Stream via delta event
-    const streamed = translateOpenCodeEvent(
+    const streamed = translate(
       {
         type: "message.part.delta",
         properties: {
@@ -1228,7 +1240,7 @@ describe("translateOpenCodeEvent", () => {
     );
 
     // Completed part echoes the same text
-    const completed = translateOpenCodeEvent(
+    const completed = translate(
       {
         type: "message.part.updated",
         properties: {
@@ -1261,7 +1273,7 @@ describe("translateOpenCodeEvent", () => {
   it("ignores message.part.delta for wrong session", () => {
     const state = createState();
 
-    const result = translateOpenCodeEvent(
+    const result = translate(
       {
         type: "message.part.delta",
         properties: {
@@ -1281,14 +1293,14 @@ describe("translateOpenCodeEvent", () => {
   it("shows OpenCode user text parts unless OpenCode marks them synthetic", () => {
     const state = createState();
     const userTextPart = (messageId: string, text: string, synthetic: boolean) => {
-      translateOpenCodeEvent(
+      translate(
         {
           type: "message.updated",
           properties: { info: { id: messageId, sessionID: "session-1", role: "user" } },
         },
         state,
       );
-      return translateOpenCodeEvent(
+      return translate(
         {
           type: "message.part.updated",
           properties: {
@@ -1320,7 +1332,7 @@ describe("translateOpenCodeEvent", () => {
     const state = createState();
 
     // Register as user message
-    translateOpenCodeEvent(
+    translate(
       {
         type: "message.updated",
         properties: {
@@ -1330,7 +1342,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    const result = translateOpenCodeEvent(
+    const result = translate(
       {
         type: "message.part.delta",
         properties: {
@@ -1356,7 +1368,7 @@ describe("translateOpenCodeEvent", () => {
     });
     state.partTypes.set("part-1", "text");
 
-    const result = translateOpenCodeEvent(
+    const result = translate(
       {
         type: "session.status",
         properties: {
@@ -1387,7 +1399,7 @@ describe("translateOpenCodeEvent", () => {
     });
     state.partTypes.set("part-1", "text");
 
-    const result = translateOpenCodeEvent(
+    const result = translate(
       {
         type: "session.status",
         properties: {
@@ -1419,7 +1431,7 @@ describe("translateOpenCodeEvent", () => {
   it("forwards retry without a message using just the attempt number", () => {
     const state = createState();
 
-    const result = translateOpenCodeEvent(
+    const result = translate(
       {
         type: "session.status",
         properties: {
@@ -1447,7 +1459,7 @@ describe("translateOpenCodeEvent", () => {
   it("ignores transient session.status busy updates", () => {
     const state = createState();
 
-    const busy = translateOpenCodeEvent(
+    const busy = translate(
       {
         type: "session.status",
         properties: {
@@ -1464,7 +1476,7 @@ describe("translateOpenCodeEvent", () => {
   it("emits structured assistant output when schema mode completes without text parts", () => {
     const state = createState();
 
-    const first = translateOpenCodeEvent(
+    const first = translate(
       {
         type: "message.updated",
         properties: {
@@ -1480,7 +1492,7 @@ describe("translateOpenCodeEvent", () => {
       state,
     );
 
-    const second = translateOpenCodeEvent(
+    const second = translate(
       {
         type: "message.updated",
         properties: {
@@ -1513,7 +1525,7 @@ describe("translateOpenCodeEvent", () => {
   it("translates session.error with MessageAbortedError as turn_canceled, not turn_failed", () => {
     const state = createState();
 
-    const events = translateOpenCodeEvent(
+    const events = translate(
       {
         type: "session.error",
         properties: {
@@ -1535,7 +1547,7 @@ describe("translateOpenCodeEvent", () => {
   it("translates session.error with a real error as turn_failed", () => {
     const state = createState();
 
-    const events = translateOpenCodeEvent(
+    const events = translate(
       {
         type: "session.error",
         properties: {

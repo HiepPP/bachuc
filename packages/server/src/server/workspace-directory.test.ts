@@ -3,25 +3,28 @@ import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
 import { createTestLogger } from "../test-utils/test-logger.js";
 import type { AgentSnapshotPayload, WorkspaceDescriptorPayload } from "./messages.js";
 import { WorkspaceDirectory } from "./workspace-directory.js";
-import type { PersistedProjectRecord, PersistedWorkspaceRecord } from "./workspace-registry.js";
+import {
+  createPersistedProjectRecord,
+  createPersistedWorkspaceRecord,
+  type PersistedProjectRecord,
+  type PersistedWorkspaceRecord,
+} from "./workspace-registry.js";
 import type { TerminalActivity } from "@getpaseo/protocol/terminal-activity";
 import type { ProviderSubagentWorkspaceActivity } from "./workspace-directory.js";
 
 const NOW = "2026-03-01T12:00:00.000Z";
 
 class WorkspaceStatus {
-  private readonly project: PersistedProjectRecord = {
+  private readonly project: PersistedProjectRecord = createPersistedProjectRecord({
     projectId: "project-1",
     rootPath: "/workspace/project",
     kind: "git",
     displayName: "project",
-    customName: null,
     createdAt: NOW,
     updatedAt: NOW,
-    archivedAt: null,
-  };
+  });
 
-  private readonly workspace: PersistedWorkspaceRecord = {
+  private readonly workspace: PersistedWorkspaceRecord = createPersistedWorkspaceRecord({
     workspaceId: "workspace-1",
     projectId: this.project.projectId,
     cwd: this.project.rootPath,
@@ -29,10 +32,9 @@ class WorkspaceStatus {
     displayName: "main",
     createdAt: NOW,
     updatedAt: NOW,
-    archivedAt: null,
-  };
+  });
 
-  private readonly worktreeWorkspace: PersistedWorkspaceRecord = {
+  private readonly worktreeWorkspace: PersistedWorkspaceRecord = createPersistedWorkspaceRecord({
     workspaceId: "workspace-worktree",
     projectId: this.project.projectId,
     cwd: "/workspace/project/.paseo/worktrees/feature",
@@ -40,12 +42,11 @@ class WorkspaceStatus {
     displayName: "feature",
     createdAt: NOW,
     updatedAt: NOW,
-    archivedAt: null,
-  };
+  });
 
   // Second workspace sharing the SAME cwd as `workspace`. Created later so the
   // deterministic-oldest fallback never attributes a stamped agent to it by cwd.
-  private readonly sameCwdWorkspace: PersistedWorkspaceRecord = {
+  private readonly sameCwdWorkspace: PersistedWorkspaceRecord = createPersistedWorkspaceRecord({
     workspaceId: "workspace-1-sibling",
     projectId: this.project.projectId,
     cwd: this.project.rootPath,
@@ -53,8 +54,7 @@ class WorkspaceStatus {
     displayName: "main-2",
     createdAt: "2026-03-02T12:00:00.000Z",
     updatedAt: "2026-03-02T12:00:00.000Z",
-    archivedAt: null,
-  };
+  });
 
   private readonly workspaces = [this.workspace];
 
@@ -85,6 +85,7 @@ class WorkspaceStatus {
       name: workspace.displayName,
       archivingAt: null,
       status: "done",
+      statusEnteredAt: null,
       activityAt: null,
       diffStat: null,
       scripts: [],
@@ -574,26 +575,27 @@ describe("WorkspaceDirectory empty projects", () => {
         name: workspace.displayName,
         archivingAt: null,
         status: "done",
+        statusEnteredAt: null,
         activityAt: null,
         diffStat: null,
+        scripts: [],
         gitRuntime: null,
         githubRuntime: null,
       }),
     });
   }
 
-  function project(input: Partial<PersistedProjectRecord> & { projectId: string }) {
-    return {
+  function project(
+    input: Partial<PersistedProjectRecord> & { projectId: string },
+  ): PersistedProjectRecord {
+    return createPersistedProjectRecord({
       rootPath: `/workspace/${input.projectId}`,
       kind: "non_git",
       displayName: input.projectId,
-      customName: null,
       createdAt: NOW,
       updatedAt: NOW,
-      archivedAt: null,
-      pinnedAt: null,
       ...input,
-    } satisfies PersistedProjectRecord;
+    });
   }
 
   test("surfaces a project with no active workspaces through the compatibility projection", async () => {
@@ -624,7 +626,7 @@ describe("WorkspaceDirectory empty projects", () => {
     const directory = makeDirectory({
       projects: [project({ projectId: "with-ws" }), project({ projectId: "empty" })],
       workspaces: [
-        {
+        createPersistedWorkspaceRecord({
           workspaceId: "ws-1",
           projectId: "with-ws",
           cwd: "/workspace/with-ws",
@@ -632,8 +634,7 @@ describe("WorkspaceDirectory empty projects", () => {
           displayName: "main",
           createdAt: NOW,
           updatedAt: NOW,
-          archivedAt: null,
-        },
+        }),
       ],
     });
 
@@ -651,26 +652,27 @@ test("Git observation targets exclude archived records without hydrating app des
     id: string,
     projectId: string,
     archivedAt: string | null = null,
-  ): PersistedWorkspaceRecord => ({
-    workspaceId: id,
-    projectId,
-    cwd: `/workspace/${id}`,
-    kind: "local_checkout",
-    displayName: id,
-    createdAt: NOW,
-    updatedAt: NOW,
-    archivedAt,
-  });
-  const project = (id: string, archivedAt: string | null = null): PersistedProjectRecord => ({
-    projectId: id,
-    rootPath: `/workspace/${id}`,
-    kind: "git",
-    displayName: id,
-    customName: null,
-    createdAt: NOW,
-    updatedAt: NOW,
-    archivedAt,
-  });
+  ): PersistedWorkspaceRecord =>
+    createPersistedWorkspaceRecord({
+      workspaceId: id,
+      projectId,
+      cwd: `/workspace/${id}`,
+      kind: "local_checkout",
+      displayName: id,
+      createdAt: NOW,
+      updatedAt: NOW,
+      archivedAt,
+    });
+  const project = (id: string, archivedAt: string | null = null): PersistedProjectRecord =>
+    createPersistedProjectRecord({
+      projectId: id,
+      rootPath: `/workspace/${id}`,
+      kind: "git",
+      displayName: id,
+      createdAt: NOW,
+      updatedAt: NOW,
+      archivedAt,
+    });
   const unexpectedHydration = async (): Promise<never> => {
     throw new Error("Watcher reconciliation hydrated app data");
   };

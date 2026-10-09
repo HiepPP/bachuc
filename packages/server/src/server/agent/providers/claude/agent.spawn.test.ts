@@ -8,13 +8,14 @@ import type {
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
+import { asInternals } from "../../../test-utils/class-mocks.js";
 import * as spawnUtils from "../../../../utils/spawn.js";
 import { ClaudeAgentClient } from "./agent.js";
 import type { ClaudeQueryInput } from "./query.js";
 
 function createQueryMock(events: unknown[]): Query {
   let index = 0;
-  return {
+  return asInternals<Query>({
     next: vi.fn(async () =>
       index < events.length
         ? { done: false, value: events[index++] }
@@ -25,13 +26,13 @@ function createQueryMock(events: unknown[]): Query {
     close: vi.fn(() => undefined),
     setPermissionMode: vi.fn(async () => undefined),
     setModel: vi.fn(async () => undefined),
-    supportedModels: vi.fn(async () => [{ value: "opus", displayName: "Opus" }]),
+    supportedModels: vi.fn(async () => [{ value: "opus", displayName: "Opus", description: "" }]),
     supportedCommands: vi.fn(async () => []),
     rewindFiles: vi.fn(async () => ({ canRewind: true })),
     [Symbol.asyncIterator]() {
       return this;
     },
-  } as Query;
+  });
 }
 
 function createChildProcessStub(): ChildProcess {

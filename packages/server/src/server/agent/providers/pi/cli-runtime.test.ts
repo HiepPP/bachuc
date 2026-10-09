@@ -22,7 +22,7 @@ function createPiChild(): PiChild {
     exitCode: null,
     signalCode: null,
     killedSignals: [],
-  }) as PiChild;
+  }) as unknown as PiChild;
   child.kill = ((signal?: NodeJS.Signals | number) => {
     child.killedSignals.push(signal);
     queueMicrotask(() => child.emit("exit", null, signal ?? null));

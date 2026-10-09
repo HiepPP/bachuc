@@ -92,6 +92,7 @@ it("accepts terminalId and token reports through the route into the tracker", as
 
   const session = await manager.createTerminal({
     cwd,
+    workspaceId: "ws-test",
     command: process.execPath,
     args: [
       "-e",
@@ -140,7 +141,7 @@ it("uses one rejection for unknown terminals and wrong tokens", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "terminal-activity-route-"));
   temporaryDirs.push(cwd);
   manager = createTerminalManager();
-  const session = await manager.createTerminal({ cwd });
+  const session = await manager.createTerminal({ cwd, workspaceId: "ws-test" });
   const handler = createTerminalActivityRouteHandler(manager);
   const unknownResponse = createMockResponse();
   const invalidResponse = createMockResponse();

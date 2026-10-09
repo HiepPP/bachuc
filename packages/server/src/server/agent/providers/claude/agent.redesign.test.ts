@@ -18,7 +18,7 @@ interface QueryMock {
   supportedModels: ReturnType<typeof vi.fn>;
   supportedCommands: ReturnType<typeof vi.fn>;
   rewindFiles: ReturnType<typeof vi.fn>;
-  [Symbol.asyncIterator]: () => AsyncIterator<Record<string, unknown>, void>;
+  [Symbol.asyncIterator]: () => { next: ReturnType<typeof vi.fn> };
 }
 
 function buildUsage() {
@@ -150,6 +150,14 @@ function restoreEnvValue(key: string, previousValue: string | undefined): void {
   process.env[key] = previousValue;
 }
 
+function collectAssistantText(events: AgentStreamEvent[]): string {
+  return events
+    .flatMap((event) =>
+      event.type === "timeline" && event.item.type === "assistant_message" ? [event.item.text] : [],
+    )
+    .join("");
+}
+
 async function collectUntilTerminal(
   stream: AsyncGenerator<AgentStreamEvent>,
 ): Promise<AgentStreamEvent[]> {
@@ -218,7 +226,7 @@ test("rejects auto mode when Claude Code uses Bedrock", async () => {
   }
 });
 
-test.each([
+test.each<{ env: Record<string, string>; expected: string }>([
   { env: {}, expected: "auto" },
   { env: { CLAUDE_CODE_USE_BEDROCK: "1" }, expected: "default" },
   { env: { CLAUDE_CODE_USE_VERTEX: "true" }, expected: "default" },
@@ -921,13 +929,7 @@ test("completes a foreground run when only system metadata arrives before the fi
 
     expect(events.some((event) => event.type === "turn_completed")).toBe(true);
 
-    const assistantText = events
-      .filter(
-        (event): event is Extract<AgentStreamEvent, { type: "timeline" }> =>
-          event.type === "timeline" && event.item.type === "assistant_message",
-      )
-      .map((event) => event.item.text)
-      .join("");
+    const assistantText = collectAssistantText(events);
     expect(assistantText).toContain("assistant output");
   } finally {
     await session.close();
@@ -1032,6 +1034,7 @@ test("preserves bypass capability across query restarts triggered by thinking ch
   try {
     await session.setMode("bypassPermissions");
     await session.setMode("acceptEdits");
+    if (!session.setThinkingOption) throw new Error("Expected the Claude session to set thinking");
     await session.setThinkingOption("high");
     await session.setMode("bypassPermissions");
 
@@ -1408,13 +1411,7 @@ test("assembles assistant timeline when message_delta arrives before message_sta
 
   const session = await createSession();
   const events = await collectUntilTerminal(streamSession(session, "timeline prompt"));
-  const assistantText = events
-    .filter(
-      (event): event is Extract<AgentStreamEvent, { type: "timeline" }> =>
-        event.type === "timeline" && event.item.type === "assistant_message",
-    )
-    .map((event) => event.item.text)
-    .join("");
+  const assistantText = collectAssistantText(events);
 
   expect(assistantText).toContain("HELLO WORLD");
 
@@ -1527,13 +1524,7 @@ test("does not use stream_event uuid as assistant message identity when message_
 
   const session = await createSession();
   const events = await collectUntilTerminal(streamSession(session, "uuid fallback prompt"));
-  const assistantText = events
-    .filter(
-      (event): event is Extract<AgentStreamEvent, { type: "timeline" }> =>
-        event.type === "timeline" && event.item.type === "assistant_message",
-    )
-    .map((event) => event.item.text)
-    .join("");
+  const assistantText = collectAssistantText(events);
 
   expect(assistantText).toContain("HELLO WORLD");
 

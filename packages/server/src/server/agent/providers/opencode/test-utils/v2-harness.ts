@@ -1,5 +1,6 @@
 import type {
   OpenCodeEvent,
+  SessionInboxUser,
   SessionInfo,
   SessionMessageInfo,
   SessionCreateInput,
@@ -9,6 +10,18 @@ import type { V2Connection } from "../v2/runtime.js";
 
 function unexpected(): never {
   throw new Error("Unexpected OpenCode v2 test operation");
+}
+
+/** The inbox item the API returns for a prompt it accepted. */
+export function acceptedPrompt(input: Parameters<V2Api["session"]["prompt"]>[0]): SessionInboxUser {
+  return {
+    id: "inbox-user",
+    sessionID: input.sessionID,
+    time: { created: 1 },
+    type: "user",
+    payload: { text: input.text },
+    delivery: "queue",
+  };
 }
 
 export class V2Harness {
@@ -30,6 +43,7 @@ export class V2Harness {
   releases = 0;
   prompt: V2Api["session"]["prompt"] = async (input) => {
     this.prompts.push(input.text);
+    return acceptedPrompt(input);
   };
   wait: V2Api["session"]["wait"] = async () => undefined;
   interrupt: V2Api["session"]["interrupt"] = async () => {
@@ -122,7 +136,7 @@ export class V2Harness {
   readonly runtime = { acquire: async () => this.connection, shutdown: async () => undefined };
 
   private async *events(signal?: AbortSignal): AsyncGenerator<OpenCodeEvent> {
-    yield { id: "connected", created: 1, type: "server.connected", data: {} };
+    yield { id: "connected", type: "server.connected", data: {} };
     const wake = () => this.notify?.();
     signal?.addEventListener("abort", wake);
     try {

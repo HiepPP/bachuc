@@ -110,7 +110,7 @@ function collectWorkspaceTitles(client: DaemonClient): {
   const stop = client.on("workspace_update", (message) => {
     if (message.payload.kind === "upsert") {
       const { id, name, title } = message.payload.workspace;
-      workspaces.push({ id, name, title });
+      workspaces.push({ id, name, title: title ?? null });
     }
   });
   return { workspaces, stop };

@@ -45,6 +45,13 @@ import {
   asGitHubService,
   asWorkspaceGitService,
   asDaemonConfigStore,
+  asProjectRegistry,
+  asProviderUsageService,
+  asServiceProxy,
+  asTerminalManager,
+  asWorkspaceAutoName,
+  asWorkspaceRegistry,
+  asWorkspaceScriptRuntimeStore,
   findByType,
   createProviderSnapshot,
   createProviderSnapshotManagerStub,
@@ -56,7 +63,11 @@ import {
   GitHubCommandError,
   type GitHubService,
 } from "../services/github-service.js";
-import type { CheckDetails, ForgeService } from "../services/forge-service.js";
+import type {
+  CheckDetails,
+  ForgeService,
+  MergePullRequestOptions,
+} from "../services/forge-service.js";
 import type { GitHubPullRequestStatusFacts } from "../services/github-facts.js";
 
 interface SessionHandlerInternals {
@@ -308,8 +319,9 @@ interface SessionForTestOptions {
     resolveForge?: ReturnType<typeof vi.fn>;
     getWorkspaceGitMetadata?: ReturnType<typeof vi.fn>;
     getProjectSlug?: ReturnType<typeof vi.fn>;
+    registerWorkspace?: ReturnType<typeof vi.fn>;
   };
-  workspaceRegistry?: { get: ReturnType<typeof vi.fn> };
+  workspaceRegistry?: Partial<SessionOptions["workspaceRegistry"]>;
   projectRegistry?: Partial<SessionOptions["projectRegistry"]>;
   terminalManager?: SessionOptions["terminalManager"];
   serviceProxy?: SessionOptions["serviceProxy"];
@@ -360,7 +372,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
     resolveForge: vi.fn().mockResolvedValue({ forge: "github", service: github }),
     // Mirror production: invalidateForge resolves the forge and busts the
     // adapter's cache. The resolved forge here is github, so delegate to it.
-    invalidateForge: vi.fn((cwd: string) => github.invalidate({ cwd })),
+    invalidateForge: vi.fn((cwd: string) => github.invalidate?.({ cwd })),
     getProjectSlug: vi.fn(),
     ...options.workspaceGitService,
   };
@@ -396,7 +408,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
       list: vi.fn().mockResolvedValue([]),
       ...options.agentStorage,
     }),
-    projectRegistry: {
+    projectRegistry: asProjectRegistry({
       list: vi.fn().mockResolvedValue([]),
       get: vi.fn(),
       getOrCreateActiveByRoot: vi.fn(),
@@ -406,13 +418,17 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
       initialize: vi.fn(),
       existsOnDisk: vi.fn(),
       ...options.projectRegistry,
-    },
-    workspaceRegistry: options.workspaceRegistry ?? {
-      get: vi.fn(),
-      list: vi.fn().mockResolvedValue([]),
-    },
+    }),
+    workspaceRegistry: asWorkspaceRegistry(
+      options.workspaceRegistry ?? {
+        get: vi.fn(),
+        list: vi.fn().mockResolvedValue([]),
+      },
+    ),
     workspaceLabelService: options.workspaceLabelService,
     scheduleService: asScheduleService(),
+    providerUsageService: asProviderUsageService(),
+    workspaceAutoName: asWorkspaceAutoName(),
     checkoutDiffManager: asCheckoutDiffManager(checkoutDiffManager),
     github: asGitHubService(github),
     workspaceGitService: asWorkspaceGitService(workspaceGitService),
@@ -511,6 +527,11 @@ test("routes plugin requests and releases its owned catalog subscription on clea
     ],
     installDirectory: async () => plugin,
     inspectDirectory: async () => ({ id: "example" }),
+    installSource: async () => plugin,
+    statusSources: async () => [],
+    previewUpdates: async () => [],
+    applyUpdates: async () => [],
+    updateSources: async () => [],
     reloadPlugin: async () => plugin,
     enablePlugin: async () => plugin,
     disablePlugin: async () => ({ ...plugin, enabled: false, status: "disabled" }),
@@ -1974,6 +1995,7 @@ test("push token registration can be revoked by the connected client", async () 
     type: "client_heartbeat",
     deviceType: "mobile",
     focusedAgentId: null,
+    focusedTerminalId: null,
     lastActivityAt: "2026-08-10T00:00:00.000Z",
     appVisible: false,
   });
@@ -2014,6 +2036,7 @@ test("push token revocation only acknowledges durable removal", async () => {
     type: "client_heartbeat",
     deviceType: "mobile",
     focusedAgentId: null,
+    focusedTerminalId: null,
     lastActivityAt: "2026-08-10T00:00:00.000Z",
     appVisible: false,
   });
@@ -2192,14 +2215,17 @@ function createWorkspaceGitSnapshot(
 }
 
 function createTerminalManagerStub(options?: { setTerminalTitle?: ReturnType<typeof vi.fn> }): {
+  manager: ReturnType<typeof asTerminalManager>;
   setTerminalTitle: ReturnType<typeof vi.fn>;
-  subscribeTerminalsChanged: ReturnType<typeof vi.fn>;
-  subscribeTerminalWorkspaceContributionChanged: ReturnType<typeof vi.fn>;
 } {
+  const setTerminalTitle = options?.setTerminalTitle ?? vi.fn();
   return {
-    setTerminalTitle: options?.setTerminalTitle ?? vi.fn(),
-    subscribeTerminalsChanged: vi.fn(() => () => {}),
-    subscribeTerminalWorkspaceContributionChanged: vi.fn(() => () => {}),
+    setTerminalTitle,
+    manager: asTerminalManager({
+      setTerminalTitle,
+      subscribeTerminalsChanged: vi.fn(() => () => {}),
+      subscribeTerminalWorkspaceContributionChanged: vi.fn(() => () => {}),
+    }),
   };
 }
 
@@ -3286,14 +3312,12 @@ describe("session checkout pull request merge", () => {
     const messages: unknown[] = [];
     const github = {
       invalidate: vi.fn(),
-      mergePullRequest: vi.fn(
-        async (input: { status?: { forgeSpecific?: { mergeStateStatus?: string | null } } }) => {
-          if (input.status?.forgeSpecific?.mergeStateStatus === "BLOCKED") {
-            throw new Error("GitHub does not report this pull request as ready for direct merge");
-          }
-          return { success: true };
-        },
-      ),
+      mergePullRequest: vi.fn(async (input: MergePullRequestOptions) => {
+        if (input.status?.forgeSpecific?.mergeStateStatus === "BLOCKED") {
+          throw new Error("GitHub does not report this pull request as ready for direct merge");
+        }
+        return { success: true as const };
+      }),
     };
     const createSnapshot = (mergeStateStatus: "CLEAN" | "BLOCKED") => ({
       forge: {
@@ -3503,7 +3527,7 @@ describe("session checkout pull request auto-merge", () => {
       invalidate: vi.fn(),
       enablePullRequestAutoMerge: vi.fn(async (input) => {
         assertPullRequestAutoMergeEnableReady(input);
-        return { success: true };
+        return { success: true as const };
       }),
     };
     const workspaceGitService = {
@@ -3565,7 +3589,7 @@ describe("session checkout pull request auto-merge", () => {
       invalidate: vi.fn(),
       disablePullRequestAutoMerge: vi.fn(async (input) => {
         assertPullRequestAutoMergeDisableReady(input);
-        return { success: true };
+        return { success: true as const };
       }),
     };
     const workspaceGitService = {
@@ -3680,7 +3704,7 @@ describe("session checkout pull request auto-merge", () => {
       invalidate: vi.fn(),
       enablePullRequestAutoMerge: vi.fn(async (input) => {
         assertPullRequestAutoMergeEnableReady(input);
-        return { success: true };
+        return { success: true as const };
       }),
     };
     const workspaceGitService = {
@@ -3741,7 +3765,7 @@ describe("session checkout pull request auto-merge", () => {
       invalidate: vi.fn(),
       disablePullRequestAutoMerge: vi.fn(async (input) => {
         assertPullRequestAutoMergeDisableReady(input);
-        return { success: true };
+        return { success: true as const };
       }),
     };
     const workspaceGitService = {
@@ -3801,7 +3825,7 @@ describe("session checkout pull request auto-merge", () => {
       invalidate: vi.fn(),
       disablePullRequestAutoMerge: vi.fn(async (input) => {
         assertPullRequestAutoMergeDisableReady(input);
-        return { success: true };
+        return { success: true as const };
       }),
     };
     const workspaceGitService = {
@@ -4534,7 +4558,7 @@ describe("session checkout rename branch handling", () => {
 describe("session terminal rename handling", () => {
   test("rejects an empty terminal title without calling the terminal manager", async () => {
     const messages: unknown[] = [];
-    const terminalManager = createTerminalManagerStub();
+    const { manager: terminalManager, setTerminalTitle } = createTerminalManagerStub();
     const session = createSessionForTest({ terminalManager, messages });
 
     await session.handleMessage({
@@ -4544,7 +4568,7 @@ describe("session terminal rename handling", () => {
       requestId: "request-empty-title",
     });
 
-    expect(terminalManager.setTerminalTitle).not.toHaveBeenCalled();
+    expect(setTerminalTitle).not.toHaveBeenCalled();
     expect(messages).toContainEqual({
       type: "terminal.rename.response",
       payload: {
@@ -4557,7 +4581,7 @@ describe("session terminal rename handling", () => {
 
   test("reports when the terminal manager cannot find the terminal", async () => {
     const messages: unknown[] = [];
-    const terminalManager = createTerminalManagerStub({
+    const { manager: terminalManager, setTerminalTitle } = createTerminalManagerStub({
       setTerminalTitle: vi.fn(() => false),
     });
     const session = createSessionForTest({ terminalManager, messages });
@@ -4569,10 +4593,7 @@ describe("session terminal rename handling", () => {
       requestId: "request-missing-terminal",
     });
 
-    expect(terminalManager.setTerminalTitle).toHaveBeenCalledWith(
-      "missing-terminal",
-      "Renamed terminal",
-    );
+    expect(setTerminalTitle).toHaveBeenCalledWith("missing-terminal", "Renamed terminal");
     expect(messages).toContainEqual({
       type: "terminal.rename.response",
       payload: {
@@ -4585,7 +4606,7 @@ describe("session terminal rename handling", () => {
 
   test("trims and sets a valid terminal title", async () => {
     const messages: unknown[] = [];
-    const terminalManager = createTerminalManagerStub({
+    const { manager: terminalManager, setTerminalTitle } = createTerminalManagerStub({
       setTerminalTitle: vi.fn(() => true),
     });
     const session = createSessionForTest({ terminalManager, messages });
@@ -4597,7 +4618,7 @@ describe("session terminal rename handling", () => {
       requestId: "request-title-success",
     });
 
-    expect(terminalManager.setTerminalTitle).toHaveBeenCalledWith("terminal-1", "Renamed terminal");
+    expect(setTerminalTitle).toHaveBeenCalledWith("terminal-1", "Renamed terminal");
     expect(messages).toContainEqual({
       type: "terminal.rename.response",
       payload: {
@@ -4828,12 +4849,12 @@ describe("session workspace script handling", () => {
     const session = createSessionForTest({
       workspaceGitService,
       workspaceRegistry,
-      terminalManager: {
+      terminalManager: asTerminalManager({
         subscribeTerminalsChanged: vi.fn(() => () => {}),
         subscribeTerminalWorkspaceContributionChanged: vi.fn(() => () => {}),
-      },
-      serviceProxy: { listRoutesForWorkspace: vi.fn(() => []) },
-      scriptRuntimeStore: { listForWorkspace: vi.fn(() => []) },
+      }),
+      serviceProxy: asServiceProxy({}),
+      scriptRuntimeStore: asWorkspaceScriptRuntimeStore({ listForWorkspace: vi.fn(() => []) }),
       getDaemonTcpPort: () => 6767,
       getDaemonTcpHost: () => "127.0.0.1",
       messages,
@@ -5134,9 +5155,9 @@ describe("session pull request timeline handling", () => {
     const messages: unknown[] = [];
     const checkDetailRequests: Array<{
       cwd: string;
-      repoOwner: string;
-      repoName: string;
-      checkRunId: number;
+      repoOwner?: string;
+      repoName?: string;
+      checkRunId?: number;
       workflowRunId?: number;
     }> = [];
     const checkDetails: CheckDetails = {
@@ -5220,47 +5241,56 @@ describe("schedule dispatch routing", () => {
   // is unstubbed, so every handler's own try/catch emits its domain rpc_error code.
   // handleMessage receives already-parsed messages, so these fixtures only need to
   // satisfy the TS union here — zod parsing happens upstream at the transport.
-  const routingCases: Array<{ msg: SessionInboundMessage; code: string }> = [
-    {
-      msg: {
-        type: "schedule/create",
-        requestId: "rt-sched-create",
-        prompt: "p",
-        cadence: { type: "every", everyMs: 1000 },
-        target: { type: "agent", agentId: "00000000-0000-0000-0000-000000000000" },
+  const routingCases: Array<{ msg: SessionInboundMessage & { requestId: string }; code: string }> =
+    [
+      {
+        msg: {
+          type: "schedule/create",
+          requestId: "rt-sched-create",
+          prompt: "p",
+          cadence: { type: "every", everyMs: 1000 },
+          target: { type: "agent", agentId: "00000000-0000-0000-0000-000000000000" },
+        },
+        code: "schedule_request_failed",
       },
-      code: "schedule_request_failed",
-    },
-    { msg: { type: "schedule/list", requestId: "rt-sched-list" }, code: "schedule_request_failed" },
-    {
-      msg: { type: "schedule/inspect", requestId: "rt-sched-inspect", scheduleId: "s1" },
-      code: "schedule_request_failed",
-    },
-    {
-      msg: { type: "schedule/logs", requestId: "rt-sched-logs", scheduleId: "s1" },
-      code: "schedule_request_failed",
-    },
-    {
-      msg: { type: "schedule/pause", requestId: "rt-sched-pause", scheduleId: "s1" },
-      code: "schedule_request_failed",
-    },
-    {
-      msg: { type: "schedule/resume", requestId: "rt-sched-resume", scheduleId: "s1" },
-      code: "schedule_request_failed",
-    },
-    {
-      msg: { type: "schedule/delete", requestId: "rt-sched-delete", scheduleId: "s1" },
-      code: "schedule_request_failed",
-    },
-    {
-      msg: { type: "schedule/run-once", requestId: "rt-sched-run-once", scheduleId: "s1" },
-      code: "schedule_request_failed",
-    },
-    {
-      msg: { type: "schedule/update", requestId: "rt-sched-update", scheduleId: "s1", name: "new" },
-      code: "schedule_request_failed",
-    },
-  ];
+      {
+        msg: { type: "schedule/list", requestId: "rt-sched-list" },
+        code: "schedule_request_failed",
+      },
+      {
+        msg: { type: "schedule/inspect", requestId: "rt-sched-inspect", scheduleId: "s1" },
+        code: "schedule_request_failed",
+      },
+      {
+        msg: { type: "schedule/logs", requestId: "rt-sched-logs", scheduleId: "s1" },
+        code: "schedule_request_failed",
+      },
+      {
+        msg: { type: "schedule/pause", requestId: "rt-sched-pause", scheduleId: "s1" },
+        code: "schedule_request_failed",
+      },
+      {
+        msg: { type: "schedule/resume", requestId: "rt-sched-resume", scheduleId: "s1" },
+        code: "schedule_request_failed",
+      },
+      {
+        msg: { type: "schedule/delete", requestId: "rt-sched-delete", scheduleId: "s1" },
+        code: "schedule_request_failed",
+      },
+      {
+        msg: { type: "schedule/run-once", requestId: "rt-sched-run-once", scheduleId: "s1" },
+        code: "schedule_request_failed",
+      },
+      {
+        msg: {
+          type: "schedule/update",
+          requestId: "rt-sched-update",
+          scheduleId: "s1",
+          name: "new",
+        },
+        code: "schedule_request_failed",
+      },
+    ];
 
   test.each(routingCases)("routes $msg.type to its domain handler", async ({ msg, code }) => {
     const messages: SessionOutboundMessage[] = [];

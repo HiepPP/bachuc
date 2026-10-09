@@ -360,8 +360,11 @@ function scanRetainedArtifacts(artifactDir: string) {
 async function createCutProxy(upstreamPort: number, artifactPath: string) {
   let connections = 0;
   let cuts = 0;
-  let activeGlobal: { upstream: NodeJS.ReadableStream; downstream: ServerResponse } | null = null;
-  const record = (value: unknown) =>
+  let activeGlobal: {
+    upstream: NodeJS.ReadableStream & { destroy(): void };
+    downstream: ServerResponse;
+  } | null = null;
+  const record = (value: Record<string, unknown>) =>
     writeFileSync(artifactPath, `${JSON.stringify({ at: Date.now(), ...value })}\n`, { flag: "a" });
   const server = createServer((incoming, outgoing) => {
     const globalEvent = incoming.url?.startsWith("/global/event") === true;
@@ -430,9 +433,7 @@ async function createCutProxy(upstreamPort: number, artifactPath: string) {
 
 function isRunningToolEvent(event: AgentStreamEvent): boolean {
   return (
-    event.type === "timeline" &&
-    event.item.type === "tool_call" &&
-    (event.item.status === "running" || event.item.status === "pending")
+    event.type === "timeline" && event.item.type === "tool_call" && event.item.status === "running"
   );
 }
 
@@ -456,10 +457,8 @@ function assertParentResult(
   const messages = new Map<string, string>();
   for (const event of events) {
     if (event.type !== "timeline" || event.item.type !== "assistant_message") continue;
-    messages.set(
-      event.item.messageId,
-      `${messages.get(event.item.messageId) ?? ""}${event.item.text}`,
-    );
+    const messageId = event.item.messageId ?? "";
+    messages.set(messageId, `${messages.get(messageId) ?? ""}${event.item.text}`);
   }
   const output = Array.from(messages.values()).join("");
   const assertedOutput = assertFinalMessageOnly ? Array.from(messages.values()).at(-1) : output;

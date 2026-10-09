@@ -35,6 +35,7 @@ function createGitHubServiceStub(): ForgeService {
     searchIssuesAndPrs: async () => ({
       items: [],
       featuresEnabled: true,
+      authState: "authenticated",
       githubFeaturesEnabled: true,
     }),
     getPullRequest: async ({ number }) => ({
@@ -46,6 +47,7 @@ function createGitHubServiceStub(): ForgeService {
       baseRefName: "main",
       headRefName: `pr-${number}`,
       labels: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
     }),
     getPullRequestHeadRef: async ({ number }) => `pr-${number}`,
     getPullRequestCheckoutTarget: async ({ number }) => ({
@@ -68,11 +70,34 @@ function createGitHubServiceStub(): ForgeService {
     },
     supportsCrossRepoCheckoutWithoutRefs: true,
     getCurrentPullRequestStatus: async () => null,
+    getPullRequestTimeline: async ({ prNumber }) => ({
+      prNumber,
+      repoOwner: "acme",
+      repoName: "repo",
+      items: [],
+      truncated: false,
+      error: null,
+    }),
+    getCheckDetails: async ({ checkRunId, workflowRunId }) => ({
+      checkRunId: checkRunId ?? 0,
+      workflowRunId: workflowRunId ?? null,
+      name: "test",
+      status: null,
+      conclusion: null,
+      url: null,
+      detailsUrl: null,
+      output: null,
+      annotations: [],
+      failedJobs: [],
+      truncated: false,
+    }),
     createPullRequest: async () => ({
       number: 1,
       url: "https://github.com/acme/repo/pull/1",
     }),
     mergePullRequest: async () => ({ success: true }),
+    enablePullRequestAutoMerge: async () => ({ success: true }),
+    disablePullRequestAutoMerge: async () => ({ success: true }),
     isAuthenticated: async () => true,
     invalidate: () => {},
   };
@@ -86,6 +111,7 @@ function createCoreDeps(options?: {
     github: options?.github ?? createGitHubServiceStub(),
     workspaceGitService: {
       resolveRepoRoot: async (cwd: string) => cwd,
+      resolveDefaultBranch: async () => "main",
       resolveForge: async () =>
         options?.forge
           ? {

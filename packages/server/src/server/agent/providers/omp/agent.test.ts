@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { setImmediate as waitForImmediate } from "node:timers/promises";
 
-import type { AgentStreamEvent } from "../../agent-sdk-types.js";
+import type { AgentPermissionRequest, AgentStreamEvent } from "../../agent-sdk-types.js";
 import type { PaseoToolCatalog } from "../../tools/types.js";
 import type { OmpAgentMessage } from "./rpc-types.js";
 import type { OmpNoTurnScheduler, OmpProviderIdleScheduler } from "./agent.js";
@@ -19,6 +19,16 @@ const TURN_LIFECYCLE_EVENTS = new Set<AgentStreamEvent["type"]>([
 
 function isTurnLifecycle(type: AgentStreamEvent["type"]): boolean {
   return TURN_LIFECYCLE_EVENTS.has(type);
+}
+
+/** The `options` of the first question in a permission request's input, if any. */
+function firstQuestionOptions(input: AgentPermissionRequest["input"]): unknown {
+  const questions: unknown = input?.questions;
+  if (!Array.isArray(questions)) return undefined;
+  const first: unknown = questions[0];
+  return typeof first === "object" && first !== null && "options" in first
+    ? first.options
+    : undefined;
 }
 
 // What OMP reports for a turn the user stopped: an error message on a terminal
@@ -620,7 +630,7 @@ describe("OMP agent client and session", () => {
       optionDetails: [{ description: "First detail" }, {}, { description: " \t" }],
     });
 
-    expect(omp.pendingPermissions()[0]?.input?.questions?.[0]?.options).toStrictEqual([
+    expect(firstQuestionOptions(omp.pendingPermissions()[0]?.input)).toStrictEqual([
       { label: "First", description: "First detail" },
       { label: "Second" },
       { label: "Third" },
@@ -641,7 +651,7 @@ describe("OMP agent client and session", () => {
     if (!parsed.success) throw new Error("Expected malformed metadata event to parse");
 
     omp.emit(parsed.data);
-    expect(omp.pendingPermissions()[0]?.input?.questions?.[0]?.options).toStrictEqual([
+    expect(firstQuestionOptions(omp.pendingPermissions()[0]?.input)).toStrictEqual([
       { label: "First" },
       { label: "Second" },
     ]);
@@ -666,7 +676,7 @@ describe("OMP agent client and session", () => {
     });
 
     const combinedInput = omp.pendingPermissions()[0]?.input;
-    expect(combinedInput?.questions?.[0]?.options).toStrictEqual([
+    expect(firstQuestionOptions(combinedInput)).toStrictEqual([
       { label: "First", description: "First detail" },
     ]);
     expect(combinedInput).toMatchObject({
@@ -761,6 +771,7 @@ describe("OMP agent client and session", () => {
         id: "child-1",
         agent: "worker",
         index: 0,
+        task: "",
         progress: { id: "child-1", status: "running" },
         parentToolCallId: "tool-1",
       },

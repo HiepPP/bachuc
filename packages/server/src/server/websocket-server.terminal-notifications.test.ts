@@ -101,9 +101,17 @@ function workspaceRecord(overrides?: Partial<PersistedWorkspaceRecord>): Persist
     cwd: CWD,
     kind: "directory",
     displayName: "Project",
+    title: null,
+    branch: null,
+    worktreeRoot: null,
+    baseBranch: null,
+    isPaseoOwnedWorktree: false,
+    mainRepoRoot: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     archivedAt: null,
+    autoArchivedChangeRequestUrl: null,
+    pinnedAt: null,
     ...overrides,
   };
 }

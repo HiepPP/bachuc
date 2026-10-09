@@ -57,7 +57,7 @@ export default function contribute(server) {
     await release.ready;
     await daemon.daemon.agentManager.emitLiveTimelineItem(agent.id, {
       type: "assistant_message",
-      id: "row",
+      messageId: "row",
       text: "only the subscriber sees this",
     });
     await expect.poll(() => received).toEqual(["timeline"]);
@@ -76,7 +76,7 @@ export default function contribute(server) {
     await client.getDaemonConfig();
     await daemon.daemon.agentManager.emitLiveTimelineItem(agent.id, {
       type: "assistant_message",
-      id: "row-2",
+      messageId: "row-2",
       text: "unsubscribed",
     });
     await client.getDaemonConfig();

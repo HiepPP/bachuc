@@ -2,9 +2,13 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type pino from "pino";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { CheckoutSnapshotFacts, CheckoutStatusGit } from "../utils/checkout-git.js";
+import type {
+  CheckoutSnapshotFacts,
+  CheckoutStatusGit,
+  CheckoutStatusGitNonPaseo,
+} from "../utils/checkout-git.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
-import type { FileObserver } from "./file-observer/index.js";
+import type { FileChange, FileObserver, FileObserverSubscription } from "./file-observer/index.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 
 const REPO_CWD = path.resolve("/tmp/paseo-observation-repo");
@@ -34,7 +38,7 @@ function createWatcherHarness(harnessOptions?: { failDirectories?: Set<string> }
       directory: string,
       callback: WatchRecord["callback"],
       options?: { ignore?: Array<string | RegExp> },
-    ) => {
+    ): Promise<FileObserverSubscription> => {
       if (harnessOptions?.failDirectories?.has(directory)) {
         throw new Error(`watch failed: ${directory}`);
       }
@@ -57,7 +61,9 @@ function createWatcherHarness(harnessOptions?: { failDirectories?: Set<string> }
   return { records, subscribe };
 }
 
-function createCheckoutFacts(cwd: string): CheckoutSnapshotFacts {
+type GitCheckoutSnapshotFacts = Extract<CheckoutSnapshotFacts, { isGit: true }>;
+
+function createCheckoutFacts(cwd: string): GitCheckoutSnapshotFacts {
   return {
     isGit: true,
     worktreeRoot: cwd,
@@ -72,11 +78,14 @@ function createCheckoutFacts(cwd: string): CheckoutSnapshotFacts {
     comparisonBaseRef: null,
     branchRemoteName: null,
     branchMergeRef: null,
+    upstreamStatus: null,
     pullRequestLookupTarget: { headRef: "main" },
   };
 }
 
-function createLinkedCheckoutFacts(cwd: string): CheckoutSnapshotFacts {
+function createLinkedCheckoutFacts(
+  cwd: string,
+): GitCheckoutSnapshotFacts & { absoluteGitDir: string } {
   const worktreeName = path.basename(cwd);
   return {
     ...createCheckoutFacts(cwd),
@@ -90,8 +99,8 @@ function createLinkedCheckoutFacts(cwd: string): CheckoutSnapshotFacts {
 
 function createCheckoutStatus(
   cwd: string,
-  overrides?: Partial<CheckoutStatusGit>,
-): CheckoutStatusGit {
+  overrides?: Partial<CheckoutStatusGitNonPaseo>,
+): CheckoutStatusGitNonPaseo {
   return {
     isGit: true,
     repoRoot: cwd,
@@ -100,6 +109,7 @@ function createCheckoutStatus(
     isDirty: false,
     baseRef: "main",
     aheadBehind: { ahead: 0, behind: 0 },
+    upstreamRef: null,
     aheadOfOrigin: null,
     behindOfOrigin: null,
     hasRemote: false,
@@ -240,7 +250,7 @@ function createService(
       })),
       createWatcherLivenessCanary: vi.fn(() => ({
         path: "",
-        filterEvents: (events) => events,
+        filterEvents: (events: FileChange[]) => events,
         verify: vi.fn(async () => {}),
       })),
       ...overrides,
@@ -401,7 +411,7 @@ describe("WorkspaceGitService checkout observation", () => {
 
   test("an observer abandoned during async setup is closed", async () => {
     const watcher = createWatcherHarness();
-    const openedSubscription = createDeferred<{ unsubscribe: () => Promise<void> }>();
+    const openedSubscription = createDeferred<FileObserverSubscription>();
     const unsubscribeWatcher = vi.fn(async () => {});
     watcher.subscribe.mockImplementationOnce(async () => openedSubscription.promise);
     const service = createService(watcher);
@@ -875,7 +885,7 @@ describe("WorkspaceGitService checkout observation", () => {
       .fn<
         (
           cwd: string,
-          facts: CheckoutSnapshotFacts,
+          facts: GitCheckoutSnapshotFacts,
           current: CheckoutStatusGit,
         ) => Promise<CheckoutStatusGit>
       >()

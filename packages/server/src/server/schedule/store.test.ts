@@ -190,7 +190,7 @@ describe("ScheduleStore", () => {
       runs: [],
     });
 
-    let releaseFirstUpdate: (() => void) | null = null;
+    let releaseFirstUpdate = null as (() => void) | null;
     const firstUpdateBlocked = new Promise<void>((resolve) => {
       releaseFirstUpdate = resolve;
     });
@@ -290,7 +290,7 @@ describe("ScheduleStore", () => {
       runs: [],
     });
 
-    let releaseCompletion: (() => void) | null = null;
+    let releaseCompletion = null as (() => void) | null;
     const completionBlocked = new Promise<void>((resolve) => {
       releaseCompletion = resolve;
     });
@@ -310,7 +310,7 @@ describe("ScheduleStore", () => {
     });
     await completionStarted;
 
-    let releaseUpsertList: (() => void) | null = null;
+    let releaseUpsertList = null as (() => void) | null;
     const upsertListBlocked = new Promise<void>((resolve) => {
       releaseUpsertList = resolve;
     });

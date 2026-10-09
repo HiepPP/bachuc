@@ -504,19 +504,17 @@ describe("ClaudeAgentSession persisted subagent replay", () => {
       },
     });
     expect(new Set(events.map((event) => event.id))).toEqual(new Set([WORKFLOW_TOOL_USE_ID]));
-    const workflowOutputs = descriptors
-      .map((event) => event.event)
-      .filter((event) => event.type === "timeline" && event.item.type === "assistant_message")
-      .map((event) => (event.item.type === "assistant_message" ? event.item.text : ""));
+    const workflowOutputs = descriptors.flatMap(({ event }) =>
+      event.type === "timeline" && event.item.type === "assistant_message" ? [event.item.text] : [],
+    );
     expect(workflowOutputs).toEqual([
       "earlier workflow child result",
       "later workflow child result",
     ]);
     expect(
-      descriptors
-        .map((event) => event.event)
-        .filter((event) => event.type === "timeline" && event.item.type === "user_message")
-        .map((event) => (event.item.type === "user_message" ? event.item.text : "")),
+      descriptors.flatMap(({ event }) =>
+        event.type === "timeline" && event.item.type === "user_message" ? [event.item.text] : [],
+      ),
     ).toEqual(["Verify the workflow row lifecycle"]);
     expect(
       replayed

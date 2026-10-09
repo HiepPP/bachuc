@@ -16,7 +16,7 @@ interface QueryMock {
   supportedCommands: ReturnType<typeof vi.fn>;
   rewindFiles: ReturnType<typeof vi.fn>;
   cancelAsyncMessage: ReturnType<typeof vi.fn>;
-  [Symbol.asyncIterator]: () => AsyncIterator<Record<string, unknown>, void>;
+  [Symbol.asyncIterator]: () => { next: ReturnType<typeof vi.fn> };
 }
 
 interface PromptRecord {
@@ -207,6 +207,10 @@ async function consumeUntil(
     if (next.done) throw new Error("Stream ended before the expected event");
     if (matches(next.value)) return;
   }
+}
+
+function turnIdOf(event: AgentStreamEvent | void): string | undefined {
+  return event && "turnId" in event ? event.turnId : undefined;
 }
 
 function collectAssistantText(events: AgentStreamEvent[]): string {
@@ -599,7 +603,7 @@ test("reuses the existing query after interrupt before starting the next prompt"
 
 test("emits an assistant system notice when Claude changes session id mid-turn", async () => {
   const logger = createTestLogger();
-  let queryRef: ScriptedQuery | null = null;
+  let queryRef = null as ScriptedQuery | null;
 
   queryFactory.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
     queryRef = createScriptedQuery({
@@ -668,11 +672,13 @@ test("recovers when the query pump sees a single interrupt abort before the next
       return: vi.fn(async () => {
         output.end();
       }),
+      close: vi.fn(() => undefined),
       setPermissionMode: vi.fn(async () => undefined),
       setModel: vi.fn(async () => undefined),
       supportedModels: vi.fn(async () => [{ value: "opus", displayName: "Opus" }]),
       supportedCommands: vi.fn(async () => []),
       rewindFiles: vi.fn(async () => ({ canRewind: true })),
+      cancelAsyncMessage: vi.fn(async () => true),
       emit: (message: Record<string, unknown>) => {
         output.push(message);
       },
@@ -745,7 +751,7 @@ test("recovers when the query pump sees a single interrupt abort before the next
 
 test("stale abort result after replacement start does not poison the new foreground turn", async () => {
   const logger = createTestLogger();
-  let queryRef: ScriptedQuery | null = null;
+  let queryRef = null as ScriptedQuery | null;
 
   queryFactory.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
     queryRef = createScriptedQuery({
@@ -814,7 +820,7 @@ test("stale abort result after replacement start does not poison the new foregro
 
 test("creates an autonomous live turn when assistant output arrives without a foreground run", async () => {
   const logger = createTestLogger();
-  let queryRef: ScriptedQuery | null = null;
+  let queryRef = null as ScriptedQuery | null;
 
   queryFactory.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
     queryRef = createScriptedQuery({
@@ -879,7 +885,7 @@ test("creates an autonomous live turn when assistant output arrives without a fo
 
 test("steers an autonomous turn through its existing query without restarting it", async () => {
   const logger = createTestLogger();
-  let queryRef: ScriptedQuery | null = null;
+  let queryRef = null as ScriptedQuery | null;
 
   queryFactory.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
     queryRef = createScriptedQuery({
@@ -923,7 +929,7 @@ test("steers an autonomous turn through its existing query without restarting it
   });
   const autonomousStart = await autonomousEvents.next();
   const autonomousTimeline = await autonomousEvents.next();
-  const autonomousTurnId = autonomousStart.value?.turnId;
+  const autonomousTurnId = turnIdOf(autonomousStart.value);
   expect(autonomousTurnId).toBeTruthy();
 
   const steer = await session.steerActiveTurn!("steer prompt", {
@@ -946,7 +952,7 @@ test("steers an autonomous turn through its existing query without restarting it
   expect(completion.value).toMatchObject({ type: "turn_completed", turnId: autonomousTurnId });
   expect(
     [autonomousStart.value, autonomousTimeline.value, steeredTimeline.value, completion.value].map(
-      (event) => event?.turnId,
+      turnIdOf,
     ),
   ).toEqual([autonomousTurnId, autonomousTurnId, autonomousTurnId, autonomousTurnId]);
 
@@ -956,7 +962,7 @@ test("steers an autonomous turn through its existing query without restarting it
 
 test("auto-completes an open autonomous turn when a foreground prompt starts", async () => {
   const logger = createTestLogger();
-  let queryRef: ScriptedQuery | null = null;
+  let queryRef = null as ScriptedQuery | null;
 
   queryFactory.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
     queryRef = createScriptedQuery({

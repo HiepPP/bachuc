@@ -26,7 +26,7 @@ function createOmpChild(options?: {
     exitCode: null,
     signalCode: null,
     killedSignals: [],
-  }) as OmpChild;
+  }) as unknown as OmpChild;
   child.kill = ((signal?: NodeJS.Signals | number) => {
     child.killedSignals.push(signal);
     queueMicrotask(() => child.emit("exit", null, signal ?? null));

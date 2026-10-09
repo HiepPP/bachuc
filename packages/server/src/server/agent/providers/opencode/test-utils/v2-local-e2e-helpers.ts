@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   AgentPermissionRequest,
+  AgentPermissionResult,
   AgentSession,
   AgentSlashCommand,
   AgentStreamEvent,
@@ -116,7 +117,7 @@ function respondToRequest(
   session: AgentSession,
   request: AgentPermissionRequest,
   options: AutoRespondOptions,
-): Promise<void> {
+): Promise<AgentPermissionResult | void> {
   if (request.kind !== "question") {
     return session.respondToPermission(request.id, {
       behavior: "allow",

@@ -2353,7 +2353,6 @@ describe("createGiteaService", () => {
 
     const result = await service.createPullRequest({
       cwd: "/repo",
-      repo: "example-user/sample-repo",
       title: "New feature",
       head: "feat/new",
       base: "main",

@@ -45,7 +45,7 @@ test("reconciliation isolates workspace update failures between sessions", async
     ],
     workspaceIds: ["ws-reclassified"],
     logger: {
-      warn: (context) => {
+      warn: (context: unknown) => {
         warnings.push(context);
       },
     },

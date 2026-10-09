@@ -265,7 +265,7 @@ describe("ProviderUsageService", () => {
 
   it("deduplicates concurrent cache misses", async () => {
     let calls = 0;
-    let resolveUsage: ((usage: ProviderUsage) => void) | null = null;
+    let resolveUsage = null as ((usage: ProviderUsage) => void) | null;
     const service = new ProviderUsageService({
       logger: createLogger(),
       now: () => Date.parse("2026-06-19T00:00:00.000Z"),
@@ -724,7 +724,7 @@ describe("real provider usage fetchers", () => {
   it("reads the Cursor token from the modern cursorAuth/accessToken key in state.vscdb", async () => {
     writeCursorStateDb(homeDir, { "cursorAuth/accessToken": "cursor_state_jwt" });
     let authorization: string | null = null;
-    fetchApi = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    fetchApi = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       authorization = (init?.headers as Record<string, string> | undefined)?.Authorization ?? null;
       return jsonResponse({
         planUsage: {
@@ -753,7 +753,7 @@ describe("real provider usage fetchers", () => {
       cursorAuthStatus: Buffer.from(JSON.stringify({ accessToken: "cursor_legacy_jwt" }), "utf8"),
     });
     let authorization: string | null = null;
-    fetchApi = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    fetchApi = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       authorization = (init?.headers as Record<string, string> | undefined)?.Authorization ?? null;
       return jsonResponse({
         planUsage: { totalSpend: "0", remaining: "100", limit: "100" },

@@ -77,6 +77,15 @@ function createDeferred<T>() {
   return { promise, reject, resolve };
 }
 
+function countGitOperations(commands: ReadonlyArray<{ args: readonly string[] }>) {
+  const counts = new Map<string, number>();
+  for (const command of commands) {
+    const operation = command.args[0] ?? "";
+    counts.set(operation, (counts.get(operation) ?? 0) + 1);
+  }
+  return Object.fromEntries([...counts].sort(([left], [right]) => left.localeCompare(right)));
+}
+
 function hasSubmittedGitOperation(operation: string): boolean {
   return getGitCommandMetrics().submissions.some((command) => command.args[0] === operation);
 }
@@ -224,11 +233,7 @@ async function measureFetchScenario(
       0,
     );
 
-    const operations = Object.fromEntries(
-      [...Map.groupBy(postFetch.submissions, (command) => command.args[0] ?? "").entries()]
-        .map(([operation, commands]) => [operation, commands.length] as const)
-        .sort(([left], [right]) => left.localeCompare(right)),
-    );
+    const operations = countGitOperations(postFetch.submissions);
     console.info(
       "[workspace-git-fetch]",
       JSON.stringify({
@@ -309,11 +314,7 @@ async function measureExternalFetchScenario(
       (total, [cwd, count]) => total + Math.max(0, count - (snapshotBaseline.get(cwd) ?? 0)),
       0,
     );
-    const operations = Object.fromEntries(
-      [...Map.groupBy(postFetch.submissions, (command) => command.args[0] ?? "").entries()]
-        .map(([operation, commands]) => [operation, commands.length] as const)
-        .sort(([left], [right]) => left.localeCompare(right)),
-    );
+    const operations = countGitOperations(postFetch.submissions);
     console.info(
       "[workspace-git-fetch]",
       JSON.stringify({

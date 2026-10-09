@@ -13,7 +13,7 @@ import {
   createRealProviderClients,
   getRealProviderConfig,
 } from "./real-provider-test-config.js";
-import type { FetchRecentProviderSessionEntry } from "../../client/daemon-client.js";
+import type { FetchRecentProviderSessionEntry } from "@getpaseo/client/internal/daemon-client";
 
 const OPENCODE_REAL_TEST_MODEL = getRealProviderConfig("opencode").model;
 const OPENCODE_REAL_TEST_TIMEOUT_MS = 180_000;
@@ -135,7 +135,7 @@ describe("daemon E2E (real opencode) - persisted import resume", () => {
       try {
         await withConnectedOpenCodeDaemon(async ({ client }) => {
           const models = await client.listProviderModels("opencode");
-          expect(hasOpenCodeBigPickleModel(models.models)).toBe(true);
+          expect(hasOpenCodeBigPickleModel(models.models ?? [])).toBe(true);
 
           const agent = await client.createAgent({
             cwd,

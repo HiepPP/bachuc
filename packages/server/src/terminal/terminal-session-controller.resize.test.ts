@@ -61,7 +61,6 @@ function createController(
   return new TerminalSessionController({
     terminalManager,
     emit: (message) => outbound.push(message),
-    emitBinary: () => {},
     hasBinaryChannel: () => true,
     isPathWithinRoot: () => false,
     sessionLogger: { warn: () => {}, error: () => {} } as unknown as pino.Logger,

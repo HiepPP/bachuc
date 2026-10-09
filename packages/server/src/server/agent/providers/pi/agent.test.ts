@@ -16,7 +16,12 @@ import { setImmediate as waitForImmediate } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { describe, expect, onTestFinished, test } from "vitest";
 
-import type { AgentSession, AgentSessionConfig, AgentStreamEvent } from "../../agent-sdk-types.js";
+import type {
+  AgentSession,
+  AgentSessionConfig,
+  AgentStreamEvent,
+  AgentTimelineItem,
+} from "../../agent-sdk-types.js";
 import {
   PiProviderParamsSchema,
   PiRpcAgentClient,
@@ -27,7 +32,29 @@ import { FakePi } from "./test-utils/fake-pi.js";
 import { createPiExtensionHost } from "./extensions/index.js";
 import { PiExtensionHost } from "./extensions/host.js";
 import type { PiModel, PiThinkingLevel } from "./rpc-types.js";
+import type { PiRuntimeLaunch } from "./runtime.js";
 import type { PiUsagePollScheduler } from "./usage-poller.js";
+
+type TimelineOrCompletionEvent =
+  | { type: "timeline"; item: AgentTimelineItem }
+  | { type: "turn_completed" };
+
+/** The Paseo extension path that Pi was launched with. */
+function paseoExtensionPath(launch: PiRuntimeLaunch | undefined): string {
+  const extensionPath = launch?.extensionPaths?.[0];
+  if (!extensionPath) {
+    throw new Error("Expected Pi to launch with the Paseo extension");
+  }
+  return extensionPath;
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
 
 const ONE_BY_ONE_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
@@ -317,7 +344,7 @@ class SessionEvents {
   }
 
   timelineAndCompletionEvents() {
-    return this.events.flatMap((event) => {
+    return this.events.flatMap((event): TimelineOrCompletionEvent[] => {
       if (event.type === "timeline") {
         return [{ type: "timeline" as const, item: event.item }];
       }
@@ -1143,8 +1170,8 @@ describe("PiRpcAgentSession", () => {
     async (stopReason) => {
       const { pi, session, events } = await createSession();
       const fakeSession = pi.latestSession();
-      const abortFinished = Promise.withResolvers<void>();
-      const turnFinished = Promise.withResolvers<void>();
+      const abortFinished = deferred<void>();
+      const turnFinished = deferred<void>();
       fakeSession.abort = async () => {
         fakeSession.finishTurn({
           role: "assistant",
@@ -1177,8 +1204,8 @@ describe("PiRpcAgentSession", () => {
   test("a natural completion during Stop does not cancel the next autonomous run", async () => {
     const { pi, session, events } = await createSession();
     const fakeSession = pi.latestSession();
-    const abortFinished = Promise.withResolvers<void>();
-    const turnFinished = Promise.withResolvers<void>();
+    const abortFinished = deferred<void>();
+    const turnFinished = deferred<void>();
     fakeSession.abort = async () => {
       fakeSession.finishTurn({ role: "assistant", stopReason: "stop", content: [] });
       turnFinished.resolve();
@@ -1516,7 +1543,7 @@ describe("PiRpcAgentSession", () => {
       "--session",
       "/tmp/native-pi-session",
       "--extension",
-      actualLaunch.extensionPaths[0],
+      paseoExtensionPath(actualLaunch),
     ]);
   });
 
@@ -1550,7 +1577,7 @@ describe("PiRpcAgentSession", () => {
     const pi = new FakePi();
     const client = createClient(pi);
     const session = await client.createSession(createConfig());
-    const extensionPath = pi.recordedLaunches[0]?.extensionPaths[0];
+    const extensionPath = pi.recordedLaunches[0]?.extensionPaths?.[0];
     expect(extensionPath).toBeDefined();
     const listeners = await loadPaseoExtensionListeners(extensionPath!);
     const submittedMessage = { role: "user", content: "new prompt" };
@@ -1596,7 +1623,7 @@ describe("PiRpcAgentSession", () => {
     const pi = new FakePi();
     const session = await createClient(pi).createSession(createConfig());
     onTestFinished(() => session.close());
-    const listeners = await loadPaseoExtensionListeners(pi.recordedLaunches[0]!.extensionPaths[0]!);
+    const listeners = await loadPaseoExtensionListeners(paseoExtensionPath(pi.recordedLaunches[0]));
     // "abandoned" was rewound; "two" was sent from the same parent afterwards.
     const entries = [
       piUserEntry({ id: "one", parentId: null, text: "first" }),
@@ -1654,11 +1681,11 @@ describe("PiRpcAgentSession", () => {
       "--mode",
       "rpc",
       "--extension",
-      actualLaunch.extensionPaths[0],
+      paseoExtensionPath(actualLaunch),
     ]);
 
     await expect(
-      applyPaseoExtensionSystemPrompt(actualLaunch.extensionPaths[0]!, "Pi project prompt"),
+      applyPaseoExtensionSystemPrompt(paseoExtensionPath(actualLaunch), "Pi project prompt"),
     ).resolves.toBe("Pi project prompt\n\nAgent prompt\n\nDaemon prompt");
 
     await session.close();
@@ -1703,10 +1730,10 @@ describe("PiRpcAgentSession", () => {
       "--session",
       "/tmp/native-pi-session",
       "--extension",
-      actualLaunch.extensionPaths[0],
+      paseoExtensionPath(actualLaunch),
     ]);
     await expect(
-      applyPaseoExtensionSystemPrompt(actualLaunch.extensionPaths[0]!, "Pi project prompt"),
+      applyPaseoExtensionSystemPrompt(paseoExtensionPath(actualLaunch), "Pi project prompt"),
     ).resolves.toBe("Pi project prompt\n\nAgent prompt\n\nDaemon prompt");
   });
 
@@ -2580,7 +2607,7 @@ describe("PiRpcAgentClient", () => {
       "--session",
       sessionFile,
       "--extension",
-      actualLaunch.extensionPaths[0],
+      paseoExtensionPath(actualLaunch),
     ]);
     expect(imported.config).toMatchObject({
       provider: "pi",
@@ -3073,7 +3100,7 @@ describe("PiRpcAgentClient", () => {
       "--mcp-config",
       actualLaunch.mcpConfigPath,
       "--extension",
-      actualLaunch.extensionPaths[0],
+      paseoExtensionPath(actualLaunch),
     ]);
     expect(session.capabilities.supportsMcpServers).toBe(true);
 
@@ -3151,7 +3178,7 @@ describe("PiRpcAgentClient", () => {
       "--mode",
       "rpc",
       "--extension",
-      actualLaunch.extensionPaths[0],
+      paseoExtensionPath(actualLaunch),
     ]);
     expect(actualLaunch.mcpConfigPath).toBeUndefined();
     expect(session.capabilities.supportsMcpServers).toBe(false);

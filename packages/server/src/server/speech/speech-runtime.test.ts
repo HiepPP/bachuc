@@ -8,7 +8,9 @@ import type { TurnDetectionProvider } from "./turn-detection-provider.js";
 import { createSpeechService } from "./speech-runtime.js";
 
 const { ensureLocalSpeechModelsMock, initializeLocalSpeechServicesMock } = vi.hoisted(() => ({
-  ensureLocalSpeechModelsMock: vi.fn(async () => ({})),
+  ensureLocalSpeechModelsMock: vi.fn<
+    (options: { signal?: AbortSignal }) => Promise<Record<string, string>>
+  >(async () => ({})),
   initializeLocalSpeechServicesMock: vi.fn<(args: unknown) => Promise<InitializedLocalSpeech>>(),
 }));
 
@@ -49,9 +51,8 @@ function createStubStt(id: string): SpeechToTextProvider {
   };
 }
 
-function createStubTts(id: string): TextToSpeechProvider {
+function createStubTts(): TextToSpeechProvider {
   return {
-    id,
     synthesizeSpeech: vi.fn(async () => {
       throw new Error("not used in this test");
     }),
@@ -130,7 +131,7 @@ describe("createSpeechService readiness", () => {
 
   it("keeps voice feature available when only realtime voice is enabled and ready", async () => {
     const voiceStt = createStubStt("voice-local");
-    const voiceTts = createStubTts("tts-local");
+    const voiceTts = createStubTts();
     const turnDetection = createStubTurnDetection("turn-local");
 
     initializeLocalSpeechServicesMock.mockResolvedValue({

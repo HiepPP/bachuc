@@ -6,6 +6,7 @@ import { Transform } from "node:stream";
 
 import pino from "pino";
 
+import type { ProviderRuntimeSettings } from "../agent/provider-launch-config.js";
 import { OpenCodeAgentClient } from "../agent/providers/opencode-agent.js";
 import { OpenCodeServerManager } from "../agent/providers/opencode/server-manager.js";
 import { terminateWithTreeKill } from "../../utils/tree-kill.js";
@@ -155,52 +156,62 @@ export async function createOpenCodeOmoRealRuntime(): Promise<OpenCodeOmoRealRun
   let client: DaemonClient | null = null;
   try {
     process.env.PASEO_HOME = path.join(paths.paseoHomeRoot, ".paseo");
-    traceDestination = pino.destination({
+    const destination = pino.destination({
       dest: path.join(paths.artifacts, "daemon.log"),
       sync: true,
     });
+    traceDestination = destination;
     const redactingTrace = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
         callback(null, redactSecrets(chunk.toString(), secrets));
       },
     });
-    redactingTrace.pipe(traceDestination, { end: false });
+    // The pino destination is not typed as a Node writable, so forward chunks instead of piping.
+    redactingTrace.on("data", (chunk: Buffer) => {
+      destination.write(chunk.toString());
+    });
     const logger = pino({ level: "trace" }, redactingTrace);
-    closeTrace = createTraceCloser(redactingTrace, traceDestination);
-    const runtimeSettings = {
+    const closeTraceStreams = createTraceCloser(redactingTrace, destination);
+    closeTrace = closeTraceStreams;
+    const runtimeSettings: ProviderRuntimeSettings = {
       command: { mode: "replace", argv: [openCodeCommand] },
-      env: runtimeEnv,
-    } as const;
-    serverManager = new OpenCodeServerManager({
+      env: definedEnvEntries(runtimeEnv),
+    };
+    const activeServerManager = new OpenCodeServerManager({
       logger,
       runtimeSettings,
       baseEnv: runtimeEnv,
       resolveHomeDir: () => paths.home,
     });
-    const openCodeClient = new OpenCodeAgentClient(logger, runtimeSettings, { serverManager });
-    daemon = await createTestPaseoDaemon({
+    serverManager = activeServerManager;
+    const openCodeClient = new OpenCodeAgentClient(logger, runtimeSettings, {
+      serverManager: activeServerManager,
+    });
+    const activeDaemon = await createTestPaseoDaemon({
       agentClients: { opencode: openCodeClient },
       logger,
       paseoHomeRoot: paths.paseoHomeRoot,
       staticDir: path.join(paths.root, "static"),
       cleanup: false,
     });
-    client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
-    await client.connect();
-    await client.fetchAgents({ subscribe: {} });
+    daemon = activeDaemon;
+    const activeClient = new DaemonClient({ url: `ws://127.0.0.1:${activeDaemon.port}/ws` });
+    client = activeClient;
+    await activeClient.connect();
+    await activeClient.fetchAgents({ subscribe: {} });
 
     return {
-      client,
-      daemon,
+      client: activeClient,
+      daemon: activeDaemon,
       model,
       workspace: paths.workspace,
       artifacts: paths.artifacts,
       close: async (passed) => {
         try {
-          await client.close().catch(() => undefined);
-          await daemon.close().catch(() => undefined);
-          await serverManager.shutdown().catch(() => undefined);
-          closeTrace();
+          await activeClient.close().catch(() => undefined);
+          await activeDaemon.close().catch(() => undefined);
+          await activeServerManager.shutdown().catch(() => undefined);
+          closeTraceStreams();
           if (passed) {
             rmSync(paths.root, { recursive: true, force: true });
           }
@@ -258,6 +269,12 @@ function resolveModel(openRouterApiKey: string | null): string {
     return explicitModel;
   }
   return openRouterApiKey ? DEFAULT_OPENROUTER_MODEL : NO_AUTH_MODEL;
+}
+
+function definedEnvEntries(env: NodeJS.ProcessEnv): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
 }
 
 function buildRuntimeEnv(paths: RuntimePaths, openRouterApiKey: string | null): NodeJS.ProcessEnv {

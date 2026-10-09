@@ -48,13 +48,12 @@ function pickModelSwitchPair(provider: string, models: Array<{ id: string }>): [
   return [first, ids[1] ?? `${first}-switch-target`];
 }
 
-function pickThinkingSwitchOption(
-  provider: string,
-  models: Array<{
+function pickThinkingSwitchOption<
+  TModel extends {
     thinkingOptions?: Array<{ id: string }>;
     defaultThinkingOptionId?: string;
-  }>,
-): { model: (typeof models)[number]; thinkingOptionId: string } {
+  },
+>(provider: string, models: TModel[]): { model: TModel; thinkingOptionId: string } {
   const modelWithOptions = models.find((m) => (m.thinkingOptions?.length ?? 0) > 0);
   if (!modelWithOptions) {
     const first = models[0];

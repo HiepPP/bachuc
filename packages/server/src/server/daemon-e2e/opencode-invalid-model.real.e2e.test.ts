@@ -58,7 +58,7 @@ describe("daemon E2E (real opencode) - invalid model handling", () => {
       expect(finish.error).toBeTruthy();
 
       const snapshot = await client.fetchAgent({ agentId: agent.id });
-      expect(snapshot.agent?.status).toBe("error");
+      expect(snapshot?.agent?.status).toBe("error");
     } finally {
       await client.close().catch(() => undefined);
       await daemon.close();

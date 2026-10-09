@@ -71,15 +71,17 @@ test("Hub MCP configuration reaches the provider alongside Paseo MCP without ent
   expect(hub.latestProviderCreateConfig()?.toolPolicy).toEqual({
     preapproved: [{ kind: "mcp", server: "hub", tool: "finish_execution" }],
   });
-  expect(response.payload.agent).not.toHaveProperty("config");
-  expect(response.payload.agent).not.toHaveProperty("mcpServers");
-  expect(response.payload.agent.persistence?.metadata).toEqual({
-    conversationId: response.payload.agent.persistence?.sessionId,
-    cwd: response.payload.agent.cwd,
+  const createdAgent = response.payload.agent;
+  if (!createdAgent) throw new Error("Expected the Hub create response to include an agent");
+  expect(createdAgent).not.toHaveProperty("config");
+  expect(createdAgent).not.toHaveProperty("mcpServers");
+  expect(createdAgent.persistence?.metadata).toEqual({
+    conversationId: createdAgent.persistence?.sessionId,
+    cwd: createdAgent.cwd,
   });
-  expect(JSON.stringify(response.payload.agent)).not.toContain(bearer);
-  expect(JSON.stringify(response.payload.agent)).not.toContain("private-build");
-  expect(JSON.stringify(response.payload.agent)).not.toContain("finish_execution");
+  expect(JSON.stringify(createdAgent)).not.toContain(bearer);
+  expect(JSON.stringify(createdAgent)).not.toContain("private-build");
+  expect(JSON.stringify(createdAgent)).not.toContain("finish_execution");
 
   const update = hub.hubMessages().find((message) => message.type === "hub.execution.agent.update");
   expect(update).toMatchObject({

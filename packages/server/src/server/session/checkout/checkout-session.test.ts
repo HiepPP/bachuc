@@ -35,7 +35,9 @@ function isCheckDetailsResponse(msg: SessionOutboundMessage): boolean {
   return msg.type === "checkout.forge.get_check_details.response";
 }
 
-function isTimelineResponse(msg: SessionOutboundMessage): boolean {
+function isTimelineResponse(
+  msg: SessionOutboundMessage,
+): msg is Extract<SessionOutboundMessage, { type: "pull_request_timeline_response" }> {
   return msg.type === "pull_request_timeline_response";
 }
 
@@ -213,12 +215,13 @@ function createGitSnapshot(
       isDirty: overrides?.isDirty ?? false,
       baseRef: null,
       aheadBehind: null,
+      upstreamRef: null,
       aheadOfOrigin: null,
       behindOfOrigin: null,
       hasRemote: false,
       diffStat: null,
     },
-    forge: { featuresEnabled: false, pullRequest: null, error: null },
+    forge: { featuresEnabled: false, authState: "no_remote", pullRequest: null, error: null },
   };
 }
 
@@ -925,6 +928,7 @@ describe("CheckoutSession", () => {
         ...createGitSnapshot(cwd, "feature/gitlab-auto-merge"),
         forge: {
           featuresEnabled: true,
+          authState: "authenticated",
           error: null,
           pullRequest: {
             number: 14,
@@ -1040,15 +1044,16 @@ describe("CheckoutSession", () => {
       const gitlabCalls: Array<{ cwd: string; checkRunId: number }> = [];
       const gitlabService: Partial<ForgeService> = {
         async getCheckDetails(input) {
-          gitlabCalls.push({ cwd: input.cwd, checkRunId: input.checkRunId });
+          const checkRunId = input.checkRunId ?? 0;
+          gitlabCalls.push({ cwd: input.cwd, checkRunId });
           return {
-            checkRunId: input.checkRunId,
+            checkRunId,
             name: "Pipeline (feat/x)",
             annotations: [],
             failedJobs: [],
             truncated: false,
             pipeline: {
-              id: input.checkRunId,
+              id: checkRunId,
               status: "success",
               rawStatus: "success",
               url: "https://gitlab.example.com/g/r/-/pipelines/306",
@@ -1079,7 +1084,7 @@ describe("CheckoutSession", () => {
       const { checkout, emitted } = makeCheckoutSession({
         github: {
           async getCheckDetails(input) {
-            githubCalls.push(input.checkRunId);
+            githubCalls.push(input.checkRunId ?? 0);
             throw new Error("github adapter should not be reached for a gitlab cwd");
           },
         },
@@ -1653,7 +1658,7 @@ describe("CheckoutSession", () => {
             forge: "gitlab",
             host: "gitlab.com",
             service: {
-              searchIssuesAndPrs: async (input) => {
+              searchIssuesAndPrs: async (input: unknown) => {
                 gitlabSearches.push(input);
                 return {
                   items: [

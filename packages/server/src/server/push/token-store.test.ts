@@ -55,7 +55,9 @@ describe.skipIf(process.platform === "win32")("PushTokenStore file permissions",
       const pushNotifications = createPushNotifications({
         logger: createLogger(),
         filePath: tokenPath,
-        deliver: async (tokens) => deliveries.push(tokens),
+        deliver: async (tokens) => {
+          deliveries.push(tokens);
+        },
       });
       await pushNotifications.send({ title: "Agent finished", body: "Done" });
 

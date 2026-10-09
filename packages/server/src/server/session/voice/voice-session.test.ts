@@ -149,7 +149,7 @@ describe("VoiceSession streaming transcription", () => {
     }
     host.interruptAgentIfRunning = recordInterruption;
     await voiceSession.handleSetVoiceMode(true, VOICE_AGENT_ID);
-    const playback = speak({ text: "A spoken response." });
+    const playback = speak({ text: "A spoken response.", callerAgentId: VOICE_AGENT_ID });
     try {
       await waitForAudioOutput(host);
       detector.emit("speech_started");
@@ -185,6 +185,7 @@ describe("VoiceSession streaming transcription", () => {
     await voiceSession.handleSetVoiceMode(true, VOICE_AGENT_ID);
     const playback = speak({
       text: "First sentence. Second sentence. Third sentence.",
+      callerAgentId: VOICE_AGENT_ID,
       signal: external.signal,
     });
     try {

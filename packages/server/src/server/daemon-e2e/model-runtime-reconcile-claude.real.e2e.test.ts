@@ -42,8 +42,8 @@ describe("daemon E2E (real claude) - runtime model reconciliation", () => {
 
       const modelsResult = await client.listProviderModels("claude", { cwd });
       expect(modelsResult.error).toBeNull();
-      expect(modelsResult.models.length).toBeGreaterThan(0);
-      const modelIds = new Set(modelsResult.models.map((model) => model.id));
+      expect(modelsResult.models?.length).toBeGreaterThan(0);
+      const modelIds = new Set(modelsResult.models?.map((model) => model.id));
 
       const agent = await client.createAgent({
         provider: "claude",

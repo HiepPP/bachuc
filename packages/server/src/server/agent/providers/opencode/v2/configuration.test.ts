@@ -9,7 +9,7 @@ describe("OpenCode v2 permission rules", () => {
         provider: "opencode",
         cwd: "/tmp/project",
         providerOptions: { permission: { bash: { pwd: "allow" }, task: "ask" } },
-        toolPolicy: { preapproved: [{ server: "paseo.host", tool: "read/info" }] },
+        toolPolicy: { preapproved: [{ kind: "mcp", server: "paseo.host", tool: "read/info" }] },
       }),
     ).toEqual([
       { action: "paseo_host_read_info", resource: "*", effect: "allow" },

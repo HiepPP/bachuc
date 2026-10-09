@@ -120,10 +120,11 @@ class FakeChildProcess extends EventEmitter {
       }, 0);
     }
 
-    if (this.behavior.emitError) {
+    const emitError = this.behavior.emitError;
+    if (emitError) {
       this.schedule(() => {
         if (this.closed) return;
-        this.finishError(this.behavior.emitError);
+        this.finishError(emitError);
       }, this.behavior.delayMs ?? 0);
       return;
     }

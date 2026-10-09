@@ -96,7 +96,7 @@ describe("OpenCode bridge adapter", () => {
       {
         provider: "opencode",
         cwd: "/workspace/two",
-        mcpServers: { custom: { transport: "http", url: "http://127.0.0.1:9999/mcp" } },
+        mcpServers: { custom: { type: "http", url: "http://127.0.0.1:9999/mcp" } },
       },
       { env: { PASEO_AGENT_ID: "two" } },
     );

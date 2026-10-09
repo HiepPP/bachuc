@@ -14,6 +14,8 @@ import {
   type GitHubCommandRunner,
   type GitHubCommandRunnerOptions,
   type CurrentPullRequestStatus,
+  type ForgeReadOptions,
+  type ForgeSpecificStatusFacts,
   type GitHubPullRequestStatusFacts,
 } from "./github-service.js";
 import { isPlatform } from "../test-utils/platform.js";
@@ -337,7 +339,7 @@ function createCurrentPullRequestStatus(
 
 function githubStatusFacts(
   overrides: Partial<GitHubPullRequestStatusFacts> = {},
-): GitHubPullRequestStatusFacts & { forge: "github" } {
+): GitHubPullRequestStatusFacts & { forge: "github" } & ForgeSpecificStatusFacts {
   return {
     forge: "github",
     mergeStateStatus: "CLEAN",

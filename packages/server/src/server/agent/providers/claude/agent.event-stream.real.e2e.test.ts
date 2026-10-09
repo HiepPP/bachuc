@@ -94,7 +94,7 @@ async function startTurnAndCollectEvents(
 
   return await new Promise((resolve, reject) => {
     const events: AgentStreamEvent[] = [];
-    let turnId: string | null = null;
+    let turnId = null as string | null;
     let settled = false;
 
     const timeout = setTimeout(() => {
@@ -160,9 +160,9 @@ function assertInvariants(events: AgentStreamEvent[], foregroundTurnIds: string[
   }
 
   // Invariant 2: Every turn_started has exactly one matching terminal
-  const turnStartedIds = events
-    .filter((e) => e.type === "turn_started" && hasTurnId(e))
-    .map((e) => e.turnId);
+  const turnStartedIds = events.flatMap((e) =>
+    e.type === "turn_started" && hasTurnId(e) ? [e.turnId] : [],
+  );
 
   for (const turnId of turnStartedIds) {
     const terminals = eventsForTurn(events, turnId).filter(isTerminalEvent);
@@ -281,7 +281,9 @@ test("Test 3: Lifecycle doesn't get stuck in running", async () => {
     ).toBe(0);
 
     // Any turn_started after terminal must have a different turnId
-    for (const ts of afterTerminal.filter((e) => e.type === "turn_started" && hasTurnId(e))) {
+    for (const ts of afterTerminal.filter(
+      (e): e is EventWithTurnId => e.type === "turn_started" && hasTurnId(e),
+    )) {
       expect(ts.turnId).not.toBe(turnId);
     }
 
@@ -420,6 +422,7 @@ test("Test 5: Interruption", async () => {
       events.slice(terminalIdx + 1).filter((e) => hasTurnId(e) && e.turnId === turnId).length,
     ).toBe(0);
 
+    if (turnId === null) throw new Error("Expected the interrupted turn to start");
     assertInvariants(events, [turnId]);
   } finally {
     await cleanupSession(handle);

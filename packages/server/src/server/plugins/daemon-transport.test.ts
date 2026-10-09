@@ -4,7 +4,7 @@ import type { PluginProcessMessage, PluginProcessRequest } from "./plugin-proces
 
 describe("plugin daemon IPC transport", () => {
   it("preserves incoming text and binary frame order", async () => {
-    let receive: ((message: PluginProcessRequest) => void) | null = null;
+    let receive = null as ((message: PluginProcessRequest) => void) | null;
     const sent: PluginProcessMessage[] = [];
     const factory = createPluginDaemonTransportFactory({
       send(message) {

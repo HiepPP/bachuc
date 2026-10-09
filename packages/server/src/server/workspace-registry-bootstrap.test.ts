@@ -8,7 +8,12 @@ import { createTestLogger } from "../test-utils/test-logger.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { createNoopWorkspaceGitService } from "./test-utils/workspace-git-service-stub.js";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
-import { FileBackedProjectRegistry, FileBackedWorkspaceRegistry } from "./workspace-registry.js";
+import {
+  createPersistedProjectRecord,
+  createPersistedWorkspaceRecord,
+  FileBackedProjectRegistry,
+  FileBackedWorkspaceRegistry,
+} from "./workspace-registry.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
 import { deriveProjectKey } from "./project-key.js";
 
@@ -65,7 +70,6 @@ describe("bootstrapWorkspaceRegistries", () => {
       cwd: missingDirectory,
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
-      lastActivityAt: null,
       lastUserMessageAt: null,
       title: null,
       labels: {},
@@ -106,7 +110,6 @@ describe("bootstrapWorkspaceRegistries", () => {
       cwd,
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
-      lastActivityAt: null,
       lastUserMessageAt: null,
       title: null,
       labels: {},
@@ -146,7 +149,6 @@ describe("bootstrapWorkspaceRegistries", () => {
       cwd: NON_GIT_PROJECT,
       createdAt: "2026-03-01T00:00:00.000Z",
       updatedAt: "2026-03-01T00:00:00.000Z",
-      lastActivityAt: null,
       lastUserMessageAt: null,
       title: null,
       labels: {},
@@ -258,25 +260,27 @@ describe("bootstrapWorkspaceRegistries", () => {
   test("does not rematerialize when registry files already exist", async () => {
     await projectRegistry.initialize();
     await workspaceRegistry.initialize();
-    await projectRegistry.upsert({
-      projectId: "proj-existing",
-      rootPath: "/tmp/existing",
-      kind: "non_git",
-      displayName: "existing",
-      createdAt: "2026-03-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
-      archivedAt: null,
-    });
-    await workspaceRegistry.upsert({
-      workspaceId: "ws-existing",
-      projectId: "proj-existing",
-      cwd: "/tmp/existing",
-      kind: "directory",
-      displayName: "existing",
-      createdAt: "2026-03-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
-      archivedAt: null,
-    });
+    await projectRegistry.upsert(
+      createPersistedProjectRecord({
+        projectId: "proj-existing",
+        rootPath: "/tmp/existing",
+        kind: "non_git",
+        displayName: "existing",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      }),
+    );
+    await workspaceRegistry.upsert(
+      createPersistedWorkspaceRecord({
+        workspaceId: "ws-existing",
+        projectId: "proj-existing",
+        cwd: "/tmp/existing",
+        kind: "directory",
+        displayName: "existing",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      }),
+    );
 
     await agentStorage.initialize();
     await agentStorage.upsert({
@@ -390,35 +394,38 @@ describe("bootstrapWorkspaceRegistries", () => {
   test("migrates cwd-only agents to the oldest existing same-cwd workspace", async () => {
     await projectRegistry.initialize();
     await workspaceRegistry.initialize();
-    await projectRegistry.upsert({
-      projectId: NON_GIT_PROJECT,
-      rootPath: NON_GIT_PROJECT,
-      kind: "non_git",
-      displayName: "non-git-project",
-      createdAt: "2026-03-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
-      archivedAt: null,
-    });
-    await workspaceRegistry.upsert({
-      workspaceId: "ws-newer",
-      projectId: NON_GIT_PROJECT,
-      cwd: NON_GIT_PROJECT,
-      kind: "directory",
-      displayName: "newer",
-      createdAt: "2026-03-02T00:00:00.000Z",
-      updatedAt: "2026-03-02T00:00:00.000Z",
-      archivedAt: null,
-    });
-    await workspaceRegistry.upsert({
-      workspaceId: "ws-older",
-      projectId: NON_GIT_PROJECT,
-      cwd: NON_GIT_PROJECT,
-      kind: "directory",
-      displayName: "older",
-      createdAt: "2026-03-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
-      archivedAt: null,
-    });
+    await projectRegistry.upsert(
+      createPersistedProjectRecord({
+        projectId: NON_GIT_PROJECT,
+        rootPath: NON_GIT_PROJECT,
+        kind: "non_git",
+        displayName: "non-git-project",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      }),
+    );
+    await workspaceRegistry.upsert(
+      createPersistedWorkspaceRecord({
+        workspaceId: "ws-newer",
+        projectId: NON_GIT_PROJECT,
+        cwd: NON_GIT_PROJECT,
+        kind: "directory",
+        displayName: "newer",
+        createdAt: "2026-03-02T00:00:00.000Z",
+        updatedAt: "2026-03-02T00:00:00.000Z",
+      }),
+    );
+    await workspaceRegistry.upsert(
+      createPersistedWorkspaceRecord({
+        workspaceId: "ws-older",
+        projectId: NON_GIT_PROJECT,
+        cwd: NON_GIT_PROJECT,
+        kind: "directory",
+        displayName: "older",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      }),
+    );
 
     await agentStorage.initialize();
     await agentStorage.upsert({
@@ -455,25 +462,27 @@ describe("bootstrapWorkspaceRegistries", () => {
   test("migrated legacy agents stay owned by the deterministic workspace when a same-cwd workspace is added later", async () => {
     await projectRegistry.initialize();
     await workspaceRegistry.initialize();
-    await projectRegistry.upsert({
-      projectId: NON_GIT_PROJECT,
-      rootPath: NON_GIT_PROJECT,
-      kind: "non_git",
-      displayName: "non-git-project",
-      createdAt: "2026-03-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
-      archivedAt: null,
-    });
-    await workspaceRegistry.upsert({
-      workspaceId: "ws-original-owner",
-      projectId: NON_GIT_PROJECT,
-      cwd: NON_GIT_PROJECT,
-      kind: "directory",
-      displayName: "original",
-      createdAt: "2026-03-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
-      archivedAt: null,
-    });
+    await projectRegistry.upsert(
+      createPersistedProjectRecord({
+        projectId: NON_GIT_PROJECT,
+        rootPath: NON_GIT_PROJECT,
+        kind: "non_git",
+        displayName: "non-git-project",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      }),
+    );
+    await workspaceRegistry.upsert(
+      createPersistedWorkspaceRecord({
+        workspaceId: "ws-original-owner",
+        projectId: NON_GIT_PROJECT,
+        cwd: NON_GIT_PROJECT,
+        kind: "directory",
+        displayName: "original",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      }),
+    );
 
     await agentStorage.initialize();
     await agentStorage.upsert({
@@ -502,16 +511,17 @@ describe("bootstrapWorkspaceRegistries", () => {
       workspaceGitService,
       logger,
     });
-    await workspaceRegistry.upsert({
-      workspaceId: "ws-created-later",
-      projectId: NON_GIT_PROJECT,
-      cwd: NON_GIT_PROJECT,
-      kind: "directory",
-      displayName: "created later",
-      createdAt: "2026-03-04T00:00:00.000Z",
-      updatedAt: "2026-03-04T00:00:00.000Z",
-      archivedAt: null,
-    });
+    await workspaceRegistry.upsert(
+      createPersistedWorkspaceRecord({
+        workspaceId: "ws-created-later",
+        projectId: NON_GIT_PROJECT,
+        cwd: NON_GIT_PROJECT,
+        kind: "directory",
+        displayName: "created later",
+        createdAt: "2026-03-04T00:00:00.000Z",
+        updatedAt: "2026-03-04T00:00:00.000Z",
+      }),
+    );
     await bootstrapWorkspaceRegistries({
       paseoHome,
       agentStorage,
@@ -529,16 +539,17 @@ describe("bootstrapWorkspaceRegistries", () => {
 
   test("preserves existing workspace IDs when only the projects file is missing", async () => {
     await workspaceRegistry.initialize();
-    await workspaceRegistry.upsert({
-      workspaceId: "ws-existing",
-      projectId: NON_GIT_PROJECT,
-      cwd: NON_GIT_PROJECT,
-      kind: "directory",
-      displayName: "non-git-project",
-      createdAt: "2026-03-01T00:00:00.000Z",
-      updatedAt: "2026-03-01T00:00:00.000Z",
-      archivedAt: null,
-    });
+    await workspaceRegistry.upsert(
+      createPersistedWorkspaceRecord({
+        workspaceId: "ws-existing",
+        projectId: NON_GIT_PROJECT,
+        cwd: NON_GIT_PROJECT,
+        kind: "directory",
+        displayName: "non-git-project",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      }),
+    );
 
     await agentStorage.initialize();
     await agentStorage.upsert({

@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import net from "node:net";
+import type { Duplex } from "node:stream";
 import express from "express";
 import { describe, expect, it } from "vitest";
 import pino from "pino";
@@ -319,7 +320,7 @@ async function startForwardedHeadersFixture(): Promise<ForwardedFixture> {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(req.headers));
   });
-  const upgradeSockets: net.Socket[] = [];
+  const upgradeSockets: Duplex[] = [];
   upstream.on("upgrade", (req, socket) => {
     upgradeSockets.push(socket);
     // The client resets this connection once it has the echo, so the reset

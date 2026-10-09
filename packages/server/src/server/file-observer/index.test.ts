@@ -372,7 +372,10 @@ async function createRoot(): Promise<string> {
 
 function expectFileChanges(paths: string[], type?: FileChange["type"]) {
   const pending = new Set(paths);
-  const { promise: complete, resolve } = Promise.withResolvers<void>();
+  let resolve!: () => void;
+  const complete = new Promise<void>((done) => {
+    resolve = done;
+  });
   return {
     complete,
     record(event: FileChange) {

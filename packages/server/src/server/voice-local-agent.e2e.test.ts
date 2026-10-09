@@ -85,6 +85,7 @@ function waitForSignal<T>(
       speech: {
         providers: {
           dictationStt: { provider: "openai", explicit: true },
+          voiceTurnDetection: { provider: "local", explicit: false, enabled: true },
           voiceStt: { provider: "openai", explicit: true },
           voiceTts: { provider: "openai", explicit: true },
         },
@@ -172,6 +173,8 @@ function waitForSignal<T>(
     expect(speakToolName.toLowerCase()).toContain("speak");
 
     const agents = await ctx.client.fetchAgents();
-    expect(agents.some((agent) => String(agent.labels?.surface ?? "") === "voice")).toBe(false);
+    expect(
+      agents.entries.some((entry) => String(entry.agent.labels?.surface ?? "") === "voice"),
+    ).toBe(false);
   }, 180000);
 });

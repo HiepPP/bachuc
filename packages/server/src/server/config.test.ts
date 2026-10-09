@@ -121,7 +121,7 @@ describe("server config", () => {
         "features.voiceMode.tts.model",
       ],
     },
-  ])("classifies speech overrides for $name", ({ providers, expected }) => {
+  ] as const)("classifies speech overrides for $name", ({ providers, expected }) => {
     const config = resolveConfigFromPersisted(
       "/tmp/paseo-speech-override-classification",
       {

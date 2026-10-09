@@ -31,15 +31,15 @@ export function textByRole(
   items: AgentTimelineItem[],
   role: "user_message" | "assistant_message",
 ): string {
-  return items
-    .filter((item) => item.type === role)
-    .map((item) => item.text)
-    .join("\n");
+  return items.flatMap((item) => (item.type === role ? [item.text] : [])).join("\n");
 }
+
+type UserMessageTimelineItem = Extract<AgentTimelineItem, { type: "user_message" }>;
 
 export function userMessageIdForToken(items: AgentTimelineItem[], token: string): string {
   const item = items.find(
-    (candidate) => candidate.type === "user_message" && candidate.text.includes(token),
+    (candidate): candidate is UserMessageTimelineItem =>
+      candidate.type === "user_message" && candidate.text.includes(token),
   );
   if (!item?.messageId) {
     throw new Error(`Timeline did not contain a user message id for ${token}`);

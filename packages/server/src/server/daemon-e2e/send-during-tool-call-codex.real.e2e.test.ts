@@ -41,15 +41,32 @@ function generateClientMessageId(): string {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
+type AgentStreamMessage = Extract<SessionOutboundMessage, { type: "agent_stream" }>;
+type TimelineEntries = Awaited<ReturnType<DaemonClient["fetchAgentTimeline"]>>["entries"];
+
+function agentStreamMessages(
+  messages: SessionOutboundMessage[],
+  agentId: string,
+): AgentStreamMessage[] {
+  return messages.flatMap((message) =>
+    message.type === "agent_stream" && message.payload.agentId === agentId ? [message] : [],
+  );
+}
+
+function recentAssistantTexts(entries: TimelineEntries | undefined, count: number): string[] {
+  return (entries ?? [])
+    .flatMap((entry) => (entry.item.type === "assistant_message" ? [entry.item.text] : []))
+    .slice(-count);
+}
+
 function getAgentStatuses(messages: SessionOutboundMessage[], agentId: string): string[] {
-  return messages
-    .filter(
-      (message) =>
-        message.type === "agent_update" &&
-        message.payload.kind === "upsert" &&
-        message.payload.agent.id === agentId,
-    )
-    .map((message) => message.payload.agent.status);
+  return messages.flatMap((message) =>
+    message.type === "agent_update" &&
+    message.payload.kind === "upsert" &&
+    message.payload.agent.id === agentId
+      ? [message.payload.agent.status]
+      : [],
+  );
 }
 
 function getAgentStatusesBeforeFirstAssistant(
@@ -69,15 +86,12 @@ function getAgentStatusesBeforeFirstAssistant(
 }
 
 function getAssistantTexts(messages: SessionOutboundMessage[], agentId: string): string[] {
-  return messages
-    .filter(
-      (message) =>
-        message.type === "agent_stream" &&
-        message.payload.agentId === agentId &&
-        message.payload.event.type === "timeline" &&
-        message.payload.event.item.type === "assistant_message",
-    )
-    .map((message) => message.payload.event.item.text);
+  return agentStreamMessages(messages, agentId).flatMap((message) => {
+    const { event } = message.payload;
+    return event.type === "timeline" && event.item.type === "assistant_message"
+      ? [event.item.text]
+      : [];
+  });
 }
 
 function hasProviderLimitText(text: string): boolean {
@@ -85,10 +99,7 @@ function hasProviderLimitText(text: string): boolean {
 }
 
 function assertNoProviderLimit(timeline: Awaited<ReturnType<DaemonClient["fetchAgentTimeline"]>>) {
-  const assistantTexts = timeline.entries
-    .filter((entry) => entry.item.type === "assistant_message")
-    .slice(-5)
-    .map((entry) => entry.item.text);
+  const assistantTexts = recentAssistantTexts(timeline.entries, 5);
   const limitText = assistantTexts.find((text) => hasProviderLimitText(text));
   if (limitText) {
     throw new Error(`Codex provider rejected the run: ${limitText}`);
@@ -197,22 +208,16 @@ async function waitForRunningCodexSleep(
   }
 
   const timeline = await client.fetchAgentTimeline(agentId, { limit: 100 }).catch(() => null);
-  const recentToolCalls =
-    timeline?.entries
-      .filter((entry) => entry.item.type === "tool_call")
-      .slice(-10)
-      .map((entry) => ({
-        name: entry.item.name,
-        status: entry.item.status,
-        callId: entry.item.callId,
-      })) ?? [];
-  const recentAssistantTexts =
-    timeline?.entries
-      .filter((entry) => entry.item.type === "assistant_message")
-      .slice(-5)
-      .map((entry) => entry.item.text) ?? [];
+  const recentToolCalls = (timeline?.entries ?? [])
+    .flatMap((entry) =>
+      entry.item.type === "tool_call"
+        ? [{ name: entry.item.name, status: entry.item.status, callId: entry.item.callId }]
+        : [],
+    )
+    .slice(-10);
+  const recentAssistantTextsSummary = recentAssistantTexts(timeline?.entries, 5);
   throw new Error(
-    `Timed out waiting for Codex to report it was waiting on sleep. Recent tool_calls=${JSON.stringify(recentToolCalls)} recent assistant text=${JSON.stringify(recentAssistantTexts)}`,
+    `Timed out waiting for Codex to report it was waiting on sleep. Recent tool_calls=${JSON.stringify(recentToolCalls)} recent assistant text=${JSON.stringify(recentAssistantTextsSummary)}`,
   );
 }
 
@@ -287,14 +292,14 @@ describe("daemon E2E (real codex) - send message during tool call", () => {
         15_000,
         client.waitForAgentUpsert(agent.id, (snapshot) => snapshot.status === "running", 10_000),
       );
-      const initialTurnStarts = resources.collector.messages.filter(
-        (message) =>
-          message.type === "agent_stream" &&
-          message.payload.agentId === agent.id &&
-          message.payload.event.type === "turn_started",
+      const initialTurnStarts = agentStreamMessages(resources.collector.messages, agent.id).flatMap(
+        (message) => {
+          const { event } = message.payload;
+          return event.type === "turn_started" ? [event] : [];
+        },
       );
       expect(initialTurnStarts).toHaveLength(1);
-      const initialTurnId = initialTurnStarts[0]?.payload.event.turnId;
+      const initialTurnId = initialTurnStarts[0]?.turnId;
       expect(initialTurnId).toEqual(expect.any(String));
       const steeringMessageId = generateClientMessageId();
       const messagesBeforeSteer = resources.collector.messages.length;

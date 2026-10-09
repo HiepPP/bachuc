@@ -188,7 +188,7 @@ await server.connect(new StdioServerTransport());
         cwd: root,
         model: process.env.OPENCODE_TEST_MODEL ?? "openai/gpt-6-astra",
         mcpServers: { validation: { type: "stdio", command: process.execPath, args: [fixture] } },
-        toolPolicy: { preapproved: [{ server: "validation", tool: "marker" }] },
+        toolPolicy: { preapproved: [{ kind: "mcp", server: "validation", tool: "marker" }] },
       },
       undefined,
       { persistSession: false },
@@ -239,6 +239,7 @@ test("v2 stops a running tool before replacement work and imports the same sessi
     expect((await replacement).finalText.trim()).toBe("REPLACED");
     expect(tools.canceledTurns()).toBe(1);
     const handle = await session.describePersistence();
+    if (!handle) throw new Error("Expected a persistence handle");
     const listing = await client.listImportableSessions({ cwd: root });
     expect(listing).toEqual(
       expect.arrayContaining([expect.objectContaining({ providerHandleId: handle.nativeHandle })]),

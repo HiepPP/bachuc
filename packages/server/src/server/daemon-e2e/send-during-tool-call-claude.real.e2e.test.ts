@@ -119,16 +119,31 @@ function isCapturedSleepCancellation(
   );
 }
 
+type AgentStreamMessage = Extract<SessionOutboundMessage, { type: "agent_stream" }>;
+type TimelineEntries = Awaited<ReturnType<DaemonClient["fetchAgentTimeline"]>>["entries"];
+
+function agentStreamMessages(
+  messages: SessionOutboundMessage[],
+  agentId: string,
+): AgentStreamMessage[] {
+  return messages.flatMap((message) =>
+    message.type === "agent_stream" && message.payload.agentId === agentId ? [message] : [],
+  );
+}
+
+function recentAssistantTexts(entries: TimelineEntries | undefined, count: number): string[] {
+  return (entries ?? [])
+    .flatMap((entry) => (entry.item.type === "assistant_message" ? [entry.item.text] : []))
+    .slice(-count);
+}
+
 function getAssistantTexts(messages: SessionOutboundMessage[], agentId: string): string[] {
-  return messages
-    .filter(
-      (message) =>
-        message.type === "agent_stream" &&
-        message.payload.agentId === agentId &&
-        message.payload.event.type === "timeline" &&
-        message.payload.event.item.type === "assistant_message",
-    )
-    .map((message) => message.payload.event.item.text);
+  return agentStreamMessages(messages, agentId).flatMap((message) => {
+    const { event } = message.payload;
+    return event.type === "timeline" && event.item.type === "assistant_message"
+      ? [event.item.text]
+      : [];
+  });
 }
 
 function hasProviderLimitText(text: string): boolean {
@@ -145,14 +160,13 @@ function countTurnStarted(messages: SessionOutboundMessage[], agentId: string): 
 }
 
 function getAgentStatuses(messages: SessionOutboundMessage[], agentId: string): string[] {
-  return messages
-    .filter(
-      (message) =>
-        message.type === "agent_update" &&
-        message.payload.kind === "upsert" &&
-        message.payload.agent.id === agentId,
-    )
-    .map((message) => message.payload.agent.status);
+  return messages.flatMap((message) =>
+    message.type === "agent_update" &&
+    message.payload.kind === "upsert" &&
+    message.payload.agent.id === agentId
+      ? [message.payload.agent.status]
+      : [],
+  );
 }
 
 function getStatusesBeforeFirstAssistant(
@@ -206,11 +220,7 @@ async function waitForRunningToolCall(
     }
 
     const timeline = await client.fetchAgentTimeline(agentId, { limit: 100 }).catch(() => null);
-    const assistantTexts =
-      timeline?.entries
-        .filter((entry) => entry.item.type === "assistant_message")
-        .slice(-5)
-        .map((entry) => entry.item.text) ?? [];
+    const assistantTexts = recentAssistantTexts(timeline?.entries, 5);
     const limitText = assistantTexts.find((text) => hasProviderLimitText(text));
     if (limitText) {
       throw new Error(
@@ -232,40 +242,25 @@ async function waitForRunningToolCall(
   }
 
   const timeline = await client.fetchAgentTimeline(agentId, { limit: 100 }).catch(() => null);
-  const recentToolCalls =
-    timeline?.entries
-      .filter((entry) => entry.item.type === "tool_call")
-      .slice(-10)
-      .map((entry) => ({
-        name: entry.item.name,
-        status: entry.item.status,
-        callId: entry.item.callId,
-      })) ?? [];
-  const recentAssistantTexts =
-    timeline?.entries
-      .filter((entry) => entry.item.type === "assistant_message")
-      .slice(-5)
-      .map((entry) => entry.item.text) ?? [];
+  const recentToolCalls = (timeline?.entries ?? [])
+    .flatMap((entry) =>
+      entry.item.type === "tool_call"
+        ? [{ name: entry.item.name, status: entry.item.status, callId: entry.item.callId }]
+        : [],
+    )
+    .slice(-10);
+  const recentAssistantTextsSummary = recentAssistantTexts(timeline?.entries, 5);
   const snapshot = await client.fetchAgent({ agentId }).catch(() => null);
-  const streamFailures = collector.messages
-    .filter(
-      (message) =>
-        message.type === "agent_stream" &&
-        message.payload.agentId === agentId &&
-        (message.payload.event.type === "turn_failed" ||
-          message.payload.event.type === "turn_canceled"),
-    )
-    .map((message) => message.payload.event);
-  const permissionEvents = collector.messages
-    .filter(
-      (message) =>
-        message.type === "agent_stream" &&
-        message.payload.agentId === agentId &&
-        message.payload.event.type === "permission_requested",
-    )
-    .map((message) => message.payload.event);
+  const streamFailures = agentStreamMessages(collector.messages, agentId).flatMap((message) => {
+    const { event } = message.payload;
+    return event.type === "turn_failed" || event.type === "turn_canceled" ? [event] : [];
+  });
+  const permissionEvents = agentStreamMessages(collector.messages, agentId).flatMap((message) => {
+    const { event } = message.payload;
+    return event.type === "permission_requested" ? [event] : [];
+  });
   throw new Error(
-    `Timed out waiting for running tool call. lifecycle=${snapshot?.agent.status ?? "missing"} activeTurn=${snapshot?.agent.activeForegroundTurnId ?? "none"} recent tool_calls=${JSON.stringify(recentToolCalls)} recent assistant text=${JSON.stringify(recentAssistantTexts)} stream failures=${JSON.stringify(streamFailures)} permissions=${JSON.stringify(permissionEvents)}`,
+    `Timed out waiting for running tool call. lifecycle=${snapshot?.agent.status ?? "missing"} activeTurn=${snapshot?.agent.activeTurn?.turnId ?? "none"} recent tool_calls=${JSON.stringify(recentToolCalls)} recent assistant text=${JSON.stringify(recentAssistantTextsSummary)} stream failures=${JSON.stringify(streamFailures)} permissions=${JSON.stringify(permissionEvents)}`,
   );
 }
 
@@ -286,11 +281,7 @@ async function waitForRunningClaudeSleep(
 
     // Projection is only diagnostic here; tool lifecycle rows are collapsed by fetch.
     const timeline = await client.fetchAgentTimeline(agentId, { limit: 100 }).catch(() => null);
-    const assistantTexts =
-      timeline?.entries
-        .filter((entry) => entry.item.type === "assistant_message")
-        .slice(-5)
-        .map((entry) => entry.item.text) ?? [];
+    const assistantTexts = recentAssistantTexts(timeline?.entries, 5);
     const limitText = assistantTexts.find((text) => hasProviderLimitText(text));
     if (limitText) {
       throw new Error(`Claude provider rejected the run: ${limitText}`);
@@ -381,14 +372,14 @@ describe("daemon E2E (real claude) - send message during tool call", () => {
         15_000,
         client.waitForAgentUpsert(agent.id, (snapshot) => snapshot.status === "running", 10_000),
       );
-      const initialTurnStarts = resources.collector.messages.filter(
-        (message) =>
-          message.type === "agent_stream" &&
-          message.payload.agentId === agent.id &&
-          message.payload.event.type === "turn_started",
+      const initialTurnStarts = agentStreamMessages(resources.collector.messages, agent.id).flatMap(
+        (message) => {
+          const { event } = message.payload;
+          return event.type === "turn_started" ? [event] : [];
+        },
       );
       expect(initialTurnStarts).toHaveLength(1);
-      const initialTurnId = initialTurnStarts[0]?.payload.event.turnId;
+      const initialTurnId = initialTurnStarts[0]?.turnId;
       expect(initialTurnId).toEqual(expect.any(String));
       expect(foregroundSleep.turnId).toBe(initialTurnId);
       const steeringMessageId = generateClientMessageId();
@@ -443,30 +434,25 @@ describe("daemon E2E (real claude) - send message during tool call", () => {
         ),
         "the exact live sleep 5 call must not be canceled or fail after hello",
       ).toBe(false);
-      const secondBoundaryEvents = postSteerMessages.filter(
-        (message) =>
-          message.type === "agent_stream" &&
-          message.payload.agentId === agent.id &&
-          message.payload.event.type === "timeline" &&
-          message.payload.event.item.type === "tool_call" &&
-          message.payload.event.item.detail.type === "shell" &&
-          /\bprintf\s+SECOND_BOUNDARY\b/.test(message.payload.event.item.detail.command),
+      const secondBoundaryEvents = agentStreamMessages(postSteerMessages, agent.id).flatMap(
+        (message) => {
+          const { event } = message.payload;
+          return event.type === "timeline" &&
+            event.item.type === "tool_call" &&
+            event.item.detail.type === "shell" &&
+            /\bprintf\s+SECOND_BOUNDARY\b/.test(event.item.detail.command)
+            ? [event]
+            : [];
+        },
       );
       expect(
         secondBoundaryEvents.some(
-          (message) =>
-            message.payload.event.type === "timeline" &&
-            message.payload.event.item.type === "tool_call" &&
-            message.payload.event.item.status === "completed",
+          (event) => event.item.type === "tool_call" && event.item.status === "completed",
         ),
         "hello must drive a second completed tool call in the same active loop",
       ).toBe(true);
       expect(
-        secondBoundaryEvents.every(
-          (message) =>
-            message.payload.event.type === "timeline" &&
-            message.payload.event.turnId === initialTurnId,
-        ),
+        secondBoundaryEvents.every((event) => event.turnId === initialTurnId),
         "both Claude tool boundaries must retain the original turn ID",
       ).toBe(true);
       const timeline = await within(

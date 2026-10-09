@@ -1,10 +1,12 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { Query } from "@anthropic-ai/claude-agent-sdk";
 import pino from "pino";
 import { describe, expect, test, vi } from "vitest";
 
 import { ClaudeAgentClient } from "../agent/providers/claude/agent.js";
+import type { ClaudeQueryInput } from "../agent/providers/claude/query.js";
 import { DaemonClient } from "../test-utils/daemon-client.js";
 import { createTestPaseoDaemon } from "../test-utils/paseo-daemon.js";
 
@@ -16,8 +18,14 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
+// Deliberately partial fake of the SDK Query: it stubs only what the session calls.
+type QueryStub = { [K in keyof Query]?: unknown };
+
 function createControlledClaudeQueryFactory(resultGate: Promise<void>) {
-  return vi.fn(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+  return vi.fn(({ prompt }: ClaudeQueryInput): Query => {
+    if (typeof prompt === "string") {
+      throw new Error("The controlled Claude query expects streaming input");
+    }
     const queuedMessages: Array<Record<string, unknown>> = [];
     const waiters: Array<() => void> = [];
     let closed = false;
@@ -127,7 +135,7 @@ function createControlledClaudeQueryFactory(resultGate: Promise<void>) {
       [Symbol.asyncIterator]() {
         return this;
       },
-    };
+    } as QueryStub as Query;
   });
 }
 

@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
 import { createMessageCollector, type MessageCollector } from "../test-utils/message-collector.js";
-import type { PersistenceHandle } from "@getpaseo/protocol/messages";
+import type { AgentPersistenceHandle } from "@getpaseo/protocol/agent-types";
 
 function tmpCwd(): string {
   return mkdtempSync(path.join(tmpdir(), "two-cycle-resume-"));
@@ -42,7 +42,7 @@ describe("two-cycle Codex agent resume", () => {
       expect(afterRemember.status).toBe("idle");
       expect(afterRemember.final?.persistence).toBeTruthy();
 
-      const persistence0 = afterRemember.final!.persistence as PersistenceHandle;
+      const persistence0 = afterRemember.final!.persistence as AgentPersistenceHandle;
       await ctx.client.deleteAgent(agent.id);
 
       collector.clear();
@@ -56,7 +56,7 @@ describe("two-cycle Codex agent resume", () => {
       expect(afterRecall1.final?.persistence).toBeTruthy();
       expect(afterRecall1.final!.persistence!.metadata).toMatchObject({ marker });
 
-      const persistence1 = afterRecall1.final!.persistence as PersistenceHandle;
+      const persistence1 = afterRecall1.final!.persistence as AgentPersistenceHandle;
       await ctx.client.deleteAgent(resumed1.id);
 
       collector.clear();

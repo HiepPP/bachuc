@@ -36,7 +36,9 @@ describe("push notifications", () => {
       logger: createLogger(),
       filePath,
       now: () => now,
-      deliver: async (tokens) => deliveries.push(tokens),
+      deliver: async (tokens) => {
+        deliveries.push(tokens);
+      },
     });
 
     pushNotifications.renew("ExponentPushToken[offline-device]");
@@ -55,7 +57,9 @@ describe("push notifications", () => {
       logger: createLogger(),
       filePath: path.join(home, "push-tokens.json"),
       now: () => Date.parse("2026-08-10T00:00:00.000Z"),
-      deliver: async (tokens) => deliveries.push(tokens),
+      deliver: async (tokens) => {
+        deliveries.push(tokens);
+      },
     });
 
     pushNotifications.renew("ExponentPushToken[online-device]");

@@ -91,8 +91,13 @@ function turnOutlastingCompaction(token: string): PiTurn {
   return { ...turn(token), filler: "lorem ipsum ".repeat(8_000) };
 }
 
-function roleItems(items: AgentTimelineItem[], role: "user_message" | "assistant_message") {
-  return items.filter((item) => item.type === role);
+function roleItems<T extends "user_message" | "assistant_message">(
+  items: AgentTimelineItem[],
+  role: T,
+): Extract<AgentTimelineItem, { type: T }>[] {
+  return items.filter(
+    (item): item is Extract<AgentTimelineItem, { type: T }> => item.type === role,
+  );
 }
 
 function expectTimeline(

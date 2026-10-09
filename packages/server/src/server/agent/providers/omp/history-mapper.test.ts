@@ -75,7 +75,9 @@ describe("OMP history mapper", () => {
     ]);
 
     expect(
-      events.map((event) => (event.item.type === "tool_call" ? event.item.callId : null)),
+      events.map((event) =>
+        event.type === "timeline" && event.item.type === "tool_call" ? event.item.callId : null,
+      ),
     ).toEqual([
       "omp-poll:job-a",
       "omp-poll:job-a",
@@ -445,7 +447,7 @@ describe("OMP history mapper", () => {
     for await (const event of streamOmpHistory({ sessionFile, provider: "omp" })) {
       events.push(event);
     }
-    expect(events.map((event) => event.item)).toEqual([
+    expect(events.map((event) => (event.type === "timeline" ? event.item : null))).toEqual([
       { type: "user_message", text: "active branch", messageId: "user-active" },
       { type: "assistant_message", text: "[future_control] Unsupported history record" },
       { type: "assistant_message", text: "[developer] developer note" },

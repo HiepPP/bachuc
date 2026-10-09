@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import pino from "pino";
 import { expect, onTestFinished, test } from "vitest";
 
 import { parsePcm16MonoWav, wordSimilarity } from "../../../test-utils/dictation-e2e.js";
@@ -82,6 +83,7 @@ workerSpeechTest(
       await ensureSherpaOnnxModels({
         modelsDir,
         modelIds: ["parakeet-tdt-0.6b-v2-int8"],
+        logger: pino({ level: "silent" }),
       });
     }
 

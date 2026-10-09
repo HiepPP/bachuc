@@ -48,10 +48,8 @@ interface WebSocketServerInternals {
   sessions: Map<unknown, unknown>;
   broadcastAgentAttention(params: {
     agentId: string;
-    reason: string;
-    preview?: string;
-    providerId?: string;
-    timestamp?: string;
+    provider: string;
+    reason: "finished" | "error" | "permission";
   }): Promise<void>;
 }
 

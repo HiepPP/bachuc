@@ -127,8 +127,6 @@ export function getRealProviderRuntimeSettings(provider: RealProvider): Provider
         },
       };
     }
-    case "pi":
-      return {};
   }
 }
 
@@ -229,8 +227,12 @@ function hasCodexAuthTokens(): boolean {
     return false;
   }
   return (
-    (typeof tokens.access_token === "string" && tokens.access_token.length > 0) ||
-    (typeof tokens.refresh_token === "string" && tokens.refresh_token.length > 0)
+    ("access_token" in tokens &&
+      typeof tokens.access_token === "string" &&
+      tokens.access_token.length > 0) ||
+    ("refresh_token" in tokens &&
+      typeof tokens.refresh_token === "string" &&
+      tokens.refresh_token.length > 0)
   );
 }
 

@@ -22,9 +22,17 @@ import type {
   AgentSessionConfig,
   AgentStreamEvent,
   ToolCallTimelineItem,
-  AssistantMessageTimelineItem,
   AgentTimelineItem,
 } from "../agent-sdk-types.js";
+
+type AssistantMessageTimelineItem = Extract<AgentTimelineItem, { type: "assistant_message" }>;
+
+// Fixtures carry only the fields the adapter reads. Full SDK events need many
+// unrelated required fields, so only the event type is checked here.
+interface OpenCodeEventFixture {
+  type: OpenCodeEvent["type"];
+  properties: unknown;
+}
 
 // Deliberately an independent literal rather than the production constant these tests
 // guard: deriving the boundary from OPENCODE_SERVER_STARTUP_TIMEOUT_MS would keep the
@@ -322,7 +330,7 @@ function manualCompactEvents({
     },
     { type: "session.compacted", properties: { sessionID: sessionId } },
     { type: "session.idle", properties: { sessionID: sessionId } },
-  ];
+  ] satisfies OpenCodeEventFixture[] as OpenCodeEvent[];
 }
 
 describe("OpenCodeAgentClient adapter smoke tests", () => {
@@ -345,7 +353,7 @@ describe("OpenCodeAgentClient adapter smoke tests", () => {
     const session = await client.createSession(buildConfig(cwd));
 
     expect(typeof session.id).toBe("string");
-    expect(session.id.length).toBeGreaterThan(0);
+    expect(session.id?.length).toBeGreaterThan(0);
     expect(session.provider).toBe("opencode");
 
     await session.close();
@@ -710,9 +718,11 @@ describe("OpenCodeAgentClient adapter smoke tests", () => {
       );
       try {
         await collectTurnEvents(streamSession(session, "Keep my saved choice"));
-        expect(execution.calls.sessionPromptAsync.map((request) => request.variant)).toEqual([
-          variant,
-        ]);
+        expect(
+          execution.calls.sessionPromptAsync.map(
+            (request) => (request as { variant?: string }).variant,
+          ),
+        ).toEqual([variant]);
       } finally {
         await session.close();
       }
@@ -1308,13 +1318,15 @@ describe("OpenCode adapter normalization", () => {
             modelID: "gpt-5",
           },
         },
-      } as OpenCodeEvent,
+      } as OpenCodeEventFixture as OpenCodeEvent,
       {
         sessionId: "session-1",
         messageRoles: new Map(),
         accumulatedUsage: usage,
         materializedParts: new Map(),
         emittedStructuredMessageIds: new Set(),
+        compactionSummaryMessageIds: new Set(),
+        emittedCompactionPartIds: new Set(),
         partTypes: new Map(),
         modelContextWindowsByModelKey: new Map([["openai/gpt-5", 400_000]]),
         onAssistantModelContextWindowResolved,
@@ -1544,7 +1556,7 @@ describe("OpenCode adapter startTurn error handling", () => {
     } as never;
 
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
       fakeClient,
       "ses_unit_test",
       createTestLogger(),
@@ -1651,15 +1663,15 @@ describe("OpenCode adapter startTurn error handling", () => {
           return { data: {}, error: undefined };
         }),
       },
-    } as never;
+    };
 
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
-      fakeClient,
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
+      fakeClient as never,
       "ses_unit_test",
       createTestLogger(),
       new Map(),
-      createDirectEventSource(fakeClient),
+      createDirectEventSource(fakeClient as never),
     );
 
     const turn = await collectTurnEvents(streamSession(session, "hello"));
@@ -1738,7 +1750,7 @@ describe("OpenCode adapter startTurn error handling", () => {
     } as never;
 
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
       fakeClient,
       "ses_unit_test",
       createTestLogger(),
@@ -1776,11 +1788,11 @@ describe("OpenCode adapter startTurn error handling", () => {
         update: vi.fn().mockResolvedValue({ error: null }),
         delete: vi.fn().mockResolvedValue({ error: null }),
       },
-    } as never;
+    };
 
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
-      fakeClient,
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
+      fakeClient as never,
       "ses_unit_test",
       createTestLogger(),
       new Map(),
@@ -1804,11 +1816,11 @@ describe("OpenCode adapter startTurn error handling", () => {
         update: vi.fn().mockResolvedValue({ error: null }),
         delete: vi.fn().mockResolvedValue({ error: null }),
       },
-    } as never;
+    };
 
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
-      fakeClient,
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
+      fakeClient as never,
       "ses_unit_test",
       createTestLogger(),
     );
@@ -1831,7 +1843,7 @@ describe("OpenCode adapter startTurn error handling", () => {
       },
     } as never;
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
       fakeClient,
       "ses_unit_test",
       createTestLogger(),
@@ -1903,7 +1915,7 @@ describe("OpenCode adapter startTurn error handling", () => {
     } as never;
 
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
       fakeClient,
       "ses_unit_test",
       createTestLogger(),
@@ -1993,7 +2005,7 @@ describe("OpenCode adapter startTurn error handling", () => {
     } as never;
 
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
       fakeClient,
       "ses_unit_test",
       createTestLogger(),
@@ -2045,7 +2057,7 @@ describe("OpenCode adapter startTurn error handling", () => {
     } as never;
 
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
       fakeClient,
       "ses_unit_test",
       createTestLogger(),
@@ -2158,7 +2170,7 @@ describe("OpenCode adapter startTurn error handling", () => {
     } as never;
 
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/repo" },
+      { provider: "opencode", cwd: "/tmp/repo", providerOptions: {} },
       fakeClient,
       "ses_unit_test",
       createTestLogger(),
@@ -2252,7 +2264,10 @@ describe("OpenCode adapter startTurn error handling", () => {
               emittedConnected = true;
               return Promise.resolve({
                 done: false,
-                value: { type: "server.connected", properties: {} } as OpenCodeEvent,
+                value: {
+                  type: "server.connected",
+                  properties: {},
+                } as OpenCodeEventFixture as OpenCodeEvent,
               });
             }
             return new Promise(() => {});
@@ -2273,7 +2288,7 @@ describe("OpenCode adapter startTurn error handling", () => {
     } as never;
 
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
       fakeClient,
       "ses_unit_test",
       createTestLogger(),
@@ -3072,7 +3087,7 @@ describe("OpenCode adapter startTurn error handling", () => {
       throw new Error("synchronous abort failure");
     }) as typeof sdkClient.session.abort;
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/workspace/repo" },
+      { provider: "opencode", cwd: "/workspace/repo", providerOptions: {} },
       sdkClient,
       "ses_sync_abort_failure",
       createTestLogger(),
@@ -3454,21 +3469,22 @@ describe("OpenCode adapter startTurn error handling", () => {
             ? { [childId]: { type: "busy" } }
             : {},
       });
-      openCode.sessionMessagesResponse = recoveryCase.failed
-        ? {
-            data: [
-              {
-                info: {
-                  id: `message_${suffix}`,
-                  sessionID: childId,
-                  role: "assistant",
-                  error: { name: "ProviderError", data: { message: "child failed" } },
+      openCode.sessionMessagesResponse =
+        "failed" in recoveryCase && recoveryCase.failed
+          ? {
+              data: [
+                {
+                  info: {
+                    id: `message_${suffix}`,
+                    sessionID: childId,
+                    role: "assistant",
+                    error: { name: "ProviderError", data: { message: "child failed" } },
+                  },
+                  parts: [],
                 },
-                parts: [],
-              },
-            ],
-          }
-        : { data: [] };
+              ],
+            }
+          : { data: [] };
       openCode.permissionListResponse = {
         data: [
           {
@@ -3725,7 +3741,7 @@ describe("OpenCode adapter startTurn error handling", () => {
     vi.useFakeTimers();
     const openCode = new TestOpenCodeClient();
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/workspace/repo" },
+      { provider: "opencode", cwd: "/workspace/repo", providerOptions: {} },
       openCode.asSdkClient(),
       "ses_readiness_timeout",
       createTestLogger(),
@@ -3778,7 +3794,7 @@ describe("OpenCode adapter startTurn error handling", () => {
     openCode.sessionPromptAsyncEvents = [];
     const streamReady = createTestDeferred<void>();
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/workspace/repo" },
+      { provider: "opencode", cwd: "/workspace/repo", providerOptions: {} },
       openCode.asSdkClient(),
       "ses_readiness_slow_stream",
       createTestLogger(),
@@ -3810,7 +3826,7 @@ describe("OpenCode adapter startTurn error handling", () => {
     openCode.sessionPromptAsyncEvents = [];
     const streamReady = createTestDeferred<void>();
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/workspace/repo" },
+      { provider: "opencode", cwd: "/workspace/repo", providerOptions: {} },
       openCode.asSdkClient(),
       "ses_readiness_retry",
       createTestLogger(),
@@ -4099,8 +4115,14 @@ describe("OpenCode persisted sessions", () => {
           sessionID: "ses_1",
           role: "assistant",
           time: { created: 1001, completed: 1002 },
+          parentID: "msg_compact_user",
           providerID: "test-provider",
           modelID: "gpt-5.5",
+          mode: "build",
+          agent: "build",
+          path: { cwd: "/workspace/repo", root: "/workspace/repo" },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
         },
         parts: [
           {
@@ -5488,7 +5510,7 @@ describe("OpenCode provider subagent contract", () => {
       },
     } as never;
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
       fakeClient,
       "ses_parent",
       createTestLogger(),
@@ -5547,7 +5569,7 @@ describe("OpenCode provider subagent contract", () => {
             title: "Background plugin child",
           },
         },
-      } as OpenCodeEvent,
+      } as OpenCodeEventFixture as OpenCodeEvent,
       state,
     );
 
@@ -5646,7 +5668,7 @@ describe("OpenCode provider subagent contract", () => {
       },
     } as never;
     const session = new __openCodeInternals.OpenCodeAgentSession(
-      { provider: "opencode", cwd: "/tmp/test" },
+      { provider: "opencode", cwd: "/tmp/test", providerOptions: {} },
       fakeClient,
       "ses_parent",
       createTestLogger(),
@@ -5791,7 +5813,7 @@ describe("OpenCode provider subagent contract", () => {
             model: { providerID: "anthropic", id: "claude-sonnet-5", variant: "high" },
           },
         },
-      } as OpenCodeEvent,
+      } as OpenCodeEventFixture as OpenCodeEvent,
       state,
     );
 
@@ -5821,7 +5843,7 @@ describe("OpenCode provider subagent contract", () => {
         properties: {
           info: { id: "ses_child_bare", parentID: "ses_parent" },
         },
-      } as OpenCodeEvent,
+      } as OpenCodeEventFixture as OpenCodeEvent,
       state,
     );
 
@@ -5861,7 +5883,7 @@ describe("OpenCode provider subagent contract", () => {
               },
             },
           },
-        } as OpenCodeEvent,
+        } as OpenCodeEventFixture as OpenCodeEvent,
         state,
       ),
       ...translateOpenCodeEvent(
@@ -5870,7 +5892,7 @@ describe("OpenCode provider subagent contract", () => {
           properties: {
             info: { id: "ses_child_linked", parentID: "ses_parent", title: "Inspect repo" },
           },
-        } as OpenCodeEvent,
+        } as OpenCodeEventFixture as OpenCodeEvent,
         state,
       ),
     );
@@ -5900,7 +5922,7 @@ describe("OpenCode provider subagent contract", () => {
           properties: {
             info: { id: "ses_childlatelink", parentID: "ses_parent", title: "Late link" },
           },
-        } as OpenCodeEvent,
+        } as OpenCodeEventFixture as OpenCodeEvent,
         state,
       ),
       // No task call was waiting at detection time; the link arrives via the tool output.
@@ -5923,7 +5945,7 @@ describe("OpenCode provider subagent contract", () => {
               },
             },
           },
-        } as OpenCodeEvent,
+        } as OpenCodeEventFixture as OpenCodeEvent,
         state,
       ),
     );
@@ -5968,7 +5990,7 @@ describe("OpenCode provider subagent contract", () => {
                 },
               },
             },
-          } as OpenCodeEvent,
+          } as OpenCodeEventFixture as OpenCodeEvent,
           state,
         ),
       );
@@ -5982,7 +6004,7 @@ describe("OpenCode provider subagent contract", () => {
             properties: {
               info: { id: childSessionId, parentID: "ses_parent", title: "Child session" },
             },
-          } as OpenCodeEvent,
+          } as OpenCodeEventFixture as OpenCodeEvent,
           state,
         ),
       );
@@ -6012,7 +6034,7 @@ describe("OpenCode provider subagent contract", () => {
                 },
               },
             },
-          } as OpenCodeEvent,
+          } as OpenCodeEventFixture as OpenCodeEvent,
           state,
         ),
       );
@@ -6068,7 +6090,7 @@ describe("OpenCode provider subagent contract", () => {
             },
           },
         },
-      } as OpenCodeEvent,
+      } as OpenCodeEventFixture as OpenCodeEvent,
       state,
     );
     const linked = translateOpenCodeEvent(
@@ -6081,7 +6103,7 @@ describe("OpenCode provider subagent contract", () => {
             title: "OpenCode session title",
           },
         },
-      } as OpenCodeEvent,
+      } as OpenCodeEventFixture as OpenCodeEvent,
       state,
     );
 
@@ -6109,7 +6131,7 @@ describe("OpenCode provider subagent contract", () => {
       {
         type: "session.deleted",
         properties: { sessionID: "ses_child_deleted" },
-      } as OpenCodeEvent,
+      } as OpenCodeEventFixture as OpenCodeEvent,
       state,
     );
 
@@ -6655,14 +6677,14 @@ describe("OpenCode provider subagent contract", () => {
               },
             },
           },
-        } as OpenCodeEvent,
+        } as OpenCodeEventFixture as OpenCodeEvent,
         state,
       ),
       ...translateOpenCodeEvent(
         {
           type: "session.created",
           properties: { info: { id: "ses_child", parentID: "ses_parent" } },
-        } as OpenCodeEvent,
+        } as OpenCodeEventFixture as OpenCodeEvent,
         state,
       ),
       ...translateOpenCodeEvent(
@@ -6679,7 +6701,7 @@ describe("OpenCode provider subagent contract", () => {
               state: { status: "completed", input: { command: "echo child" }, output: "child\n" },
             },
           },
-        } as OpenCodeEvent,
+        } as OpenCodeEventFixture as OpenCodeEvent,
         state,
       ),
     );

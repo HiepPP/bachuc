@@ -28,6 +28,7 @@ function createSnapshot(
       aheadOfOrigin: 0,
       behindOfOrigin: 0,
       hasRemote: true,
+      upstreamRef: null,
       diffStat: { additions: 0, deletions: 0 },
     },
     forge: {
@@ -47,7 +48,7 @@ function createSnapshot(
 }
 
 test("fans one fresh observation out to every workspace attached to its exact cwd", async () => {
-  let onSnapshotUpdated: ((snapshot: WorkspaceGitRuntimeSnapshot) => void) | null = null;
+  let onSnapshotUpdated = null as ((snapshot: WorkspaceGitRuntimeSnapshot) => void) | null;
   const eventSnapshot = createSnapshot("/repo/worktree/.");
   const freshSnapshot = createSnapshot("/repo/worktree");
   const getSnapshot = vi.fn(async () => freshSnapshot);
@@ -97,7 +98,7 @@ test("fans one fresh observation out to every workspace attached to its exact cw
 });
 
 test("serializes the complete fan-out for duplicate merge events on one cwd", async () => {
-  let onSnapshotUpdated: ((snapshot: WorkspaceGitRuntimeSnapshot) => void) | null = null;
+  let onSnapshotUpdated = null as ((snapshot: WorkspaceGitRuntimeSnapshot) => void) | null;
   const snapshot = createSnapshot("/repo/worktree/.");
   const options = {
     logger: { child: () => ({ warn: vi.fn() }) } as unknown as Logger,
@@ -115,7 +116,7 @@ test("serializes the complete fan-out for duplicate merge events on one cwd", as
     ],
   } as unknown as AutoArchiveOnMergeOptions;
   const archivedWorkspaceIds: string[] = [];
-  let releaseFirstArchive: (() => void) | null = null;
+  let releaseFirstArchive = null as (() => void) | null;
   const firstArchivePaused = new Promise<void>((resolvePromise) => {
     releaseFirstArchive = resolvePromise;
   });
@@ -150,7 +151,7 @@ test("serializes the complete fan-out for duplicate merge events on one cwd", as
 });
 
 test("does not fan out a stale merged event when the fresh observation has no PR", async () => {
-  let onSnapshotUpdated: ((snapshot: WorkspaceGitRuntimeSnapshot) => void) | null = null;
+  let onSnapshotUpdated = null as ((snapshot: WorkspaceGitRuntimeSnapshot) => void) | null;
   const eventSnapshot = createSnapshot("/repo/worktree");
   const freshSnapshot = createSnapshot("/repo/worktree");
   freshSnapshot.forge.pullRequest = null;
@@ -182,7 +183,7 @@ test("does not fan out a stale merged event when the fresh observation has no PR
 });
 
 test("logs and skips when the fresh observation cannot be read", async () => {
-  let onSnapshotUpdated: ((snapshot: WorkspaceGitRuntimeSnapshot) => void) | null = null;
+  let onSnapshotUpdated = null as ((snapshot: WorkspaceGitRuntimeSnapshot) => void) | null;
   const warn = vi.fn();
   const archiveIfSafe = vi.fn();
   const options = {
@@ -215,7 +216,7 @@ test("logs and skips when the fresh observation cannot be read", async () => {
 });
 
 test("does not read an observation when auto-archive is disabled", async () => {
-  let onSnapshotUpdated: ((snapshot: WorkspaceGitRuntimeSnapshot) => void) | null = null;
+  let onSnapshotUpdated = null as ((snapshot: WorkspaceGitRuntimeSnapshot) => void) | null;
   const getSnapshot = vi.fn();
   const archiveIfSafe = vi.fn();
   const options = {

@@ -184,12 +184,13 @@ describe("exact MCP preapproval mappings", () => {
   test("OpenCode keeps authored ask or deny rules after internal grants", () => {
     expect(
       buildOpenCodePermissionRules(
+        // The strict options schema has no MCP tool keys; this models raw config.
         {
           permission: {
             hub_finish_execution: "deny",
             bash: "ask",
           },
-        },
+        } as Parameters<typeof buildOpenCodePermissionRules>[0],
         hubPolicy,
       ),
     ).toEqual([

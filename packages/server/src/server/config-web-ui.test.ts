@@ -15,6 +15,19 @@ async function createPaseoHome(config: unknown): Promise<string> {
   return paseoHome;
 }
 
+type LoadedConfig = ReturnType<typeof loadConfig>;
+
+// loadConfig always resolves the web UI section; the daemon config type marks it optional.
+function loadConfigWithWebUi(
+  ...args: Parameters<typeof loadConfig>
+): LoadedConfig & { webUi: NonNullable<LoadedConfig["webUi"]> } {
+  const config = loadConfig(...args);
+  if (!config.webUi) {
+    throw new Error("loadConfig did not resolve the web UI config");
+  }
+  return { ...config, webUi: config.webUi };
+}
+
 function expectBundledWebUiDistDir(distDir: string | null): void {
   expect(distDir).not.toBeNull();
   expect(path.isAbsolute(distDir ?? "")).toBe(true);
@@ -29,7 +42,7 @@ describe("daemon web UI config", () => {
   test("web UI is disabled by default", async () => {
     const home = await createPaseoHome({ version: 1 });
 
-    const config = loadConfig(home, { env: {} });
+    const config = loadConfigWithWebUi(home, { env: {} });
 
     expect(config.webUi.enabled).toBe(false);
     expectBundledWebUiDistDir(config.webUi.distDir);
@@ -41,7 +54,7 @@ describe("daemon web UI config", () => {
       features: { webUi: { enabled: true } },
     });
 
-    const config = loadConfig(home, { env: {} });
+    const config = loadConfigWithWebUi(home, { env: {} });
 
     expect(config.webUi.enabled).toBe(true);
     expectBundledWebUiDistDir(config.webUi.distDir);
@@ -53,7 +66,7 @@ describe("daemon web UI config", () => {
       features: { webUi: { enabled: true } },
     });
 
-    const config = loadConfig(home, { env: { PASEO_WEB_UI_ENABLED: "false" } });
+    const config = loadConfigWithWebUi(home, { env: { PASEO_WEB_UI_ENABLED: "false" } });
 
     expect(config.webUi.enabled).toBe(false);
   });
@@ -61,7 +74,7 @@ describe("daemon web UI config", () => {
   test("PASEO_WEB_UI_ENABLED=true enables web UI", async () => {
     const home = await createPaseoHome({ version: 1 });
 
-    const config = loadConfig(home, { env: { PASEO_WEB_UI_ENABLED: "true" } });
+    const config = loadConfigWithWebUi(home, { env: { PASEO_WEB_UI_ENABLED: "true" } });
 
     expect(config.webUi.enabled).toBe(true);
   });
@@ -72,7 +85,7 @@ describe("daemon web UI config", () => {
       features: { webUi: { enabled: false } },
     });
 
-    const config = loadConfig(home, {
+    const config = loadConfigWithWebUi(home, {
       env: { PASEO_WEB_UI_ENABLED: "false" },
       cli: { webUiEnabled: true },
     });
@@ -86,7 +99,7 @@ describe("daemon web UI config", () => {
       features: { webUi: { enabled: true } },
     });
 
-    const config = loadConfig(home, {
+    const config = loadConfigWithWebUi(home, {
       env: { PASEO_WEB_UI_ENABLED: "true" },
       cli: { webUiEnabled: false },
     });
@@ -98,7 +111,7 @@ describe("daemon web UI config", () => {
     const home = await createPaseoHome({ version: 1 });
     const distDir = path.join(os.tmpdir(), "paseo-web-ui-dist");
 
-    const config = loadConfig(home, { env: { PASEO_WEB_UI_DIST_DIR: distDir } });
+    const config = loadConfigWithWebUi(home, { env: { PASEO_WEB_UI_DIST_DIR: distDir } });
 
     expect(config.webUi.distDir).toBe(path.resolve(distDir));
   });
@@ -109,7 +122,7 @@ describe("daemon web UI config", () => {
       features: { webUi: { distDir: "web-ui-dist" } },
     });
 
-    const config = loadConfig(home, { env: {} });
+    const config = loadConfigWithWebUi(home, { env: {} });
 
     expect(config.webUi.distDir).toBe(path.join(home, "web-ui-dist"));
   });
@@ -121,7 +134,7 @@ describe("daemon web UI config", () => {
     });
     const envDir = path.join(os.tmpdir(), "env-dist");
 
-    const config = loadConfig(home, { env: { PASEO_WEB_UI_DIST_DIR: envDir } });
+    const config = loadConfigWithWebUi(home, { env: { PASEO_WEB_UI_DIST_DIR: envDir } });
 
     expect(config.webUi.distDir).toBe(path.resolve(envDir));
   });

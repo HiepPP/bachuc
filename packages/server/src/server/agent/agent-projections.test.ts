@@ -10,7 +10,7 @@ import {
 } from "./agent-projections.js";
 import type { AgentSession } from "./agent-sdk-types.js";
 import type {
-  AgentFeature,
+  AgentFeatureToggle,
   ImportableProviderSession,
   AgentPermissionRequest,
   AgentPersistenceHandle,
@@ -53,12 +53,12 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
   const lastErrorValue =
     restOverrides.lastError ?? (lifecycle === "error" ? "encountered error" : undefined);
 
-  const agent: ManagedAgent = {
+  // Overrides pair any lifecycle with any session, which the ManagedAgent union forbids.
+  const agent = {
     id: "agent-123",
     provider: "claude",
     cwd: "/tmp/project",
     session: sessionValue,
-    sessionId: "session-123",
     capabilities: {
       supportsStreaming: true,
       supportsSessionPersistence: true,
@@ -77,12 +77,16 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     ],
     currentModeId: "plan",
     pendingPermissions: pendingPermissionsOverride ?? new Map<string, AgentPermissionRequest>(),
+    bufferedPermissionResolutions: new Map(),
+    inFlightPermissionResponses: new Set(),
+    pendingReplacement: false,
     activeForegroundTurnId: activeForegroundTurnIdValue,
     activeTurnId: activeForegroundTurnIdValue,
     activeTurnStartedAt: lifecycle === "running" ? new Date("2025-01-01T00:00:01.000Z") : null,
     foregroundTurnWaiters: new Set(),
+    finalizedForegroundTurnIds: new Set(),
     unsubscribeSession: null,
-    timeline: [],
+    labels: {},
     runtimeInfo: {
       provider: "claude",
       sessionId: "session-123",
@@ -95,7 +99,7 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     historyPrimed: true,
     lastUserMessageAt: now,
     attention: { requiresAttention: false },
-  };
+  } as ManagedAgent;
 
   return {
     ...agent,
@@ -103,7 +107,7 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     lifecycle,
     config: agent.config,
     pendingPermissions: agent.pendingPermissions,
-  };
+  } as ManagedAgent;
 }
 
 it("projects the daemon-owned active turn identity", () => {
@@ -128,7 +132,7 @@ function createPermission(overrides: Partial<AgentPermissionRequest> = {}): Agen
   return { ...base, ...overrides };
 }
 
-function createFeature(overrides: Partial<AgentFeature> = {}): AgentFeature {
+function createFeature(overrides: Partial<AgentFeatureToggle> = {}): AgentFeatureToggle {
   return {
     type: "toggle",
     id: "fast_mode",
@@ -327,7 +331,7 @@ describe("toAgentPayload", () => {
       persistence: {
         provider: "codex",
         sessionId: "persist-99",
-        nativeHandle: { id: "native" } as unknown,
+        nativeHandle: "native-handle",
         metadata: {
           restored: new Date("2025-03-01T00:00:00.000Z"),
           empty: {},
@@ -344,7 +348,7 @@ describe("toAgentPayload", () => {
     expect(payload.persistence).toEqual({
       provider: "codex",
       sessionId: "persist-99",
-      nativeHandle: { id: "native" },
+      nativeHandle: "native-handle",
       metadata: { restored: "2025-03-01T00:00:00.000Z" },
     });
     (payload.persistence as AgentPersistenceHandle).sessionId = "mutated";

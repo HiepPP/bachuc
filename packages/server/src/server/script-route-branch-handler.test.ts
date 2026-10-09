@@ -5,6 +5,21 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ScriptRouteStore, ServiceProxyRouteCollisionError } from "./script-proxy.js";
 import { createBranchChangeRouteHandler } from "./script-route-branch-handler.js";
+import type { ServiceProxySubsystem } from "./service-proxy.js";
+
+// The service proxy subsystem wraps this route registry. Branch-change handling only uses its
+// route members, so the HTTP members throw if a test ever reaches them.
+function createRouteStoreServiceProxy(): ScriptRouteStore & ServiceProxySubsystem {
+  const unsupported = (member: string) => (): never => {
+    throw new Error(`ServiceProxySubsystem.${member} is not available in this test`);
+  };
+  return Object.assign(new ScriptRouteStore(), {
+    middleware: unsupported("middleware"),
+    upgradeHandler: unsupported("upgradeHandler"),
+    startStandalone: unsupported("startStandalone"),
+    stopStandalone: unsupported("stopStandalone"),
+  });
+}
 
 function createWorkspaceRepo(options?: {
   branchName?: string;
@@ -74,7 +89,7 @@ function registerRoute(
 
 describe("script-route-branch-handler", () => {
   it("updates routes on branch rename by removing old hostnames and registering new ones", () => {
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     registerRoute(routeStore, {
       hostname: "api--feature-auth--paseo.localhost",
       port: 3001,
@@ -97,7 +112,7 @@ describe("script-route-branch-handler", () => {
   });
 
   it("is a no-op when the workspace has no routes", () => {
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const onRoutesChanged = vi.fn();
     const handleBranchChange = createBranchChangeRouteHandler({
       serviceProxy: routeStore,
@@ -111,7 +126,7 @@ describe("script-route-branch-handler", () => {
   });
 
   it("is a no-op when the resolved hostnames do not change", () => {
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     registerRoute(routeStore, {
       hostname: "api--paseo.localhost",
       port: 3001,
@@ -139,7 +154,7 @@ describe("script-route-branch-handler", () => {
   });
 
   it("triggers shared reprojection after a route change", () => {
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     registerRoute(routeStore, {
       hostname: "api--feature-auth--paseo.localhost",
       port: 3001,
@@ -158,7 +173,7 @@ describe("script-route-branch-handler", () => {
   });
 
   it("updates public route aliases from the stored public base URL", () => {
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     registerRoute(routeStore, {
       hostname: "api--feature-auth--paseo.localhost",
       publicHostname: "api--feature-auth--paseo.services.example.com",
@@ -194,7 +209,7 @@ describe("script-route-branch-handler", () => {
   });
 
   it("updates all services for a workspace when multiple routes are registered", () => {
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     registerRoute(routeStore, {
       hostname: "api--feature-auth--paseo.localhost",
       port: 3001,
@@ -249,7 +264,7 @@ describe("script-route-branch-handler", () => {
   });
 
   it("does not emit a status update when no changes are needed", () => {
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     registerRoute(routeStore, {
       hostname: "web--paseo.localhost",
       port: 3002,
@@ -277,7 +292,7 @@ describe("script-route-branch-handler", () => {
         },
       },
     });
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     registerRoute(routeStore, {
       hostname: "api--feature-auth--repo.localhost",
       port: 3001,
@@ -311,7 +326,7 @@ describe("script-route-branch-handler", () => {
   });
 
   it("leaves existing local and public routes intact when a branch rename collides", () => {
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     registerRoute(routeStore, {
       hostname: "api--feature-auth--repo.localhost",
       publicHostname: "api--feature-auth--repo.services.example.com",
@@ -366,7 +381,7 @@ describe("script-route-branch-handler", () => {
   });
 
   it("leaves old routes intact when branch rename creates an internal incoming collision", () => {
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     routeStore.registerRoute({
       hostname: "api--feature-one--repo.localhost",
       publicHostname: "api--feature-one--repo.services.example.com",

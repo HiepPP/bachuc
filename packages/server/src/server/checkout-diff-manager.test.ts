@@ -42,6 +42,7 @@ function createWorkspaceSnapshot(
       isDirty: false,
       baseRef: "main",
       aheadBehind: { ahead: 1, behind: 0 },
+      upstreamRef: null,
       aheadOfOrigin: 1,
       behindOfOrigin: 0,
       hasRemote: true,
@@ -416,7 +417,7 @@ describe("CheckoutDiffManager", () => {
   });
 
   test("base diff subscriptions ignore worktree-only workspace snapshot updates", async () => {
-    const getCheckoutDiff = vi.fn(async () => ({ diff: "", structured: [] }));
+    const getCheckoutDiff = vi.fn(async (..._args: unknown[]) => ({ diff: "", structured: [] }));
     const { manager, getOnWorkspaceSnapshot } = createManager({
       getCheckoutDiffImplementation: getCheckoutDiff,
     });
@@ -438,7 +439,7 @@ describe("CheckoutDiffManager", () => {
   });
 
   test("base diff subscriptions refresh for structural workspace changes", async () => {
-    const getCheckoutDiff = vi.fn(async () => ({ diff: "", structured: [] }));
+    const getCheckoutDiff = vi.fn(async (..._args: unknown[]) => ({ diff: "", structured: [] }));
     const { manager, getOnWorkspaceSnapshot, workspaceGitService } = createManager({
       getCheckoutDiffImplementation: getCheckoutDiff,
     });

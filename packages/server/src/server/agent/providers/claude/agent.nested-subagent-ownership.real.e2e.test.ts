@@ -42,9 +42,10 @@ test("attributes a nested Claude child and its background notification to their 
         .trim(),
     ).toBe("ROOT_DONE");
     const descriptors = events
-      .filter((event) => event.type === "provider_subagent" && event.event.type === "upsert")
-      .map((event) => event.event)
-      .filter((event) => event.type === "upsert" && event.description);
+      .flatMap((event) =>
+        event.type === "provider_subagent" && event.event.type === "upsert" ? [event.event] : [],
+      )
+      .filter((event) => event.description);
     const direct = descriptors.find((event) => event.description === "direct_owner");
     const nested = descriptors.find((event) => event.description === "nested_owner");
 

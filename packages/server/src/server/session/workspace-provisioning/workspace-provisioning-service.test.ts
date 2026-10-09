@@ -84,10 +84,21 @@ function gitService() {
           worktreeRoot = root;
         }
       }
+      if (worktreeRoot === null) {
+        return {
+          cwd,
+          isGit: false,
+          currentBranch: null,
+          remoteUrl: null,
+          worktreeRoot: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        };
+      }
       return {
         cwd,
-        isGit: worktreeRoot !== null,
-        currentBranch: worktreeRoot ? (gitBranches.get(worktreeRoot) ?? "main") : null,
+        isGit: true,
+        currentBranch: gitBranches.get(worktreeRoot) ?? "main",
         remoteUrl: null,
         worktreeRoot,
         isPaseoOwnedWorktree: false,
@@ -201,6 +212,7 @@ test("persists manual worktree ownership separately from its workspace kind", as
     workspaceRegistry,
     projectRegistry,
     isDirectory,
+    logger,
     workspaceGitService: createNoopWorkspaceGitService({
       peekSnapshot: () => null,
       getCheckout: async () => ({
@@ -265,6 +277,7 @@ test("reopening archived exact-root records restores the fresh Git project", asy
     workspaceRegistry,
     projectRegistry,
     isDirectory,
+    logger,
     workspaceGitService: createNoopWorkspaceGitService({
       peekSnapshot: () => null,
       getCheckout: async () => ({
@@ -309,6 +322,7 @@ test("uses one workspace snapshot when reopening an archived workspace", async (
     existsOnDisk: () => workspaceRegistry.existsOnDisk(),
     list: async () => (reads++ === 0 ? archived : []),
     get: (workspaceId) => workspaceRegistry.get(workspaceId),
+    update: (workspaceId, updater) => workspaceRegistry.update(workspaceId, updater),
     upsert: (workspace) => workspaceRegistry.upsert(workspace),
     archive: (workspaceId, archivedAt) => workspaceRegistry.archive(workspaceId, archivedAt),
     remove: (workspaceId) => workspaceRegistry.remove(workspaceId),
@@ -318,6 +332,7 @@ test("uses one workspace snapshot when reopening an archived workspace", async (
     projectRegistry,
     workspaceGitService: gitService(),
     isDirectory,
+    logger,
   });
 
   const reopened = await snapshotProvisioning.findOrCreateWorkspaceForDirectory(repo);

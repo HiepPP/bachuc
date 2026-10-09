@@ -2,9 +2,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { AgentManager } from "../agent/agent-manager.js";
+import { AgentManager, type ManagedAgent } from "../agent/agent-manager.js";
 import { AgentStorage } from "../agent/agent-storage.js";
-import { createAgentCommand } from "../agent/create-agent/create.js";
+import {
+  createAgentCommand,
+  type CreateAgentCommandInput,
+  type CreateAgentFromMcpInput,
+} from "../agent/create-agent/create.js";
 import type {
   AgentCapabilityFlags,
   AgentClient,
@@ -76,6 +80,27 @@ const TEST_CLAUDE_PROVIDER_DEFINITION = {
 
 let workspaceArchiveInProgress = false;
 
+// The schedule runner reads only a few snapshot fields, so these tests stub just those.
+type ManagedAgentStub = { [K in keyof ManagedAgent]?: unknown };
+
+function asManagedAgent(stub: ManagedAgentStub): ManagedAgent {
+  return stub as ManagedAgent;
+}
+
+function asMcpCreateInput(input: CreateAgentCommandInput): CreateAgentFromMcpInput {
+  if (input.kind !== "mcp") {
+    throw new Error("Expected an mcp create-agent input");
+  }
+  return input;
+}
+
+function newAgentTargetConfig(schedule: Pick<StoredSchedule, "target">) {
+  if (schedule.target.type !== "new-agent") {
+    throw new Error("Expected a new-agent schedule target");
+  }
+  return schedule.target.config;
+}
+
 type TestScheduleServiceOptions = Omit<
   ScheduleServiceOptions,
   "createAgent" | "createDirectoryWorkspace" | "createPaseoWorktreeWorkspace" | "archiveWorkspace"
@@ -103,12 +128,17 @@ function createScheduleService(options: TestScheduleServiceOptions): ScheduleSer
       cwd: input.cwd,
       kind: "directory",
       displayName: "test-project",
-      title: input.firstAgentContext.prompt,
+      title: input.firstAgentContext.prompt ?? null,
       branch: null,
+      worktreeRoot: null,
       baseBranch: null,
+      isPaseoOwnedWorktree: false,
+      mainRepoRoot: null,
       createdAt: timestamp,
       updatedAt: timestamp,
       archivedAt: null,
+      autoArchivedChangeRequestUrl: null,
+      pinnedAt: null,
     };
     workspaces.set(workspaceId, workspace);
     return workspace;
@@ -120,6 +150,9 @@ function createScheduleService(options: TestScheduleServiceOptions): ScheduleSer
         workspaceId: workspace.workspaceId,
         cwd: workspace.cwd,
         kind: workspace.kind,
+        worktreeRoot: workspace.worktreeRoot,
+        isPaseoOwnedWorktree: workspace.isPaseoOwnedWorktree,
+        mainRepoRoot: workspace.mainRepoRoot,
       }));
   const archiveDefaultWorkspace: ScheduleServiceOptions["archiveWorkspace"] = async (
     workspaceId,
@@ -213,6 +246,7 @@ async function createRegistryBackedScheduleWorkspaceDeps(rootDir: string): Promi
     workspaceRegistry,
     workspaceGitService,
     isDirectory: async () => true,
+    logger: createTestLogger(),
   });
   return {
     workspaceRegistry,
@@ -242,6 +276,9 @@ async function createRegistryBackedScheduleWorkspaceDeps(rootDir: string): Promi
                     workspaceId: workspace.workspaceId,
                     cwd: workspace.cwd,
                     kind: workspace.kind,
+                    worktreeRoot: workspace.worktreeRoot,
+                    isPaseoOwnedWorktree: workspace.isPaseoOwnedWorktree,
+                    mainRepoRoot: workspace.mainRepoRoot,
                   })),
               archiveWorkspaceRecord: async (id) => {
                 await workspaceRegistry.archive(id, new Date().toISOString());
@@ -283,7 +320,6 @@ function buildAgentRecord(params: {
     lastStatus: "closed" as const,
     lastModeId: "default",
     config: { modeId: "default" },
-    runtimeInfo: null,
     features: [],
     persistence: null,
     requiresAttention: false,
@@ -565,7 +601,7 @@ describe("ScheduleService", () => {
       runOnCreate: false,
     });
 
-    expect(created.target.config).toMatchObject({
+    expect(newAgentTargetConfig(created)).toMatchObject({
       provider: "claude",
       model: "test-model",
       cwd: tempDir,
@@ -788,18 +824,18 @@ describe("ScheduleService", () => {
       newAgentConfig: { cwd: join(tempDir, "also-missing") },
     });
 
-    expect(updated.target.config).toMatchObject({
+    expect(newAgentTargetConfig(updated)).toMatchObject({
       provider: "claude",
       cwd: join(tempDir, "also-missing"),
     });
   });
 
   test("concurrent run finish and update preserve the target config and run outcome", async () => {
-    let finishRun: (() => void) | null = null;
+    let finishRun = null as (() => void) | null;
     const runBlocked = new Promise<void>((resolve) => {
       finishRun = resolve;
     });
-    let releaseRun: (() => void) | null = null;
+    let releaseRun = null as (() => void) | null;
     const runStarted = new Promise<void>((resolve) => {
       releaseRun = resolve;
     });
@@ -888,7 +924,7 @@ describe("ScheduleService", () => {
       permission: null,
       lastMessage: "compacted",
     });
-    manager.archiveAgent = async () => {};
+    manager.archiveAgent = async () => ({ archivedAt: now.toISOString() });
     const service = createScheduleService({
       paseoHome: tempDir,
       logger: createTestLogger(),
@@ -897,14 +933,14 @@ describe("ScheduleService", () => {
       providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
       createAgent: async (input) => {
         createdInputs.push(input);
-        const snapshot = {
+        const mcpInput = asMcpCreateInput(input);
+        const snapshot = asManagedAgent({
           id: "00000000-0000-0000-0000-000000000322",
           provider: "claude",
-          cwd: input.cwd ?? tempDir,
-          workspaceId: input.workspaceId,
-          status: "idle",
+          cwd: mcpInput.cwd ?? tempDir,
+          workspaceId: mcpInput.workspaceId,
           lifecycle: "idle",
-        };
+        });
         return {
           snapshot: snapshot as Awaited<
             ReturnType<ScheduleServiceOptions["createAgent"]>
@@ -964,7 +1000,7 @@ describe("ScheduleService", () => {
       permission: null,
       lastMessage: null,
     });
-    manager.archiveAgent = async () => {};
+    manager.archiveAgent = async () => ({ archivedAt: now.toISOString() });
     const service = createScheduleService({
       paseoHome: tempDir,
       logger: createTestLogger(),
@@ -972,17 +1008,17 @@ describe("ScheduleService", () => {
       agentStorage,
       providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
       createAgent: async (input) => {
-        const snapshot = {
+        const mcpInput = asMcpCreateInput(input);
+        const snapshot = asManagedAgent({
           id:
             runCount === 0
               ? "00000000-0000-0000-0000-000000000323"
               : "00000000-0000-0000-0000-000000000324",
           provider: "claude",
-          cwd: input.cwd ?? tempDir,
-          workspaceId: input.workspaceId,
-          status: "idle",
+          cwd: mcpInput.cwd ?? tempDir,
+          workspaceId: mcpInput.workspaceId,
           lifecycle: "idle",
-        };
+        });
         return {
           snapshot: snapshot as Awaited<
             ReturnType<ScheduleServiceOptions["createAgent"]>
@@ -1037,7 +1073,7 @@ describe("ScheduleService", () => {
       permission: null,
       lastMessage: null,
     });
-    manager.archiveAgent = async () => {};
+    manager.archiveAgent = async () => ({ archivedAt: now.toISOString() });
     const service = createScheduleService({
       paseoHome: tempDir,
       logger: createTestLogger(),
@@ -1045,14 +1081,14 @@ describe("ScheduleService", () => {
       agentStorage,
       providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
       createAgent: async (input) => {
-        const snapshot = {
+        const mcpInput = asMcpCreateInput(input);
+        const snapshot = asManagedAgent({
           id: "00000000-0000-0000-0000-000000000325",
           provider: "claude",
-          cwd: input.cwd ?? tempDir,
-          workspaceId: input.workspaceId,
-          status: "idle",
+          cwd: mcpInput.cwd ?? tempDir,
+          workspaceId: mcpInput.workspaceId,
           lifecycle: "idle",
-        };
+        });
         return {
           snapshot: snapshot as Awaited<
             ReturnType<ScheduleServiceOptions["createAgent"]>
@@ -1087,7 +1123,7 @@ describe("ScheduleService", () => {
     const logger = createTestLogger();
     const warn = vi.fn();
     logger.warn = warn as typeof logger.warn;
-    logger.child = (() => logger) as typeof logger.child;
+    Object.assign(logger, { child: () => logger });
     const archiveError = new Error("archive exploded");
     const manager = new AgentManager({
       logger: createTestLogger(),
@@ -1105,14 +1141,14 @@ describe("ScheduleService", () => {
       agentStorage,
       providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
       createAgent: async (input) => {
-        const snapshot = {
+        const mcpInput = asMcpCreateInput(input);
+        const snapshot = asManagedAgent({
           id: agentId,
           provider: "claude",
-          cwd: input.cwd ?? tempDir,
-          workspaceId: input.workspaceId,
-          status: "idle",
+          cwd: mcpInput.cwd ?? tempDir,
+          workspaceId: mcpInput.workspaceId,
           lifecycle: "idle",
-        };
+        });
         return {
           snapshot: snapshot as Awaited<
             ReturnType<ScheduleServiceOptions["createAgent"]>
@@ -2085,11 +2121,11 @@ describe("ScheduleService", () => {
   });
 
   test("keeps schedules paused when an in-flight run finishes after pause", async () => {
-    let releaseRun: (() => void) | null = null;
+    let releaseRun = null as (() => void) | null;
     const runStarted = new Promise<void>((resolve) => {
       releaseRun = resolve;
     });
-    let finishRun: (() => void) | null = null;
+    let finishRun = null as (() => void) | null;
     const runBlocked = new Promise<void>((resolve) => {
       finishRun = resolve;
     });
@@ -2167,7 +2203,6 @@ describe("ScheduleService", () => {
       config: {
         modeId: "default",
       },
-      runtimeInfo: null,
       features: [],
       persistence: null,
       requiresAttention: false,

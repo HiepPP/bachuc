@@ -6,12 +6,12 @@ import type {
   AgentPermissionResult,
   AgentRunOptions,
   AgentPermissionResponse,
+  AgentStreamEvent,
 } from "./agent-sdk-types.js";
-import type { AgentStreamEvent } from "../messages.js";
 import { respondToAgentPermission } from "./permission-response.js";
 
 class FakePermissionAgentManager {
-  permissionResult: AgentPermissionResult | void;
+  permissionResult: AgentPermissionResult | void = undefined;
   hasRunInFlight = false;
   outOfBandHandled = false;
   permissionResponses: Array<{
@@ -37,7 +37,7 @@ class FakePermissionAgentManager {
   }
 
   getAgent() {
-    return undefined;
+    return null;
   }
 
   hasInFlightRun(): boolean {
@@ -60,6 +60,15 @@ class FakePermissionAgentManager {
   ): Promise<AsyncGenerator<AgentStreamEvent>> {
     this.replacementRuns.push({ agentId, prompt, options });
     return emptyAgentStream();
+  }
+
+  // The run controller requires these, but no case here steers a turn or hits a stale session.
+  steerOrReplaceActiveTurn(): never {
+    throw new Error("steerOrReplaceActiveTurn is not used by these cases");
+  }
+
+  async reloadAgentSession(): Promise<never> {
+    throw new Error("reloadAgentSession is not used by these cases");
   }
 }
 

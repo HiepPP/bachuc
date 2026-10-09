@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { once } from "node:events";
 import { fork, type ChildProcess } from "node:child_process";
+import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import pino from "pino";
 import { describe, expect, it } from "vitest";
@@ -21,7 +22,7 @@ class FakeLocalSpeechWorker extends EventEmitter {
   public connected = true;
   public killed = false;
   public pid = 12345;
-  public readonly stderr = new EventEmitter() as NodeJS.ReadableStream;
+  public readonly stderr = new PassThrough();
   public readonly sent: LocalSpeechWorkerRequest[] = [];
   public disconnects = 0;
   public kills = 0;
@@ -140,6 +141,23 @@ async function waitForMicrotasks(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+// The worker-backed sessions are EventEmitters at runtime, but their public interfaces are not.
+function asEmitter(session: object): EventEmitter {
+  if (!(session instanceof EventEmitter)) {
+    throw new Error("Expected the session to be an EventEmitter");
+  }
+  return session;
+}
+
+function asSessionCreate(
+  request: LocalSpeechWorkerRequest,
+): Extract<LocalSpeechWorkerRequest, { type: "session.create" }> {
+  if (request.type !== "session.create") {
+    throw new Error("Expected session.create request");
+  }
+  return request;
+}
+
 describe("LocalSpeechWorkerClient", () => {
   it("does not spawn the worker until first local speech use", () => {
     const { workers } = createClient();
@@ -182,11 +200,11 @@ describe("LocalSpeechWorkerClient", () => {
     const provider = new WorkerBackedSpeechToTextProvider(client, "voiceStt");
     const session = provider.createSession({ logger: pino({ level: "silent" }) });
 
-    const transcriptPromise = once(session as EventEmitter, "transcript");
-    const committedPromise = once(session as EventEmitter, "committed");
+    const transcriptPromise = once(asEmitter(session), "transcript");
+    const committedPromise = once(asEmitter(session), "committed");
 
     const connect = session.connect();
-    const createRequest = workers[0].sent[0];
+    const createRequest = asSessionCreate(workers[0].sent[0]);
     expect(createRequest).toMatchObject({ type: "session.create", kind: "voiceStt" });
     workers[0].respond(createRequest, { requiredSampleRate: 16000 });
     await connect;
@@ -250,8 +268,8 @@ describe("LocalSpeechWorkerClient", () => {
     });
     const provider = new WorkerBackedSpeechToTextProvider(client, "dictationStt");
     const session = provider.createSession({ logger: pino({ level: "silent" }) });
-    let observedError: Error | null = null;
-    (session as EventEmitter).on("error", (error: Error) => {
+    let observedError = null as Error | null;
+    asEmitter(session).on("error", (error: Error) => {
       observedError = error;
     });
 
@@ -352,11 +370,11 @@ describe("LocalSpeechWorkerClient", () => {
     const { client, workers } = createClient();
     const provider = new WorkerBackedTurnDetectionProvider(client);
     const session = provider.createSession({ logger: pino({ level: "silent" }) });
-    const startedPromise = once(session as EventEmitter, "speech_started");
-    const stoppedPromise = once(session as EventEmitter, "speech_stopped");
+    const startedPromise = once(asEmitter(session), "speech_started");
+    const stoppedPromise = once(asEmitter(session), "speech_stopped");
 
     const connect = session.connect();
-    const createRequest = workers[0].sent[0];
+    const createRequest = asSessionCreate(workers[0].sent[0]);
     expect(createRequest).toMatchObject({ type: "session.create", kind: "vad" });
     workers[0].respond(createRequest, { requiredSampleRate: 16000 });
     await connect;

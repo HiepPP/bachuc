@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import type {
   AgentLaunchContext,
+  AgentPromptInput,
   AgentSession,
   AgentSessionConfig,
   AgentSlashCommand,
@@ -86,6 +87,7 @@ import { CodexAppServerClient } from "./codex/app-server-transport.js";
 import {
   createFakeCodexAppServer,
   type FakeCodexAppServer,
+  waitForNextEvent,
   waitForNextPermission,
   waitForNextTimelineItem,
   waitForProviderSubagent,
@@ -130,6 +132,17 @@ type CodexTestSession = AgentSession & {
   client: CodexClientLike | null;
 };
 
+function lastTimelineItem(events: AgentStreamEvent[]) {
+  const last = events.at(-1);
+  return last?.type === "timeline" ? last.item : undefined;
+}
+
+function timelineStatusLabel(event: AgentStreamEvent): string {
+  if (event.type !== "timeline") return event.type;
+  const status = "status" in event.item ? event.item.status : undefined;
+  return `${event.item.type}:${status}`;
+}
+
 type TurnTerminalEvent = Extract<
   AgentStreamEvent,
   { type: "turn_completed" | "turn_failed" | "turn_canceled" }
@@ -153,18 +166,20 @@ function createSession(
   configOverrides: Partial<AgentSessionConfig> = {},
   options: { goalsEnabled?: boolean; autoReviewEnabled?: boolean } = {},
 ): CodexTestSession {
-  const session = new CodexAppServerAgentSession(
-    createConfig(configOverrides),
-    null,
-    createTestLogger(),
-    () => {
-      throw new Error("Test session cannot spawn Codex app-server");
-    },
-    {},
-    false,
-    options.goalsEnabled === true,
-    options.autoReviewEnabled === true,
-  ) as CodexTestSession;
+  const session = castInternals<CodexTestSession>(
+    new CodexAppServerAgentSession(
+      createConfig(configOverrides),
+      null,
+      createTestLogger(),
+      () => {
+        throw new Error("Test session cannot spawn Codex app-server");
+      },
+      {},
+      false,
+      options.goalsEnabled === true,
+      options.autoReviewEnabled === true,
+    ),
+  );
   session.connectionState = "connected";
   session.currentThreadId = "test-thread";
   session.activeForegroundTurnId = "test-turn";
@@ -496,7 +511,7 @@ function archivedThreadErrorMessage(threadId: string): string {
   );
 }
 
-function asInternals(session: CodexTestSession): CodexSessionTestAccess {
+function asInternals(session: AgentSession): CodexSessionTestAccess {
   return castInternals<CodexSessionTestAccess>(session);
 }
 
@@ -691,6 +706,7 @@ process.stdin.on("data", (chunk) => {
   });
   const session = await client.createSession(createConfig({ cwd: projectCwd }));
   try {
+    if (!session.listCommands) throw new Error("Codex session must list commands");
     return await session.listCommands();
   } finally {
     await session.close();
@@ -785,7 +801,7 @@ describe("Codex app-server provider", () => {
 
   test("switching from auto-review back to Default returns approvals to the user", async () => {
     const session = createSession({ modeId: "auto-review" }, { autoReviewEnabled: true });
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, _params?: unknown) => {
       if (method === "thread/loaded/list") {
         return { data: ["test-thread"] };
       }
@@ -892,7 +908,7 @@ describe("Codex app-server provider", () => {
 
   test("turn/start forwards approvalsReviewer while in auto-review mode", async () => {
     const session = createSession({ modeId: "auto-review" }, { autoReviewEnabled: true });
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, _params?: unknown) => {
       if (method === "thread/loaded/list") {
         return { data: ["test-thread"] };
       }
@@ -917,7 +933,7 @@ describe("Codex app-server provider", () => {
 
   test("omitted mode preserves Codex resolved approval and sandbox config", async () => {
     const session = createSession({ modeId: undefined });
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, _params?: unknown) => {
       if (method === "thread/loaded/list") return { data: ["test-thread"] };
       if (method === "turn/start") return {};
       throw new Error(`Unexpected request: ${method}`);
@@ -946,7 +962,7 @@ describe("Codex app-server provider", () => {
         },
       },
     });
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, _params?: unknown) => {
       if (method === "thread/loaded/list") return { data: ["test-thread"] };
       if (method === "turn/start") return {};
       throw new Error(`Unexpected request: ${method}`);
@@ -1024,7 +1040,7 @@ describe("Codex app-server provider", () => {
         preapproved: [{ kind: "mcp", server: "hub", tool: "finish_execution" }],
       },
     });
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, _params?: unknown) => {
       if (method === "thread/loaded/list") return { data: ["test-thread"] };
       if (method === "turn/start") return {};
       throw new Error(`Unexpected request: ${method}`);
@@ -1117,11 +1133,10 @@ describe("Codex app-server provider", () => {
     child.stdin = new PassThrough() as ChildProcessWithoutNullStreams["stdin"];
     child.stdout = new PassThrough() as ChildProcessWithoutNullStreams["stdout"];
     child.stderr = new PassThrough() as ChildProcessWithoutNullStreams["stderr"];
-    child.exitCode = null;
-    child.signalCode = null;
+    Object.assign(child, { exitCode: null, signalCode: null });
     child.kill = vi.fn((signal) => {
       if (signal === "SIGKILL") {
-        child.signalCode = "SIGKILL";
+        Object.assign(child, { signalCode: "SIGKILL" });
         child.emit("exit", null, "SIGKILL");
       }
       return true;
@@ -1849,7 +1864,11 @@ describe("Codex app-server provider", () => {
       threadId: "thread-1",
       turn: { id: "turn-1" },
     });
-    const userMessage = waitForNextTimelineItem(session, "user_message");
+    const userMessage = waitForNextEvent(
+      session,
+      "timeline",
+      (event) => event.item.type === "user_message",
+    );
     emitCodexUserMessage(appServer, { id: "codex-message", text: "remember this" });
 
     await expect(userMessage).resolves.toMatchObject({
@@ -2143,7 +2162,7 @@ describe("Codex app-server provider", () => {
 
   test("passes a normalized output schema to turn/start", async () => {
     const session = createSession();
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, _params?: unknown) => {
       if (method === "thread/loaded/list") {
         return { data: ["test-thread"] };
       }
@@ -2182,7 +2201,7 @@ describe("Codex app-server provider", () => {
 
   test("resolves Codex skill slash commands into app-server skill input", async () => {
     const session = createSession();
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, _params?: unknown) => {
       if (method === "skills/list") {
         return {
           data: [
@@ -2442,6 +2461,7 @@ describe("Codex app-server provider", () => {
       running: false,
     });
 
+    if (!item) throw new Error("Expected a patch tool call");
     expect(item.detail.type).toBe("edit");
     if (item.detail.type === "edit") {
       expect(item.detail.filePath).toBe("src/array-alias.ts");
@@ -2482,6 +2502,7 @@ describe("Codex app-server provider", () => {
       running: false,
     });
 
+    if (!item) throw new Error("Expected a patch tool call");
     expect(item.detail.type).toBe("edit");
     if (item.detail.type === "edit") {
       expect(item.detail.filePath).toBe("src/object-single.ts");
@@ -2505,6 +2526,7 @@ describe("Codex app-server provider", () => {
       running: false,
     });
 
+    if (!item) throw new Error("Expected a patch tool call");
     expect(item.detail.type).toBe("edit");
     if (item.detail.type === "edit") {
       expect(item.detail.filePath).toBe("src/alias-path.ts");
@@ -3385,9 +3407,9 @@ describe("Codex app-server provider", () => {
       }),
     );
 
-    const beforeParentCompletes = events
-      .filter((event) => event.type === "timeline" && event.item.type === "tool_call")
-      .map((event) => event.item);
+    const beforeParentCompletes = events.flatMap((event) =>
+      event.type === "timeline" && event.item.type === "tool_call" ? [event.item] : [],
+    );
     expect(new Set(beforeParentCompletes.map((item) => item.callId))).toEqual(
       new Set(["spawn-child-root"]),
     );
@@ -3947,7 +3969,7 @@ describe("Codex app-server provider", () => {
       },
     });
 
-    expect(events.at(-1)?.item).toMatchObject({
+    expect(lastTimelineItem(events)).toMatchObject({
       type: "tool_call",
       callId: "call-sub-agent-child-command-failure",
       name: "Sub-agent",
@@ -3981,7 +4003,7 @@ describe("Codex app-server provider", () => {
       },
     });
 
-    expect(events.at(-1)?.item).toMatchObject({
+    expect(lastTimelineItem(events)).toMatchObject({
       type: "tool_call",
       callId: "call-sub-agent-transient-child-error",
       name: "Sub-agent",
@@ -4195,9 +4217,9 @@ describe("Codex app-server provider", () => {
       },
     ]);
     expect(
-      history
-        .filter((event) => event.type === "timeline" && event.item.type === "tool_call")
-        .map((event) => event.item),
+      history.flatMap((event) =>
+        event.type === "timeline" && event.item.type === "tool_call" ? [event.item] : [],
+      ),
     ).toMatchObject([
       {
         callId: "legacy-spawn-history",
@@ -4729,11 +4751,11 @@ describe("Codex app-server provider", () => {
       appServer.completeTurn();
       await terminalEvent;
 
-      expect(
-        events.map((event) =>
-          event.type === "timeline" ? `${event.item.type}:${event.item.status}` : event.type,
-        ),
-      ).toEqual(["compaction:loading", "compaction:completed", "turn_completed"]);
+      expect(events.map(timelineStatusLabel)).toEqual([
+        "compaction:loading",
+        "compaction:completed",
+        "turn_completed",
+      ]);
       appServer.assertNoErrors();
     } finally {
       await session.close();
@@ -4755,11 +4777,11 @@ describe("Codex app-server provider", () => {
       appServer.completeTurn();
       await terminalEvent;
 
-      expect(
-        events.map((event) =>
-          event.type === "timeline" ? `${event.item.type}:${event.item.status}` : event.type,
-        ),
-      ).toEqual(["compaction:loading", "compaction:completed", "turn_completed"]);
+      expect(events.map(timelineStatusLabel)).toEqual([
+        "compaction:loading",
+        "compaction:completed",
+        "turn_completed",
+      ]);
       appServer.assertNoErrors();
     } finally {
       await session.close();
@@ -4775,11 +4797,11 @@ describe("Codex app-server provider", () => {
       appServer.completeTurn();
       await terminalEvent;
 
-      expect(
-        events.map((event) =>
-          event.type === "timeline" ? `${event.item.type}:${event.item.status}` : event.type,
-        ),
-      ).toEqual(["compaction:loading", "compaction:completed", "turn_completed"]);
+      expect(events.map(timelineStatusLabel)).toEqual([
+        "compaction:loading",
+        "compaction:completed",
+        "turn_completed",
+      ]);
       appServer.assertNoErrors();
     } finally {
       await session.close();
@@ -4787,8 +4809,8 @@ describe("Codex app-server provider", () => {
   });
 
   test.each([
-    { status: "failed", terminalType: "turn_failed" },
-    { status: "interrupted", terminalType: "turn_canceled" },
+    { status: "failed" as const, terminalType: "turn_failed" },
+    { status: "interrupted" as const, terminalType: "turn_canceled" },
   ])("completes a pending compaction before a $status turn", async ({ status, terminalType }) => {
     const { appServer, session, events, terminalEvent } = await startCompactionTurnTest();
 
@@ -4800,11 +4822,11 @@ describe("Codex app-server provider", () => {
       });
       await terminalEvent;
 
-      expect(
-        events.map((event) =>
-          event.type === "timeline" ? `${event.item.type}:${event.item.status}` : event.type,
-        ),
-      ).toEqual(["compaction:loading", "compaction:completed", terminalType]);
+      expect(events.map(timelineStatusLabel)).toEqual([
+        "compaction:loading",
+        "compaction:completed",
+        terminalType,
+      ]);
       appServer.assertNoErrors();
     } finally {
       await session.close();
@@ -5270,7 +5292,7 @@ describe("Codex app-server provider", () => {
 
     session.activeForegroundTurnId = null;
     session.client = createStub<CodexClientLike>({
-      request: async (method) => {
+      request: async (method: string) => {
         if (method === "thread/loaded/list") return { data: ["test-thread"] };
         if (method === "turn/start") return {};
         throw new Error(`Unexpected request: ${method}`);
@@ -5315,7 +5337,7 @@ describe("Codex app-server provider", () => {
     });
     session.activeForegroundTurnId = null;
     session.client = createStub<CodexClientLike>({
-      request: async (method) => {
+      request: async (method: string) => {
         if (method === "thread/loaded/list") {
           markPromptSetupStarted?.();
           await new Promise<void>((resolve) => {
@@ -5367,7 +5389,7 @@ describe("Codex app-server provider", () => {
     });
     session.activeForegroundTurnId = null;
     session.client = createStub<CodexClientLike>({
-      request: async (method) => {
+      request: async (method: string) => {
         if (method === "thread/loaded/list") return { data: ["test-thread"] };
         if (method === "turn/start") {
           markPromptRequested?.();
@@ -5414,7 +5436,7 @@ describe("Codex app-server provider", () => {
 
     session.activeForegroundTurnId = null;
     session.client = createStub<CodexClientLike>({
-      request: async (method) => {
+      request: async (method: string) => {
         if (method === "thread/loaded/list") return { data: ["test-thread"] };
         if (method === "turn/start") throw new Error("Prompt rejected");
         throw new Error(`Unexpected request: ${method}`);
@@ -6032,7 +6054,7 @@ describe("Codex app-server provider", () => {
       },
     ];
     asInternals(session).refreshResolvedCollaborationMode();
-    const request = vi.fn(async (method: string) => {
+    const request = vi.fn(async (method: string, _params?: unknown) => {
       if (method === "thread/loaded/list") {
         return { data: ["test-thread"] };
       }
@@ -6313,8 +6335,7 @@ describe("Codex importable sessions", () => {
       provider,
     ).spawnAppServer = async () => {
       const child = new EventEmitter() as ChildProcessWithoutNullStreams;
-      child.exitCode = 0;
-      child.signalCode = null;
+      Object.assign(child, { exitCode: 0, signalCode: null });
       child.stdin = new PassThrough();
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();

@@ -52,7 +52,9 @@ test("the shared physical send boundary rejects binary above the hard bound", ()
   const socket = {
     readyState: 1,
     bufferedAmount: MAX_PHYSICAL_SOCKET_BUFFERED_BYTES - 1,
-    send: (data: string | Uint8Array | ArrayBuffer) => sent.push(data),
+    send: (data: string | Uint8Array | ArrayBuffer) => {
+      sent.push(data);
+    },
   };
 
   const accepted = sendBoundedPhysicalFrame({

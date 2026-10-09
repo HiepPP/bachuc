@@ -499,6 +499,7 @@ describe("codex tool-call mapper", () => {
       ...[truncated 27 chars]",
       }
     `);
+    if (item.detail.type !== "edit") throw new Error("Expected an edit detail");
     expect(String(item.detail.unifiedDiff).length).toBeLessThan(hugeDiff.length);
   });
 

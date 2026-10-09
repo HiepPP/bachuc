@@ -14,12 +14,19 @@ import {
 import type { ArchiveResult, ActiveWorkspaceRef } from "../workspace-archive-service.js";
 import type { WorkspaceGitRuntimeSnapshot } from "../workspace-git-service.js";
 import { createWorktree, type WorktreeConfig } from "../../utils/worktree.js";
-import type { ForgeService } from "../../../services/forge-service.js";
+import type { ForgeService } from "../../services/forge-service.js";
 import type { StoredAgentRecord } from "../agent/agent-storage.js";
+import { createStub } from "../test-utils/class-mocks.js";
 
 const CWD = "/tmp/paseo/worktrees/repo/branch";
 const PASEO_HOME = "/tmp/paseo";
 const WORKTREES_ROOT = "/tmp/paseo/worktrees/repo";
+
+function createActiveWorkspace(
+  workspace: Pick<ActiveWorkspaceRef, "workspaceId" | "cwd" | "kind">,
+): ActiveWorkspaceRef {
+  return { ...workspace, worktreeRoot: null, isPaseoOwnedWorktree: false, mainRepoRoot: null };
+}
 
 function createPullRequest(
   overrides?: Partial<NonNullable<WorkspaceGitRuntimeSnapshot["forge"]["pullRequest"]>>,
@@ -54,6 +61,7 @@ function createSnapshot(overrides?: {
       aheadOfOrigin: 0,
       behindOfOrigin: 0,
       hasRemote: true,
+      upstreamRef: null,
       diffStat: { additions: 0, deletions: 0 },
       ...overrides?.git,
     },
@@ -206,7 +214,7 @@ async function createPaseoOwnedWorktree(
 }
 
 function createGitHubServiceStub(): ForgeService {
-  return {
+  return createStub<ForgeService>({
     listPullRequests: async () => [],
     listIssues: async () => [],
     searchIssuesAndPrs: async () => ({
@@ -214,7 +222,7 @@ function createGitHubServiceStub(): ForgeService {
       featuresEnabled: true,
       githubFeaturesEnabled: true,
     }),
-    getPullRequest: async ({ number }) => ({
+    getPullRequest: async ({ number }: { number: number }) => ({
       number,
       title: `PR ${number}`,
       url: `https://github.com/acme/repo/pull/${number}`,
@@ -224,8 +232,8 @@ function createGitHubServiceStub(): ForgeService {
       headRefName: `pr-${number}`,
       labels: [],
     }),
-    getPullRequestHeadRef: async ({ number }) => `pr-${number}`,
-    getPullRequestCheckoutTarget: async ({ number }) => ({
+    getPullRequestHeadRef: async ({ number }: { number: number }) => `pr-${number}`,
+    getPullRequestCheckoutTarget: async ({ number }: { number: number }) => ({
       number,
       baseRefName: "main",
       headRefName: `pr-${number}`,
@@ -242,7 +250,7 @@ function createGitHubServiceStub(): ForgeService {
     mergePullRequest: async () => ({ success: true }),
     isAuthenticated: async () => true,
     invalidate: () => {},
-  };
+  });
 }
 
 function createRealOutcomeHarness(input: {
@@ -281,6 +289,7 @@ function createRealOutcomeHarness(input: {
             aheadOfOrigin: 0,
             behindOfOrigin: 0,
             hasRemote: true,
+            upstreamRef: null,
             diffStat: { additions: 0, deletions: 0 },
           },
           forge: {
@@ -488,8 +497,8 @@ describe("archiveIfSafe", () => {
   test("archives only the supplied workspace id and does not iterate siblings", async () => {
     const harness = createHarness();
     harness.options.listActiveWorkspaces = vi.fn(async () => [
-      { workspaceId: "ws-merged-worktree", cwd: CWD, kind: "worktree" as const },
-      { workspaceId: "ws-sibling", cwd: CWD, kind: "local_checkout" as const },
+      createActiveWorkspace({ workspaceId: "ws-merged-worktree", cwd: CWD, kind: "worktree" }),
+      createActiveWorkspace({ workspaceId: "ws-sibling", cwd: CWD, kind: "local_checkout" }),
     ]);
 
     await runArchiveIfSafe(harness, { workspaceId: "ws-merged-worktree" });
@@ -516,8 +525,16 @@ describe("archiveIfSafe", () => {
       repoDir,
       worktreePath: worktree.worktreePath,
       activeWorkspaces: [
-        { workspaceId: workspaceA, cwd: worktree.worktreePath, kind: "worktree" },
-        { workspaceId: workspaceB, cwd: worktree.worktreePath, kind: "local_checkout" },
+        createActiveWorkspace({
+          workspaceId: workspaceA,
+          cwd: worktree.worktreePath,
+          kind: "worktree",
+        }),
+        createActiveWorkspace({
+          workspaceId: workspaceB,
+          cwd: worktree.worktreePath,
+          kind: "local_checkout",
+        }),
       ],
       archivedWorkspaceIds,
     });
@@ -545,7 +562,13 @@ describe("archiveIfSafe", () => {
       paseoHome,
       repoDir,
       worktreePath: worktree.worktreePath,
-      activeWorkspaces: [{ workspaceId: workspaceA, cwd: worktree.worktreePath, kind: "worktree" }],
+      activeWorkspaces: [
+        createActiveWorkspace({
+          workspaceId: workspaceA,
+          cwd: worktree.worktreePath,
+          kind: "worktree",
+        }),
+      ],
       archivedWorkspaceIds,
     });
 
@@ -564,16 +587,16 @@ describe("archiveIfSafe", () => {
     const { tempDir, repoDir } = createGitRepo();
     const paseoHome = path.join(tempDir, ".paseo");
     const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "merged-then-unarchived");
-    const workspace = {
+    const workspace = createActiveWorkspace({
       workspaceId: "ws-merged-then-unarchived",
       cwd: worktree.worktreePath,
-      kind: "worktree" as const,
-    };
-    const sibling = {
+      kind: "worktree",
+    });
+    const sibling = createActiveWorkspace({
       workspaceId: "ws-directory-preserving-sibling",
       cwd: worktree.worktreePath,
-      kind: "local_checkout" as const,
-    };
+      kind: "local_checkout",
+    });
     const archivedWorkspaceIds = new Set<string>();
     const harness = createRealOutcomeHarness({
       paseoHome,

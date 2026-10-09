@@ -694,6 +694,7 @@ describe("DaemonConfigStore", () => {
         providers: {},
         metadataGeneration: { providers: [] },
         autoArchiveAfterMerge: false,
+        enableTerminalAgentHooks: false,
         appendSystemPrompt: "",
       },
       undefined,
@@ -781,6 +782,7 @@ describe("DaemonConfigStore", () => {
       paseoHome,
       {
         mcp: { injectIntoAgents: false },
+        browserTools: { enabled: false },
         providers: {},
         metadataGeneration: { providers: [] },
         autoArchiveAfterMerge: false,

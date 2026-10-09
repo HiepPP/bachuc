@@ -70,19 +70,20 @@ function toolCall(options?: {
   error?: unknown;
 }): Extract<AgentTimelineItem, { type: "tool_call" }> {
   const status = options?.status ?? "running";
-  return {
-    type: "tool_call",
+  const base = {
+    type: "tool_call" as const,
     callId: options?.callId ?? "tool-1",
     name: "shell",
-    status,
-    error: status === "failed" ? (options?.error ?? "failed") : null,
     detail: {
-      type: "shell",
+      type: "shell" as const,
       command: "printf ok",
       output: options?.output ?? "",
       exitCode: status === "completed" ? 0 : null,
     },
   };
+  return status === "failed"
+    ? { ...base, status, error: options?.error ?? "failed" }
+    : { ...base, status, error: null };
 }
 
 class TestAgentSession implements AgentSession {
@@ -354,6 +355,10 @@ function getTimelineStreamEvents(
   );
 }
 
+function timelineStreamItem(event: AgentManagerEvent): AgentTimelineItem | null {
+  return event.type === "agent_stream" && event.event.type === "timeline" ? event.event.item : null;
+}
+
 function getTimelineItems(rows: AgentTimelineRow[]): AgentTimelineItem[] {
   return rows.map((row) => row.item);
 }
@@ -412,9 +417,7 @@ describe("target coalesced behavior", () => {
       const events = getTimelineStreamEvents(harness.events, agentId);
 
       expect(getTimelineItems(rows)).toEqual([expectedItem]);
-      expect(
-        events.map((event) => (event.type === "agent_stream" ? event.event.item : null)),
-      ).toEqual([expectedItem]);
+      expect(events.map(timelineStreamItem)).toEqual([expectedItem]);
     } finally {
       harness.cleanup();
     }
@@ -436,9 +439,7 @@ describe("target coalesced behavior", () => {
       const events = getTimelineStreamEvents(harness.events, agentId);
 
       expect(getTimelineItems(rows)).toEqual([expectedItem]);
-      expect(
-        events.map((event) => (event.type === "agent_stream" ? event.event.item : null)),
-      ).toEqual([expectedItem]);
+      expect(events.map(timelineStreamItem)).toEqual([expectedItem]);
     } finally {
       harness.cleanup();
     }
@@ -482,9 +483,7 @@ describe("target coalesced behavior", () => {
 
       const events = getTimelineStreamEvents(harness.events, agentId);
       expect(await harness.manager.getTimelineRows(agentId)).toEqual([]);
-      expect(
-        events.map((event) => (event.type === "agent_stream" ? event.event.item : null)),
-      ).toEqual([expectedItem]);
+      expect(events.map(timelineStreamItem)).toEqual([expectedItem]);
     } finally {
       harness.cleanup();
     }

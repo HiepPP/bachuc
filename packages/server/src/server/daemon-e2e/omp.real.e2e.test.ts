@@ -11,7 +11,7 @@ import type { AgentTimelineItem } from "../agent/agent-sdk-types.js";
 import {
   MIN_SUPPORTED_OMP_VERSION,
   formatOmpVersionSupport,
-} from "../agent/providers/omp/agent.js";
+} from "../agent/providers/omp/provider-config.js";
 import { DaemonClient } from "../test-utils/daemon-client.js";
 import { createTestPaseoDaemon, type TestPaseoDaemon } from "../test-utils/paseo-daemon.js";
 import { createRealProviderClients, getRealProviderConfig } from "./real-provider-test-config.js";

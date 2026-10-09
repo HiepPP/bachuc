@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "vitest";
-import type { SessionOutboundMessage } from "../messages.js";
+import { AgentCreatedStatusPayloadSchema, type SessionOutboundMessage } from "../messages.js";
 import { HubRelationshipHarness } from "./test-utils/relationship-harness.js";
 
 let relationship: HubRelationshipHarness | null = null;
@@ -17,11 +17,17 @@ async function launchRelationship(): Promise<HubRelationshipHarness> {
   return launched;
 }
 
+function agentCreatedPayload(message: SessionOutboundMessage) {
+  if (message.type !== "status") throw new Error("Agent was not created");
+  const parsed = AgentCreatedStatusPayloadSchema.safeParse(message.payload);
+  if (!parsed.success) throw new Error("Agent was not created");
+  return parsed.data;
+}
+
 function createdAgentWorkspaceId(message: SessionOutboundMessage): string {
-  if (message.type !== "status" || message.payload.status !== "agent_created")
-    throw new Error("Agent was not created");
-  if (!message.payload.agent.workspaceId) throw new Error("Workspace was not created");
-  return message.payload.agent.workspaceId;
+  const { agent } = agentCreatedPayload(message);
+  if (!agent.workspaceId) throw new Error("Workspace was not created");
+  return agent.workspaceId;
 }
 
 test("Hub retries one durable daemon execution across concurrency and reconstruction", async () => {
@@ -129,17 +135,15 @@ test("ordinary Hub create and message retries do not duplicate agents or prompts
       }),
     },
   });
-  if (first?.type !== "status" || first.payload.status !== "agent_created")
-    throw new Error("Agent was not created");
-  const agentId = first.payload.agentId;
-  expect(first.payload.agent.id).toBe(agentId);
+  const { agentId, agent: firstAgent } = agentCreatedPayload(first);
+  expect(firstAgent.id).toBe(agentId);
   expect(responses[1]).toEqual({
     type: "status",
     payload: {
       status: "agent_created",
       requestId: "create-duplicate",
       agentId,
-      agent: first.payload.agent,
+      agent: firstAgent,
     },
   });
   expect(
@@ -191,10 +195,8 @@ test("ordinary Hub requests survive daemon restart and restore an archived works
     worktree: { mode: "branch-off", newBranch: "ordinary-restoration" },
   };
   const response = await hub.requestOrdinary({ ...create, requestId: "restorable-create" });
-  if (response.type !== "status" || response.payload.status !== "agent_created")
-    throw new Error("Agent was not created");
-  const { agentId, agent } = response.payload;
-  if (!agent?.workspaceId) throw new Error("Workspace was not created");
+  const { agentId, agent } = agentCreatedPayload(response);
+  if (!agent.workspaceId) throw new Error("Workspace was not created");
   const workspaceId = agent.workspaceId;
   const message = {
     type: "send_agent_message_request",

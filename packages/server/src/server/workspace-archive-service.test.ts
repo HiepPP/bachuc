@@ -43,6 +43,7 @@ function createGitHubServiceStub(): ForgeService {
     searchIssuesAndPrs: async () => ({
       items: [],
       featuresEnabled: true,
+      authState: "authenticated",
       githubFeaturesEnabled: true,
     }),
     getPullRequest: async ({ number }) => ({
@@ -54,6 +55,7 @@ function createGitHubServiceStub(): ForgeService {
       baseRefName: "main",
       headRefName: `pr-${number}`,
       labels: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
     }),
     getPullRequestHeadRef: async ({ number }) => `pr-${number}`,
     getPullRequestCheckoutTarget: async ({ number }) => ({
@@ -66,11 +68,34 @@ function createGitHubServiceStub(): ForgeService {
       isCrossRepository: false,
     }),
     getCurrentPullRequestStatus: async () => null,
+    getPullRequestTimeline: async ({ prNumber }) => ({
+      prNumber,
+      repoOwner: "acme",
+      repoName: "repo",
+      items: [],
+      truncated: false,
+      error: null,
+    }),
+    getCheckDetails: async ({ checkRunId, workflowRunId }) => ({
+      checkRunId: checkRunId ?? 0,
+      workflowRunId: workflowRunId ?? null,
+      name: "test",
+      status: null,
+      conclusion: null,
+      url: null,
+      detailsUrl: null,
+      output: null,
+      annotations: [],
+      failedJobs: [],
+      truncated: false,
+    }),
     createPullRequest: async () => ({
       number: 1,
       url: "https://github.com/acme/repo/pull/1",
     }),
     mergePullRequest: async () => ({ success: true }),
+    enablePullRequestAutoMerge: async () => ({ success: true }),
+    disablePullRequestAutoMerge: async () => ({ success: true }),
     isAuthenticated: async () => true,
     invalidate: () => {},
   };
@@ -115,9 +140,30 @@ async function createPaseoOwnedWorktree(
   });
 }
 
+// Fixtures name the fields a test cares about; the persisted ownership fields default to unset.
+type ActiveWorkspaceFixture = Pick<ActiveWorkspaceRef, "workspaceId" | "cwd" | "kind"> &
+  Partial<ActiveWorkspaceRef>;
+
+function createActiveWorkspaceRef(fixture: ActiveWorkspaceFixture): ActiveWorkspaceRef {
+  return { worktreeRoot: null, isPaseoOwnedWorktree: false, mainRepoRoot: null, ...fixture };
+}
+
+function createStoredAgentRecord(id: string): StoredAgentRecord {
+  const timestamp = "2026-01-01T00:00:00.000Z";
+  return {
+    id,
+    provider: "codex",
+    cwd: "/tmp/repo",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    labels: {},
+    lastStatus: "closed",
+  };
+}
+
 interface ArchiveDepsInput {
   paseoHome: string;
-  activeWorkspaces: ActiveWorkspaceRef[];
+  activeWorkspaces: ActiveWorkspaceFixture[];
   paseoWorktreesBaseRoot?: string;
   findWorkspaceIdForCwd?: (cwd: string) => Promise<string | null>;
 }
@@ -130,7 +176,7 @@ interface ArchiveTestDependencies extends ArchiveDependencies {
 
 function createArchiveDeps(input: ArchiveDepsInput): ArchiveTestDependencies {
   const archivedWorkspaceIds = new Set<string>();
-  const active = [...input.activeWorkspaces];
+  const active = input.activeWorkspaces.map(createActiveWorkspaceRef);
   const archivedAgentIds: string[] = [];
   const archivedSnapshotIds: string[] = [];
 
@@ -150,7 +196,7 @@ function createArchiveDeps(input: ArchiveDepsInput): ArchiveTestDependencies {
       }),
       archiveSnapshot: vi.fn(async (agentId: string, _archivedAt: string) => {
         archivedSnapshotIds.push(agentId);
-        return {};
+        return createStoredAgentRecord(agentId);
       }),
     },
     agentStorage: {
@@ -750,7 +796,7 @@ describe("archiveByScope", () => {
       }),
       archiveSnapshot: vi.fn(async (agentId: string, _archivedAt: string) => {
         deps.archivedSnapshotIds.push(agentId);
-        return {};
+        return createStoredAgentRecord(agentId);
       }),
     };
     deps.agentStorage = {
@@ -793,14 +839,14 @@ describe("archiveByScope", () => {
       listAgents: () => [{ id: agentId, workspaceId }] as ManagedAgent[],
       getAgent: () => null,
       archiveAgent: vi.fn(async () => ({ archivedAt: new Date().toISOString() })),
-      archiveSnapshot: vi.fn(async (id: string) => {
+      archiveSnapshot: vi.fn(async (id: string, _archivedAt: string) => {
         deps.archivedSnapshotIds.push(id);
-        return {};
+        return createStoredAgentRecord(id);
       }),
     };
     deps.agentStorage = {
-      list: async () => [{ id: agentId, workspaceId, archivedAt: null }] as StoredAgentRecord[],
-    } as Pick<AgentStorage, "list">;
+      listByWorkspace: async () => [{ ...createStoredAgentRecord(agentId), workspaceId }],
+    };
 
     const result = await archiveByScope(deps, {
       scope: { kind: "workspace", workspaceId },
@@ -851,8 +897,16 @@ describe("resolveWorkspaceIdAtPath", () => {
     const result = await resolveWorkspaceIdAtPath(
       {
         listActiveWorkspaces: async () => [
-          { workspaceId: "ws-local", cwd: targetPath, kind: "local_checkout" },
-          { workspaceId: "ws-worktree", cwd: targetPath, kind: "worktree" },
+          createActiveWorkspaceRef({
+            workspaceId: "ws-local",
+            cwd: targetPath,
+            kind: "local_checkout",
+          }),
+          createActiveWorkspaceRef({
+            workspaceId: "ws-worktree",
+            cwd: targetPath,
+            kind: "worktree",
+          }),
         ],
         findWorkspaceIdForCwd: vi.fn(async () => "ws-local"),
       },
@@ -868,7 +922,11 @@ describe("resolveWorkspaceIdAtPath", () => {
     const result = await resolveWorkspaceIdAtPath(
       {
         listActiveWorkspaces: async () => [
-          { workspaceId: "ws-nested", cwd: "/worktrees/repo", kind: "worktree" },
+          createActiveWorkspaceRef({
+            workspaceId: "ws-nested",
+            cwd: "/worktrees/repo",
+            kind: "worktree",
+          }),
         ],
         findWorkspaceIdForCwd: vi.fn(async () => "ws-nested"),
       },

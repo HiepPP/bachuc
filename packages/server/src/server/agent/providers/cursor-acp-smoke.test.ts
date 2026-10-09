@@ -19,9 +19,7 @@ const capabilities: AgentCapabilityFlags = {
   supportsToolInvocations: true,
 };
 
-interface SmokeLogger extends Logger {
-  warn: ReturnType<typeof vi.fn>;
-}
+type SmokeLogger = Logger & { warn: ReturnType<typeof vi.fn> };
 
 interface SmokeEvidence {
   availableModes: unknown;
@@ -190,7 +188,7 @@ runCursorACPSmoke("real cursor-acp@0.1.0 smoke", () => {
 
     const originalSetMode = ClientSideConnection.prototype.setSessionMode;
     vi.spyOn(ClientSideConnection.prototype, "setSessionMode").mockImplementation(
-      async function (params) {
+      async function (this: ClientSideConnection, params) {
         evidence.setModeRpc.push({ modeId: params.modeId, direction: "out", payload: params });
         try {
           const response = await originalSetMode.call(this, params);
@@ -209,7 +207,7 @@ runCursorACPSmoke("real cursor-acp@0.1.0 smoke", () => {
 
     const originalSetConfig = ClientSideConnection.prototype.setSessionConfigOption;
     vi.spyOn(ClientSideConnection.prototype, "setSessionConfigOption").mockImplementation(
-      async function (params) {
+      async function (this: ClientSideConnection, params) {
         evidence.setConfigRpc.push({
           configId: params.configId,
           value: params.value,
@@ -236,7 +234,7 @@ runCursorACPSmoke("real cursor-acp@0.1.0 smoke", () => {
 
     const originalSetModel = ClientSideConnection.prototype.unstable_setSessionModel;
     vi.spyOn(ClientSideConnection.prototype, "unstable_setSessionModel").mockImplementation(
-      async function (params) {
+      async function (this: ClientSideConnection, params) {
         evidence.setModelRpc.push({ modelId: params.modelId, direction: "out" });
         try {
           const response = await originalSetModel.call(this, params);

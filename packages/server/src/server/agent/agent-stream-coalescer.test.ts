@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import type { AgentProvider, AgentStreamEvent } from "./agent-sdk-types.js";
+import type { AgentProvider, AgentStreamEvent, ToolCallTimelineItem } from "./agent-sdk-types.js";
 import {
   AGENT_STREAM_COALESCE_DEFAULT_WINDOW_MS,
   AgentStreamCoalescer,
@@ -95,22 +95,22 @@ function toolCall(options?: {
   error?: unknown;
 }): Extract<AgentStreamEvent, { type: "timeline" }> {
   const status = options?.status ?? "running";
-  return timeline(
-    {
-      type: "tool_call",
-      callId: options?.callId ?? "tool-1",
-      name: "shell",
-      status,
-      error: status === "failed" ? (options?.error ?? "failed") : null,
-      detail: {
-        type: "shell",
-        command: "printf ok",
-        output: options?.output ?? "",
-        exitCode: status === "completed" ? 0 : null,
-      },
+  const base = {
+    type: "tool_call" as const,
+    callId: options?.callId ?? "tool-1",
+    name: "shell",
+    detail: {
+      type: "shell" as const,
+      command: "printf ok",
+      output: options?.output ?? "",
+      exitCode: status === "completed" ? 0 : null,
     },
-    options,
-  );
+  };
+  const item: ToolCallTimelineItem =
+    status === "failed"
+      ? { ...base, status, error: options?.error ?? "failed" }
+      : { ...base, status, error: null };
+  return timeline(item, options);
 }
 
 describe("AgentStreamCoalescer", () => {

@@ -46,6 +46,7 @@ import type {
   UpdateScheduleInput,
 } from "@getpaseo/protocol/schedule/types";
 import type { ScheduleService } from "../schedule/service.js";
+import type { ActiveWorkspaceRef } from "../workspace-archive-service.js";
 import type { WorkspaceGitService } from "../workspace-git-service.js";
 import {
   createPaseoWorktree as createPaseoWorktreeService,
@@ -73,6 +74,10 @@ import { createWorkspaceProvisioningService } from "../session/workspace-provisi
 const REPO_CWD = resolvePath("/tmp/repo");
 const TARGET_CWD = resolvePath("/tmp/target");
 const BROWSER_WORKSPACE_ID = "wks_browser_tools";
+
+// Fakes carry only the ManagedAgent fields the MCP tools read. Casting through
+// this type keeps every key a real ManagedAgent field.
+type ManagedAgentStub = { [K in keyof ManagedAgent]?: unknown };
 
 interface LooseSafeParseResult {
   success: boolean;
@@ -157,8 +162,10 @@ function agentsOf(response: {
   return z.array(z.record(z.string(), z.unknown())).parse(response.structuredContent.agents);
 }
 
-function expectSingleTextContent(response: { content?: LooseContentBlock[] }): string {
-  const content = response.content ?? [];
+function expectSingleTextContent(response: Record<string, unknown>): string {
+  const content = z
+    .array(z.object({ type: z.string(), text: z.string().optional() }))
+    .parse(response.content ?? []);
   expect(content).toHaveLength(1);
   const block = content[0];
   expect(block?.type).toBe("text");
@@ -502,7 +509,7 @@ function createStoredRecord(overrides: Partial<StoredAgentRecord> = {}): StoredA
   };
 }
 
-function createManagedAgent(overrides: Partial<ManagedAgent> = {}): ManagedAgent {
+function createManagedAgent(overrides: ManagedAgentStub = {}): ManagedAgent {
   const now = new Date();
   return {
     id: "live-agent",
@@ -530,7 +537,7 @@ function createManagedAgent(overrides: Partial<ManagedAgent> = {}): ManagedAgent
     labels: {},
     attention: { requiresAttention: false },
     ...overrides,
-  } as ManagedAgent;
+  } as ManagedAgentStub as ManagedAgent;
 }
 
 function createGitHubServiceStub(): ForgeService {
@@ -541,6 +548,7 @@ function createGitHubServiceStub(): ForgeService {
       items: [],
       featuresEnabled: true,
       githubFeaturesEnabled: true,
+      authState: "authenticated",
     }),
     getPullRequest: async ({ number }) => ({
       number,
@@ -551,6 +559,7 @@ function createGitHubServiceStub(): ForgeService {
       baseRefName: "main",
       headRefName: `pr-${number}`,
       labels: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
     }),
     getPullRequestHeadRef: async ({ number }) => `pr-${number}`,
     getPullRequestCheckoutTarget: async ({ number }) => ({
@@ -563,11 +572,34 @@ function createGitHubServiceStub(): ForgeService {
       isCrossRepository: false,
     }),
     getCurrentPullRequestStatus: async () => null,
+    getPullRequestTimeline: async ({ prNumber }) => ({
+      prNumber,
+      repoOwner: "acme",
+      repoName: "repo",
+      items: [],
+      truncated: false,
+      error: null,
+    }),
+    getCheckDetails: async ({ checkRunId, workflowRunId }) => ({
+      checkRunId: checkRunId ?? 0,
+      workflowRunId: workflowRunId ?? null,
+      name: "test",
+      status: null,
+      conclusion: null,
+      url: null,
+      detailsUrl: null,
+      output: null,
+      annotations: [],
+      failedJobs: [],
+      truncated: false,
+    }),
     createPullRequest: async () => ({
       number: 1,
       url: "https://github.com/acme/repo/pull/1",
     }),
     mergePullRequest: async () => ({ success: true }),
+    enablePullRequestAutoMerge: async () => ({ success: true }),
+    disablePullRequestAutoMerge: async () => ({ success: true }),
     isAuthenticated: async () => true,
     invalidate: () => {},
   };
@@ -665,11 +697,7 @@ function createStoredSchedule(input: CreateScheduleInput): StoredSchedule {
 }
 
 function createArchiveWorkspaceRecordMutator(
-  activeWorkspaces: Array<{
-    workspaceId: string;
-    cwd: string;
-    kind: "worktree" | "local_checkout" | "directory";
-  }>,
+  activeWorkspaces: ActiveWorkspaceRef[],
   archivedWorkspaceIds: string[],
 ) {
   return async (workspaceId: string) => {
@@ -727,6 +755,13 @@ function createPaseoWorktreeForMcpTest(options: {
       const project = projects.get(projectId);
       if (project) projects.set(projectId, { ...project, archivedAt });
     },
+    update: async (projectId, updater) => {
+      const project = projects.get(projectId);
+      if (!project) return null;
+      const updated = updater(project);
+      projects.set(projectId, updated);
+      return updated;
+    },
     remove: async (projectId) => {
       projects.delete(projectId);
     },
@@ -769,7 +804,6 @@ function createPaseoWorktreeForMcpTest(options: {
     readDaemonConfig: () => ({ metadataGeneration: { providers: [] } }),
     gitMutation: createGitMutationService({
       workspaceGitService,
-      github,
       logger: createTestLogger(),
     }),
     emitWorkspaceUpdateForCwd: async (cwd) => {
@@ -846,12 +880,12 @@ describe("browser MCP tools", () => {
       result: { command: "list_tabs", tabs: [] },
     });
     const serverOptions = {
-      agentManager: agentManager as AgentManager,
+      agentManager: agentManager as unknown as AgentManager,
       agentStorage: agentStorage as AgentStorage,
       providerSnapshotManager:
         new BoundaryProviderSnapshotManagerFake() as unknown as ProviderSnapshotManager,
       browserToolsEnabled: true,
-      browserToolsBroker: broker as BrowserToolsBroker,
+      browserToolsBroker: broker as unknown as BrowserToolsBroker,
       callerAgentId: "agent-1",
       logger,
     };
@@ -918,12 +952,12 @@ describe("browser MCP tools", () => {
       },
     });
     const server = await createAgentMcpServer({
-      agentManager: agentManager as AgentManager,
+      agentManager: agentManager as unknown as AgentManager,
       agentStorage: agentStorage as AgentStorage,
       providerSnapshotManager:
         new BoundaryProviderSnapshotManagerFake() as unknown as ProviderSnapshotManager,
       browserToolsEnabled: true,
-      browserToolsBroker: broker as BrowserToolsBroker,
+      browserToolsBroker: broker as unknown as BrowserToolsBroker,
       callerAgentId: "agent-1",
       logger,
     });
@@ -1016,12 +1050,12 @@ describe("browser MCP tools", () => {
       result: { command: "list_tabs", tabs: [] },
     });
     const server = await createAgentMcpServer({
-      agentManager: agentManager as AgentManager,
+      agentManager: agentManager as unknown as AgentManager,
       agentStorage: agentStorage as AgentStorage,
       providerSnapshotManager:
         new BoundaryProviderSnapshotManagerFake() as unknown as ProviderSnapshotManager,
       browserToolsEnabled: true,
-      browserToolsBroker: broker as BrowserToolsBroker,
+      browserToolsBroker: broker as unknown as BrowserToolsBroker,
       callerAgentId: "agent-1",
       paseoToolPolicy: { disabledTools: ["browser_list_tabs"] },
       logger,
@@ -1040,12 +1074,12 @@ describe("browser MCP tools", () => {
       result: { command: "list_tabs", tabs: [] },
     });
     const server = await createAgentMcpServer({
-      agentManager: agentManager as AgentManager,
+      agentManager: agentManager as unknown as AgentManager,
       agentStorage: agentStorage as AgentStorage,
       providerSnapshotManager:
         new BoundaryProviderSnapshotManagerFake() as unknown as ProviderSnapshotManager,
       browserToolsEnabled: true,
-      browserToolsBroker: broker as BrowserToolsBroker,
+      browserToolsBroker: broker as unknown as BrowserToolsBroker,
       callerAgentId: "agent-1",
       paseoToolPolicy: { disabledTools: ["list_agents", "browser_list_tabs"] },
       logger,
@@ -1314,7 +1348,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Top-level agent" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     const ensureWorkspace = vi.fn(async () => "workspace-created");
     const server = await createAgentMcpServer({
       agentManager,
@@ -1399,7 +1433,7 @@ describe("create_agent MCP tool", () => {
       cwd: existingCwd,
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     const server = await createAgentMcpServer({
       agentManager,
       agentStorage,
@@ -1429,13 +1463,20 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Existing workspace" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     const server = await createAgentMcpServer({
       agentManager,
       agentStorage,
       providerSnapshotManager: createOpenCodeManager().manager,
       listActiveWorkspaces: async () => [
-        { workspaceId: "wks_existing", cwd: existingCwd, kind: "worktree" },
+        {
+          workspaceId: "wks_existing",
+          cwd: existingCwd,
+          kind: "worktree",
+          worktreeRoot: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
       ],
       logger,
     });
@@ -1468,7 +1509,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Feature test", featureValues: { fast_mode: true } },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
 
     const server = await createAgentMcpServer({
       agentManager,
@@ -1521,7 +1562,7 @@ describe("create_agent MCP tool", () => {
         },
       ],
       config: { title: "Mode test" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
 
     const server = await createAgentMcpServer({
       agentManager,
@@ -1696,7 +1737,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Fix auth bug" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
 
     const server = await createAgentMcpServer({
       agentManager,
@@ -1732,7 +1773,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Fix auth" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
 
     const server = await createAgentMcpServer({
       agentManager,
@@ -1767,7 +1808,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Config test", model: "claude-sonnet-4-20250514" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
 
     const server = await createAgentMcpServer({
       agentManager,
@@ -1937,7 +1978,7 @@ describe("create_agent MCP tool", () => {
         createPaseoWorktree: createPaseoWorktreeForMcpTest({ paseoHome, broadcasts }),
         workspaceGitService: workspaceGitService as unknown as Pick<
           WorkspaceGitService,
-          "getSnapshot" | "listWorktrees"
+          "getSnapshot" | "listWorktrees" | "resolveRepoRoot"
         >,
         logger,
       });
@@ -2114,6 +2155,7 @@ describe("create_agent MCP tool", () => {
         }),
         workspaceRegistry: {
           get: async (workspaceId) => workspaceRecords.get(workspaceId) ?? null,
+          list: async () => Array.from(workspaceRecords.values()),
           upsert: async (record) => {
             workspaceRecords.set(record.workspaceId, record);
           },
@@ -2254,7 +2296,7 @@ describe("create_agent MCP tool", () => {
     const workspaceGitService = new WorkspaceGitServiceImpl({
       logger: createTestLogger(),
       paseoHome: join(tempDir, ".paseo"),
-      deps: { github: createGitHubServiceStub() },
+      deps: { forgeOverrides: { github: createGitHubServiceStub() } },
     });
     const workspaceAutoName = new WorkspaceAutoName({
       agentManager,
@@ -2272,7 +2314,6 @@ describe("create_agent MCP tool", () => {
       readDaemonConfig: () => ({ metadataGeneration: { providers: [] } }),
       gitMutation: createGitMutationService({
         workspaceGitService,
-        github: createGitHubServiceStub(),
         logger: createTestLogger(),
       }),
       emitWorkspaceUpdateForCwd: async () => {},
@@ -2424,7 +2465,7 @@ describe("create_agent MCP tool", () => {
         }),
         workspaceGitService: workspaceGitService as unknown as Pick<
           WorkspaceGitService,
-          "getSnapshot" | "listWorktrees"
+          "getSnapshot" | "listWorktrees" | "resolveRepoRoot"
         >,
         logger,
       });
@@ -2486,16 +2527,15 @@ describe("create_agent MCP tool", () => {
           headRef: "pr-123",
           baseRefName: "main",
         },
-        workspace: {
+        workspace: createPersistedWorkspaceRecord({
           workspaceId: "ws-pr-123",
           projectId: REPO_CWD,
           cwd: "/tmp/worktrees/pr-123",
-          kind: "worktree" as const,
+          kind: "worktree",
           displayName: "pr-123",
           createdAt: "2026-04-30T00:00:00.000Z",
           updatedAt: "2026-04-30T00:00:00.000Z",
-          archivedAt: null,
-        },
+        }),
         repoRoot: REPO_CWD,
         created: true,
         ...(options?.setupContinuation?.kind === "agent"
@@ -2531,7 +2571,7 @@ describe("create_agent MCP tool", () => {
       createPaseoWorktree,
       workspaceGitService: workspaceGitService as unknown as Pick<
         WorkspaceGitService,
-        "getSnapshot" | "listWorktrees"
+        "getSnapshot" | "listWorktrees" | "resolveRepoRoot"
       >,
       logger,
     });
@@ -2805,10 +2845,12 @@ describe("create_agent MCP tool", () => {
         resolveRepoRoot: vi.fn(async () => repoDir),
       };
       const archiveWorkspaceRecord = vi.fn(async () => undefined);
-      const emitWorkspaceUpdatesForWorkspaceIds = vi.fn(async () => undefined);
+      const emitWorkspaceUpdatesForWorkspaceIds = vi.fn(
+        async (_workspaceIds: Iterable<string>) => undefined,
+      );
       const markWorkspaceArchiving = vi.fn();
       const clearWorkspaceArchiving = vi.fn();
-      const listActiveWorkspaces = vi.fn(async () => []);
+      const listActiveWorkspaces = vi.fn(async (): Promise<ActiveWorkspaceRef[]> => []);
       const server = await createAgentMcpServer({
         agentManager,
         agentStorage,
@@ -2838,7 +2880,14 @@ describe("create_agent MCP tool", () => {
       });
       const createdWorktreePath = z.string().parse(created.structuredContent.cwd);
       listActiveWorkspaces.mockImplementation(async () => [
-        { workspaceId: "ws-archive-tool-worktree", cwd: createdWorktreePath, kind: "worktree" },
+        {
+          workspaceId: "ws-archive-tool-worktree",
+          cwd: createdWorktreePath,
+          kind: "worktree",
+          worktreeRoot: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
       ]);
       archiveWorkspaceRecord.mockImplementation(async () => {
         listActiveWorkspaces.mockResolvedValueOnce([]);
@@ -2912,11 +2961,7 @@ describe("create_agent MCP tool", () => {
         resolveRepoRoot: vi.fn(async () => repoDir),
       };
       const archivedWorkspaceIds: string[] = [];
-      let activeWorkspaces: Array<{
-        workspaceId: string;
-        cwd: string;
-        kind: "worktree" | "local_checkout" | "directory";
-      }> = [];
+      let activeWorkspaces: ActiveWorkspaceRef[] = [];
       const listActiveWorkspaces = vi.fn(async () => activeWorkspaces);
       const archiveWorkspaceRecord = createArchiveWorkspaceRecordMutator(
         activeWorkspaces,
@@ -2954,8 +2999,22 @@ describe("create_agent MCP tool", () => {
       // Populate the active workspaces with the real created path so archiveByScope
       // matches it against the worktree directory.
       activeWorkspaces = [
-        { workspaceId: "ws-mcp-A", cwd: worktreePath, kind: "worktree" as const },
-        { workspaceId: "ws-mcp-B", cwd: worktreePath, kind: "worktree" as const },
+        {
+          workspaceId: "ws-mcp-A",
+          cwd: worktreePath,
+          kind: "worktree",
+          worktreeRoot: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
+        {
+          workspaceId: "ws-mcp-B",
+          cwd: worktreePath,
+          kind: "worktree",
+          worktreeRoot: null,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        },
       ];
 
       await archiveTool.handler({
@@ -3088,7 +3147,7 @@ describe("create_agent MCP tool", () => {
       workspaceId: "wks_voice",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     spies.agentManager.createAgent.mockResolvedValue({
       id: "child-agent",
       cwd: subdir,
@@ -3096,7 +3155,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
 
     const server = await createAgentMcpServer({
       agentManager,
@@ -3142,7 +3201,7 @@ describe("create_agent MCP tool", () => {
       workspaceId: "wks_parent",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
 
     const server = await createAgentMcpServer({
       agentManager,
@@ -3188,7 +3247,7 @@ describe("create_agent MCP tool", () => {
       workspaceId: "wks_parent",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent;
+    } as ManagedAgentStub as ManagedAgent;
     const childAgent = {
       id: "child-agent",
       cwd: existingCwd,
@@ -3196,7 +3255,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent;
+    } as ManagedAgentStub as ManagedAgent;
     spies.agentManager.getAgent.mockImplementation((agentId: string) => {
       if (agentId === "parent-agent") return parentAgent;
       if (agentId === "child-agent") return childAgent;
@@ -3233,7 +3292,7 @@ describe("create_agent MCP tool", () => {
       workspaceId: "wks_parent",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     spies.agentManager.createAgent.mockResolvedValue({
       id: "detached-agent",
       cwd: existingCwd,
@@ -3241,7 +3300,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Detached" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
 
     const server = await createAgentMcpServer({
       agentManager,
@@ -3285,7 +3344,7 @@ describe("create_agent MCP tool", () => {
       workspaceId: "wks_parent",
       provider: "claude",
       currentModeId: "bypassPermissions",
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     spies.agentManager.createAgent.mockResolvedValue({
       id: "child-agent",
       cwd: existingCwd,
@@ -3293,7 +3352,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Child", featureValues: { fast_mode: true } },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     const providerSnapshot = createOpenCodeManager();
     providerSnapshot.stub.resolveCreateConfig.mockImplementation(async (input) => {
       const opts = input as { featureValues: Record<string, unknown> | undefined };
@@ -3351,7 +3410,7 @@ describe("create_agent MCP tool", () => {
           sandbox_workspace_write: { writable_roots: ["/tmp/shared"] },
         },
       },
-    } as ManagedAgent;
+    } as ManagedAgentStub as ManagedAgent;
     spies.agentManager.getAgent.mockReturnValue(parentAgent);
     spies.agentManager.createAgent.mockResolvedValue({
       id: "child-agent",
@@ -3360,7 +3419,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     const server = await createAgentMcpServer({
       agentManager,
       agentStorage,
@@ -3444,7 +3503,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Injected config test" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
 
     const server = await createAgentMcpServer({
       agentManager,
@@ -3510,7 +3569,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: "dynamic",
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     const dynamicModes: AgentMode[] = [
       { id: "dynamic", label: "Dynamic", description: "Runtime mode" },
     ];
@@ -3561,7 +3620,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: "build",
       availableModes: [],
       config: { title: "Child", featureValues: { auto_accept: true } },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     const providerSnapshot = createOpenCodeManager();
     providerSnapshot.stub.resolveCreateConfig.mockResolvedValue({
       modeId: "build",
@@ -3599,7 +3658,7 @@ describe("create_agent MCP tool", () => {
       workspaceId: "wks_parent",
       provider: "claude",
       currentModeId: "bypassPermissions",
-    } as ManagedAgent;
+    } as ManagedAgentStub as ManagedAgent;
     spies.agentManager.getAgent.mockReturnValue(parentAgent);
     spies.agentManager.createAgent.mockResolvedValue({
       id: "child-agent",
@@ -3608,7 +3667,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: "resolver-mode",
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     const providerSnapshot = createOpenCodeManager();
     providerSnapshot.stub.resolveCreateConfig.mockResolvedValue({
       modeId: "resolver-mode",
@@ -3651,7 +3710,7 @@ describe("create_agent MCP tool", () => {
       workspaceId: "wks_parent",
       provider: "claude",
       currentModeId: "bypassPermissions",
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     spies.agentManager.createAgent.mockResolvedValue({
       id: "child-agent",
       cwd: existingCwd,
@@ -3659,7 +3718,7 @@ describe("create_agent MCP tool", () => {
       currentModeId: "build",
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
 
     const server = await createAgentMcpServer({
       agentManager,
@@ -3833,7 +3892,7 @@ describe("send_agent_prompt MCP tool", () => {
       workspaceId: "wks_parent",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent;
+    } as ManagedAgentStub as ManagedAgent;
     const childAgent = {
       id: "child-agent",
       cwd: existingCwd,
@@ -3841,7 +3900,7 @@ describe("send_agent_prompt MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent;
+    } as ManagedAgentStub as ManagedAgent;
     spies.agentManager.getAgent.mockImplementation((agentId: string) => {
       if (agentId === "parent-agent") return parentAgent;
       if (agentId === "child-agent") return childAgent;
@@ -3888,7 +3947,7 @@ describe("send_agent_prompt MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
 
     const server = await createAgentMcpServer({
       agentManager,
@@ -3928,7 +3987,7 @@ describe("send_agent_prompt MCP tool", () => {
       workspaceId: "wks_parent",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent;
+    } as ManagedAgentStub as ManagedAgent;
     const childAgent = {
       id: "child-agent",
       cwd: existingCwd,
@@ -3936,7 +3995,7 @@ describe("send_agent_prompt MCP tool", () => {
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent;
+    } as ManagedAgentStub as ManagedAgent;
     spies.agentManager.getAgent.mockImplementation((agentId: string) => {
       if (agentId === "parent-agent") return parentAgent;
       if (agentId === "child-agent") return childAgent;
@@ -4221,6 +4280,7 @@ describe("rename_workspace MCP tool", () => {
       providerSnapshotManager: createOpenCodeManager().manager,
       workspaceRegistry: {
         get: async (workspaceId) => workspaces.get(workspaceId) ?? null,
+        list: async () => Array.from(workspaces.values()),
         upsert: async (record) => {
           upsertedWorkspaces.push(record);
           workspaces.set(record.workspaceId, record);
@@ -4292,6 +4352,7 @@ describe("rename_workspace MCP tool", () => {
       providerSnapshotManager: createOpenCodeManager().manager,
       workspaceRegistry: {
         get: async (workspaceId) => workspaces.get(workspaceId) ?? null,
+        list: async () => Array.from(workspaces.values()),
         upsert: async (record) => {
           upsertedWorkspaces.push(record);
           workspaces.set(record.workspaceId, record);
@@ -4353,6 +4414,7 @@ describe("rename_workspace MCP tool", () => {
       providerSnapshotManager: createOpenCodeManager().manager,
       workspaceRegistry: {
         get: async (workspaceId) => workspaces.get(workspaceId) ?? null,
+        list: async () => Array.from(workspaces.values()),
         upsert: async (record) => {
           upsertedWorkspaces.push(record);
           workspaces.set(record.workspaceId, record);
@@ -4488,7 +4550,7 @@ describe("create_schedule MCP tool", () => {
         model: "openai/gpt-5.5",
         featureValues: { auto_accept: true },
       },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     const createOrReplace = vi.fn(async (input: CreateScheduleInput) =>
       createStoredSchedule(input),
     );
@@ -4633,7 +4695,7 @@ describe("create_heartbeat MCP tool", () => {
       currentModeId: "build",
       availableModes: [],
       config: { title: "Parent agent" },
-    } as ManagedAgent);
+    } as ManagedAgentStub as ManagedAgent);
     const createOrReplace = vi.fn(async (input: CreateScheduleInput) =>
       createStoredSchedule(input),
     );
@@ -5173,7 +5235,7 @@ describe("provider listing MCP tool", () => {
     });
     const tool = registeredTool(server, "list_providers");
     const response = await tool.handler({});
-    const modelVisibleText = String(response.content[0]?.text);
+    const modelVisibleText = String(response.content?.[0]?.text);
 
     expect(response.structuredContent).toEqual({
       providers: [
@@ -6097,7 +6159,7 @@ describe("agent snapshot MCP serialization", () => {
     const snapshot = {
       id: "archived-activity-agent",
       currentModeId: "default",
-    } as ManagedAgent;
+    } as ManagedAgentStub as ManagedAgent;
     spies.agentManager.getAgent
       .mockReturnValueOnce(null)
       .mockReturnValue(snapshot)

@@ -427,7 +427,7 @@ describe("notes", () => {
     const updated = await store.get(task.id);
     expect(updated?.notes).toHaveLength(1);
     expect(updated?.notes[0].content).toBe("This is a note");
-    expect(updated?.notes[0].timestamp >= before).toBe(true);
+    expect((updated?.notes[0]?.timestamp ?? "") >= before).toBe(true);
   });
 
   it("appends multiple notes in order", async () => {

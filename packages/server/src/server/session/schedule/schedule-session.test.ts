@@ -58,7 +58,7 @@ describe("ScheduleSession", () => {
     const response = findByType(emitted, "schedule/create/response");
     expect(response?.payload.schedule).toBeDefined();
     expect(response?.payload.schedule).not.toHaveProperty("runs");
-    expect(response?.payload.schedule.id).toBe("s1");
+    expect(response?.payload.schedule?.id).toBe("s1");
   });
 
   it("schedule/create remaps a self target to an agent target before creating", async () => {

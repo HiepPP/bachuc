@@ -47,6 +47,7 @@ describe("OpenCode v2 token streaming", () => {
         id: "rs",
         created: 2,
         type: "session.reasoning.started",
+        durable: { aggregateID: "session", seq: 0, version: 1 },
         data: { sessionID: "session", assistantMessageID: "answer", ordinal: 0 },
       });
       harness.push({
@@ -59,6 +60,7 @@ describe("OpenCode v2 token streaming", () => {
         id: "ts",
         created: 2,
         type: "session.text.started",
+        durable: { aggregateID: "session", seq: 0, version: 1 },
         data: { sessionID: "session", assistantMessageID: "answer", ordinal: 0 },
       });
       harness.push({
@@ -150,6 +152,7 @@ describe("OpenCode v2 token streaming", () => {
         id: "ts",
         created: 2,
         type: "session.text.started",
+        durable: { aggregateID: "session", seq: 0, version: 1 },
         data: { sessionID: "session", assistantMessageID: "answer", ordinal: 0 },
       });
       harness.push({
@@ -169,6 +172,7 @@ describe("OpenCode v2 token streaming", () => {
         id: "rs",
         created: 2,
         type: "session.reasoning.started",
+        durable: { aggregateID: "session", seq: 0, version: 1 },
         data: { sessionID: "session", assistantMessageID: "answer", ordinal: 0 },
       });
       harness.push({

@@ -55,14 +55,14 @@ function makeAudioOutputHandler(
     }
     const payload = message.payload;
     if (!state.targetGroupId) {
-      state.targetGroupId = payload.groupId;
+      state.targetGroupId = payload.groupId ?? null;
       state.format = payload.format;
     }
     if (payload.groupId !== state.targetGroupId) {
       return;
     }
     state.chunks.push({
-      index: payload.chunkIndex,
+      index: payload.chunkIndex ?? 0,
       bytes: Buffer.from(payload.audio, "base64"),
     });
     if (payload.isLastChunk) {
@@ -119,6 +119,8 @@ function getVoiceRoundtripConfig(provider: VoiceRoundtripProvider): {
         model: "opencode/gpt-5-nano",
         modeId: "default",
       };
+    default:
+      throw new Error(`Unsupported voice roundtrip provider: ${provider}`);
   }
 }
 
@@ -165,6 +167,7 @@ beforeAll(async () => {
     speech: {
       providers: {
         dictationStt: { provider: "openai", explicit: true },
+        voiceTurnDetection: { provider: "local", explicit: false, enabled: true },
         voiceStt: { provider: "openai", explicit: true },
         voiceTts: { provider: "openai", explicit: true },
       },

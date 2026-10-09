@@ -20,6 +20,7 @@ import type {
   CreateAgentWorktreeTarget,
   SessionOutboundMessage,
 } from "../../messages.js";
+import { parseServerInfoStatusPayload } from "../../messages.js";
 import { createPaseoDaemon, type PaseoDaemon, type PaseoDaemonConfig } from "../../bootstrap.js";
 import type { WebSocketLike } from "../../websocket-server.js";
 import type {
@@ -28,6 +29,7 @@ import type {
   AgentLaunchContext,
   AgentPromptInput,
   AgentPersistenceHandle,
+  AgentProvider,
   AgentSession,
   AgentSessionConfig,
   FetchCatalogOptions,
@@ -792,8 +794,10 @@ export class HubRelationshipHarness {
     this.codex.finishCreation();
   }
 
-  async ownedCreateResult(requestId: string): Promise<SessionOutboundMessage> {
-    return this.latestSocket().socket.messageFor(requestId);
+  async ownedCreateResult(requestId: string): Promise<HubExecutionAgentCreateResponse> {
+    return (await this.latestSocket().socket.messageFor(
+      requestId,
+    )) as HubExecutionAgentCreateResponse;
   }
 
   async controlExecution(
@@ -1204,11 +1208,11 @@ export class HubRelationshipHarness {
 
   serverInfoPermissions(): string[][] {
     return this.remote.sockets.flatMap(({ socket }) =>
-      socket.sent.flatMap((message) =>
-        message.type === "status" && message.payload.status === "server_info"
-          ? [message.payload.permissions ?? []]
-          : [],
-      ),
+      socket.sent.flatMap((message) => {
+        if (message.type !== "status") return [];
+        const serverInfo = parseServerInfoStatusPayload(message.payload);
+        return serverInfo ? [serverInfo.permissions ?? []] : [];
+      }),
     );
   }
 
@@ -1557,7 +1561,7 @@ export class HubRelationshipHarness {
       requestId,
     )) as HubExecutionAgentCreateResponse;
     if (!message.payload.success || !message.payload.agentId || !message.payload.agent) {
-      throw new Error(message.payload.error ?? "Hub agent creation failed");
+      throw new Error(message.payload.error?.message ?? "Hub agent creation failed");
     }
     return {
       ...message.payload,

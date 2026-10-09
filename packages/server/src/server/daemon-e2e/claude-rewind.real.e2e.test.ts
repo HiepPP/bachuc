@@ -183,8 +183,13 @@ async function runtimeSessionId(
   return snapshot?.agent.runtimeInfo?.sessionId ?? snapshot?.agent.persistence?.sessionId ?? null;
 }
 
-function roleItems(items: AgentTimelineItem[], role: "user_message" | "assistant_message") {
-  return items.filter((item) => item.type === role);
+function roleItems<T extends "user_message" | "assistant_message">(
+  items: AgentTimelineItem[],
+  role: T,
+): Extract<AgentTimelineItem, { type: T }>[] {
+  return items.filter(
+    (item): item is Extract<AgentTimelineItem, { type: T }> => item.type === role,
+  );
 }
 
 function expectSessionId(value: string | null): asserts value is string {

@@ -15,6 +15,7 @@ export interface AgentTestConfig {
   thinkingOptionId?: string;
   modes?: {
     full: string; // No permissions required
+    write?: string; // Allows edits without approval
     ask: string; // Requires permission approval
   };
 }
@@ -74,8 +75,8 @@ export type AgentProvider = keyof typeof agentConfigs;
  * Get test config for creating an agent with full permissions (no prompts).
  */
 export function getFullAccessConfig(provider: AgentProvider) {
-  const config = agentConfigs[provider];
-  const thinkingOptionId = "thinkingOptionId" in config ? config.thinkingOptionId : undefined;
+  const config: AgentTestConfig = agentConfigs[provider];
+  const thinkingOptionId = config.thinkingOptionId;
   return {
     provider: config.provider,
     ...(config.model ? { model: config.model } : {}),
@@ -88,8 +89,8 @@ export function getFullAccessConfig(provider: AgentProvider) {
  * Get test config for creating an agent that requires permission approval.
  */
 export function getAskModeConfig(provider: AgentProvider) {
-  const config = agentConfigs[provider];
-  const thinkingOptionId = "thinkingOptionId" in config ? config.thinkingOptionId : undefined;
+  const config: AgentTestConfig = agentConfigs[provider];
+  const thinkingOptionId = config.thinkingOptionId;
   return {
     provider: config.provider,
     ...(config.model ? { model: config.model } : {}),

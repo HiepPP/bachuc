@@ -30,10 +30,10 @@ describe("provider model catalogs (e2e)", () => {
       const result = await ctx.client.listProviderModels("claude");
 
       expect(result.error).toBeNull();
-      expect(result.models.length).toBeGreaterThan(0);
+      expect(result.models?.length).toBeGreaterThan(0);
 
-      expect(result.models.some((model) => modelMatchesFamily(model, "sonnet"))).toBe(true);
-      expect(result.models.some((model) => modelMatchesFamily(model, "haiku"))).toBe(true);
+      expect(result.models?.some((model) => modelMatchesFamily(model, "sonnet"))).toBe(true);
+      expect(result.models?.some((model) => modelMatchesFamily(model, "haiku"))).toBe(true);
     } finally {
       await ctx.cleanup();
     }
@@ -47,7 +47,7 @@ describe("provider model catalogs (e2e)", () => {
         const result = await ctx.client.listProviderModels("codex");
 
         expect(result.error).toBeNull();
-        expect(result.models.length).toBeGreaterThan(0);
+        expect(result.models?.length).toBeGreaterThan(0);
         expect(result.models).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
@@ -72,7 +72,7 @@ describe("provider model catalogs (e2e)", () => {
         const result = await ctx.client.listProviderModels("opencode");
 
         expect(result.error).toBeNull();
-        expect(result.models.length).toBeGreaterThan(0);
+        expect(result.models?.length).toBeGreaterThan(0);
 
         expect(result.models).toEqual(
           expect.arrayContaining([

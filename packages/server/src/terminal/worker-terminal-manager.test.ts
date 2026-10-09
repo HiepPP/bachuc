@@ -572,7 +572,7 @@ it("lists terminals locally without waiting on the worker", async () => {
     "terminal-root",
     "terminal-subdir",
   ]);
-  expect(worker.sentMessages.some((message) => message.type === "getTerminals")).toBe(false);
+  expect(worker.sentMessages).toEqual([]);
 });
 
 it("includes only stamped terminals in workspace-scoped local reads", async () => {

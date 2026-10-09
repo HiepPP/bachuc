@@ -1,7 +1,7 @@
 import pino from "pino";
 import { describe, expect, test } from "vitest";
 
-import type { AgentSession, AgentSessionConfig } from "../agent-sdk-types.js";
+import type { AgentSessionConfig } from "../agent-sdk-types.js";
 import { CodexAppServerAgentSession } from "./codex-app-server-agent.js";
 import {
   createFakeCodexAppServer,
@@ -32,7 +32,7 @@ const TEST_COLLABORATION_MODES: CollaborationModeRecord[] = [
   },
 ];
 
-type CodexFeaturesTestSession = AgentSession;
+type CodexFeaturesTestSession = CodexAppServerAgentSession;
 
 interface CapturedLogEntry {
   level?: number;
@@ -74,12 +74,12 @@ function createSessionHarness(
   const appServer = createFakeCodexAppServer({
     "collaborationMode/list": () => ({ data: TEST_COLLABORATION_MODES }),
   });
-  const session = new CodexAppServerAgentSession(
+  const session: CodexFeaturesTestSession = new CodexAppServerAgentSession(
     { ...config, provider: CODEX_PROVIDER },
     null,
     options.logger ?? createTestLogger(),
     async () => appServer.child,
-  ) as CodexFeaturesTestSession;
+  );
   return { session, appServer };
 }
 

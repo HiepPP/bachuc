@@ -8,7 +8,7 @@ import {
   slugify,
   type CreateWorktreeOptions,
   type WorktreeConfig,
-} from "./worktree";
+} from "./worktree.js";
 import { execFileSync } from "child_process";
 import {
   mkdtempSync,
@@ -21,7 +21,7 @@ import {
 } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { createRealpathAwarePathMatcher } from "./path";
+import { createRealpathAwarePathMatcher } from "./path.js";
 
 interface LegacyCreateWorktreeTestOptions {
   branchName: string;

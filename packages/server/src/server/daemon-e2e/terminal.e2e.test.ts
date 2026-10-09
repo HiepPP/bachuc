@@ -154,9 +154,6 @@ function toWsBuffer(raw: WebSocket.RawData): Buffer | null {
   if (raw instanceof ArrayBuffer) {
     return Buffer.from(raw);
   }
-  if (ArrayBuffer.isView(raw)) {
-    return Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
-  }
   return null;
 }
 

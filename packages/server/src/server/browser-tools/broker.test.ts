@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import type { z } from "zod";
 import type {
   BrowserAutomationCommand,
   BrowserAutomationCommandName,
   BrowserAutomationExecuteRequest,
   BrowserAutomationExecuteResponse,
+  BrowserAutomationExecuteResponseSchema,
+  BrowserAutomationResult,
 } from "@getpaseo/protocol/browser-automation/rpc-schemas";
 import { BROWSER_AUTOMATION_COMMAND_NAMES } from "@getpaseo/protocol/browser-automation/rpc-schemas";
 import { BrowserToolsBroker, type BrowserHostClient } from "./broker.js";
+
+// Hosts send wire data that omits schema-defaulted fields (tab isActive/isLoading).
+// The broker parses the payload and fills the defaults.
+type HostResponsePayload = z.input<typeof BrowserAutomationExecuteResponseSchema>["payload"];
 
 const BROWSER_ID = "11111111-1111-4111-8111-111111111111";
 const SECOND_BROWSER_ID = "22222222-2222-4222-8222-222222222222";
@@ -33,7 +40,7 @@ class FakeBrowserHostClient implements BrowserHostClient {
 
   public resolveLatestWith(
     broker: BrowserToolsBroker,
-    responsePayload: BrowserAutomationExecuteResponse["payload"],
+    responsePayload: HostResponsePayload,
   ): boolean {
     const latest = this.receivedRequests.at(-1);
     if (!latest) {
@@ -45,11 +52,14 @@ class FakeBrowserHostClient implements BrowserHostClient {
   public resolveRequestWith(
     broker: BrowserToolsBroker,
     request: BrowserAutomationExecuteRequest,
-    responsePayload: BrowserAutomationExecuteResponse["payload"],
+    responsePayload: HostResponsePayload,
   ): boolean {
     return broker.receiveResponse({
       type: "browser.automation.execute.response",
-      payload: { ...responsePayload, requestId: request.requestId },
+      payload: {
+        ...responsePayload,
+        requestId: request.requestId,
+      } as BrowserAutomationExecuteResponse["payload"],
     });
   }
 }
@@ -467,11 +477,7 @@ describe("BrowserToolsBroker", () => {
   ] satisfies Array<{
     name: string;
     command: BrowserAutomationCommand;
-    result: BrowserAutomationExecuteResponse["payload"] extends infer Payload
-      ? Payload extends { ok: true }
-        ? Payload["result"]
-        : never
-      : never;
+    result: BrowserAutomationResult;
   }>)("routes $name to the host that owns the browser id", async ({ command, result }) => {
     const broker = createBroker();
     const other = new FakeBrowserHostClient("host-1");

@@ -71,7 +71,7 @@ describe("DaemonSelfUpdateSessionController", () => {
   });
 
   test("emits progress, response, and restart lifecycle intent after a successful update", async () => {
-    let updateInput: DaemonSelfUpdateInput | null = null;
+    let updateInput = null as DaemonSelfUpdateInput | null;
     const updater: TestUpdater = {
       async update(input) {
         updateInput = input;
@@ -123,7 +123,7 @@ describe("DaemonSelfUpdateSessionController", () => {
   });
 
   test("emits a failed response without restart lifecycle intent", async () => {
-    let updateInput: DaemonSelfUpdateInput | null = null;
+    let updateInput = null as DaemonSelfUpdateInput | null;
     const updater: TestUpdater = {
       async update(input) {
         updateInput = input;

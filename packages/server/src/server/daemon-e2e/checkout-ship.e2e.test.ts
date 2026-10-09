@@ -160,11 +160,12 @@ describe("daemon checkout ship loop", () => {
 
         const status = await ctx.client.getCheckoutStatus(worktree.worktreePath);
         expect(status.isGit).toBe(true);
+        if (!status.isGit) {
+          throw new Error("Expected the Paseo worktree to be a git checkout");
+        }
         expect(status.isPaseoOwnedWorktree).toBe(true);
         expect(realpathSync(status.repoRoot)).toBe(realpathSync(worktree.worktreePath));
-        if (status.isGit) {
-          expect(status.baseRef).toBe("main");
-        }
+        expect(status.baseRef).toBe("main");
 
         execSync("git branch -m ship-loop-ready", {
           cwd: worktree.worktreePath,

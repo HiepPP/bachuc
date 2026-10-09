@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { TransformStream as NodeTransformStream } from "node:stream/web";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   AgentSideConnection,
@@ -11,6 +12,7 @@ import {
   RequestError,
   ndJsonStream,
   type Agent,
+  type AgentCapabilities,
   type CreateTerminalRequest,
   PermissionOption,
   PromptResponse,
@@ -92,9 +94,20 @@ describe("buildACPClientCapabilities", () => {
   });
 });
 
+// Deliberately partial fake of a spawned ACP process; each test supplies only what it exercises.
+type SpawnedACPProcessStub = { [K in keyof SpawnedACPProcess]?: unknown };
+
+// ACPAgentSession.spawnProcess is private, so a subclass cannot override it. Replace it on the instance.
+function stubSpawnProcess(
+  session: ACPAgentSession,
+  spawnProcess: () => Promise<SpawnedACPProcess>,
+): void {
+  asInternals<{ spawnProcess: typeof spawnProcess }>(session).spawnProcess = spawnProcess;
+}
+
 interface ACPSessionInternals {
   sessionId: string | null;
-  connection: { prompt: (...args: unknown[]) => Promise<PromptResponse> };
+  connection: { prompt?: (...args: unknown[]) => Promise<PromptResponse> };
   activeForegroundTurnId: string | null;
   configOptions: SessionConfigOption[];
   translateSessionUpdate(update: SessionUpdate): AgentStreamEvent[];
@@ -437,7 +450,9 @@ function prepareConfiguredOverrideSession(
 test("ACP setModel only uses config-option fallback when the matching select choice contains the model", async () => {
   const logger = createTestLogger();
   const childLogger = { trace: vi.fn(), warn: vi.fn() };
-  vi.spyOn(logger, "child").mockReturnValue(asInternals<typeof logger>(childLogger));
+  vi.spyOn(logger, "child").mockReturnValue(
+    asInternals<ReturnType<typeof logger.child>>(childLogger),
+  );
   const session = createSessionWithConfig({}, logger);
   const setSessionConfigOption = vi.fn(async () => ({
     configOptions: [
@@ -485,8 +500,8 @@ test("ACP setModel only uses config-option fallback when the matching select cho
 
 describe("createLoggedNdJsonStream", () => {
   test("routes malformed ACP stdout through the provider logger instead of console.error", async () => {
-    const input = new TransformStream<Uint8Array, Uint8Array>();
-    const output = new TransformStream<Uint8Array, Uint8Array>();
+    const input = new NodeTransformStream<Uint8Array, Uint8Array>();
+    const output = new NodeTransformStream<Uint8Array, Uint8Array>();
     const logger = {
       warn: vi.fn(),
     };
@@ -527,8 +542,8 @@ describe("createLoggedNdJsonStream", () => {
   });
 
   test("normalizes stringified numeric ACP response ids", async () => {
-    const input = new TransformStream<Uint8Array, Uint8Array>();
-    const output = new TransformStream<Uint8Array, Uint8Array>();
+    const input = new NodeTransformStream<Uint8Array, Uint8Array>();
+    const output = new NodeTransformStream<Uint8Array, Uint8Array>();
     const logger = {
       warn: vi.fn(),
     };
@@ -554,8 +569,8 @@ describe("createLoggedNdJsonStream", () => {
   });
 
   test("does not log terminal control sequences from malformed ACP stdout", async () => {
-    const input = new TransformStream<Uint8Array, Uint8Array>();
-    const output = new TransformStream<Uint8Array, Uint8Array>();
+    const input = new NodeTransformStream<Uint8Array, Uint8Array>();
+    const output = new NodeTransformStream<Uint8Array, Uint8Array>();
     const logger = {
       warn: vi.fn(),
     };
@@ -937,6 +952,7 @@ describe("ACP selection validity helpers", () => {
           options: [
             {
               group: "Anthropic",
+              name: "Anthropic",
               options: [{ value: "opus", name: "Opus", description: "Deep" }],
             },
           ],
@@ -1000,7 +1016,9 @@ describe("ACPAgentSession Zed parity", () => {
 
     const logger = createTestLogger();
     const childLogger = { trace: vi.fn(), warn: vi.fn() };
-    vi.spyOn(logger, "child").mockReturnValue(asInternals<typeof logger>(childLogger));
+    vi.spyOn(logger, "child").mockReturnValue(
+      asInternals<ReturnType<typeof logger.child>>(childLogger),
+    );
     const invalidSession = createSessionWithConfig(
       { modeId: "acceptEdits", model: "opus" },
       logger,
@@ -1047,7 +1065,9 @@ describe("ACPAgentSession Zed parity", () => {
   test("does not fail session start when configured model cannot be applied by ACP", async () => {
     const logger = createTestLogger();
     const childLogger = { trace: vi.fn(), warn: vi.fn() };
-    vi.spyOn(logger, "child").mockReturnValue(asInternals<typeof logger>(childLogger));
+    vi.spyOn(logger, "child").mockReturnValue(
+      asInternals<ReturnType<typeof logger.child>>(childLogger),
+    );
     const session = createSessionWithConfig(
       { provider: "deepseek-tui", model: "deepseek/v4" },
       logger,
@@ -1879,7 +1899,7 @@ describe("ACPAgentClient modelTransformer", () => {
             }),
           },
           initialize: { agentCapabilities: {} },
-        } as SpawnedACPProcess;
+        } as SpawnedACPProcessStub as SpawnedACPProcess;
       }
 
       protected override async closeProbe(): Promise<void> {}
@@ -2097,7 +2117,7 @@ describe("ACPAgentClient config features", () => {
             }),
           },
           initialize: { agentCapabilities: {} },
-        } as SpawnedACPProcess;
+        } as SpawnedACPProcessStub as SpawnedACPProcess;
       }
 
       protected override async closeProbe(): Promise<void> {}
@@ -2153,7 +2173,7 @@ describe("ACPAgentClient sessionResponseTransformer", () => {
           newSession: vi.fn().mockResolvedValue(response),
         },
         initialize: { agentCapabilities: {} },
-      } as SpawnedACPProcess;
+      } as SpawnedACPProcessStub as SpawnedACPProcess;
     }
 
     protected override async closeProbe(): Promise<void> {}
@@ -2199,7 +2219,7 @@ describe("ACPAgentClient fetchCatalog", () => {
           child: { kill: vi.fn(), exitCode: 0, signalCode: null, once: vi.fn() },
           connection: { newSession },
           initialize: { agentCapabilities: {} },
-        } as SpawnedACPProcess;
+        } as SpawnedACPProcessStub as SpawnedACPProcess;
       }
 
       protected override async closeProbe(): Promise<void> {}
@@ -2245,7 +2265,7 @@ describe("ACPAgentClient fetchCatalog", () => {
             }),
           },
           initialize: { agentCapabilities: {} },
-        } as SpawnedACPProcess;
+        } as SpawnedACPProcessStub as SpawnedACPProcess;
       }
 
       protected override async closeProbe(): Promise<void> {}
@@ -2886,7 +2906,7 @@ describe("ACPAgentSession", () => {
     let resolvePrompt!: (value: PromptResponse) => void;
     const prompt = vi.fn(
       () =>
-        new Promise((resolve) => {
+        new Promise<PromptResponse>((resolve) => {
           resolvePrompt = resolve;
         }),
     );
@@ -2907,7 +2927,10 @@ describe("ACPAgentSession", () => {
     });
     expect(asInternals<ACPSessionInternals>(session).activeForegroundTurnId).toBe(turnId);
 
-    resolvePrompt({ stopReason: "end_turn", usage: { outputTokens: 3 } });
+    resolvePrompt({
+      stopReason: "end_turn",
+      usage: { inputTokens: 0, outputTokens: 3, totalTokens: 3 },
+    });
     await Promise.resolve();
     await Promise.resolve();
 
@@ -3246,7 +3269,7 @@ describe("ACPAgentSession", () => {
     let rejectPrompt!: (error: Error) => void;
     const prompt = vi.fn(
       () =>
-        new Promise((_, reject) => {
+        new Promise<PromptResponse>((_, reject) => {
           rejectPrompt = reject;
         }),
     );
@@ -3538,6 +3561,10 @@ describe("ACPAgentSession initialization cleanup", () => {
         capabilities: {
           supportsStreaming: true,
           supportsSessionPersistence: true,
+          supportsDynamicModes: false,
+          supportsMcpServers: false,
+          supportsReasoningStream: false,
+          supportsToolInvocations: false,
         },
         handle: { provider: "test-acp", sessionId: "archived-session" },
         terminateProcess: terminator.terminate,
@@ -3556,19 +3583,7 @@ describe("ACPAgentSession initialization cleanup", () => {
     const terminator = new FakeTerminator();
     const child = createProbeChildStub();
 
-    class FailingNewSession extends ACPAgentSession {
-      protected override async spawnProcess(): Promise<SpawnedACPProcess> {
-        return {
-          child,
-          connection: {
-            newSession: vi.fn().mockRejectedValue(new Error("session/new failed")),
-          } as unknown as ClientSideConnection,
-          initialize: { agentCapabilities: {} },
-        };
-      }
-    }
-
-    const session = new FailingNewSession(
+    const session = new ACPAgentSession(
       { provider: "copilot", cwd: "/tmp/paseo-acp-test" },
       {
         provider: "copilot",
@@ -3578,10 +3593,21 @@ describe("ACPAgentSession initialization cleanup", () => {
         capabilities: {
           supportsStreaming: true,
           supportsSessionPersistence: true,
+          supportsDynamicModes: false,
+          supportsMcpServers: false,
+          supportsReasoningStream: false,
+          supportsToolInvocations: false,
         },
         terminateProcess: terminator.terminate,
       },
     );
+    stubSpawnProcess(session, async () => ({
+      child,
+      connection: {
+        newSession: vi.fn().mockRejectedValue(new Error("session/new failed")),
+      } as unknown as ClientSideConnection,
+      initialize: { protocolVersion: PROTOCOL_VERSION, agentCapabilities: {} },
+    }));
 
     await expect(session.initializeNewSession()).rejects.toThrow("session/new failed");
 
@@ -3592,19 +3618,7 @@ describe("ACPAgentSession initialization cleanup", () => {
     const terminator = new FakeTerminator();
     const child = createProbeChildStub();
 
-    class FailingLoadSession extends ACPAgentSession {
-      protected override async spawnProcess(): Promise<SpawnedACPProcess> {
-        return {
-          child,
-          connection: {
-            loadSession: vi.fn().mockRejectedValue(new Error("session/load failed")),
-          } as unknown as ClientSideConnection,
-          initialize: { agentCapabilities: { loadSession: true } },
-        };
-      }
-    }
-
-    const session = new FailingLoadSession(
+    const session = new ACPAgentSession(
       { provider: "cursor", cwd: "/tmp/paseo-acp-test" },
       {
         provider: "cursor",
@@ -3614,11 +3628,22 @@ describe("ACPAgentSession initialization cleanup", () => {
         capabilities: {
           supportsStreaming: true,
           supportsSessionPersistence: true,
+          supportsDynamicModes: false,
+          supportsMcpServers: false,
+          supportsReasoningStream: false,
+          supportsToolInvocations: false,
         },
         handle: { provider: "cursor", sessionId: "session-1" },
         terminateProcess: terminator.terminate,
       },
     );
+    stubSpawnProcess(session, async () => ({
+      child,
+      connection: {
+        loadSession: vi.fn().mockRejectedValue(new Error("session/load failed")),
+      } as unknown as ClientSideConnection,
+      initialize: { protocolVersion: PROTOCOL_VERSION, agentCapabilities: { loadSession: true } },
+    }));
 
     await expect(session.initializeResumedSession()).rejects.toThrow("session/load failed");
 
@@ -3647,7 +3672,7 @@ describe("ACPAgentClient probe cleanup", () => {
             }),
           },
           initialize: { agentCapabilities: {} },
-        } as SpawnedACPProcess;
+        } as SpawnedACPProcessStub as SpawnedACPProcess;
       }
     }
 
@@ -3915,10 +3940,13 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
    * without spawning real processes. Each call produces fresh vi.fn() stubs.
    */
   function makeTestSession(args: {
-    capabilities?: AgentCapabilityFlags;
+    /** Capabilities the fake ACP agent reports from `initialize`. */
+    agentCapabilities?: AgentCapabilities;
+    /** Overrides for the session's own capability flags. */
+    sessionCapabilities?: Partial<AgentCapabilityFlags>;
     handle: AgentPersistenceHandle;
-    loadSession?: ReturnType<typeof vi.fn>;
-    unstableResumeSession?: ReturnType<typeof vi.fn>;
+    loadSession?: (input: unknown) => Promise<unknown>;
+    unstableResumeSession?: (input: unknown) => Promise<unknown>;
   }) {
     const loadSession =
       args.loadSession ??
@@ -3937,22 +3965,8 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
         configOptions: [],
       });
 
-    class TestSession extends ACPAgentSession {
-      protected override async spawnProcess(): Promise<SpawnedACPProcess> {
-        return {
-          child: createProbeChildStub(),
-          connection: {
-            prompt: vi.fn(),
-            loadSession,
-            unstable_resumeSession: unstableResumeSession,
-          } as unknown as ClientSideConnection,
-          initialize: { agentCapabilities: args.capabilities ?? {} },
-        } as SpawnedACPProcess;
-      }
-    }
-
     // Pass handle through the typed constructor option (no private-field casts).
-    const session = new TestSession(
+    const session = new ACPAgentSession(
       { provider: "claude-acp", cwd: "/tmp/paseo-acp-test" },
       {
         provider: "claude-acp",
@@ -3966,10 +3980,23 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
           supportsMcpServers: true,
           supportsReasoningStream: true,
           supportsToolInvocations: true,
-          ...args.capabilities,
+          ...args.sessionCapabilities,
         },
         handle: args.handle,
       },
+    );
+    stubSpawnProcess(
+      session,
+      async () =>
+        ({
+          child: createProbeChildStub(),
+          connection: {
+            prompt: vi.fn(),
+            loadSession,
+            unstable_resumeSession: unstableResumeSession,
+          },
+          initialize: { agentCapabilities: args.agentCapabilities ?? {} },
+        }) as SpawnedACPProcessStub as SpawnedACPProcess,
     );
 
     return { session, loadSession, unstableResumeSession };
@@ -3977,7 +4004,8 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
 
   test("loadSession is always called with sessionId, cwd, and mcpServers even when mcpServers is empty", async () => {
     const { session, loadSession } = makeTestSession({
-      capabilities: { loadSession: true, supportsMcpServers: true },
+      agentCapabilities: { loadSession: true },
+      sessionCapabilities: { supportsMcpServers: true },
       handle: { sessionId: "session-1", provider: "claude-acp" },
     });
 
@@ -4009,7 +4037,7 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
       };
     };
     ({ session } = makeTestSession({
-      capabilities: { loadSession: true },
+      agentCapabilities: { loadSession: true },
       handle: { sessionId: "session-1", provider: "claude-acp" },
       loadSession,
     }));
@@ -4066,7 +4094,7 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
       };
     };
     ({ session } = makeTestSession({
-      capabilities: { loadSession: true },
+      agentCapabilities: { loadSession: true },
       handle: { sessionId: "session-1", provider: "test-acp" },
       loadSession,
     }));
@@ -4129,7 +4157,7 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
       };
     };
     ({ session } = makeTestSession({
-      capabilities: { loadSession: true },
+      agentCapabilities: { loadSession: true },
       handle: { sessionId: "session-1", provider: "claude-acp" },
       loadSession,
     }));
@@ -4151,7 +4179,8 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
 
   test("loadSession is always called with mcpServers even when supportsMcpServers is false", async () => {
     const { session, loadSession } = makeTestSession({
-      capabilities: { loadSession: true, supportsMcpServers: false },
+      agentCapabilities: { loadSession: true },
+      sessionCapabilities: { supportsMcpServers: false },
       handle: { sessionId: "session-1", provider: "claude-acp" },
     });
 
@@ -4167,7 +4196,7 @@ describe("ACP session/load invariant — cwd and mcpServers always passed", () =
 
   test("unstable_resumeSession is always called with sessionId, cwd, and mcpServers", async () => {
     const { session, unstableResumeSession } = makeTestSession({
-      capabilities: { sessionCapabilities: { resume: {} } },
+      agentCapabilities: { sessionCapabilities: { resume: {} } },
       handle: { sessionId: "session-1", provider: "claude-acp" },
     });
 

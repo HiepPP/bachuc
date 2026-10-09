@@ -22,6 +22,14 @@ import { buildRelayWebSocketUrl } from "@getpaseo/protocol/daemon-endpoints";
 import { ConnectionOfferSchema } from "@getpaseo/protocol/connection-offer";
 import { WSOutboundMessageSchema } from "@getpaseo/protocol/messages";
 
+function rawDataToArrayBuffer(data: WebSocket.RawData): ArrayBuffer {
+  let bytes: Buffer;
+  if (Array.isArray(data)) bytes = Buffer.concat(data);
+  else if (data instanceof ArrayBuffer) bytes = Buffer.from(new Uint8Array(data));
+  else bytes = data;
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 const nodeMajor = Number((process.versions.node ?? "0").split(".")[0] ?? "0");
 const shouldRunRelayE2e = process.env.FORCE_RELAY_E2E === "1" || nodeMajor < 25;
 
@@ -308,9 +316,7 @@ async function waitForCapturedLog(
 
         ws.on("message", (data, isBinary) => {
           transport.onmessage?.({
-            data: isBinary
-              ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
-              : data.toString(),
+            data: isBinary ? rawDataToArrayBuffer(data) : data.toString(),
             isBinary,
           });
         });
@@ -572,9 +578,7 @@ async function waitForCapturedLog(
 
         ws.on("message", (data, isBinary) => {
           transport.onmessage?.({
-            data: isBinary
-              ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
-              : data.toString(),
+            data: isBinary ? rawDataToArrayBuffer(data) : data.toString(),
             isBinary,
           });
         });

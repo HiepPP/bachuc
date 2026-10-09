@@ -14,11 +14,13 @@ function tmpCwd(): string {
   return mkdtempSync(path.join(tmpdir(), "daemon-e2e-"));
 }
 
+type ToolCallTimelineItem = Extract<AgentTimelineItem, { type: "tool_call" }>;
+
 function findTimelineToolCall(
   messages: SessionOutboundMessage[],
   agentId: string,
-  predicate: (item: AgentTimelineItem) => boolean,
-): AgentTimelineItem | null {
+  predicate: (item: ToolCallTimelineItem) => boolean,
+): ToolCallTimelineItem | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (msg?.type !== "agent_stream") {
@@ -42,13 +44,13 @@ function findTimelineToolCall(
 async function waitForTimelineToolCall(
   messages: SessionOutboundMessage[],
   agentId: string,
-  predicate: (item: AgentTimelineItem) => boolean,
+  predicate: (item: ToolCallTimelineItem) => boolean,
   timeoutMs = 10000,
-): Promise<Extract<AgentTimelineItem, { type: "tool_call" }>> {
+): Promise<ToolCallTimelineItem> {
   const startTime = Date.now();
   while (Date.now() - startTime < timeoutMs) {
     const existing = findTimelineToolCall(messages, agentId, predicate);
-    if (existing && existing.type === "tool_call") {
+    if (existing) {
       return existing;
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -507,7 +509,6 @@ test("bootstraps configured worktree terminals after setup succeeds", async () =
     expect(failedBootstraps).toEqual([]);
 
     const list = await ctx.client.listTerminals(agent.cwd);
-    expect(list.error).toBeUndefined();
     expect(list.terminals.some((terminal) => terminal.name === "Dev Server")).toBe(true);
     expect(list.terminals.length).toBeGreaterThanOrEqual(2);
     await waitForPathExists({

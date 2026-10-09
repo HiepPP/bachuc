@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { removeSkill, syncSkills } from "./sync";
+import { removeSkill, syncSkills } from "./sync.js";
 
 interface Sandbox {
   root: string;

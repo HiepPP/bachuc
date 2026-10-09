@@ -12,7 +12,7 @@ import {
   type SkillTargets,
   uninstallSkills,
   updateSkills,
-} from "./operations";
+} from "./operations.js";
 
 const ALL_SKILLS: SkillSelection = { mode: "all" };
 

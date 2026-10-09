@@ -229,7 +229,7 @@ async function resolveSisyphusMode(
   cwd: string,
 ): Promise<string> {
   const { modes } = await client.listProviderModes("opencode", { cwd });
-  const matches = modes.filter((mode) => mode.label.toLowerCase().startsWith("sisyphus"));
+  const matches = (modes ?? []).filter((mode) => mode.label.toLowerCase().startsWith("sisyphus"));
   if (matches.length !== 1 || !matches[0]) {
     throw new Error(`Expected one OMO Sisyphus mode, received: ${JSON.stringify(modes)}`);
   }

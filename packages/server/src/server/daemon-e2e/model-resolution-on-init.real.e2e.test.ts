@@ -45,7 +45,7 @@ describe("daemon E2E (real claude) - model resolution on init", () => {
       });
 
       const modelsResult = await client.listProviderModels("claude", { cwd });
-      const catalogModelIds = new Set(modelsResult.models.map((m) => m.id));
+      const catalogModelIds = new Set(modelsResult.models?.map((m) => m.id));
 
       const agent = await client.createAgent({
         ...getRealProviderConfig("claude"),

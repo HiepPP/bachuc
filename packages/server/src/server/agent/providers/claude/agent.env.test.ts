@@ -6,6 +6,9 @@ import type { AgentLaunchContext } from "../../agent-sdk-types.js";
 import { ClaudeAgentClient } from "./agent.js";
 import type { ClaudeQueryInput } from "./query.js";
 
+// Deliberately partial fake of the SDK Query: it stubs only what the session calls.
+type QueryStub = { [K in keyof Query]?: unknown };
+
 function createQueryMock(events: unknown[]): Query {
   let index = 0;
   return {
@@ -25,7 +28,7 @@ function createQueryMock(events: unknown[]): Query {
     [Symbol.asyncIterator]() {
       return this;
     },
-  } as Query;
+  } as QueryStub as Query;
 }
 
 describe("Claude SDK env", () => {

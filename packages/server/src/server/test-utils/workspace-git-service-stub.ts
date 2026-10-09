@@ -15,6 +15,7 @@ export function createNoGitWorkspaceRuntimeSnapshot(cwd: string): WorkspaceGitRu
       isDirty: null,
       baseRef: null,
       aheadBehind: null,
+      upstreamRef: null,
       aheadOfOrigin: null,
       behindOfOrigin: null,
       hasRemote: false,
@@ -22,6 +23,7 @@ export function createNoGitWorkspaceRuntimeSnapshot(cwd: string): WorkspaceGitRu
     },
     forge: {
       featuresEnabled: false,
+      authState: "no_remote",
       pullRequest: null,
       error: null,
     },

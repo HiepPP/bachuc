@@ -2,7 +2,12 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { PermissionResult, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  PermissionResult,
+  Query,
+  SDKMessage,
+  SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import * as executableUtils from "../../../../executable-resolution/executable-resolution.js";
@@ -16,6 +21,7 @@ import {
   toClaudeSdkMcpConfig,
 } from "./agent.js";
 import { claudeProjectDirSync } from "./project-dir.js";
+import type { ClaudeQueryInput } from "./query.js";
 import { streamSession } from "../test-utils/session-stream-adapter.js";
 import type {
   AgentPromptInput,
@@ -27,8 +33,22 @@ import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import { buildAgentPrompt, renderPromptAttachmentAsText } from "../../prompt-attachments.js";
 
 interface TestClaudeSession {
-  translateMessageToEvents(message: SDKMessage): AgentStreamEvent[];
+  translateMessageToEvents(message: SDKMessage | Record<string, unknown>): AgentStreamEvent[];
   close(): Promise<void>;
+}
+
+// Deliberately partial fake of the SDK Query: each test stubs only what the session calls.
+type QueryStub = { [K in keyof Query]?: unknown };
+
+function asQuery(stub: QueryStub): Query {
+  return stub as Query;
+}
+
+function streamingPrompt(input: ClaudeQueryInput): AsyncIterable<SDKUserMessage> {
+  if (typeof input.prompt === "string") {
+    throw new Error("Expected the Claude session to stream its prompt");
+  }
+  return input.prompt;
 }
 
 function isLoadingCompactionEvent(event: AgentStreamEvent): boolean {
@@ -67,9 +87,11 @@ describe("convertClaudeHistoryEntry", () => {
     const stubTimeline: AgentTimelineItem[] = [
       {
         type: "tool_call",
-        server: "editor",
-        tool: "read_file",
+        callId: "call-read-file",
+        name: "read_file",
         status: "completed",
+        detail: { type: "unknown", input: null, output: null },
+        error: null,
       },
     ];
 
@@ -534,10 +556,12 @@ describe("ClaudeAgentClient binary resolution", () => {
   test("loads user, project, and local Claude settings", async () => {
     const queryReturn = vi.fn();
     queryReturn.mockResolvedValue(undefined);
-    const queryFactory = vi.fn(() => ({
-      close: vi.fn(),
-      return: queryReturn,
-    }));
+    const queryFactory = vi.fn((_input: ClaudeQueryInput) =>
+      asQuery({
+        close: vi.fn(),
+        return: queryReturn,
+      }),
+    );
 
     const client = new ClaudeAgentClient({
       logger,
@@ -580,10 +604,12 @@ describe("ClaudeAgentClient binary resolution", () => {
 
     const queryReturn = vi.fn();
     queryReturn.mockResolvedValue(undefined);
-    const queryFactory = vi.fn(() => ({
-      close: vi.fn(),
-      return: queryReturn,
-    }));
+    const queryFactory = vi.fn((_input: ClaudeQueryInput) =>
+      asQuery({
+        close: vi.fn(),
+        return: queryReturn,
+      }),
+    );
 
     const client = new ClaudeAgentClient({
       logger,
@@ -642,10 +668,10 @@ describe("ClaudeAgentSession features", () => {
         };
       },
     };
-    const launches: Array<{ options: Record<string, unknown> }> = [];
-    const queryFactory = vi.fn((input) => {
+    const launches: ClaudeQueryInput[] = [];
+    const queryFactory = vi.fn((input: ClaudeQueryInput) => {
       launches.push(input);
-      return queryMock;
+      return asQuery(queryMock);
     });
     return { queryFactory, queryMock, launches };
   }
@@ -668,7 +694,7 @@ describe("ClaudeAgentSession features", () => {
       const permission = canUseTool(
         "Bash",
         { command: "printf test" },
-        { signal: abort.signal, toolUseID: "tool-aborted" },
+        { signal: abort.signal, toolUseID: "tool-aborted", requestId: "request-aborted" },
       );
       abort.abort();
 
@@ -704,7 +730,7 @@ describe("ClaudeAgentSession features", () => {
       const permission = canUseTool(
         "Bash",
         { command: "printf test" },
-        { signal: abort.signal, toolUseID: "tool-interrupted" },
+        { signal: abort.signal, toolUseID: "tool-interrupted", requestId: "request-interrupted" },
       );
 
       await session.interrupt();
@@ -929,14 +955,14 @@ describe("ClaudeAgentSession features", () => {
     const sent = new Promise<SDKUserMessage>((resolve) => {
       resolveSent = resolve;
     });
-    queryFactory.mockImplementation((input: { prompt: AsyncIterable<SDKUserMessage> }) => {
+    queryFactory.mockImplementation((input: ClaudeQueryInput) => {
       void (async () => {
-        for await (const message of input.prompt) {
+        for await (const message of streamingPrompt(input)) {
           resolveSent?.(message);
           break;
         }
       })();
-      return queryMock;
+      return asQuery(queryMock);
     });
     const session = await new ClaudeAgentClient({
       logger,
@@ -1949,7 +1975,7 @@ describe("ClaudeAgentSession context window usage", () => {
     turns: Array<Array<Record<string, unknown>>>,
     options?: QueryFactoryForTurnsOptions,
   ) {
-    return vi.fn(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    return vi.fn((input: ClaudeQueryInput) => {
       const queuedMessages: Array<Record<string, unknown>> = [];
       const waiters: Array<() => void> = [];
       let turnIndex = 0;
@@ -1967,7 +1993,7 @@ describe("ClaudeAgentSession context window usage", () => {
       }
 
       void (async () => {
-        for await (const _ of prompt) {
+        for await (const _ of streamingPrompt(input)) {
           const turnMessages = turns[turnIndex] ?? [];
           turnIndex += 1;
           for (const message of turnMessages) {
@@ -1978,7 +2004,7 @@ describe("ClaudeAgentSession context window usage", () => {
         wakeNextWaiter();
       })();
 
-      return {
+      return asQuery({
         next: vi.fn(async () => {
           while (queuedMessages.length === 0 && !closedRef.value) {
             await new Promise<void>((resolve) => {
@@ -2009,7 +2035,7 @@ describe("ClaudeAgentSession context window usage", () => {
         [Symbol.asyncIterator]() {
           return this;
         },
-      };
+      });
     });
   }
 
@@ -2225,9 +2251,8 @@ describe("ClaudeAgentSession context window usage", () => {
   });
 
   test("classifies Claude root-only commands separately from inline skills", async () => {
-    const queryFactory = vi.fn(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
-      void prompt;
-      return {
+    const queryFactory = vi.fn((_input: ClaudeQueryInput) => {
+      return asQuery({
         next: async () => ({ done: true, value: undefined }),
         interrupt: async () => undefined,
         return: async () => undefined,
@@ -2262,7 +2287,7 @@ describe("ClaudeAgentSession context window usage", () => {
         [Symbol.asyncIterator]() {
           return this;
         },
-      };
+      });
     });
     const client = new ClaudeAgentClient({
       logger,
@@ -2271,6 +2296,7 @@ describe("ClaudeAgentSession context window usage", () => {
     });
     const session = await client.createSession({ provider: "claude", cwd: process.cwd() });
 
+    if (!session.listCommands) throw new Error("Expected the Claude session to list commands");
     const commands = await session.listCommands();
     await session.close();
 
@@ -3012,7 +3038,7 @@ describe("ClaudeAgentSession context window usage", () => {
       expect(
         events.some(
           (event) =>
-            event.type === "turn_completed" && event.usage.contextWindowUsedTokens !== undefined,
+            event.type === "turn_completed" && event.usage?.contextWindowUsedTokens !== undefined,
         ),
       ).toBe(false);
     } finally {
@@ -3310,7 +3336,7 @@ describe("toClaudeSdkMcpConfig", () => {
       args: ["markitdown-mcp"],
     });
     expect(result.type).toBe("stdio");
-    expect(result.alwaysLoad).toBeUndefined();
+    expect("alwaysLoad" in result ? result.alwaysLoad : undefined).toBeUndefined();
   });
 });
 

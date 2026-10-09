@@ -100,7 +100,9 @@ describe("OMP todo mapper", () => {
   test("drops malformed todo inputs", () => {
     expect(mapOmpTodoReminderEvent({ type: "todo_reminder", todos: [{ content: 1 }] })).toBeNull();
     expect(
-      mapOmpTodoToolResult({ details: { phases: [{ name: "Bad", tasks: [{}] }] } }),
+      mapOmpTodoToolResult({ details: { phases: [{ name: "Bad", tasks: [{}] }] } } as Parameters<
+        typeof mapOmpTodoToolResult
+      >[0]),
     ).toBeNull();
   });
 });

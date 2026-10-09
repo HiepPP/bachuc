@@ -2,9 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DaemonConfigStore, type MutableDaemonConfigPatch } from "../../daemon-config-store";
-import { loadPersistedConfig } from "../../persisted-config";
-import { createSkillSelectionStore } from "./selection-store";
+import { DaemonConfigStore, type MutableDaemonConfigPatch } from "../../daemon-config-store.js";
+import { loadPersistedConfig } from "../../persisted-config.js";
+import { createSkillSelectionStore } from "./selection-store.js";
 
 const roots: string[] = [];
 

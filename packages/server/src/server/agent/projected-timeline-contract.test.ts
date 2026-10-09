@@ -100,7 +100,7 @@ test("projects Codex child history and confines old-client degradation to the ch
     expect(root.error).toBeNull();
     expect(root.projection).toBe("projected");
     expect(root.entries).toHaveLength(1);
-    expect((await legacy.buildAgentForkContext(agent.id)).attachment.text).toContain(
+    expect((await legacy.buildAgentForkContext(agent.id)).attachment?.text).toContain(
       "[Child] child",
     );
     app.assertNoErrors();

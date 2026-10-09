@@ -83,7 +83,7 @@ function createLogger(): pino.Logger {
 
 describe("terminal-session-controller restore", () => {
   test("delivers output produced while restore is in flight after the restore frame", async () => {
-    let terminalListener: ((message: ServerMessage) => void) | null = null;
+    let terminalListener = null as ((message: ServerMessage) => void) | null;
     const snapshot = deferred<TerminalStateSnapshot | null>();
     const binaryFrames: TerminalStreamFrame[] = [];
     const outboundMessages: SessionOutboundMessage[] = [];
@@ -109,6 +109,7 @@ describe("terminal-session-controller restore", () => {
       getTitle: () => undefined,
       getActivity: () => null,
       setActivity: vi.fn(),
+      clearActivityAttention: () => false,
       setTitle: vi.fn(),
       getExitInfo: () => null,
       kill: vi.fn(),
@@ -118,11 +119,12 @@ describe("terminal-session-controller restore", () => {
       getTerminals: vi.fn(),
       createTerminal: vi.fn(),
       registerCwdEnv: vi.fn(),
-      validateTerminalActivityToken: vi.fn(() => "unknown"),
+      validateTerminalActivityToken: vi.fn(() => "unknown" as const),
       getTerminal: vi.fn(() => terminal),
       getTerminalState: vi.fn(() => snapshot.promise),
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
+      clearTerminalAttention: vi.fn(),
       killTerminal: vi.fn(),
       killTerminalAndWait: vi.fn(),
       captureTerminal: vi.fn(),
@@ -207,6 +209,7 @@ function listSession(input: {
     getTitle: () => undefined,
     getActivity: () => null,
     setActivity: vi.fn(),
+    clearActivityAttention: () => false,
     setTitle: vi.fn(),
     getExitInfo: () => null,
     kill: vi.fn(),
@@ -233,7 +236,7 @@ describe("terminal-session-controller legacy terminal creation", () => {
       getTerminals: vi.fn(),
       createTerminal,
       registerCwdEnv: vi.fn(),
-      validateTerminalActivityToken: vi.fn(() => "unknown"),
+      validateTerminalActivityToken: vi.fn(() => "unknown" as const),
       getTerminal: vi.fn(),
       getTerminalState: vi.fn(),
       setTerminalTitle: vi.fn(),
@@ -308,7 +311,7 @@ describe("terminal-session-controller legacy terminal creation", () => {
       getTerminals: vi.fn(),
       createTerminal,
       registerCwdEnv: vi.fn(),
-      validateTerminalActivityToken: vi.fn(() => "unknown"),
+      validateTerminalActivityToken: vi.fn(() => "unknown" as const),
       getTerminal: vi.fn(),
       getTerminalState: vi.fn(),
       setTerminalTitle: vi.fn(),
@@ -383,6 +386,7 @@ describe("terminal-session-controller wrap-flag gating", () => {
       getTitle: () => undefined,
       getActivity: () => null,
       setActivity: vi.fn(),
+      clearActivityAttention: () => false,
       setTitle: vi.fn(),
       getExitInfo: () => null,
       kill: vi.fn(),
@@ -395,11 +399,12 @@ describe("terminal-session-controller wrap-flag gating", () => {
       getTerminals: vi.fn(),
       createTerminal: vi.fn(),
       registerCwdEnv: vi.fn(),
-      validateTerminalActivityToken: vi.fn(() => "unknown"),
+      validateTerminalActivityToken: vi.fn(() => "unknown" as const),
       getTerminal: vi.fn(() => terminal),
       getTerminalState,
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
+      clearTerminalAttention: vi.fn(),
       killTerminal: vi.fn(),
       killTerminalAndWait: vi.fn(),
       captureTerminal: vi.fn(),
@@ -463,16 +468,17 @@ describe("terminal-session-controller subdirectory aggregation", () => {
       listSession({ id: "subdir-term", name: "Mobile", cwd: subdirCwd }),
     ];
 
-    let changedListener: ((event: TerminalsChangedEvent) => void) | null = null;
+    let changedListener = null as ((event: TerminalsChangedEvent) => void) | null;
     const terminalManager: TerminalManager = {
       getTerminals: vi.fn(async (cwd: string) => (cwd === rootCwd ? aggregatedRootTerminals : [])),
       createTerminal: vi.fn(),
       registerCwdEnv: vi.fn(),
-      validateTerminalActivityToken: vi.fn(() => "unknown"),
+      validateTerminalActivityToken: vi.fn(() => "unknown" as const),
       getTerminal: vi.fn(),
       getTerminalState: vi.fn(),
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
+      clearTerminalAttention: vi.fn(),
       killTerminal: vi.fn(),
       killTerminalAndWait: vi.fn(),
       captureTerminal: vi.fn(),
@@ -503,7 +509,15 @@ describe("terminal-session-controller subdirectory aggregation", () => {
 
     changedListener?.({
       cwd: subdirCwd,
-      terminals: [{ id: "subdir-term", name: "Mobile", cwd: subdirCwd, workspaceId: "ws-test" }],
+      terminals: [
+        {
+          id: "subdir-term",
+          name: "Mobile",
+          cwd: subdirCwd,
+          workspaceId: "ws-test",
+          activity: null,
+        },
+      ],
     });
     await flushMicrotasks();
 
@@ -536,11 +550,12 @@ describe("terminal-session-controller subdirectory aggregation", () => {
       ),
       createTerminal: vi.fn(),
       registerCwdEnv: vi.fn(),
-      validateTerminalActivityToken: vi.fn(() => "unknown"),
+      validateTerminalActivityToken: vi.fn(() => "unknown" as const),
       getTerminal: vi.fn(),
       getTerminalState: vi.fn(),
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
+      clearTerminalAttention: vi.fn(),
       killTerminal: vi.fn(),
       killTerminalAndWait: vi.fn(),
       captureTerminal: vi.fn(),
@@ -621,18 +636,19 @@ describe("terminal-session-controller workspace-scoped subscriptions", () => {
       workspaceId: "ws-b",
     };
 
-    let changedListener: ((event: TerminalsChangedEvent) => void) | null = null;
+    let changedListener = null as ((event: TerminalsChangedEvent) => void) | null;
     const terminalManager: TerminalManager = {
       getTerminals: vi.fn(async (_cwd: string, options?: { workspaceId?: string }) =>
         options?.workspaceId === "ws-b" ? [terminalB] : [terminalA],
       ),
       createTerminal: vi.fn(),
       registerCwdEnv: vi.fn(),
-      validateTerminalActivityToken: vi.fn(() => "unknown"),
+      validateTerminalActivityToken: vi.fn(() => "unknown" as const),
       getTerminal: vi.fn(),
       getTerminalState: vi.fn(),
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
+      clearTerminalAttention: vi.fn(),
       killTerminal: vi.fn(),
       killTerminalAndWait: vi.fn(),
       captureTerminal: vi.fn(),
@@ -677,7 +693,10 @@ describe("terminal-session-controller workspace-scoped subscriptions", () => {
       false,
     );
 
-    changedListener?.({ cwd, terminals: [{ id: "a", name: "A", cwd, workspaceId: "ws-a" }] });
+    changedListener?.({
+      cwd,
+      terminals: [{ id: "a", name: "A", cwd, workspaceId: "ws-a", activity: null }],
+    });
     await flushMicrotasks();
 
     expect(outboundMessages).toEqual([
@@ -697,7 +716,7 @@ describe("terminal-session-controller backpressure snapshot fallback", () => {
     pushOutput: (data: string) => void;
     frames: TerminalStreamFrame[];
   }> {
-    let terminalListener: ((message: ServerMessage) => void) | null = null;
+    let terminalListener = null as ((message: ServerMessage) => void) | null;
     const terminal: TerminalSession = {
       id: "term-1",
       name: "Terminal",
@@ -716,11 +735,15 @@ describe("terminal-session-controller backpressure snapshot fallback", () => {
       onExit: () => vi.fn(),
       onCommandFinished: () => vi.fn(),
       onTitleChange: () => vi.fn(),
+      onActivityChange: () => vi.fn(),
       getSize: () => ({ rows: 1, cols: 80 }),
       getState: () => terminalState("live"),
       getStateSnapshot: () => ({ state: terminalState("live"), revision: 1 }),
       getReplayPreamble: () => "",
       getTitle: () => undefined,
+      getActivity: () => null,
+      setActivity: vi.fn(),
+      clearActivityAttention: () => false,
       setTitle: vi.fn(),
       getExitInfo: () => null,
       kill: vi.fn(),

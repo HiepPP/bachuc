@@ -600,7 +600,7 @@ describe("PluginAgentClientRegistry", () => {
 type RequestKind = "session.open" | "catalog" | "session.configure" | "session.prompt";
 
 async function requestFromClient(client: AgentClient, kind: RequestKind): Promise<unknown> {
-  if (kind === "catalog") return client.fetchCatalog({ scope: "global" });
+  if (kind === "catalog") return client.fetchCatalog({ scope: "global", force: false });
   const session = await client.createSession({ provider: client.provider, cwd: "/workspace" });
   if (kind === "session.open") return session;
   if (kind === "session.configure") return session.setMode("build");
@@ -753,7 +753,10 @@ describe("pending provider responses", () => {
         },
         async (client) => {
           await expect(
-            client.fetchCatalog({ scope: "global" }, { signal: controller.signal }),
+            client.fetchCatalog(
+              { scope: "global", force: false },
+              { signal: controller.signal, runActivity: (_name, operation) => operation() },
+            ),
           ).rejects.toBe(reason);
         },
       );

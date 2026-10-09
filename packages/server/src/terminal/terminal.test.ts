@@ -513,7 +513,7 @@ describe("createTerminal", () => {
     }
 
     // Rows 0 and 1 continue onto the next row; row 2 is the end of the logical line.
-    const withFlags = session.getState({ includeWrapFlags: true });
+    const withFlags = session.getStateSnapshot({ includeWrapFlags: true }).state;
     expect(withFlags.gridWrapped?.slice(0, 3)).toEqual([true, true, false]);
 
     // Back-compat gate: without the capability the daemon must not attach the new

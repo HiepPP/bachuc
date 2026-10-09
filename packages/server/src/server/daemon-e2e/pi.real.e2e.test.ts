@@ -23,7 +23,7 @@ process.env.PASEO_SUPERVISED = "0";
 
 const PI_TEST_TIMEOUT_MS = 240_000;
 const PI_REAL_TEST_MODEL = getRealProviderConfig("pi").model;
-const PI_COMPACTION_TEST_MODEL = PI_REAL_TEST_MODEL.startsWith("openai-codex/")
+const PI_COMPACTION_TEST_MODEL = PI_REAL_TEST_MODEL?.startsWith("openai-codex/")
   ? "openai-codex/gpt-5.4-mini"
   : PI_REAL_TEST_MODEL;
 const PI_COMPACTION_RESERVE_TOKENS =

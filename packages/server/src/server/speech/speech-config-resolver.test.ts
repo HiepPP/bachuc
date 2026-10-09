@@ -2,13 +2,18 @@ import path from "node:path";
 
 import { describe, expect, test } from "vitest";
 
-import { PersistedConfigSchema } from "../persisted-config.js";
+import { PersistedConfigSchema, type PersistedConfig } from "../persisted-config.js";
 import { resolveSpeechConfig } from "./speech-config-resolver.js";
+
+// Mirrors persisted-config.ts, which narrows the schema output to PersistedConfig.
+function parsePersistedConfig(input: unknown): PersistedConfig {
+  return PersistedConfigSchema.parse(input) as PersistedConfig;
+}
 
 describe("resolveSpeechConfig", () => {
   test("resolves local-first defaults without env overrides", () => {
     const paseoHome = "/tmp/paseo-home";
-    const persisted = PersistedConfigSchema.parse({});
+    const persisted = parsePersistedConfig({});
     const env = {} as NodeJS.ProcessEnv;
 
     const result = resolveSpeechConfig({
@@ -58,7 +63,7 @@ describe("resolveSpeechConfig", () => {
   });
 
   test("resolves feature-scoped local speech settings", () => {
-    const persisted = PersistedConfigSchema.parse({
+    const persisted = parsePersistedConfig({
       features: {
         voiceMode: {
           turnDetection: { provider: "local" },
@@ -135,7 +140,7 @@ describe("resolveSpeechConfig", () => {
   });
 
   test("resolves STT language from env, settings, and voice-to-dictation fallback", () => {
-    const persisted = PersistedConfigSchema.parse({
+    const persisted = parsePersistedConfig({
       features: {
         dictation: {
           stt: {
@@ -166,7 +171,7 @@ describe("resolveSpeechConfig", () => {
   });
 
   test("respects disabled dictation and voice mode feature flags", () => {
-    const persisted = PersistedConfigSchema.parse({
+    const persisted = parsePersistedConfig({
       features: {
         dictation: { enabled: false },
         voiceMode: { enabled: false },

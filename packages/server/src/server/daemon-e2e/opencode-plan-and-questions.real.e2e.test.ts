@@ -46,7 +46,7 @@ describe("daemon E2E (real opencode) - plan mode and clarifying questions", () =
 
     try {
       const modelList = await client.listProviderModels("opencode");
-      expect(modelList.models.length).toBeGreaterThan(0);
+      expect(modelList.models?.length).toBeGreaterThan(0);
 
       const agent = await client.createAgent({
         provider: "opencode",
@@ -78,7 +78,10 @@ describe("daemon E2E (real opencode) - plan mode and clarifying questions", () =
       expect(permission?.kind).toBe("question");
       expect(Array.isArray(permission?.input?.questions)).toBe(true);
 
-      const firstQuestion = permission?.input?.questions?.[0] as { header?: string } | undefined;
+      const questions = permission?.input?.questions;
+      const firstQuestion = (Array.isArray(questions) ? questions[0] : undefined) as
+        | { header?: string }
+        | undefined;
       expect(firstQuestion?.header).toBeTruthy();
     } finally {
       await client.close().catch(() => undefined);
@@ -94,7 +97,7 @@ describe("daemon E2E (real opencode) - plan mode and clarifying questions", () =
 
     try {
       const modelList = await client.listProviderModels("opencode");
-      expect(modelList.models.length).toBeGreaterThan(0);
+      expect(modelList.models?.length).toBeGreaterThan(0);
 
       const agent = await client.createAgent({
         provider: "opencode",
@@ -120,8 +123,7 @@ describe("daemon E2E (real opencode) - plan mode and clarifying questions", () =
       });
       const toolCalls = timeline.entries.filter((entry) => entry.item.type === "tool_call");
       const assistantText = timeline.entries
-        .filter((entry) => entry.item.type === "assistant_message")
-        .map((entry) => entry.item.text)
+        .flatMap((entry) => (entry.item.type === "assistant_message" ? [entry.item.text] : []))
         .join(" ")
         .trim();
 

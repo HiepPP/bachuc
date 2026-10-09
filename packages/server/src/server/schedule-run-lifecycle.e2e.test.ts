@@ -210,7 +210,7 @@ test("archiveOnFinish=false local scheduled run emits upserts and remains active
   const cwd = makeTempDir("schedule-run-local-");
   const schedule = await createNewAgentSchedule({
     prompt: "Say done.",
-    cadence: { type: "every", everyMs: 60_000 },
+    cadence: { type: "cron", expression: "* * * * *" },
     target: {
       type: "new-agent",
       config: {
@@ -243,7 +243,7 @@ test("archiveOnFinish=true scheduled run emits a workspace remove", async () => 
   const cwd = makeTempDir("schedule-run-archive-");
   const schedule = await createNewAgentSchedule({
     prompt: "Say done.",
-    cadence: { type: "every", everyMs: 60_000 },
+    cadence: { type: "cron", expression: "* * * * *" },
     target: {
       type: "new-agent",
       config: {
@@ -280,7 +280,7 @@ test("worktree isolation creates a run worktree and archiveOnFinish removes it",
   );
   const schedule = await createNewAgentSchedule({
     prompt: "Say done.",
-    cadence: { type: "every", everyMs: 60_000 },
+    cadence: { type: "cron", expression: "* * * * *" },
     target: {
       type: "new-agent",
       config: {
@@ -328,7 +328,7 @@ test("update_schedule patches thinking, archive behavior, and isolation for the 
   );
   const schedule = await createNewAgentSchedule({
     prompt: "Say done.",
-    cadence: { type: "every", everyMs: 60_000 },
+    cadence: { type: "cron", expression: "* * * * *" },
     target: {
       type: "new-agent",
       config: {

@@ -31,10 +31,11 @@ describe("daemon E2E", () => {
 
           // Should return at least one model
           expect(result.models).toBeTruthy();
-          expect(result.models.length).toBeGreaterThan(0);
+          const models = result.models ?? [];
+          expect(models.length).toBeGreaterThan(0);
 
           // Verify model structure
-          const model = result.models[0];
+          const model = models[0];
           expect(model.provider).toBe("codex");
           expect(model.id).toBeTruthy();
           expect(model.label).toBeTruthy();
@@ -58,10 +59,11 @@ describe("daemon E2E", () => {
 
         // Should return at least one model
         expect(result.models).toBeTruthy();
-        expect(result.models.length).toBeGreaterThan(0);
+        const models = result.models ?? [];
+        expect(models.length).toBeGreaterThan(0);
 
         // Verify model structure
-        const model = result.models[0];
+        const model = models[0];
         expect(model.provider).toBe("claude");
         expect(model.id).toBeTruthy();
         expect(model.label).toBeTruthy();
@@ -82,9 +84,10 @@ describe("daemon E2E", () => {
           expect(result.fetchedAt).toBeTruthy();
 
           expect(result.models).toBeTruthy();
-          expect(result.models.length).toBeGreaterThan(0);
+          const models = result.models ?? [];
+          expect(models.length).toBeGreaterThan(0);
 
-          const model = result.models[0];
+          const model = models[0];
           expect(model.provider).toBe("opencode");
           expect(model.id).toBeTruthy();
           expect(model.label).toBeTruthy();

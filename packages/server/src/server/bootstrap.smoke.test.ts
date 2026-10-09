@@ -60,17 +60,14 @@ describe("paseo daemon bootstrap", () => {
       speech: {
         providers: {
           dictationStt: { provider: "openai", explicit: true },
+          voiceTurnDetection: { provider: "local", explicit: false, enabled: true },
           voiceStt: { provider: "openai", explicit: true },
           voiceTts: { provider: "openai", explicit: true },
         },
       },
     });
     try {
-      const response = await fetch(`http://127.0.0.1:${daemonHandle.port}/api/health`, {
-        headers: daemonHandle.agentMcpAuthHeader
-          ? { Authorization: daemonHandle.agentMcpAuthHeader }
-          : undefined,
-      });
+      const response = await fetch(`http://127.0.0.1:${daemonHandle.port}/api/health`);
       expect(response.ok).toBe(true);
       const payload = await response.json();
       expect(payload.status).toBe("ok");
@@ -451,6 +448,7 @@ describe("paseo daemon bootstrap", () => {
       openai: undefined,
       speech: undefined,
       serviceProxy: {
+        publicBaseUrl: null,
         standaloneListen: `127.0.0.1:${address.port}`,
       },
     };
@@ -458,7 +456,8 @@ describe("paseo daemon bootstrap", () => {
 
     try {
       await expect(daemon.start()).rejects.toThrow();
-      await expect(fetch(`http://127.0.0.1:${daemon.port}/api/health`)).rejects.toThrow();
+      // The standalone proxy fails first, so the daemon listener must never bind.
+      expect(daemon.getListenTarget()).toBeNull();
     } finally {
       await daemon.stop().catch(() => undefined);
       await new Promise<void>((resolve) => occupiedServer.close(() => resolve()));
@@ -622,7 +621,7 @@ describe("paseo daemon bootstrap", () => {
     }
 
     const daemonHandle = await createTestPaseoDaemon({
-      serviceProxy: { standaloneListen: `127.0.0.1:${standalonePort}` },
+      serviceProxy: { publicBaseUrl: null, standaloneListen: `127.0.0.1:${standalonePort}` },
     });
     try {
       daemonHandle.daemon.serviceProxy.registerWorkspaceService({
@@ -701,7 +700,7 @@ export default function contribute(plugin: unknown) {
       appBaseUrl: "https://app.paseo.sh",
       openai: undefined,
       speech: undefined,
-      serviceProxy: { standaloneListen: `127.0.0.1:${standalonePort}` },
+      serviceProxy: { publicBaseUrl: null, standaloneListen: `127.0.0.1:${standalonePort}` },
       pluginsEnabled: !isPlatform("win32"),
       plugins: isPlatform("win32")
         ? {}
@@ -792,6 +791,7 @@ export default function contribute(plugin: unknown) {
       speech: {
         providers: {
           dictationStt: { provider: "openai", explicit: true },
+          voiceTurnDetection: { provider: "local", explicit: false, enabled: true },
           voiceStt: { provider: "openai", explicit: true },
           voiceTts: { provider: "openai", explicit: true },
         },
@@ -815,7 +815,7 @@ export default function contribute(plugin: unknown) {
 
   test("does not block daemon start on local speech model downloads", async () => {
     const originalFetch = globalThis.fetch;
-    let releaseFetch: ((value: Response) => void) | null = null;
+    let releaseFetch = null as ((value: Response) => void) | null;
     const fetchGate = new Promise<Response>((resolve) => {
       releaseFetch = resolve;
     });

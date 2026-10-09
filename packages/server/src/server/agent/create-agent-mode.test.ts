@@ -5,13 +5,23 @@ const CLAUDE_MODES = ["default", "acceptEdits", "plan", "bypassPermissions"];
 const OPENCODE_MODES = ["build", "plan"];
 const CODEX_MODES = ["auto", "full-access"];
 
+type CreateAgentModeInput = Parameters<typeof resolveAndValidateCreateAgentMode>[0];
+
+// Tests that do not exercise the unattended-mode fallback leave the target without one.
+function resolveCreateAgentMode(
+  input: Omit<CreateAgentModeInput, "targetUnattendedMode"> &
+    Partial<Pick<CreateAgentModeInput, "targetUnattendedMode">>,
+) {
+  return resolveAndValidateCreateAgentMode({ targetUnattendedMode: undefined, ...input });
+}
+
 function agentParent(provider: string, modeId: string | null, isUnattended = false) {
   return { provider, modeId, isUnattended };
 }
 
 describe("resolveAndValidateCreateAgentMode", () => {
   it("returns the requested mode when it is valid for the target provider", () => {
-    const resolved = resolveAndValidateCreateAgentMode({
+    const resolved = resolveCreateAgentMode({
       requestedMode: "plan",
       targetProvider: "opencode",
       parent: null,
@@ -23,7 +33,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
 
   it("throws when the requested mode is invalid for the target provider", () => {
     expect(() =>
-      resolveAndValidateCreateAgentMode({
+      resolveCreateAgentMode({
         requestedMode: "bypassPermissions",
         targetProvider: "opencode",
         parent: null,
@@ -36,7 +46,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
   });
 
   it("returns undefined (provider default) when no mode and no caller", () => {
-    const resolved = resolveAndValidateCreateAgentMode({
+    const resolved = resolveCreateAgentMode({
       requestedMode: undefined,
       targetProvider: "claude",
       parent: null,
@@ -47,7 +57,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
   });
 
   it("inherits the caller mode when caller and target share a provider", () => {
-    const resolved = resolveAndValidateCreateAgentMode({
+    const resolved = resolveCreateAgentMode({
       requestedMode: undefined,
       targetProvider: "claude",
       parent: agentParent("claude", "bypassPermissions"),
@@ -58,7 +68,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
   });
 
   it("returns undefined when same-provider caller has no mode", () => {
-    const resolved = resolveAndValidateCreateAgentMode({
+    const resolved = resolveCreateAgentMode({
       requestedMode: undefined,
       targetProvider: "claude",
       parent: agentParent("claude", null),
@@ -70,7 +80,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
 
   it("refuses cross-provider inheritance with the target provider's modes in the message", () => {
     expect(() =>
-      resolveAndValidateCreateAgentMode({
+      resolveCreateAgentMode({
         requestedMode: undefined,
         targetProvider: "opencode",
         parent: agentParent("claude", "bypassPermissions"),
@@ -84,7 +94,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
 
   it("refuses cross-provider inheritance even when the caller mode is null", () => {
     expect(() =>
-      resolveAndValidateCreateAgentMode({
+      resolveCreateAgentMode({
         requestedMode: undefined,
         targetProvider: "codex",
         parent: agentParent("opencode", null),
@@ -97,7 +107,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
   });
 
   it("uses the provider default when the cross-provider target has no modes", () => {
-    const resolved = resolveAndValidateCreateAgentMode({
+    const resolved = resolveCreateAgentMode({
       requestedMode: undefined,
       targetProvider: "pi",
       parent: agentParent("codex", "auto"),
@@ -110,7 +120,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
   });
 
   it("uses the provider default when an unattended parent targets a provider with no modes", () => {
-    const resolved = resolveAndValidateCreateAgentMode({
+    const resolved = resolveCreateAgentMode({
       requestedMode: undefined,
       targetProvider: "pi",
       parent: agentParent("claude", "bypassPermissions", true),
@@ -123,7 +133,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
   });
 
   it("passes through an explicit mode when the target provider's modes are unknown", () => {
-    const resolved = resolveAndValidateCreateAgentMode({
+    const resolved = resolveCreateAgentMode({
       requestedMode: "default",
       targetProvider: "zai-custom",
       parent: null,
@@ -135,7 +145,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
 
   it("renders 'unknown' in cross-provider error when target modes are unknown", () => {
     expect(() =>
-      resolveAndValidateCreateAgentMode({
+      resolveCreateAgentMode({
         requestedMode: undefined,
         targetProvider: "zai-custom",
         parent: agentParent("claude", "default"),
@@ -146,7 +156,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
   });
 
   it("inherits target's unattended mode when caller is unattended cross-provider", () => {
-    const resolved = resolveAndValidateCreateAgentMode({
+    const resolved = resolveCreateAgentMode({
       requestedMode: undefined,
       targetProvider: "codex",
       parent: agentParent("claude", "bypassPermissions", true),
@@ -158,7 +168,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
   });
 
   it("inherits target's unattended mode for unattended creation without a parent", () => {
-    const resolved = resolveAndValidateCreateAgentMode({
+    const resolved = resolveCreateAgentMode({
       requestedMode: undefined,
       targetProvider: "codex",
       parent: null,
@@ -171,7 +181,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
 
   it("still refuses cross-provider inheritance when caller is not unattended", () => {
     expect(() =>
-      resolveAndValidateCreateAgentMode({
+      resolveCreateAgentMode({
         requestedMode: undefined,
         targetProvider: "codex",
         parent: agentParent("claude", "default"),
@@ -186,7 +196,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
 
   it("still refuses cross-provider inheritance when target has no unattended mode", () => {
     expect(() =>
-      resolveAndValidateCreateAgentMode({
+      resolveCreateAgentMode({
         requestedMode: undefined,
         targetProvider: "zai-custom",
         parent: agentParent("claude", "bypassPermissions", true),
@@ -200,7 +210,7 @@ describe("resolveAndValidateCreateAgentMode", () => {
   });
 
   it("explicit mode wins over unattended inheritance", () => {
-    const resolved = resolveAndValidateCreateAgentMode({
+    const resolved = resolveCreateAgentMode({
       requestedMode: "auto",
       targetProvider: "codex",
       parent: agentParent("claude", "bypassPermissions", true),

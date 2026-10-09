@@ -52,7 +52,7 @@ describe("daemon E2E (real opencode) - initial prompt wait", () => {
 
     try {
       const models = await client.listProviderModels("opencode");
-      expect(models.models.some((model) => model.id === OPENCODE_REAL_TEST_MODEL)).toBe(true);
+      expect(models.models?.some((model) => model.id === OPENCODE_REAL_TEST_MODEL)).toBe(true);
 
       const agent = await client.createAgent({
         provider: "opencode",
@@ -67,21 +67,19 @@ describe("daemon E2E (real opencode) - initial prompt wait", () => {
       expect(finish.lastMessage).toContain("BIG_PICKLE_OK");
 
       const snapshot = await client.fetchAgent({ agentId: agent.id });
-      expect(snapshot.agent?.status).toBe("idle");
+      expect(snapshot?.agent?.status).toBe("idle");
 
       const timeline = await client.fetchAgentTimeline(agent.id, {
         direction: "tail",
         limit: 0,
         projection: "projected",
       });
-      const assistantMessages = timeline.entries.filter(
-        (entry) => entry.item.type === "assistant_message",
+      const assistantTexts = timeline.entries.flatMap((entry) =>
+        entry.item.type === "assistant_message" ? [entry.item.text] : [],
       );
 
-      expect(assistantMessages.length).toBeGreaterThan(0);
-      expect(assistantMessages.some((entry) => entry.item.text.includes("BIG_PICKLE_OK"))).toBe(
-        true,
-      );
+      expect(assistantTexts.length).toBeGreaterThan(0);
+      expect(assistantTexts.some((text) => text.includes("BIG_PICKLE_OK"))).toBe(true);
     } finally {
       await client.close().catch(() => undefined);
       await daemon.close();

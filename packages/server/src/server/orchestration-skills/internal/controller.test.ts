@@ -17,10 +17,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { SkillSelection, SkillTargets } from "./operations";
-import type { SkillSelectionStore } from "./selection-store";
-import { createSkillsController, type SkillsController } from "./controller";
-import { beginSkillsTransaction } from "./transaction";
+import type { SkillSelection, SkillTargets } from "./operations.js";
+import { coerceSkillSelection, type SkillSelectionStore } from "./selection-store.js";
+import { createSkillsController, type SkillsController } from "./controller.js";
+import { beginSkillsTransaction } from "./transaction.js";
 
 interface Harness {
   root: string;
@@ -129,7 +129,7 @@ function createGatedSelectionStore(initial: SkillSelection): {
       set: async (selection) => {
         markStarted();
         await gate;
-        current = selection;
+        current = coerceSkillSelection(selection);
         return current;
       },
     },
@@ -192,13 +192,9 @@ async function backupArtifacts(targets: SkillTargets): Promise<string[][]> {
 }
 
 async function waitForTransactionDirectory(parent: string): Promise<void> {
-  const events = watch(parent);
-  try {
-    for await (const event of events) {
-      if (event.filename?.startsWith(".paseo-skills-transaction-")) return;
-    }
-  } finally {
-    await events.return?.();
+  // Returning from inside for-await closes the watcher.
+  for await (const event of watch(parent)) {
+    if (event.filename?.startsWith(".paseo-skills-transaction-")) return;
   }
 }
 
@@ -581,14 +577,14 @@ describe("skills controller", () => {
         harness.targets.codexDir,
       ].map((root) => path.join(root, "paseo-loop"));
       for (const live of livePaths) await chmod(live, 0o700);
-      const before = await Promise.all(livePaths.map(lstat));
+      const before = await Promise.all(livePaths.map((livePath) => lstat(livePath)));
 
       const transaction = await beginSkillsTransaction(harness.targets, previous, next, [
         { kind: "delete", name: "paseo-loop" },
       ]);
       await transaction.rollback();
 
-      const after = await Promise.all(livePaths.map(lstat));
+      const after = await Promise.all(livePaths.map((livePath) => lstat(livePath)));
       expect(after.map((entry) => entry.ino)).toEqual(before.map((entry) => entry.ino));
       expect(after.map((entry) => entry.mode & 0o777)).toEqual([0o700, 0o700, 0o700]);
     },

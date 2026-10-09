@@ -60,12 +60,13 @@ describe("serializeAgentStreamEvent", () => {
   });
 
   test("preserves user_message text as-is", () => {
+    const text = "<paseo-instructions>\nX\n</paseo-instructions>\n\nHello";
     const event: AgentStreamEvent = {
       type: "timeline",
       provider: "claude",
       item: {
         type: "user_message",
-        text: "<paseo-instructions>\nX\n</paseo-instructions>\n\nHello",
+        text,
         messageId: "m1",
       },
     };
@@ -75,7 +76,7 @@ describe("serializeAgentStreamEvent", () => {
     if (!serialized || serialized.type !== "timeline" || serialized.item.type !== "user_message") {
       throw new Error("Expected timeline.user_message event");
     }
-    expect(serialized.item.text).toBe(event.item.text);
+    expect(serialized.item.text).toBe(text);
     expect(serialized.item.messageId).toBe("m1");
   });
 

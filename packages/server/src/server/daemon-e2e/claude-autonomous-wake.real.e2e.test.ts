@@ -4,6 +4,7 @@ import path from "node:path";
 import pino from "pino";
 import { beforeAll, beforeEach, describe, expect, test } from "vitest";
 import { WebSocket } from "ws";
+import type { AgentTimelineItem } from "../agent/agent-sdk-types.js";
 import { DaemonClient } from "../test-utils/daemon-client.js";
 import { createTestPaseoDaemon } from "../test-utils/paseo-daemon.js";
 import {
@@ -336,13 +337,7 @@ async function runPreHelloNoise(params: { wsUrl: string; durationMs: number }): 
   }
 }
 
-function summarizeTimelineEntry(entry: {
-  item:
-    | { type: "user_message"; text: string }
-    | { type: "assistant_message"; text: string }
-    | { type: "tool_call"; name: string; status: string }
-    | { type: string };
-}): string {
+function summarizeTimelineEntry(entry: { item: AgentTimelineItem }): string {
   const item = entry.item;
   if (item.type === "user_message") {
     return `[user] ${item.text}`;
@@ -405,15 +400,9 @@ async function waitForAssistantTextCombined(params: {
       limit: 0,
       projection: "canonical",
     });
-    const assistantTexts = timeline.entries
-      .filter(
-        (
-          entry,
-        ): entry is {
-          item: { type: "assistant_message"; text: string };
-        } => entry.item.type === "assistant_message",
-      )
-      .map((entry) => compactText(entry.item.text));
+    const assistantTexts = timeline.entries.flatMap((entry) =>
+      entry.item.type === "assistant_message" ? [compactText(entry.item.text)] : [],
+    );
     assistantTextCombined = assistantTexts.join("");
     if (
       assistantTextCombined.includes(helloAssistant) &&
@@ -542,6 +531,11 @@ describe("daemon E2E (real claude) - autonomous wake from background task", () =
       expect(helloFinish.status).toBe("idle");
       expect((helloFinish.lastMessage ?? "").trim().toUpperCase()).toContain("HELLO");
 
+      const timelineAtIdle = await client.fetchAgentTimeline(agent.id, {
+        direction: "tail",
+        limit: 0,
+      });
+
       // The background task may complete before, during, or after the HELLO
       // turn. When the task_notification races with HELLO, the notification
       // is handled during the foreground turn and there is no separate
@@ -576,7 +570,7 @@ describe("daemon E2E (real claude) - autonomous wake from background task", () =
         expect(sawTimelineGrowth).toBe(true);
       } else {
         const current = await client.fetchAgent({ agentId: agent.id });
-        expect(current.agent.status).toBe("idle");
+        expect(current?.agent.status).toBe("idle");
       }
     } finally {
       await client.close();

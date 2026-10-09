@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createTestPaseoDaemon, type TestPaseoDaemon } from "./test-utils/paseo-daemon.js";
 import { DaemonClient } from "./test-utils/daemon-client.js";
-import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
 import type { AgentSnapshotPayload } from "./messages.js";
 import type { PushNotificationSender, PushPayload } from "./push/index.js";
 import { PRESENCE_THRESHOLD_MS } from "./agent-attention-policy.js";
@@ -54,7 +53,6 @@ describe("client activity tracking", () => {
   async function createClient(): Promise<DaemonClient> {
     const client = new DaemonClient({
       url: `ws://127.0.0.1:${daemon.port}/ws`,
-      messageQueueLimit: null,
     });
     await client.connect();
     return client;
@@ -77,7 +75,11 @@ describe("client activity tracking", () => {
     client: DaemonClient,
     agentId: string,
     timeout = 60000,
-  ): Promise<Extract<AgentStreamEventPayload, { type: "attention_required" }>> {
+  ): Promise<
+    { type: "attention_required" } & Parameters<
+      Parameters<DaemonClient["onAgentAttentionRequired"]>[0]
+    >[0]
+  > {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup();

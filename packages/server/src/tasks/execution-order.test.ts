@@ -113,6 +113,7 @@ function makeTask(
     body: "",
     acceptanceCriteria: [],
     notes: [],
+    raw: "",
   };
 }
 

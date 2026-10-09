@@ -65,6 +65,14 @@ export function asScheduleService(): SessionOptions["scheduleService"] {
   return createStub<SessionOptions["scheduleService"]>({});
 }
 
+export function asProviderUsageService(): SessionOptions["providerUsageService"] {
+  return createStub<SessionOptions["providerUsageService"]>({});
+}
+
+export function asWorkspaceAutoName(): SessionOptions["workspaceAutoName"] {
+  return createStub<SessionOptions["workspaceAutoName"]>({});
+}
+
 export function asCheckoutDiffManager(stub: {
   [K in keyof SessionOptions["checkoutDiffManager"]]?: unknown;
 }): SessionOptions["checkoutDiffManager"] {
@@ -96,6 +104,47 @@ export function asWorkspaceGitService(stub: {
   [K in keyof SessionOptions["workspaceGitService"]]?: unknown;
 }): SessionOptions["workspaceGitService"] {
   return createStub<SessionOptions["workspaceGitService"]>(stub);
+}
+
+function notStubbed(name: string): () => Promise<never> {
+  return async () => {
+    throw new Error(`"${name}" was called but not stubbed`);
+  };
+}
+
+// Plain objects, not createStub: Session probes the optional
+// subscribeToMutations with `?.`, which a throwing Proxy would break.
+export function asProjectRegistry(
+  stub: Partial<SessionOptions["projectRegistry"]>,
+): SessionOptions["projectRegistry"] {
+  return {
+    initialize: notStubbed("initialize"),
+    existsOnDisk: notStubbed("existsOnDisk"),
+    list: notStubbed("list"),
+    get: notStubbed("get"),
+    getOrCreateActiveByRoot: notStubbed("getOrCreateActiveByRoot"),
+    upsert: notStubbed("upsert"),
+    update: notStubbed("update"),
+    archive: notStubbed("archive"),
+    remove: notStubbed("remove"),
+    ...stub,
+  };
+}
+
+export function asWorkspaceRegistry(
+  stub: Partial<SessionOptions["workspaceRegistry"]>,
+): SessionOptions["workspaceRegistry"] {
+  return {
+    initialize: notStubbed("initialize"),
+    existsOnDisk: notStubbed("existsOnDisk"),
+    list: notStubbed("list"),
+    get: notStubbed("get"),
+    update: notStubbed("update"),
+    upsert: notStubbed("upsert"),
+    archive: notStubbed("archive"),
+    remove: notStubbed("remove"),
+    ...stub,
+  };
 }
 
 export function asServiceProxy(stub: {

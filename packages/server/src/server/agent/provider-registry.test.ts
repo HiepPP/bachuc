@@ -3,6 +3,7 @@ import type { ToolPolicy } from "@getpaseo/protocol/agent-types";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type {
+  AgentCapabilityFlags,
   AgentClient,
   AgentFeature,
   AgentModelDefinition,
@@ -10,6 +11,18 @@ import type {
   AgentSessionConfig,
   ProviderCatalog,
 } from "./agent-sdk-types.js";
+
+// Deliberately partial fake of a provider client; each test supplies only what the registry calls.
+type AgentClientStub = { [K in keyof AgentClient]?: unknown };
+
+const NO_CAPABILITIES: AgentCapabilityFlags = {
+  supportsStreaming: false,
+  supportsSessionPersistence: false,
+  supportsDynamicModes: false,
+  supportsMcpServers: false,
+  supportsReasoningStream: false,
+  supportsToolInvocations: false,
+};
 
 const CLAUDE_CUSTOM_THINKING_FIELDS = {
   thinkingOptions: [
@@ -255,7 +268,7 @@ vi.mock("./providers/pi/agent.js", () => ({
       commandsRpcType?: unknown;
     }) {
       this.runtimeSettings = options.runtimeSettings;
-      const entry: ConstructorEntry = {
+      const entry: (typeof mockState.constructorArgs.pi)[number] = {
         runtimeSettings: options.runtimeSettings,
         providerParams: options.providerParams,
       };
@@ -1740,10 +1753,10 @@ describe("fetchCatalog", () => {
     const resolveDefaultModeId = vi.fn(async () => "default");
     const injectedClient = {
       provider: "codex",
-      capabilities: {},
+      capabilities: NO_CAPABILITIES,
       resolveDefaultModeId,
       isAvailable: vi.fn(async () => true),
-    } satisfies Partial<AgentClient> as AgentClient;
+    } satisfies Partial<AgentClient> as AgentClientStub as AgentClient;
     const registry = buildProviderRegistry(logger, {
       providerOverrides: {
         codex: { models: [{ id: "profile-model", label: "Profile Model" }] },
@@ -1793,14 +1806,14 @@ describe("fetchCatalog", () => {
     const injectedModes: AgentMode[] = [{ id: "agent", label: "Agent" }];
     const injectedClient = {
       provider: "codex",
-      capabilities: {},
+      capabilities: NO_CAPABILITIES,
       fetchCatalog: vi.fn(async () => ({ models: injectedModels, modes: injectedModes })),
       isAvailable: vi.fn(async () => true),
-    } satisfies Partial<AgentClient> as AgentClient;
+    } satisfies Partial<AgentClient> as AgentClientStub as AgentClient;
 
     const registry = buildProviderRegistry(logger);
     const catalog = await registry.codex.fetchCatalog(
-      { cwd: "/tmp/catalog", force: false },
+      { scope: "workspace", cwd: "/tmp/catalog", force: false },
       injectedClient,
     );
 
@@ -1812,17 +1825,17 @@ describe("fetchCatalog", () => {
   test("uses injected client fetchCatalog when available", async () => {
     const injectedClient = {
       provider: "codex",
-      capabilities: {},
+      capabilities: NO_CAPABILITIES,
       fetchCatalog: vi.fn(async () => ({
         models: [{ provider: "codex", id: "catalog-model", label: "Catalog Model" }],
         modes: [{ id: "ask", label: "Ask" }],
       })),
       isAvailable: vi.fn(async () => true),
-    } satisfies Partial<AgentClient> as AgentClient;
+    } satisfies Partial<AgentClient> as AgentClientStub as AgentClient;
 
     const registry = buildProviderRegistry(logger);
     const catalog = await registry.codex.fetchCatalog(
-      { cwd: "/tmp/catalog", force: false },
+      { scope: "workspace", cwd: "/tmp/catalog", force: false },
       injectedClient,
     );
 

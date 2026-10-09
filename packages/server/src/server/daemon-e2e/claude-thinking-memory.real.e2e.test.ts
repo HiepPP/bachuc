@@ -76,7 +76,7 @@ describe("daemon E2E (real claude) - thinking effort memory", () => {
       });
 
       const modelList = await client.listProviderModels("claude", { cwd });
-      const model = modelList.models.find(modelHasLowThinkingOption);
+      const model = modelList.models?.find(modelHasLowThinkingOption);
       if (!model) {
         throw new Error("No Claude Sonnet model with low thinking effort returned");
       }

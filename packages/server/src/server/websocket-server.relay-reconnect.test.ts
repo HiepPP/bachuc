@@ -57,7 +57,12 @@ const sessionMock = vi.hoisted(() => {
     });
     handleMessage = vi.fn(async () => {});
     handleBinaryFrame = vi.fn((_frame: unknown) => {});
-    supports = vi.fn((capability: string) => this.args.clientCapabilities?.[capability] === true);
+    supports = vi.fn(
+      (capability: string) =>
+        (this.args.clientCapabilities as Record<string, unknown> | null | undefined)?.[
+          capability
+        ] === true,
+    );
     updateClientCapabilities = vi.fn(
       (capabilities: Record<string, unknown> | null, source: object) => {
         this.args.clientCapabilities = capabilities;
@@ -116,7 +121,7 @@ vi.mock("./push/index.js", () => ({
 }));
 
 import { z } from "zod";
-import { VoiceAssistantWebSocketServer } from "./websocket-server";
+import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
 import { DAEMON_PERMISSIONS, parseServerInfoStatusPayload } from "./messages.js";
 import type { SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
 

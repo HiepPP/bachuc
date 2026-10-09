@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
-import type { AgentStreamEvent } from "../../agent-sdk-types.js";
+import type { AgentStreamEvent, ToolCallTimelineItem } from "../../agent-sdk-types.js";
 import type { AgentTimelineRow } from "../../agent-manager.js";
 import { projectTimelineRows } from "../../timeline-projection.js";
 import { ClaudeAgentClient } from "./agent.js";
@@ -19,7 +19,7 @@ interface QueryMock {
   supportedModels: ReturnType<typeof vi.fn>;
   supportedCommands: ReturnType<typeof vi.fn>;
   rewindFiles: ReturnType<typeof vi.fn>;
-  [Symbol.asyncIterator]: () => AsyncIterator<Record<string, unknown>, void>;
+  [Symbol.asyncIterator]: () => { next: ReturnType<typeof vi.fn> };
 }
 
 function buildQueryMock(events: unknown[]): QueryMock {
@@ -45,6 +45,12 @@ function buildQueryMock(events: unknown[]): QueryMock {
       return this;
     },
   };
+}
+
+function toolCallItems(events: AgentStreamEvent[]): ToolCallTimelineItem[] {
+  return events.flatMap((event) =>
+    event.type === "timeline" && event.item.type === "tool_call" ? [event.item] : [],
+  );
 }
 
 async function collectUntilTerminal(
@@ -286,13 +292,7 @@ describe("ClaudeAgentSession sub-agent sidechain updates", () => {
     const events = await collectUntilTerminal(streamSession(session, "delegate work"));
     await session.close();
 
-    const timelineToolCalls = events
-      .filter(
-        (event): event is Extract<AgentStreamEvent, { type: "timeline" }> =>
-          event.type === "timeline" && event.item.type === "tool_call",
-      )
-      .map((event) => event.item)
-      .filter((item) => item.callId === "task-call-1");
+    const timelineToolCalls = toolCallItems(events).filter((item) => item.callId === "task-call-1");
 
     expect(timelineToolCalls.length).toBeGreaterThanOrEqual(2);
 
@@ -385,16 +385,9 @@ describe("ClaudeAgentSession sub-agent sidechain updates", () => {
 
     expect(visibleAssistantText).not.toContain("Sub-agent narration");
 
-    const latestSubAgentUpdate = events
-      .filter(
-        (event): event is Extract<AgentStreamEvent, { type: "timeline" }> =>
-          event.type === "timeline" &&
-          event.item.type === "tool_call" &&
-          event.item.callId === "task-call-1" &&
-          event.item.detail.type === "sub_agent",
-      )
-      .map((event) => event.item)
-      .at(-1);
+    const latestSubAgentUpdate = toolCallItems(events).findLast(
+      (item) => item.callId === "task-call-1" && item.detail.type === "sub_agent",
+    );
 
     expect(latestSubAgentUpdate?.detail).toMatchObject({
       type: "sub_agent",
@@ -568,13 +561,7 @@ describe("ClaudeAgentSession sub-agent sidechain updates", () => {
     const events = await collectUntilTerminal(streamSession(session, "delegate work"));
     await session.close();
 
-    const timelineToolCalls = events
-      .filter(
-        (event): event is Extract<AgentStreamEvent, { type: "timeline" }> =>
-          event.type === "timeline" && event.item.type === "tool_call",
-      )
-      .map((event) => event.item)
-      .filter((item) => item.callId === "task-tail-1");
+    const timelineToolCalls = toolCallItems(events).filter((item) => item.callId === "task-tail-1");
     const subAgentUpdates = timelineToolCalls.filter((item) => item.detail.type === "sub_agent");
     const latest = subAgentUpdates[subAgentUpdates.length - 1];
     expect(latest).toBeDefined();

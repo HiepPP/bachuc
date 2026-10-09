@@ -1,7 +1,11 @@
 import { execFileSync } from "node:child_process";
 import type { z } from "zod";
 import { WebSocket } from "ws";
-import { SessionInboundMessageSchema, WSOutboundMessageSchema } from "@getpaseo/protocol/messages";
+import {
+  AgentSnapshotPayloadSchema,
+  SessionInboundMessageSchema,
+  WSOutboundMessageSchema,
+} from "@getpaseo/protocol/messages";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -224,7 +228,7 @@ test.each(["create_agent_request", "agent.create.request"] as const)(
           return message.payload.agent;
         }
         if (message.type === "status" && message.payload.status === "agent_created")
-          return message.payload.agent;
+          return AgentSnapshotPayloadSchema.parse(message.payload.agent);
         throw new Error(`Unexpected creation result ${JSON.stringify(message)}`);
       };
       expect(createdAgent(replay)?.id).toBe(createdAgent(first)?.id);

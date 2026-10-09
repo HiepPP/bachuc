@@ -201,7 +201,7 @@ describe("DaemonSelfUpdater", () => {
 
   test("rejects concurrent update requests", async () => {
     const calls: RuntimeCall[] = [];
-    let resolveInstall: ((result: CommandResult) => void) | null = null;
+    let resolveInstall = null as ((result: CommandResult) => void) | null;
     let installStartedResolve: (() => void) | null = null;
     const installStarted = new Promise<void>((resolve) => {
       installStartedResolve = resolve;

@@ -555,7 +555,7 @@ test("finish notifications log a rejected parent prompt without an unhandled rej
 });
 
 it("does not notify archived callers", async () => {
-  let subscriber: ((event: AgentManagerEvent) => void) | null = null;
+  let subscriber = null as ((event: AgentManagerEvent) => void) | null;
 
   const childAgent: ManagedAgent = Object.create(null);
   Reflect.set(childAgent, "id", "child-agent");

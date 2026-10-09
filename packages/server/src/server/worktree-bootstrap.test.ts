@@ -8,14 +8,16 @@ import type { AgentTimelineItem } from "./agent/agent-sdk-types.js";
 import { runAsyncWorktreeBootstrap, spawnWorkspaceScript } from "./worktree-bootstrap.js";
 import { ensureWorkspaceServicePortPlan } from "./workspace-service-port-registry.js";
 import { ScriptRouteStore } from "./script-proxy.js";
+import type { ServiceProxySubsystem } from "./service-proxy.js";
 import { createBranchChangeRouteHandler } from "./script-route-branch-handler.js";
 import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 import {
   createWorktree as createWorktreePrimitive,
   type WorktreeConfig,
 } from "../utils/worktree.js";
+import type { TerminalState } from "@getpaseo/protocol/messages";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
-import type { TerminalSession } from "../terminal/terminal.js";
+import type { TerminalExitInfo, TerminalSession } from "../terminal/terminal.js";
 
 interface CreateAgentWorktreeTestOptions {
   cwd: string;
@@ -44,6 +46,56 @@ function killTerminal(terminalManager: TerminalManager, terminal: TerminalSessio
     gracefulTimeoutMs: 100,
     forceTimeoutMs: 100,
   });
+}
+
+// The service proxy subsystem wraps this route registry. Script spawn only uses its route
+// members, so the HTTP members throw if a test ever reaches them.
+function createRouteStoreServiceProxy(): ScriptRouteStore & ServiceProxySubsystem {
+  const unsupported = (member: string) => (): never => {
+    throw new Error(`ServiceProxySubsystem.${member} is not available in this test`);
+  };
+  return Object.assign(new ScriptRouteStore(), {
+    middleware: unsupported("middleware"),
+    upgradeHandler: unsupported("upgradeHandler"),
+    startStandalone: unsupported("startStandalone"),
+    stopStandalone: unsupported("stopStandalone"),
+  });
+}
+
+const STUB_TERMINAL_STATE: TerminalState = {
+  rows: 1,
+  cols: 1,
+  grid: [[{ char: "$" }]],
+  scrollback: [],
+  cursor: { row: 0, col: 0 },
+};
+
+function createTerminalSessionStub(
+  base: Pick<TerminalSession, "id" | "name" | "cwd" | "workspaceId">,
+  overrides: Partial<TerminalSession> = {},
+): TerminalSession {
+  return {
+    ...base,
+    send: () => {},
+    subscribe: () => () => {},
+    onExit: () => () => {},
+    onCommandFinished: () => () => {},
+    onTitleChange: () => () => {},
+    onActivityChange: () => () => {},
+    getSize: () => ({ rows: 1, cols: 1 }),
+    getState: () => STUB_TERMINAL_STATE,
+    getStateSnapshot: () => ({ state: STUB_TERMINAL_STATE, revision: 0 }),
+    getReplayPreamble: () => "",
+    getTitle: () => undefined,
+    getActivity: () => null,
+    setActivity: () => {},
+    clearActivityAttention: () => false,
+    setTitle: () => {},
+    getExitInfo: () => null,
+    kill: () => {},
+    killAndWait: async () => {},
+    ...overrides,
+  };
 }
 
 async function createBootstrapWorktreeForTest(
@@ -244,56 +296,39 @@ describe("runAsyncWorktreeBootstrap", () => {
       worktree: worktreeBootstrap.worktree,
       shouldBootstrap: worktreeBootstrap.shouldBootstrap,
       terminalManager: {
-        async getTerminals() {
-          return [];
-        },
+        ...createStubTerminalManager([]),
         async createTerminal(options) {
           setTimeout(() => {
             readyAt = Date.now();
             outputListener?.({ data: "$ " });
           }, 25);
-          return {
-            id: "term-ready",
-            name: options.name ?? "Terminal",
-            cwd: options.cwd,
-            send: () => {
-              sendAt = Date.now();
+          return createTerminalSessionStub(
+            {
+              id: "term-ready",
+              name: options.name ?? "Terminal",
+              cwd: options.cwd,
+              workspaceId: options.workspaceId,
             },
-            subscribe: (listener) => {
-              outputListener = (chunk) => listener({ type: "output", data: chunk.data });
-              return () => {
-                outputListener = null;
-              };
+            {
+              send: () => {
+                sendAt = Date.now();
+              },
+              subscribe: (listener) => {
+                outputListener = (chunk) => listener({ type: "output", data: chunk.data });
+                return () => {
+                  outputListener = null;
+                };
+              },
+              getSize: () => ({ rows: 0, cols: 0 }),
+              getState: () => ({
+                rows: 0,
+                cols: 0,
+                grid: [],
+                scrollback: [],
+                cursor: { row: 0, col: 0 },
+              }),
             },
-            onExit: () => () => {},
-            onCommandFinished: () => () => {},
-            onTitleChange: () => () => {},
-            getSize: () => ({ rows: 0, cols: 0 }),
-            getTitle: () => undefined,
-            getExitInfo: () => null,
-            getState: () => ({
-              rows: 0,
-              cols: 0,
-              grid: [],
-              scrollback: [],
-              cursor: { row: 0, col: 0 },
-            }),
-            kill: () => {},
-            killAndWait: async () => {},
-          };
-        },
-        registerCwdEnv() {},
-        getTerminal() {
-          return undefined;
-        },
-        killTerminal() {},
-        async killTerminalAndWait() {},
-        listDirectories() {
-          return [];
-        },
-        killAll() {},
-        subscribeTerminalsChanged() {
-          return () => {};
+          );
         },
       },
       appendTimelineItem: async () => true,
@@ -307,6 +342,7 @@ describe("runAsyncWorktreeBootstrap", () => {
 
   interface CreateTerminalCall {
     cwd: string;
+    workspaceId: string;
     name?: string;
     title?: string;
     env?: Record<string, string>;
@@ -334,7 +370,7 @@ describe("runAsyncWorktreeBootstrap", () => {
         createTerminalCalls.push(options);
         terminalCounter += 1;
         const terminalId = `term-${terminalCounter}`;
-        let exitHandler: ((info: { exitCode: number | null }) => void) | null = null;
+        let exitHandler: ((info: TerminalExitInfo) => void) | null = null;
         let commandFinishedHandler: ((info: { exitCode: number | null }) => void) | null = null;
         const sentInputs: string[] = [];
         terminalRecords.push({
@@ -345,54 +381,42 @@ describe("runAsyncWorktreeBootstrap", () => {
           },
           triggerExit: (exitCode) => {
             if (exitHandler) {
-              exitHandler({ exitCode });
+              exitHandler({ exitCode, signal: null, lastOutputLines: [] });
             }
           },
         });
 
-        const session: TerminalSession = {
-          id: terminalId,
-          name: options.name ?? "Terminal",
-          cwd: options.cwd,
-          send: (message) => {
-            if (message.type === "input") {
-              sentInputs.push(message.data);
-            }
+        const session: TerminalSession = createTerminalSessionStub(
+          {
+            id: terminalId,
+            name: options.name ?? "Terminal",
+            cwd: options.cwd,
+            workspaceId: options.workspaceId,
           },
-          subscribe: () => () => {},
-          onExit: (handler) => {
-            exitHandler = handler;
-            return () => {
-              if (exitHandler === handler) {
-                exitHandler = null;
+          {
+            send: (message) => {
+              if (message.type === "input") {
+                sentInputs.push(message.data);
               }
-            };
+            },
+            onExit: (handler) => {
+              exitHandler = handler;
+              return () => {
+                if (exitHandler === handler) {
+                  exitHandler = null;
+                }
+              };
+            },
+            onCommandFinished: (handler) => {
+              commandFinishedHandler = handler;
+              return () => {
+                if (commandFinishedHandler === handler) {
+                  commandFinishedHandler = null;
+                }
+              };
+            },
           },
-          onCommandFinished: (handler) => {
-            commandFinishedHandler = handler;
-            return () => {
-              if (commandFinishedHandler === handler) {
-                commandFinishedHandler = null;
-              }
-            };
-          },
-          getState: () => ({
-            rows: 1,
-            cols: 1,
-            grid: [[{ char: "$" }]],
-            scrollback: [],
-            cursor: { row: 0, col: 0 },
-          }),
-          kill: () => {},
-          onTitleChange: () => () => {},
-          onActivityChange: () => () => {},
-          getSize: () => ({ rows: 1, cols: 1 }),
-          getTitle: () => undefined,
-          getActivity: () => null,
-          setActivity: () => {},
-          getExitInfo: () => null,
-          killAndWait: async () => {},
-        };
+        );
         sessionsById.set(terminalId, session);
         return session;
       },
@@ -412,6 +436,9 @@ describe("runAsyncWorktreeBootstrap", () => {
       async setTerminalActivity() {
         return false;
       },
+      async clearTerminalAttention() {
+        return false;
+      },
       killTerminal() {},
       async killTerminalAndWait() {},
       async captureTerminal() {
@@ -425,6 +452,9 @@ describe("runAsyncWorktreeBootstrap", () => {
         return () => {};
       },
       subscribeTerminalActivity() {
+        return () => {};
+      },
+      subscribeTerminalWorkspaceContributionChanged() {
         return () => {};
       },
     };
@@ -509,7 +539,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       },
     });
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
     const terminalRecords: StubTerminalRecord[] = [];
@@ -552,7 +582,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       "add one-off script config",
     );
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
     const terminalRecords: StubTerminalRecord[] = [];
@@ -591,7 +621,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       "add one-off script config",
     );
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
     const terminalRecords: StubTerminalRecord[] = [];
@@ -657,13 +687,14 @@ describe("runAsyncWorktreeBootstrap", () => {
       "add one-off script config",
     );
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
     const terminalRecords: StubTerminalRecord[] = [];
     const terminalManager = createStubTerminalManager(createTerminalCalls, terminalRecords);
     const existingTerminal = await terminalManager.createTerminal({
       cwd: repoDir,
+      workspaceId: repoDir,
       name: "typecheck",
       title: "typecheck",
     });
@@ -712,7 +743,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       "add one-off script config",
     );
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
     const terminalRecords: StubTerminalRecord[] = [];
@@ -750,7 +781,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       "add long-running one-off script",
     );
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
     const terminalManager = createStubTerminalManager(createTerminalCalls);
@@ -798,7 +829,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       "add service script config",
     );
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
     const terminalRecords: StubTerminalRecord[] = [];
@@ -852,7 +883,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       "add public service script config",
     );
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
     const terminalRecords: StubTerminalRecord[] = [];
@@ -917,7 +948,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       },
     );
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
     const terminalRecords: StubTerminalRecord[] = [];
@@ -1020,7 +1051,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       },
     );
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
     const terminalRecords: StubTerminalRecord[] = [];
@@ -1086,7 +1117,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       },
     );
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
 
@@ -1174,7 +1205,7 @@ describe("runAsyncWorktreeBootstrap", () => {
       },
     );
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: CreateTerminalCall[] = [];
 

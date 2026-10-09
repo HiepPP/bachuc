@@ -111,6 +111,8 @@ function makeManagedAgent(args: {
     lifecycle: "closed",
     session: null,
     activeForegroundTurnId: null,
+    activeTurnId: null,
+    activeTurnStartedAt: null,
   } satisfies ManagedAgent;
 }
 
@@ -597,8 +599,15 @@ function makeStoredProviderSession(input: {
     updatedAt: "2026-04-30T11:00:00.000Z",
     lastActivityAt: "2026-04-30T10:30:00.000Z",
     lastUserMessageAt: null,
+    title: null,
     labels: input.labels ?? {},
-    config: { provider: "codex", cwd: input.cwd },
+    lastStatus: "closed",
+    lastModeId: null,
+    requiresAttention: false,
+    attentionReason: null,
+    attentionTimestamp: null,
+    internal: false,
+    config: {},
     persistence: {
       provider: "codex",
       sessionId: input.sessionId,

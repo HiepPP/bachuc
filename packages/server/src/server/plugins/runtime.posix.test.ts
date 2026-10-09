@@ -60,7 +60,7 @@ function createReloadChild(
   methods: string[] = [],
   providers: Array<{ id: string; label: string }> = [],
 ) {
-  const listeners = new Map<string, Array<(message: never) => void>>();
+  const listeners = new Map<string, Array<(...args: never[]) => void>>();
   const emit = (event: string, message: unknown) => {
     for (const listener of listeners.get(event) ?? []) listener(message as never);
   };
@@ -69,7 +69,10 @@ function createReloadChild(
     stderr: new PassThrough(),
     connected: true,
     killed: false,
-    send(message: { type: string }, callback?: (error: Error | null) => void) {
+    send(
+      message: { type: string; connectionId?: string },
+      callback?: (error: Error | null) => void,
+    ) {
       callback?.(null);
       if (message.type === "initialize") {
         events.push(`start:${name}`);
@@ -94,7 +97,7 @@ function createReloadChild(
     disconnect() {
       this.connected = false;
     },
-    on(event: string, listener: (message: never) => void) {
+    on(event: string, listener: (...args: never[]) => void) {
       const registered = listeners.get(event) ?? [];
       registered.push(listener);
       listeners.set(event, registered);
@@ -115,7 +118,7 @@ function createTestRuntime(
     ...dependencies,
     sessionHost: dependencies.sessionHost ?? {
       async attachPluginSocket(_pluginId, socket) {
-        const closed = new Promise<void>((resolve) => socket.once("close", resolve));
+        const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
         socket.on("message", (data) => {
           if (typeof data !== "string") return;
           const message = JSON.parse(data);
@@ -168,7 +171,7 @@ function createTrackedSessionHost() {
     },
     host: {
       async attachPluginSocket(_pluginId: string, socket: PluginSessionSocket) {
-        const closed = new Promise<void>((resolve) => socket.once("close", resolve));
+        const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
         active.add(socket);
         socket.once("close", () => active.delete(socket));
         socket.on("message", (data) => {
@@ -1431,7 +1434,7 @@ export default function contribute(server: { registerProvider(provider: Provider
       "broken",
       `export default function contribute(plugin: unknown) { void plugin; return () => undefined; }`,
     );
-    const listeners = new Map<string, Array<(message: never) => void>>();
+    const listeners = new Map<string, Array<(...args: never[]) => void>>();
     const child = {
       connected: true,
       killed: false,
@@ -1454,7 +1457,7 @@ export default function contribute(server: { registerProvider(provider: Provider
       disconnect() {
         this.connected = false;
       },
-      on(event: string, listener: (message: never) => void) {
+      on(event: string, listener: (...args: never[]) => void) {
         const registered = listeners.get(event) ?? [];
         registered.push(listener);
         listeners.set(event, registered);
@@ -2011,7 +2014,9 @@ export default function contribute(plugin: any) {
         isBinary: false,
       });
       const replacement = await replacementStarted;
-      const replacementClosed = new Promise<void>((resolve) => replacement.once("close", resolve));
+      const replacementClosed = new Promise<void>((resolve) =>
+        replacement.once("close", () => resolve()),
+      );
       await runtime.stopPluginById("stopping-redial");
       finishAttachment();
       await replacementClosed;

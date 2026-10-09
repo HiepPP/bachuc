@@ -9,11 +9,27 @@ import { findFreePort, ScriptRouteStore } from "./script-proxy.js";
 import { ScriptHealthMonitor, type ScriptHealthEntry } from "./script-health-monitor.js";
 import { spawnWorkspaceScript } from "./worktree-bootstrap.js";
 import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
-import type { TerminalManager } from "./terminal/terminal-manager.js";
+import type { TerminalManager } from "../terminal/terminal-manager.js";
+import type { ServiceProxySubsystem } from "./service-proxy.js";
+import { createStub } from "./test-utils/class-mocks.js";
 
 interface TcpServerHandle {
   port: number;
   server: net.Server;
+}
+
+// The service proxy subsystem wraps this route registry. Health monitoring and script spawn only
+// use its route members, so the HTTP members throw if a test ever reaches them.
+function createRouteStoreServiceProxy(): ScriptRouteStore & ServiceProxySubsystem {
+  const unsupported = (member: string) => (): never => {
+    throw new Error(`ServiceProxySubsystem.${member} is not available in this test`);
+  };
+  return Object.assign(new ScriptRouteStore(), {
+    middleware: unsupported("middleware"),
+    upgradeHandler: unsupported("upgradeHandler"),
+    startStandalone: unsupported("startStandalone"),
+    stopStandalone: unsupported("stopStandalone"),
+  });
 }
 
 function createWorkspaceRepo(options?: {
@@ -51,10 +67,11 @@ function createWorkspaceRepo(options?: {
   };
 }
 
+// Script spawn only creates a terminal, so the rest of the manager stays unstubbed.
 function createStubTerminalManager(
   createTerminalCalls: Array<{ cwd: string; name?: string; env?: Record<string, string> }>,
-) {
-  return {
+): TerminalManager {
+  return createStub<TerminalManager>({
     async getTerminals() {
       return [];
     },
@@ -96,7 +113,7 @@ function createStubTerminalManager(
     subscribeTerminalsChanged() {
       return () => {};
     },
-  };
+  });
 }
 
 async function startTcpServer(): Promise<TcpServerHandle> {
@@ -159,7 +176,7 @@ describe("ScriptHealthMonitor", () => {
     const healthy = await startTcpServer();
     servers.add(healthy.server);
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const onChange = vi.fn<(workspaceId: string, services: ScriptHealthEntry[]) => void>();
     const monitor = new ScriptHealthMonitor({
       serviceProxy: routeStore,
@@ -203,7 +220,7 @@ describe("ScriptHealthMonitor", () => {
     vi.useFakeTimers();
 
     const deadPort = await findFreePort();
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     routeStore.registerRoute({
       hostname: "route-b.example.localhost",
       port: deadPort,
@@ -250,7 +267,7 @@ describe("ScriptHealthMonitor", () => {
     const healthy = await startTcpServer();
     servers.add(healthy.server);
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     routeStore.registerRoute({
       hostname: "route-b.example.localhost",
       port: healthy.port,
@@ -281,7 +298,7 @@ describe("ScriptHealthMonitor", () => {
     const healthy = await startTcpServer();
     servers.add(healthy.server);
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     routeStore.registerRoute({
       hostname: "route-b.example.localhost",
       port: healthy.port,
@@ -332,7 +349,7 @@ describe("ScriptHealthMonitor", () => {
     const healthy = await startTcpServer();
     servers.add(healthy.server);
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     routeStore.registerRoute({
       hostname: "route-b.example.localhost",
       port: healthy.port,
@@ -375,7 +392,7 @@ describe("ScriptHealthMonitor", () => {
     servers.add(api.server);
     servers.add(web.server);
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     routeStore.registerRoute({
       hostname: "route-b.example.localhost",
       port: api.port,
@@ -435,7 +452,7 @@ describe("ScriptHealthMonitor", () => {
         },
       },
     });
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     const runtimeStore = new WorkspaceScriptRuntimeStore();
     const createTerminalCalls: Array<{ cwd: string; name?: string; env?: Record<string, string> }> =
       [];
@@ -452,9 +469,7 @@ describe("ScriptHealthMonitor", () => {
             daemonPort: null,
             serviceProxy: routeStore,
             runtimeStore,
-            terminalManager: createStubTerminalManager(
-              createTerminalCalls,
-            ) as unknown as TerminalManager,
+            terminalManager: createStubTerminalManager(createTerminalCalls),
           }),
         ),
       );
@@ -506,7 +521,7 @@ describe("ScriptHealthMonitor", () => {
     servers.add(api.server);
     servers.add(web.server);
 
-    const routeStore = new ScriptRouteStore();
+    const routeStore = createRouteStoreServiceProxy();
     routeStore.registerRoute({
       hostname: "route-b.example.localhost",
       port: api.port,

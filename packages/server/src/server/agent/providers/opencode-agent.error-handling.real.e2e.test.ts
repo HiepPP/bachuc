@@ -44,7 +44,7 @@ describe("opencode agent error handling (real)", () => {
     });
 
     try {
-      await session.setModel("opencode/adklasldkdas");
+      await session.setModel?.("opencode/adklasldkdas");
 
       const events: AgentStreamEvent[] = [];
       for await (const event of streamSession(session, "hello")) {
@@ -69,7 +69,7 @@ describe("opencode agent error handling (real)", () => {
     });
 
     try {
-      await session.setModel("bogus-provider/totally-fake-model-12345");
+      await session.setModel?.("bogus-provider/totally-fake-model-12345");
 
       const events: AgentStreamEvent[] = [];
       for await (const event of streamSession(session, "Say hello")) {
@@ -94,7 +94,7 @@ describe("opencode agent error handling (real)", () => {
       cwd: process.cwd(),
       modeId: "build",
     });
-    await s1.setModel("bogus-provider/fake-model-12345");
+    await s1.setModel?.("bogus-provider/fake-model-12345");
     for await (const event of streamSession(s1, "Say hello")) {
       if (isTerminalEvent(event)) break;
     }
@@ -106,7 +106,7 @@ describe("opencode agent error handling (real)", () => {
       cwd: process.cwd(),
       modeId: "build",
     });
-    await s2.setModel("bogus-provider/fake-model-67890");
+    await s2.setModel?.("bogus-provider/fake-model-67890");
 
     const events: AgentStreamEvent[] = [];
     for await (const event of streamSession(s2, "Say hello")) {
@@ -131,7 +131,7 @@ describe("opencode agent error handling (real)", () => {
     });
 
     try {
-      await session.setModel("anthropic/claude-nonexistent-99");
+      await session.setModel?.("anthropic/claude-nonexistent-99");
 
       const events: AgentStreamEvent[] = [];
       const start = Date.now();

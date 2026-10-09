@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "vitest";
 import os from "node:os";
 import path from "node:path";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, type Dirent } from "node:fs";
 import { promises as fs } from "node:fs";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
@@ -96,6 +96,16 @@ function resolveManagedAgentCore(overrides: ManagedAgentOverrides): ManagedAgent
   return { provider, cwd, lifecycle, config, session, activeForegroundTurnId, now };
 }
 
+function requireSessionConfig(
+  record: Parameters<typeof buildSessionConfig>[0] | null | undefined,
+): AgentSessionConfig {
+  const config = record ? buildSessionConfig(record) : null;
+  if (!config) {
+    throw new Error("Expected a stored record with a registered provider");
+  }
+  return config;
+}
+
 function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent {
   const core = resolveManagedAgentCore(overrides);
   return {
@@ -112,24 +122,31 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     availableModes: overrides.availableModes ?? [],
     currentModeId: overrides.currentModeId ?? core.config.modeId ?? null,
     pendingPermissions: overrides.pendingPermissions ?? new Map<string, AgentPermissionRequest>(),
+    bufferedPermissionResolutions: new Map(),
+    inFlightPermissionResponses: new Set(),
+    pendingReplacement: false,
     activeForegroundTurnId: core.activeForegroundTurnId,
+    activeTurnId: null,
+    activeTurnStartedAt: null,
     foregroundTurnWaiters: new Set(),
+    finalizedForegroundTurnIds: new Set(),
     unsubscribeSession: null,
-    timeline: overrides.timeline ?? [],
+    labels: {},
     attention: overrides.attention ?? { requiresAttention: false },
     runtimeInfo:
       overrides.runtimeInfo ??
       buildDefaultRuntimeInfo({
         provider: core.provider,
         config: core.config,
-        sessionId: overrides.sessionId ?? "session-123",
+        sessionId: "session-123",
       }),
     persistence: overrides.persistence ?? null,
     historyPrimed: overrides.historyPrimed ?? true,
     lastUserMessageAt: overrides.lastUserMessageAt ?? core.now,
     lastUsage: overrides.lastUsage,
     lastError: overrides.lastError,
-  };
+    // Fixtures pair any lifecycle with any session or turn id, which the union forbids.
+  } as ManagedAgent;
 }
 
 describe("AgentStorage", () => {
@@ -213,7 +230,7 @@ describe("AgentStorage", () => {
     const reloaded = new AgentStorage(storagePath, logger);
     const persisted = await reloaded.get("agent-feature-values");
     expect(persisted?.config?.featureValues).toEqual({ fast_mode: true });
-    expect(buildSessionConfig(persisted!).featureValues).toEqual({ fast_mode: true });
+    expect(requireSessionConfig(persisted).featureValues).toEqual({ fast_mode: true });
   });
 
   test("applySnapshot keeps featureValues absent when they were never set", async () => {
@@ -226,7 +243,7 @@ describe("AgentStorage", () => {
     const reloaded = new AgentStorage(storagePath, logger);
     const persisted = await reloaded.get("agent-no-feature-values");
     expect(persisted?.config?.featureValues).toBeUndefined();
-    expect(buildSessionConfig(persisted!).featureValues).toBeUndefined();
+    expect(requireSessionConfig(persisted).featureValues).toBeUndefined();
   });
 
   test("buildConfigOverrides includes featureValues when present in stored config", async () => {
@@ -363,7 +380,7 @@ describe("AgentStorage", () => {
     const initialRecord = await storage.get(agentId);
     expect(initialRecord).not.toBeNull();
 
-    let releasePendingWrite: (() => void) | null = null;
+    let releasePendingWrite = null as (() => void) | null;
     const pendingWrite = new Promise<void>((resolve) => {
       releasePendingWrite = resolve;
     });
@@ -552,7 +569,7 @@ describe("AgentStorage", () => {
     const hasAnyRecordFile = async () => {
       const projects = await fs
         .readdir(storagePath, { withFileTypes: true })
-        .catch(() => [] as Awaited<ReturnType<typeof fs.readdir>>);
+        .catch(() => [] as Dirent[]);
       const exists = await Promise.all(
         projects
           .filter((project) => project.isDirectory())

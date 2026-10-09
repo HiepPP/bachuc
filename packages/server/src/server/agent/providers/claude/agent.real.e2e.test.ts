@@ -226,7 +226,7 @@ describe("ClaudeAgentSession integration", () => {
 
     try {
       await handle.session.setMode("acceptEdits");
-      await handle.session.setThinkingOption("high");
+      await handle.session.setThinkingOption?.("high");
       await expect(handle.session.setMode("bypassPermissions")).resolves.toBeUndefined();
     } finally {
       await cleanupSession(handle);

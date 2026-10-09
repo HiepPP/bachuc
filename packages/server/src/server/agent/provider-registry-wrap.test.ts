@@ -6,6 +6,8 @@ import type {
   AgentSession,
   AgentStreamEvent,
   AgentRuntimeInfo,
+  SteerActiveTurnOptions,
+  SteerResult,
 } from "./agent-sdk-types.js";
 import { wrapSessionProvider } from "./provider-registry.js";
 
@@ -26,6 +28,7 @@ const OPTIONAL_AGENT_SESSION_METHOD_NAMES = [
   "revertFiles",
   "revertBoth",
   "tryHandleOutOfBand",
+  "steerActiveTurn",
 ] as const satisfies readonly OptionalAgentSessionMethodName[];
 
 type MissingOptionalAgentSessionMethod = Exclude<
@@ -63,7 +66,7 @@ class FakeSession implements AgentSession {
 
   async run() {
     this.recordedCalls.push("run");
-    return { timeline: [] };
+    return { sessionId: "session-1", finalText: "", timeline: [] };
   }
 
   async startTurn() {
@@ -159,6 +162,14 @@ class FakeSession implements AgentSession {
       },
     };
   }
+
+  async steerActiveTurn(
+    _prompt: AgentPromptInput,
+    options: SteerActiveTurnOptions,
+  ): Promise<SteerResult> {
+    this.recordedCalls.push(`steerActiveTurn:${options.expectedTurnId}`);
+    return { status: "accepted" };
+  }
 }
 
 async function* emptyHistory(): AsyncGenerator<AgentStreamEvent> {
@@ -169,6 +180,7 @@ async function* emptyHistory(): AsyncGenerator<AgentStreamEvent> {
 
 describe("wrapSessionProvider", () => {
   test("forwards every optional AgentSession method", async () => {
+    expect(_allOptionalAgentSessionMethodsAreCovered).toBe(true);
     const session = new FakeSession();
     const wrapped = wrapSessionProvider("custom-claude", session);
 
@@ -181,6 +193,9 @@ describe("wrapSessionProvider", () => {
     await wrapped.revertBoth?.({ messageId: "message-1" });
     const handler = wrapped.tryHandleOutOfBand?.("/compact");
     await handler?.run({ emit: () => {} });
+    await expect(
+      wrapped.steerActiveTurn?.("keep going", { expectedTurnId: "turn-1" }),
+    ).resolves.toEqual({ status: "accepted" });
 
     expect(session.recordedCalls).toEqual([
       "listCommands",
@@ -192,6 +207,7 @@ describe("wrapSessionProvider", () => {
       "revertBoth",
       "tryHandleOutOfBand",
       "tryHandleOutOfBand.run",
+      "steerActiveTurn:turn-1",
     ]);
   });
 });

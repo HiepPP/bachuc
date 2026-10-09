@@ -513,7 +513,6 @@ describe("createGitLabService", () => {
     );
     const result = await service.createPullRequest({
       cwd: "/repo",
-      repo: "example-group/example-project",
       title: "Ship it",
       head: "release/v0.4.0",
       base: "main",

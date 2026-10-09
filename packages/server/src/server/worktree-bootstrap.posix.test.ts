@@ -16,6 +16,8 @@ import { tmpdir } from "os";
 import type { AgentTimelineItem } from "./agent/agent-sdk-types.js";
 import { runAsyncWorktreeBootstrap, spawnWorkspaceScript } from "./worktree-bootstrap.js";
 import { ScriptRouteStore } from "./script-proxy.js";
+import type { ServiceProxySubsystem } from "./service-proxy.js";
+import { asInternals } from "./test-utils/class-mocks.js";
 import { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
 import { isPlatform } from "../test-utils/platform.js";
 import {
@@ -340,11 +342,12 @@ describe.skipIf(isPlatform("win32"))("worktree-bootstrap POSIX-only", () => {
         workspaceId: "ws-shared-runtime-port",
         worktree: worktreeBootstrap.worktree,
         shouldBootstrap: worktreeBootstrap.shouldBootstrap,
-        terminalManager: {
+        // Partial fake: the bootstrap only creates terminals and registers cwd env.
+        terminalManager: asInternals<TerminalManager>({
           async getTerminals() {
             return [];
           },
-          async createTerminal(options) {
+          async createTerminal(options: Parameters<TerminalManager["createTerminal"]>[0]) {
             createTerminalEnvs.push(options.env ?? {});
             createTerminalWorkspaceIds.push(options.workspaceId);
             return {
@@ -370,7 +373,7 @@ describe.skipIf(isPlatform("win32"))("worktree-bootstrap POSIX-only", () => {
               killAndWait: async () => {},
             };
           },
-          registerCwdEnv(options) {
+          registerCwdEnv(options: Parameters<TerminalManager["registerCwdEnv"]>[0]) {
             registeredEnvs.push({ cwd: options.cwd, env: options.env });
           },
           getTerminal() {
@@ -385,7 +388,7 @@ describe.skipIf(isPlatform("win32"))("worktree-bootstrap POSIX-only", () => {
           subscribeTerminalsChanged() {
             return () => {};
           },
-        },
+        }),
         appendTimelineItem: async (item) => {
           persisted.push(item);
           return true;
@@ -456,7 +459,7 @@ describe.skipIf(isPlatform("win32"))("worktree-bootstrap POSIX-only", () => {
             branchName: "feature-peer-env",
             scriptName,
             daemonPort: 6767,
-            serviceProxy: routeStore,
+            serviceProxy: asInternals<ServiceProxySubsystem>(routeStore),
             runtimeStore,
             terminalManager,
           }),

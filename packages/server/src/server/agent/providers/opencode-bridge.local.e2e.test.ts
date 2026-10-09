@@ -8,7 +8,7 @@ import { expect, test } from "vitest";
 
 import { execCommand } from "../../../utils/spawn.js";
 import { createTestLogger } from "../../../test-utils/test-logger.js";
-import type { PaseoToolCatalog } from "../tools/types.js";
+import type { PaseoToolCatalog, PaseoToolDefinition } from "../tools/types.js";
 import { OpenCodeAgentClient } from "./opencode-agent.js";
 import { OpenCodeV2AgentClient } from "./opencode/v2/agent.js";
 import { OpenCodeBridge } from "./opencode/bridge.js";
@@ -209,7 +209,7 @@ function createCallerCatalog(callerAgentId: string): PaseoToolCatalog {
       return { content: [{ type: "text", text: callerAgentId }] };
     },
   };
-  const tools = new Map([[tool.name, tool]]);
+  const tools = new Map<string, PaseoToolDefinition>([[tool.name, tool]]);
   return {
     tools,
     getTool: (name) => tools.get(name),
@@ -342,10 +342,11 @@ test.each([
         { persistSession: false },
       );
       const handle = await original.describePersistence();
+      if (!handle) throw new Error("Expected a persistence handle");
       expect(original.initialTimeline).toEqual(expectedInitialTimeline);
       expect(handle.metadata?.openCodeRuntimeNotices).toEqual(expectedNotices);
       resumed = await client.resumeSession(handle, { cwd: root });
-      expect((await resumed.describePersistence()).nativeHandle).toBe(handle.nativeHandle);
+      expect((await resumed.describePersistence())?.nativeHandle).toBe(handle.nativeHandle);
       expect(
         (await drainPersistedTimeline(resumed)).map((event) =>
           event.type === "timeline" ? event.item : event,

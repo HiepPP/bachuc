@@ -8,7 +8,7 @@ import { z } from "zod";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
-import type { PaseoToolCatalog } from "../../tools/types.js";
+import type { PaseoToolCatalog, PaseoToolDefinition } from "../../tools/types.js";
 import {
   OpenCodeBridge,
   loadOpenCodeBridgePluginArtifact,
@@ -36,7 +36,7 @@ function createCatalog(): PaseoToolCatalog {
       return { content: [{ type: "text", text: parsed.value }] };
     },
   };
-  const tools = new Map([[tool.name, tool]]);
+  const tools = new Map<string, PaseoToolDefinition>([[tool.name, tool]]);
   return {
     tools,
     getTool(name) {

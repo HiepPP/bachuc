@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type pino from "pino";
 import { createClientChannel, type Transport } from "@getpaseo/relay/e2ee";
 import { exportPublicKey, generateKeyPair } from "@getpaseo/relay";
-import { startRelayTransport } from "./relay-transport";
+import { startRelayTransport } from "./relay-transport.js";
 
 function createMockLogger() {
   const messages: { level: "debug" | "info" | "warn" | "error"; args: unknown[] }[] = [];

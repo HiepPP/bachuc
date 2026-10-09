@@ -22,6 +22,9 @@ interface QueryMockOptions {
   tail?: Promise<unknown>;
 }
 
+// Deliberately partial fake of the SDK Query: it stubs only what the session calls.
+type QueryStub = { [K in keyof Query]?: unknown };
+
 function createQueryMock(events: unknown[], options: QueryMockOptions = {}): Query {
   let index = 0;
   return {
@@ -50,7 +53,7 @@ function createQueryMock(events: unknown[], options: QueryMockOptions = {}): Que
     [Symbol.asyncIterator]() {
       return this;
     },
-  } as Query;
+  } as QueryStub as Query;
 }
 
 function createChildProcessStub(): ChildProcess & { killSignals: (NodeJS.Signals | number)[] } {
@@ -258,6 +261,9 @@ describe("Claude runtime exit", () => {
 
       // Restarts the query on the next call, which retires the current process
       // while no turn is running.
+      if (!session.setThinkingOption || !session.listCommands) {
+        throw new Error("Expected the Claude session to set thinking and list commands");
+      }
       await session.setThinkingOption(null);
       await session.listCommands();
 

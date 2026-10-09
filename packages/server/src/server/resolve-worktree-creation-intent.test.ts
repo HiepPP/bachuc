@@ -20,6 +20,12 @@ interface ResolverHarness {
   resolveDefaultBranch: (repoRoot: string) => Promise<string>;
 }
 
+function unstubbedForgeMethod(name: string): () => Promise<never> {
+  return async () => {
+    throw new Error(`ForgeService.${name} is not stubbed`);
+  };
+}
+
 function createResolverHarness(overrides?: {
   forge?: string;
   forgeService?: Partial<ForgeService>;
@@ -49,6 +55,7 @@ function createResolverHarness(overrides?: {
     searchIssuesAndPrs: async () => ({
       items: [],
       featuresEnabled: true,
+      authState: "authenticated",
       githubFeaturesEnabled: true,
     }),
     getPullRequest: async ({ number }) => ({
@@ -60,6 +67,7 @@ function createResolverHarness(overrides?: {
       baseRefName: "main",
       headRefName: `pr-${number}`,
       labels: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
     }),
     getPullRequestHeadRef: async ({ cwd, number }) => {
       headRefLookups.push({ cwd, number });
@@ -79,7 +87,11 @@ function createResolverHarness(overrides?: {
       number: 1,
       url: "https://github.com/acme/repo/pull/1",
     }),
+    getPullRequestTimeline: unstubbedForgeMethod("getPullRequestTimeline"),
+    getCheckDetails: unstubbedForgeMethod("getCheckDetails"),
     mergePullRequest: async () => ({ success: true }),
+    enablePullRequestAutoMerge: unstubbedForgeMethod("enablePullRequestAutoMerge"),
+    disablePullRequestAutoMerge: unstubbedForgeMethod("disablePullRequestAutoMerge"),
     isAuthenticated: async () => true,
     invalidate: () => {},
     ...githubCapabilities,

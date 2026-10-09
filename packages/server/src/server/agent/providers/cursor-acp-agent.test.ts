@@ -6,6 +6,7 @@ import type { SpawnedACPProcess, SessionStateResponse } from "./acp-agent.js";
 import type { AgentSessionConfig } from "../agent-sdk-types.js";
 import { CURSOR_FAST_FEATURE_OPTION, CursorACPAgentClient } from "./cursor-acp-agent.js";
 import { createTestLogger } from "../../../test-utils/test-logger.js";
+import { asInternals } from "../../test-utils/class-mocks.js";
 
 function captureWarnings(): {
   logger: ReturnType<typeof createTestLogger>;
@@ -17,10 +18,19 @@ function captureWarnings(): {
     trace: vi.fn(),
     warn: (_context: unknown, message: string) => logged.push(message),
   };
-  vi.spyOn(logger, "child").mockReturnValue(
-    child as unknown as ReturnType<typeof createTestLogger>,
-  );
+  vi.spyOn(logger, "child").mockReturnValue(asInternals<ReturnType<typeof logger.child>>(child));
   return { logger, messages: () => logged };
+}
+
+// Deliberately partial fake of a spawned ACP process; each test supplies only what it exercises.
+type SpawnedACPProcessStub = { [K in keyof SpawnedACPProcess]?: unknown };
+
+// ACPAgentSession.spawnProcess is private, so a subclass cannot override it. Replace it on the instance.
+function stubSpawnProcess(
+  session: ACPAgentSession,
+  spawnProcess: () => Promise<SpawnedACPProcess>,
+): void {
+  asInternals<{ spawnProcess: typeof spawnProcess }>(session).spawnProcess = spawnProcess;
 }
 
 function fastConfigOption(currentValue: "false" | "true"): SessionConfigOption {
@@ -62,7 +72,7 @@ describe("CursorACPAgentClient model discovery", () => {
           }),
         },
         initialize: { agentCapabilities: {} },
-      } as SpawnedACPProcess;
+      } as SpawnedACPProcessStub as SpawnedACPProcess;
     }
 
     protected override async closeProbe(): Promise<void> {}
@@ -228,9 +238,28 @@ describe("CursorACPAgentClient session start", () => {
     } = { currentModelId: "kimi-k3", configOptions: KIMI_K3_CONFIG_OPTIONS },
     logger = createTestLogger(),
   ): ACPAgentSession {
-    class StubbedCursorSession extends ACPAgentSession {
-      protected override async spawnProcess(): Promise<SpawnedACPProcess> {
-        return {
+    const cursorSession = new ACPAgentSession(
+      { provider: "acp", cwd: "/tmp/cursor", ...config },
+      {
+        provider: "acp",
+        logger,
+        defaultCommand: ["cursor-agent", "acp"],
+        defaultModes: [],
+        capabilities: {
+          supportsStreaming: true,
+          supportsSessionPersistence: true,
+          supportsDynamicModes: false,
+          supportsMcpServers: false,
+          supportsReasoningStream: false,
+          supportsToolInvocations: false,
+        },
+        configFeatureOptions: [CURSOR_FAST_FEATURE_OPTION],
+      },
+    );
+    stubSpawnProcess(
+      cursorSession,
+      async () =>
+        ({
           child: { kill: vi.fn(), exitCode: 0, signalCode: null, once: vi.fn() },
           connection: {
             newSession: vi.fn().mockResolvedValue({
@@ -251,21 +280,9 @@ describe("CursorACPAgentClient session start", () => {
               vi.fn().mockResolvedValue({ configOptions: session.configOptions }),
           },
           initialize: { agentCapabilities: {} },
-        } as SpawnedACPProcess;
-      }
-    }
-
-    return new StubbedCursorSession(
-      { provider: "acp", cwd: "/tmp/cursor", ...config },
-      {
-        provider: "acp",
-        logger,
-        defaultCommand: ["cursor-agent", "acp"],
-        defaultModes: [],
-        capabilities: { supportsStreaming: true, supportsSessionPersistence: true },
-        configFeatureOptions: [CURSOR_FAST_FEATURE_OPTION],
-      },
+        }) as SpawnedACPProcessStub as SpawnedACPProcess,
     );
+    return cursorSession;
   }
 
   test("starts on a model without a fast variant while Fast is still stored", async () => {

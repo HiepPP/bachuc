@@ -80,11 +80,10 @@ test("OpenCode v2 commits conversation and file rewind only after staging succee
   harness.api.session.revert.stage = async (input) => {
     expect(input).toEqual({ sessionID: "session", messageID: "user-message", files: true });
     operations.push("stage");
-    return harness.info;
+    return { messageID: input.messageID };
   };
   harness.api.session.revert.commit = async () => {
     operations.push("commit");
-    return harness.info;
   };
   const client = new OpenCodeV2AgentClient({
     logger: createTestLogger(),

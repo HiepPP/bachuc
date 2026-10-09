@@ -1,10 +1,10 @@
-import type { SessionMessageInfo } from "@opencode/client";
+import type { SessionInboxUser, SessionMessageInfo } from "@opencode/client";
 import { describe, expect, test } from "vitest";
 
 import { createTestLogger } from "../../../../../test-utils/test-logger.js";
 import type { AgentStreamEvent } from "../../../agent-sdk-types.js";
 import { OpenCodeV2AgentClient } from "./agent.js";
-import { V2Harness } from "../test-utils/v2-harness.js";
+import { V2Harness, acceptedPrompt } from "../test-utils/v2-harness.js";
 
 describe("OpenCode v2 session lifecycle", () => {
   test("reconnects after a helper exits and restores session configuration on the next turn", async () => {
@@ -36,6 +36,7 @@ describe("OpenCode v2 session lifecycle", () => {
         content: [{ type: "text", text: "recovered" }],
       });
       second.prompts.push(input.text);
+      return acceptedPrompt(input);
     };
     const session = await client.createSession(
       {
@@ -106,6 +107,7 @@ describe("OpenCode v2 session lifecycle", () => {
           },
         ],
       });
+      return acceptedPrompt(input);
     };
     const client = new OpenCodeV2AgentClient({
       logger: createTestLogger(),
@@ -225,10 +227,10 @@ describe("OpenCode v2 session lifecycle", () => {
         content: [{ type: "text", text: "ha" }],
       } satisfies SessionMessageInfo;
       harness.history.push(answer);
-      harness.push({ id: "reconnect-1", created: 2, type: "server.connected", data: {} });
+      harness.push({ id: "reconnect-1", type: "server.connected", data: {} });
       await expect.poll(() => chunks).toEqual(["ha"]);
       answer.content[0].text = "haha";
-      harness.push({ id: "reconnect-2", created: 3, type: "server.connected", data: {} });
+      harness.push({ id: "reconnect-2", type: "server.connected", data: {} });
       await expect.poll(() => chunks).toEqual(["ha", "ha"]);
       finish();
       expect((await running).finalText).toBe("haha");
@@ -263,9 +265,9 @@ describe("OpenCode v2 session lifecycle", () => {
     let accept!: () => void;
     let settle!: () => void;
     let interruptions = 0;
-    harness.prompt = () =>
-      new Promise<void>((resolve) => {
-        accept = resolve;
+    harness.prompt = (input) =>
+      new Promise<SessionInboxUser>((resolve) => {
+        accept = () => resolve(acceptedPrompt(input));
       });
     harness.wait = () =>
       new Promise<void>((resolve) => {
@@ -307,6 +309,7 @@ describe("OpenCode v2 session lifecycle", () => {
         time: { created: 2 },
         content: [{ type: "text", text: "done" }],
       });
+      return acceptedPrompt(input);
     };
     const client = new OpenCodeV2AgentClient({
       logger: createTestLogger(),

@@ -121,7 +121,12 @@ function createHarness(input: {
       existsOnDisk: async () => true,
       list: async () => Array.from(projects.values()),
       get: async (id: string) => projects.get(id) ?? null,
-      getOrCreateActiveByRoot: async (allocation) => {
+      getOrCreateActiveByRoot: async (allocation: {
+        rootPath: string;
+        kind: PersistedProjectRecord["kind"];
+        displayName: string;
+        timestamp: string;
+      }) => {
         const existing = Array.from(projects.values()).find(
           (project) => !project.archivedAt && project.rootPath === allocation.rootPath,
         );
@@ -167,14 +172,14 @@ function createHarness(input: {
     }),
     filesystem: { isDirectory: async () => true },
     scheduleService: createStub<SessionOptions["scheduleService"]>({}),
+    workspaceAutoName: createStub<SessionOptions["workspaceAutoName"]>({}),
+    providerUsageService: createStub<SessionOptions["providerUsageService"]>({}),
     checkoutDiffManager: createStub<SessionOptions["checkoutDiffManager"]>({
       subscribe: async () => ({
         initial: { cwd: "/tmp", files: [], error: null },
         unsubscribe: () => {},
       }),
       scheduleRefreshForCwd: () => {},
-      onWorkspaceStateMayHaveChanged: () => {},
-      invalidateForge: () => {},
       getMetrics: () => ({
         checkoutDiffTargetCount: 0,
         checkoutDiffSubscriptionCount: 0,

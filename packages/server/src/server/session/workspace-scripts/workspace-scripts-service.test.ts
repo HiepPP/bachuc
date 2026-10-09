@@ -198,7 +198,7 @@ describe("buildSnapshot", () => {
       workspace,
       project,
       serviceProxy,
-      gitService: { peekSnapshot: () => undefined },
+      gitService: { peekSnapshot: () => null },
     });
 
     expect(service.buildSnapshot(workspace, project)[0]?.hostname).toBe(

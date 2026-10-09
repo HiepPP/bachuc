@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createTestPaseoDaemon } from "./test-utils/paseo-daemon.js";
-import { DaemonAuthenticationError, DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import {
+  DaemonAuthenticationError,
+  DaemonClient,
+  type WebSocketLike,
+} from "@getpaseo/client/internal/daemon-client";
 import { readLocalCredentialForTarget } from "./local-credential.js";
 
 const originalEnv = { ...process.env };
@@ -268,7 +272,9 @@ describe("daemon bearer auth", () => {
       localCredential: async () =>
         readLocalCredentialForTarget(daemonHandle.paseoHome, target) ?? undefined,
       webSocketFactory: (url, options) =>
-        new WebSocket(url, options?.protocols, { headers: options?.headers }),
+        new WebSocket(url, options?.protocols, {
+          headers: options?.headers,
+        }) as unknown as WebSocketLike,
       reconnect: { enabled: false },
     });
     try {
@@ -315,7 +321,9 @@ describe("daemon bearer auth", () => {
       clientType: "browser",
       password: "wrong password",
       webSocketFactory: (url, options) =>
-        new WebSocket(url, options?.protocols, { headers: options?.headers }),
+        new WebSocket(url, options?.protocols, {
+          headers: options?.headers,
+        }) as unknown as WebSocketLike,
       reconnect: { enabled: false },
     });
     try {
@@ -340,7 +348,9 @@ describe("daemon bearer auth", () => {
       clientType: "browser",
       password,
       webSocketFactory: (url, options) =>
-        new WebSocket(url, options?.protocols, { headers: options?.headers }),
+        new WebSocket(url, options?.protocols, {
+          headers: options?.headers,
+        }) as unknown as WebSocketLike,
       reconnect: { enabled: false },
     });
     try {

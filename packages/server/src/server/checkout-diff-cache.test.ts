@@ -1,6 +1,17 @@
 import { expect, test } from "vitest";
 import { CheckoutDiffCache } from "@server/server/checkout-diff-cache.js";
 
+// Promise.withResolvers is outside the server tsconfig's ES lib.
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function createSequencedLoader<T>(first: Promise<T>, second: Promise<T>) {
   let calls = 0;
   return {
@@ -23,8 +34,8 @@ async function fillCompletedCache(cache: CheckoutDiffCache) {
 
 test("forced reads after a mutation share a fresh build after the active build finishes", async () => {
   const cache = new CheckoutDiffCache(() => 0);
-  const first = Promise.withResolvers<{ diff: string }>();
-  const second = Promise.withResolvers<{ diff: string }>();
+  const first = createDeferred<{ diff: string }>();
+  const second = createDeferred<{ diff: string }>();
   const loader = createSequencedLoader(first.promise, second.promise);
   const { load } = loader;
   const pending = cache.read({ cwd: "repo", compare: { mode: "base" }, load });
@@ -49,8 +60,8 @@ test("forced reads after a mutation share a fresh build after the active build f
 
 test("reads after invalidation wait for fresh work without overlapping the original read", async () => {
   const cache = new CheckoutDiffCache(() => 0);
-  const first = Promise.withResolvers<{ diff: string }>();
-  const second = Promise.withResolvers<{ diff: string }>();
+  const first = createDeferred<{ diff: string }>();
+  const second = createDeferred<{ diff: string }>();
   const loader = createSequencedLoader(first.promise, second.promise);
   const { load } = loader;
   const read = () => cache.read({ cwd: "repo", compare: { mode: "base" }, load });
@@ -75,7 +86,7 @@ test("reads after invalidation wait for fresh work without overlapping the origi
 
 test("edits during a read do not delay its caller or cache its outdated snapshot", async () => {
   const cache = new CheckoutDiffCache(() => 0);
-  const deferred = Promise.withResolvers<{ diff: string }>();
+  const deferred = createDeferred<{ diff: string }>();
   let calls = 0;
   const load = () => {
     calls += 1;
@@ -98,7 +109,7 @@ test("edits during a read do not delay its caller or cache its outdated snapshot
 
 test("active reads survive completed-payload eviction and failed reads can retry", async () => {
   const cache = new CheckoutDiffCache(() => 0);
-  const deferred = Promise.withResolvers<{ diff: string }>();
+  const deferred = createDeferred<{ diff: string }>();
   const load = () => deferred.promise;
   const first = cache.read({ cwd: "active", compare: { mode: "uncommitted" }, load });
   const rejected = expect(first).rejects.toThrow("read failed");

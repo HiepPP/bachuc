@@ -148,6 +148,12 @@ describe("snapshot mutation ownership boundary", () => {
         createAgentMcpTransport: async () => {
           throw new Error("not used");
         },
+        scheduleService: createStub<SessionOptions["scheduleService"]>({}),
+        checkoutDiffManager: createStub<SessionOptions["checkoutDiffManager"]>({}),
+        workspaceGitService: createStub<SessionOptions["workspaceGitService"]>({}),
+        workspaceAutoName: createStub<SessionOptions["workspaceAutoName"]>({}),
+        daemonConfigStore: createStub<SessionOptions["daemonConfigStore"]>({}),
+        providerUsageService: createStub<SessionOptions["providerUsageService"]>({}),
         stt: null,
         tts: null,
         providerSnapshotManager: createProviderSnapshotManagerStub().manager,

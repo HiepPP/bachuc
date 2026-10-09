@@ -101,7 +101,7 @@ function buildHarness() {
   let providerVisible: (provider: string) => boolean = () => true;
   let buildAgentPayloadError: Error | null = null;
   let enrichProjectedPayload = false;
-  const directorySync = new DirectorySyncService("test-generation");
+  const directorySync = new DirectorySyncService("00000000-0000-4000-8000-0000000000a1");
 
   const service = createAgentUpdatesService({
     emit: (message) => emitted.push(message),

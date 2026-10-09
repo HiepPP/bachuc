@@ -24,6 +24,9 @@ import type { AgentTimelineFetchOptions } from "./agent/agent-timeline-store-typ
 import { handleCreatePaseoWorktreeRequest } from "./worktree-session.js";
 import { createPersistedProjectRecord } from "./workspace-registry.js";
 
+// DirectorySyncService infers its constructor parameter as the randomUUID() template type.
+const DIRECTORY_GENERATION = "11111111-1111-4111-8111-111111111111";
+
 const LegacyTimelineEntryPayloadSchema = z.object({
   provider: z.enum(["claude", "codex", "opencode"]),
   item: AgentTimelineItemPayloadSchema,
@@ -231,6 +234,8 @@ function createSessionForWireCompatTest(options?: {
       new EmptyWorkspaceRegistry() as unknown as SessionOptions["workspaceRegistry"],
     directorySync: options?.directorySync,
     scheduleService: {} as SessionOptions["scheduleService"],
+    workspaceAutoName: {} as SessionOptions["workspaceAutoName"],
+    providerUsageService: {} as SessionOptions["providerUsageService"],
     checkoutDiffManager: {
       scheduleRefreshForCwd() {},
       onWorkspaceStateMayHaveChanged() {},
@@ -369,8 +374,9 @@ describe("wire compatibility", () => {
   });
 
   test("publishes rapid project mutations in order before incremental reconciliation", async () => {
-    const directorySync = new DirectorySyncService("generation");
+    const directorySync = new DirectorySyncService(DIRECTORY_GENERATION);
     const initial = directorySync.synchronizeProjects([], {});
+    if (!initial.sync) throw new Error("Expected project sync metadata");
     const messages: SessionOutboundMessage[] = [];
     const session = createSessionForWireCompatTest({
       clientCapabilities: { [CLIENT_CAPS.projectUpdates]: true },
@@ -404,7 +410,7 @@ describe("wire compatibility", () => {
     ).toEqual({
       projects: [],
       sync: {
-        generation: "generation",
+        generation: DIRECTORY_GENERATION,
         mode: "changes",
         headSeq: 2,
         removals: [{ id: "project-ordered", seq: 2 }],

@@ -78,9 +78,9 @@ describe("daemon E2E - timeline window", () => {
         projection: "canonical",
       });
 
-      const assistantTexts = timeline.entries
-        .filter((entry) => entry.item.type === "assistant_message")
-        .map((entry) => entry.item.text);
+      const assistantTexts = timeline.entries.flatMap((entry) =>
+        entry.item.type === "assistant_message" ? [entry.item.text] : [],
+      );
 
       expect(assistantTexts).toEqual([expected]);
       expect(timeline.startCursor?.seq).toBe(timeline.endCursor?.seq);
@@ -116,9 +116,9 @@ describe("daemon E2E - timeline window", () => {
         projection: "canonical",
       });
 
-      const assistantTexts = timeline.entries
-        .filter((entry) => entry.item.type === "assistant_message")
-        .map((entry) => entry.item.text);
+      const assistantTexts = timeline.entries.flatMap((entry) =>
+        entry.item.type === "assistant_message" ? [entry.item.text] : [],
+      );
 
       expect(assistantTexts.join("")).toBe(expected);
       expect(timeline.hasOlder).toBe(true);

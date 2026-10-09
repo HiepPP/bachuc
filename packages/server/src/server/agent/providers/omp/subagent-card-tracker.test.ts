@@ -2,6 +2,11 @@ import { describe, expect, test } from "vitest";
 
 import { OmpSubagentCardTracker, type OmpSubagentCardScheduler } from "./subagent-card-tracker.js";
 import type { OmpSubagentLifecyclePayload, OmpSubagentProgressPayload } from "./rpc-types.js";
+import type { ToolCallDetail } from "../../agent-sdk-types.js";
+
+function subAgentLog(detail: ToolCallDetail): string | undefined {
+  return detail.type === "sub_agent" ? detail.log : undefined;
+}
 
 const PARENT_TOOL_CALL_ID = "task-1";
 const SESSION_FILE = "/tmp/omp-task/EchoSubagent.jsonl";
@@ -222,10 +227,12 @@ describe("OmpSubagentCardTracker", () => {
 
     expect(emitted).toEqual(["task-1"]);
     expect(
-      tracker.detailFor("task-1", {
-        type: "sub_agent",
-        log: "",
-      }).log,
+      subAgentLog(
+        tracker.detailFor("task-1", {
+          type: "sub_agent",
+          log: "",
+        }),
+      ),
     ).toBe("Explore started\nfound target file");
 
     tracker.delete("task-1");
@@ -233,10 +240,12 @@ describe("OmpSubagentCardTracker", () => {
 
     expect(emitted).toEqual(["task-1"]);
     expect(
-      tracker.detailFor("task-1", {
-        type: "sub_agent",
-        log: "static",
-      }).log,
+      subAgentLog(
+        tracker.detailFor("task-1", {
+          type: "sub_agent",
+          log: "static",
+        }),
+      ),
     ).toBe("static");
   });
 });

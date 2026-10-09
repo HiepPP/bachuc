@@ -4,11 +4,7 @@ import path from "node:path";
 import pino from "pino";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 
-import type {
-  AgentProvider,
-  AgentSessionConfig,
-  AgentStreamEvent,
-} from "../agent/agent-sdk-types.js";
+import type { AgentStreamEvent, AgentTimelineItem } from "../agent/agent-sdk-types.js";
 import { DaemonClient } from "../test-utils/daemon-client.js";
 import { createTestPaseoDaemon, type TestPaseoDaemon } from "../test-utils/paseo-daemon.js";
 import {
@@ -16,16 +12,21 @@ import {
   createRealProviderClient,
   getRealProviderConfig,
   type RealProvider,
+  type RealProviderConfig,
 } from "./real-provider-test-config.js";
 import { fetchTimelineItems } from "./test-utils/rewind-helpers.js";
 
-type ContractProvider = Extract<AgentProvider, RealProvider>;
+type ContractProvider = Extract<RealProvider, "claude" | "codex" | "opencode" | "pi">;
+
+type UserMessageTimelineEvent = Extract<AgentStreamEvent, { type: "timeline" }> & {
+  item: Extract<AgentTimelineItem, { type: "user_message" }>;
+};
 
 interface ProviderContractCase {
   provider: ContractProvider;
   title: string;
   timeoutMs: number;
-  createConfig: () => AgentSessionConfig;
+  createConfig: () => RealProviderConfig;
 }
 
 const CONTRACT_CASES: ProviderContractCase[] = [
@@ -59,19 +60,23 @@ function tmpCwd(provider: ContractProvider): string {
   return mkdtempSync(path.join(tmpdir(), `daemon-real-${provider}-user-message-contract-`));
 }
 
-function collectUserMessageEvents(client: DaemonClient, agentId: string): AgentStreamEvent[] {
-  const events: AgentStreamEvent[] = [];
+function collectUserMessageEvents(
+  client: DaemonClient,
+  agentId: string,
+): UserMessageTimelineEvent[] {
+  const events: UserMessageTimelineEvent[] = [];
   client.subscribeAgentTimeline(agentId, (message) => {
     if (message.type !== "agent_stream" || message.payload.agentId !== agentId) {
       return;
     }
-    if (message.payload.event.type !== "timeline") {
+    const { event } = message.payload;
+    if (event.type !== "timeline") {
       return;
     }
-    if (message.payload.event.item.type !== "user_message") {
+    if (event.item.type !== "user_message") {
       return;
     }
-    events.push(message.payload.event);
+    events.push({ ...event, item: event.item });
   });
   return events;
 }

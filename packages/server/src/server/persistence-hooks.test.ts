@@ -17,6 +17,7 @@ function createRecord(overrides?: Partial<StoredAgentRecord>): StoredAgentRecord
     title: null,
     lastStatus: "idle",
     lastModeId: "plan",
+    labels: {},
     config: { modeId: "plan", model: "claude-3.5-sonnet" },
     persistence: {
       provider: "claude",

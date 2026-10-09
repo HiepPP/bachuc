@@ -9,7 +9,6 @@ class ObservationControls implements FileObserverDependencies {
   closes = 0;
   private change: ((filename: string | null) => void) | null = null;
   private timeout: (() => void | Promise<void>) | null = null;
-  private interval: (() => void | Promise<void>) | null = null;
 
   watchDirectory(_directory: string, onChange: (filename: string | null) => void) {
     this.watches += 1;
@@ -19,21 +18,19 @@ class ObservationControls implements FileObserverDependencies {
 
   setTimeout(callback: () => void | Promise<void>): ReturnType<typeof setTimeout> {
     this.timeout = callback;
-    return 1 as ReturnType<typeof setTimeout>;
+    return {} as ReturnType<typeof setTimeout>;
   }
 
   clearTimeout(): void {
     this.timeout = null;
   }
 
-  setInterval(callback: () => void | Promise<void>): ReturnType<typeof setInterval> {
-    this.interval = callback;
-    return 2 as ReturnType<typeof setInterval>;
+  // The fallback poll is never driven in these tests.
+  setInterval(): ReturnType<typeof setInterval> {
+    return {} as ReturnType<typeof setInterval>;
   }
 
-  clearInterval(): void {
-    this.interval = null;
-  }
+  clearInterval(): void {}
 
   async fileChanged(filename: string): Promise<void> {
     this.change?.(filename);

@@ -53,7 +53,7 @@ describe("stripReadLineNumberGutter", () => {
 describe("toReadToolDetail gutter normalization", () => {
   it("strips the gutter from output content and derives offset", () => {
     const detail = toReadToolDetail(
-      { filePath: "/repo/src/index.ts" },
+      { filePath: "/repo/src/index.ts", offset: undefined, limit: undefined },
       { content: "10\tconst a = 1;\n11\tconst b = 2;" },
     );
     expect(detail).toEqual({
@@ -74,7 +74,7 @@ describe("toReadToolDetail gutter normalization", () => {
 
   it("leaves raw content untouched", () => {
     const detail = toReadToolDetail(
-      { filePath: "/repo/src/index.ts" },
+      { filePath: "/repo/src/index.ts", offset: undefined, limit: undefined },
       { content: "const a = 1;\nconst b = 2;" },
     );
     expect(detail).toEqual({

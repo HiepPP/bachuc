@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import os from "node:os";
 import path, { join } from "node:path";
 import type pino from "pino";
+import type { FileChange } from "./file-observer/index.js";
 import type { ForgeService } from "../services/forge-service.js";
 import type {
   CheckoutSnapshotFacts,
   CheckoutStatusGit,
+  CheckoutStatusGitNonPaseo,
   PullRequestStatusResult,
 } from "../utils/checkout-git.js";
 import {
@@ -46,6 +48,7 @@ function createSnapshot(
       isDirty: false,
       baseRef: "main",
       aheadBehind: { ahead: 0, behind: 0 },
+      upstreamRef: null,
       aheadOfOrigin: 0,
       behindOfOrigin: 0,
       hasRemote: true,
@@ -53,6 +56,7 @@ function createSnapshot(
     },
     forge: {
       featuresEnabled: true,
+      authState: "authenticated",
       pullRequest: {
         url: "https://github.com/acme/repo/pull/123",
         title: "Update feature",
@@ -126,8 +130,8 @@ function resolveSnapshotError(
 
 function createCheckoutStatus(
   cwd: string,
-  overrides?: Partial<CheckoutStatusGit>,
-): CheckoutStatusGit {
+  overrides?: Partial<CheckoutStatusGitNonPaseo>,
+): CheckoutStatusGitNonPaseo {
   return {
     isGit: true,
     repoRoot: cwd,
@@ -136,6 +140,7 @@ function createCheckoutStatus(
     isDirty: false,
     baseRef: "main",
     aheadBehind: { ahead: 0, behind: 0 },
+    upstreamRef: null,
     aheadOfOrigin: 0,
     behindOfOrigin: 0,
     hasRemote: true,
@@ -160,6 +165,7 @@ function createCheckoutSnapshotFacts(cwd: string): CheckoutSnapshotFacts {
     comparisonBaseRef: null,
     branchRemoteName: "origin",
     branchMergeRef: "refs/heads/main",
+    upstreamStatus: null,
     pullRequestLookupTarget: { headRef: "main" },
   };
 }
@@ -177,7 +183,6 @@ function createPullRequestStatusResult(
       isMerged: false,
     },
     authState: "authenticated",
-    featuresEnabled: true,
     githubFeaturesEnabled: true,
     ...overrides,
   };
@@ -213,6 +218,7 @@ function createGitHubServiceStub(): ForgeService {
     searchIssuesAndPrs: vi.fn(async () => ({
       items: [],
       featuresEnabled: true,
+      authState: "authenticated" as const,
       githubFeaturesEnabled: true,
     })),
     getPullRequest: vi.fn(async () => ({
@@ -224,6 +230,7 @@ function createGitHubServiceStub(): ForgeService {
       baseRefName: "main",
       headRefName: "feature",
       labels: [],
+      updatedAt: "2026-04-12T00:00:00.000Z",
     })),
     getPullRequestHeadRef: vi.fn(async () => "feature"),
     getPullRequestCheckoutTarget: vi.fn(async ({ number }) => ({
@@ -236,32 +243,43 @@ function createGitHubServiceStub(): ForgeService {
       isCrossRepository: false,
     })),
     getCurrentPullRequestStatus: vi.fn(async () => null),
+    getPullRequestTimeline: vi.fn(async ({ prNumber }) => ({
+      prNumber,
+      repoOwner: "acme",
+      repoName: "repo",
+      items: [],
+      truncated: false,
+      error: null,
+    })),
+    getCheckDetails: vi.fn(async ({ checkRunId, workflowRunId }) => ({
+      checkRunId: checkRunId ?? 0,
+      workflowRunId: workflowRunId ?? null,
+      name: "test",
+      status: null,
+      conclusion: null,
+      url: null,
+      detailsUrl: null,
+      output: null,
+      annotations: [],
+      failedJobs: [],
+      truncated: false,
+    })),
     createPullRequest: vi.fn(async () => ({
       url: "https://github.com/acme/repo/pull/1",
       number: 1,
     })),
-    mergePullRequest: vi.fn(async () => ({ success: true })),
+    mergePullRequest: vi.fn(async () => ({ success: true as const })),
+    enablePullRequestAutoMerge: vi.fn(async () => ({ success: true as const })),
+    disablePullRequestAutoMerge: vi.fn(async () => ({ success: true as const })),
     isAuthenticated: vi.fn(async () => true),
     authProbeCanThrow: true,
     invalidate: vi.fn(),
   };
 }
 
-interface CreateServiceTestOptions {
-  subscribe?: ReturnType<typeof vi.fn>;
-  getCheckoutStatus?: ReturnType<typeof vi.fn>;
-  getCheckoutSnapshotFacts?: ReturnType<typeof vi.fn>;
-  getCheckoutShortstat?: ReturnType<typeof vi.fn>;
-  getCheckoutWorktreeState?: ReturnType<typeof vi.fn>;
-  getPullRequestStatus?: ReturnType<typeof vi.fn>;
-  github?: ForgeService;
-  resolveAbsoluteGitDir?: ReturnType<typeof vi.fn>;
-  hasOriginRemote?: ReturnType<typeof vi.fn>;
-  runGitFetch?: ReturnType<typeof vi.fn>;
-  runGitCommand?: ReturnType<typeof vi.fn>;
-  getWorkspaceGitSelfHealPhaseMs?: (cwd: string) => number;
-  now?: () => Date;
-}
+type CreateServiceTestOptions = NonNullable<
+  ConstructorParameters<typeof WorkspaceGitServiceImpl>[0]["deps"]
+>;
 
 function buildDefaultTestServiceDeps() {
   return {
@@ -295,7 +313,7 @@ function buildDefaultTestServiceDeps() {
     getWorkspaceGitSelfHealPhaseMs: vi.fn(() => 30_000),
     createWatcherLivenessCanary: vi.fn(() => ({
       path: "",
-      filterEvents: (events) => events,
+      filterEvents: (events: FileChange[]) => events,
       verify: vi.fn(async () => {}),
     })),
     now: () => new Date("2026-04-12T00:00:00.000Z"),
@@ -313,7 +331,7 @@ function createService(options?: CreateServiceTestOptions) {
       }
       return {
         isDirty: status.isDirty,
-        diffStat: await deps.getCheckoutShortstat(),
+        diffStat: await deps.getCheckoutShortstat(cwd),
       };
     });
   return new WorkspaceGitServiceImpl({
@@ -1417,9 +1435,7 @@ describe("WorkspaceGitServiceImpl", () => {
     const getCheckoutDiff = vi.fn(async (cwd: string) => ({
       diff: `diff for ${cwd}`,
     }));
-    const service = createService({
-      getCheckoutDiff: getCheckoutDiff as unknown as ReturnType<typeof vi.fn>,
-    });
+    const service = createService({ getCheckoutDiff });
 
     const CACHE_MAX = 64;
     const OVERFLOW = 5;

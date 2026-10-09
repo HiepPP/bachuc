@@ -2,7 +2,10 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { ProjectCheckoutLitePayload } from "@getpaseo/protocol/messages";
+import {
+  ProjectCheckoutLitePayloadSchema,
+  type ProjectCheckoutLitePayload,
+} from "@getpaseo/protocol/messages";
 import type pino from "pino";
 import { afterEach, describe, expect, test } from "vitest";
 import {
@@ -57,6 +60,13 @@ function createTestRegistries() {
     },
     upsert: async (record: PersistedProjectRecord) => {
       projects.set(record.projectId, record);
+    },
+    update: async (id, updater) => {
+      const existing = projects.get(id);
+      if (!existing) return null;
+      const updated = updater(existing);
+      projects.set(id, updated);
+      return updated;
     },
     archive: async (id: string, archivedAt: string) => {
       const existing = projects.get(id);
@@ -143,12 +153,12 @@ function createWorkspaceGitServiceStub(
   >,
 ) {
   return {
-    getCheckout: async (cwd: string) => {
+    getCheckout: async (cwd: string): Promise<ProjectCheckoutLitePayload> => {
       const metadata = metadataByCwd[cwd];
-      if (!metadata) {
+      if (metadata?.projectKind !== "git") {
         return {
           cwd,
-          isGit: false as const,
+          isGit: false,
           currentBranch: null,
           remoteUrl: null,
           worktreeRoot: null,
@@ -158,10 +168,10 @@ function createWorkspaceGitServiceStub(
       }
       return {
         cwd,
-        isGit: metadata.projectKind === "git",
+        isGit: true,
         currentBranch: metadata.currentBranch ?? metadata.workspaceDisplayName,
         remoteUrl: metadata.gitRemote ?? null,
-        worktreeRoot: null,
+        worktreeRoot: cwd,
         isPaseoOwnedWorktree: false,
         mainRepoRoot: null,
       };
@@ -173,7 +183,8 @@ function createCheckout(
   cwd: string,
   overrides: Partial<ProjectCheckoutLitePayload> = {},
 ): ProjectCheckoutLitePayload {
-  return {
+  // Parsing keeps the fixture a valid member of the git / non-git union.
+  return ProjectCheckoutLitePayloadSchema.parse({
     cwd,
     isGit: false,
     currentBranch: null,
@@ -182,7 +193,7 @@ function createCheckout(
     isPaseoOwnedWorktree: false,
     mainRepoRoot: null,
     ...overrides,
-  };
+  });
 }
 
 function deferred(): { promise: Promise<void>; resolve(): void } {

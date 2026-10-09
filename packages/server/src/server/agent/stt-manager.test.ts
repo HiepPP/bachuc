@@ -3,7 +3,7 @@ import pino from "pino";
 import { EventEmitter } from "node:events";
 
 import { STTManager } from "./stt-manager.js";
-import { PersistedConfigSchema } from "../persisted-config.js";
+import { PersistedConfigSchema, type PersistedConfig } from "../persisted-config.js";
 import { resolveSpeechConfig } from "../speech/speech-config-resolver.js";
 import type {
   SpeechToTextProvider,
@@ -12,9 +12,6 @@ import type {
 } from "../speech/speech-provider.js";
 
 type SessionParams = Parameters<SpeechToTextProvider["createSession"]>[0];
-type StreamingOn = StreamingTranscriptionSession["on"];
-type StreamingOnEvent = Parameters<StreamingOn>[0];
-type StreamingOnHandler = Parameters<StreamingOn>[1];
 
 class FakeStt implements SpeechToTextProvider {
   public readonly id = "fake";
@@ -48,7 +45,7 @@ class FakeStt implements SpeechToTextProvider {
       },
       clear() {},
       close() {},
-      on(event: StreamingOnEvent, handler: StreamingOnHandler) {
+      on(event: string, handler: (...args: never[]) => void) {
         emitter.on(event, handler as (...args: unknown[]) => void);
         return undefined;
       },
@@ -87,7 +84,7 @@ class SequencedFakeStt implements SpeechToTextProvider {
       },
       clear() {},
       close() {},
-      on(event: StreamingOnEvent, handler: StreamingOnHandler) {
+      on(event: string, handler: (...args: never[]) => void) {
         emitter.on(event, handler as (...args: unknown[]) => void);
         return undefined;
       },
@@ -100,9 +97,13 @@ describe("STTManager", () => {
     const result = resolveSpeechConfig({
       paseoHome: "/tmp/paseo-home",
       env: params.env ?? ({} as NodeJS.ProcessEnv),
-      persisted: PersistedConfigSchema.parse(params.persisted ?? {}),
+      persisted: PersistedConfigSchema.parse(params.persisted ?? {}) as PersistedConfig,
     });
-    return result.speech.sttLanguages.voice;
+    const voiceLanguage = result.speech.sttLanguages?.voice;
+    if (voiceLanguage === undefined) {
+      throw new Error("Expected the resolved speech config to include STT languages");
+    }
+    return voiceLanguage;
   }
 
   async function transcribeWithResolvedVoiceLanguage(params: {

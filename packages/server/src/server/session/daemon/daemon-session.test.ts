@@ -140,11 +140,15 @@ describe("DaemonSession", () => {
           daemonId: null,
           hubOrigin: null,
           scopes: [],
+          permissions: [],
           connectedAt: null,
           lastError: null,
         }),
         disconnect: async () => {
           throw new Error("Hub revocation failed (503)");
+        },
+        updatePermissions: async () => {
+          throw new Error("updatePermissions is not used by this test");
         },
       },
     });
@@ -154,6 +158,7 @@ describe("DaemonSession", () => {
       requestId: "connect-1",
       hubUrl: "https://hub.test",
       token: "token",
+      permissions: [],
     });
     await subsystem.handleHubRelationshipRequest({
       type: "hub.management.daemon.disconnect.request",
@@ -421,6 +426,7 @@ describe("DaemonSession", () => {
           arrayBuffers: 1024 * 512,
         },
         final: false,
+        git: null,
         sessions: {
           activeConnections: 2,
           externalSessionKeys: 3,
@@ -446,6 +452,8 @@ describe("DaemonSession", () => {
           relayExternalSocketAttached: 0,
           originRejected: 0,
           hostRejected: 0,
+          applicationJsonRejected: 0,
+          applicationBinaryRejected: 0,
         },
         inboundMessageTypesTop: [["session", 4]],
         inboundSessionRequestTypesTop: [["diagnostics.request", 2]],

@@ -15,7 +15,8 @@ import {
 import { runGitCommand } from "../../utils/run-git-command.js";
 
 const roots: string[] = [];
-type TestPluginRuntime = NonNullable<ConstructorParameters<typeof PluginService>[3]["runtime"]>;
+type TestPluginServiceDependencies = NonNullable<ConstructorParameters<typeof PluginService>[3]>;
+type TestPluginRuntime = NonNullable<TestPluginServiceDependencies["runtime"]>;
 
 async function createPlugin(id: string, source: string): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-service-"));
@@ -55,7 +56,7 @@ function createService(
 function bindTestSessionHost(service: PluginService): PluginService {
   service.bindPaseoSessionHost({
     async attachPluginSocket(_pluginId, socket) {
-      const closed = new Promise<void>((resolve) => socket.once("close", resolve));
+      const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
       socket.on("message", (data) => {
         if (typeof data !== "string") return;
         const message = JSON.parse(data);
@@ -93,9 +94,13 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
+async function rejectConnectProvider(): Promise<never> {
+  throw new Error("The fake plugin runtime does not connect providers");
+}
+
 function createPausedRuntime() {
-  let releaseStart = () => undefined;
-  let markStarted = () => undefined;
+  let releaseStart: () => void = () => undefined;
+  let markStarted: () => void = () => undefined;
   const startGate = new Promise<void>((resolve) => {
     releaseStart = resolve;
   });
@@ -108,6 +113,7 @@ function createPausedRuntime() {
     invoke: async () => undefined,
     getLogs: () => [],
     clearLogs: () => undefined,
+    connectProvider: rejectConnectProvider,
     startPlugin: async (pluginId, _path, canPublish) => {
       markStarted();
       await startGate;
@@ -125,8 +131,8 @@ function createPausedRuntime() {
 }
 
 function createPluginSelectivePausedRuntime(pausedPluginId: string) {
-  let releaseStart = () => undefined;
-  let markStarted = () => undefined;
+  let releaseStart: () => void = () => undefined;
+  let markStarted: () => void = () => undefined;
   const startGate = new Promise<void>((resolve) => {
     releaseStart = resolve;
   });
@@ -140,6 +146,7 @@ function createPluginSelectivePausedRuntime(pausedPluginId: string) {
     invoke: async () => undefined,
     getLogs: () => [],
     clearLogs: () => undefined,
+    connectProvider: rejectConnectProvider,
     startPlugin: async (pluginId, _path, canPublish) => {
       starts.push(pluginId);
       if (pluginId === pausedPluginId) {
@@ -242,6 +249,7 @@ describe("PluginService", () => {
         cleared.push(pluginId);
         entries.length = 0;
       },
+      connectProvider: rejectConnectProvider,
       startPlugin: async () => undefined,
       stopPluginById: async () => false,
       stopAll: async () => undefined,
@@ -624,6 +632,7 @@ export default function contribute(server: PluginServerContext) {
       invoke: async () => undefined,
       getLogs: () => [],
       clearLogs: () => undefined,
+      connectProvider: rejectConnectProvider,
       validatePlugin: async (directory) => {
         events.push(
           `validate:${await readFile(path.join(directory, "build-marker;touch shell-injection"), "utf8")}`,
@@ -707,6 +716,7 @@ export default function contribute(server: PluginServerContext) {
       invoke: async () => undefined,
       getLogs: () => [],
       clearLogs: () => undefined,
+      connectProvider: rejectConnectProvider,
       validatePlugin: async () => undefined,
       startPlugin: async (pluginId, sourcePath, canPublish) => {
         starts.push(sourcePath);
@@ -770,6 +780,7 @@ export default function contribute(server: PluginServerContext) {
         invoke: async () => undefined,
         getLogs: () => [],
         clearLogs: () => undefined,
+        connectProvider: rejectConnectProvider,
         validatePlugin: async () => undefined,
         startPlugin: async (id) => {
           starts++;
@@ -1072,7 +1083,7 @@ export default function contribute(plugin: unknown) {
 
 describe("npm plugin installation", () => {
   it("preserves dependencies and metadata, and reloads without npm", async () => {
-    const packages = npmPluginPackages();
+    const packages: Parameters<typeof startNpmRegistry>[0] = npmPluginPackages();
     const fixture = packages[1];
     packages.push({ ...fixture, version: "2.0.0", tags: ["future"] });
     const failures: Array<[string, Record<string, string>]> = [

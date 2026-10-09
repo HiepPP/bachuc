@@ -456,7 +456,9 @@ describe("workspace labels", () => {
     });
     const workspacePublications: unknown[] = [];
     const catalogPublications: unknown[] = [];
-    interruptedRegistry.subscribeToMutations((mutation) => workspacePublications.push(mutation));
+    interruptedRegistry.subscribeToMutations((mutation) => {
+      workspacePublications.push(mutation);
+    });
     const subscription = await interrupted.subscribe({
       onChange: (change) => catalogPublications.push(change),
     });
@@ -519,7 +521,9 @@ describe("workspace labels", () => {
     });
     const workspacePublications: unknown[] = [];
     const catalogPublications: unknown[] = [];
-    recoveringRegistry.subscribeToMutations((mutation) => workspacePublications.push(mutation));
+    recoveringRegistry.subscribeToMutations((mutation) => {
+      workspacePublications.push(mutation);
+    });
     const subscription = await recovering.subscribe({
       onChange: (change) => catalogPublications.push(change),
     });
@@ -554,7 +558,9 @@ describe("workspace labels", () => {
     });
     const workspacePublications: unknown[] = [];
     const catalogPublications: unknown[] = [];
-    registry.subscribeToMutations((mutation) => workspacePublications.push(mutation));
+    registry.subscribeToMutations((mutation) => {
+      workspacePublications.push(mutation);
+    });
     const subscription = await markerLabels.subscribe({
       onChange: (change) => catalogPublications.push(change),
     });
@@ -586,7 +592,9 @@ describe("workspace labels", () => {
   test("does not leave replayable intent when prepared-journal persistence fails", async () => {
     const workspacePublications: unknown[] = [];
     const catalogPublications: unknown[] = [];
-    registry.subscribeToMutations((mutation) => workspacePublications.push(mutation));
+    registry.subscribeToMutations((mutation) => {
+      workspacePublications.push(mutation);
+    });
     const preparedLabels = createWorkspaceLabelService({
       paseoHome: join(paseoHome, "prepared-write"),
       workspaceRegistry: registry,
@@ -642,7 +650,9 @@ describe("workspace labels", () => {
     });
     const workspacePublications: unknown[] = [];
     const catalogPublications: unknown[] = [];
-    registry.subscribeToMutations((mutation) => workspacePublications.push(mutation));
+    registry.subscribeToMutations((mutation) => {
+      workspacePublications.push(mutation);
+    });
     const subscription = await preparedLabels.subscribe({
       onChange: (change) => catalogPublications.push(change),
     });
@@ -702,7 +712,9 @@ describe("workspace labels", () => {
     });
     const workspacePublications: unknown[] = [];
     const catalogPublications: unknown[] = [];
-    registry.subscribeToMutations((mutation) => workspacePublications.push(mutation));
+    registry.subscribeToMutations((mutation) => {
+      workspacePublications.push(mutation);
+    });
     const subscription = await catalogLabels.subscribe({
       onChange: (change) => catalogPublications.push(change),
     });
@@ -774,7 +786,9 @@ describe("workspace labels", () => {
     });
     const workspacePublications: unknown[] = [];
     const catalogPublications: unknown[] = [];
-    lostAckRegistry.subscribeToMutations((mutation) => workspacePublications.push(mutation));
+    lostAckRegistry.subscribeToMutations((mutation) => {
+      workspacePublications.push(mutation);
+    });
     const subscription = await workspaceLabels.subscribe({
       onChange: (change) => catalogPublications.push(change),
     });
@@ -827,7 +841,9 @@ describe("workspace labels", () => {
     });
     const workspacePublications: unknown[] = [];
     const catalogPublications: unknown[] = [];
-    registry.subscribeToMutations((mutation) => workspacePublications.push(mutation));
+    registry.subscribeToMutations((mutation) => {
+      workspacePublications.push(mutation);
+    });
     const subscription = await uncertainLabels.subscribe({
       onChange: (change) => catalogPublications.push(change),
     });

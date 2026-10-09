@@ -13,6 +13,7 @@ import { AgentManager } from "./agent-manager.js";
 import { AgentStorage } from "./agent-storage.js";
 import { createAgentMcpServer } from "./mcp-server.js";
 import { shutdownProviders } from "./provider-registry.js";
+import { createProviderSnapshotManagerStub } from "../test-utils/session-stubs.js";
 import {
   canRunRealProvider,
   createRealProviderClients,
@@ -50,6 +51,7 @@ async function startAgentMcpServer(logger: pino.Logger): Promise<AgentMcpServerH
     const mcpServer = await createAgentMcpServer({
       agentManager,
       agentStorage,
+      providerSnapshotManager: createProviderSnapshotManagerStub().manager,
       callerAgentId,
       logger,
     });

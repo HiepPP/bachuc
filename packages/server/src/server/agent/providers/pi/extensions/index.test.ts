@@ -75,7 +75,14 @@ describe("Pi extension host", () => {
     ).toBeUndefined();
     expect(
       host.respondToPermission(
-        { id: "ui-1", provider: "pi", kind: "question", title: "Pick", input: { questions: [] } },
+        {
+          id: "ui-1",
+          provider: "pi",
+          name: "question",
+          kind: "question",
+          title: "Pick",
+          input: { questions: [] },
+        },
         { behavior: "allow" },
       ),
     ).toBeUndefined();

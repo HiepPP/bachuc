@@ -82,8 +82,13 @@ function expectOpenCodeSessionId(value: string): void {
   expect(value).toMatch(/^ses_/);
 }
 
-function roleItems(items: AgentTimelineItem[], role: "user_message" | "assistant_message") {
-  return items.filter((item) => item.type === role);
+function roleItems<T extends "user_message" | "assistant_message">(
+  items: AgentTimelineItem[],
+  role: T,
+): Extract<AgentTimelineItem, { type: T }>[] {
+  return items.filter(
+    (item): item is Extract<AgentTimelineItem, { type: T }> => item.type === role,
+  );
 }
 
 function expectTimeline(

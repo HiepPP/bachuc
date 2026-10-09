@@ -10,14 +10,14 @@ describe("prompt attachments", () => {
   it("places fork history before the new user prompt", () => {
     const chatHistory = {
       type: "text" as const,
-      mimeType: "text/plain",
+      mimeType: "text/plain" as const,
       contextKind: "chat_history" as const,
       title: "Chat history",
       text: "<chat-history-summary>\nPrevious work\n</chat-history-summary>",
     };
     const issue = {
       type: "github_issue" as const,
-      mimeType: "application/github-issue",
+      mimeType: "application/github-issue" as const,
       number: 55,
       title: "Issue",
       url: "https://github.com/getpaseo/paseo/issues/55",

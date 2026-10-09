@@ -46,6 +46,8 @@ import {
   isPaseoWorktreePath,
   isDescendantPath,
   warmCheckoutShortstatInBackground,
+  type CheckoutStatusGit,
+  type CheckoutStatusResult,
 } from "./checkout-git.js";
 import { startGitCommandMetrics, stopGitCommandMetrics } from "./run-git-command.js";
 import { createForgeResolver } from "../services/forge-resolver.js";
@@ -117,6 +119,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function expectGitStatus(status: CheckoutStatusResult): asserts status is CheckoutStatusGit {
+  expect(status.isGit).toBe(true);
+}
+
+function unstubbedForgeMethod(name: string): () => Promise<never> {
+  return async () => {
+    throw new Error(`ForgeService.${name} is not stubbed`);
+  };
+}
+
 function createGitHubServiceForStatus(
   status: CurrentPullRequestStatus | null,
   options?: { onStatus?: () => void },
@@ -124,7 +136,12 @@ function createGitHubServiceForStatus(
   return {
     listPullRequests: async () => [],
     listIssues: async () => [],
-    searchIssuesAndPrs: async () => ({ items: [], githubFeaturesEnabled: true }),
+    searchIssuesAndPrs: async () => ({
+      items: [],
+      featuresEnabled: true,
+      authState: "authenticated",
+      githubFeaturesEnabled: true,
+    }),
     getPullRequest: async () => ({
       number: 1,
       title: "PR",
@@ -134,6 +151,7 @@ function createGitHubServiceForStatus(
       baseRefName: "main",
       headRefName: "feature",
       labels: [],
+      updatedAt: "2026-01-01T00:00:00.000Z",
     }),
     getPullRequestHeadRef: async () => "feature",
     getPullRequestCheckoutTarget: async ({ number }) => ({
@@ -149,11 +167,15 @@ function createGitHubServiceForStatus(
       options?.onStatus?.();
       return status;
     },
+    getPullRequestTimeline: unstubbedForgeMethod("getPullRequestTimeline"),
+    getCheckDetails: unstubbedForgeMethod("getCheckDetails"),
     createPullRequest: async () => ({
       url: "https://github.com/getpaseo/paseo/pull/1",
       number: 1,
     }),
     mergePullRequest: async () => ({ success: true }),
+    enablePullRequestAutoMerge: unstubbedForgeMethod("enablePullRequestAutoMerge"),
+    disablePullRequestAutoMerge: unstubbedForgeMethod("disablePullRequestAutoMerge"),
     isAuthenticated: async () => true,
     invalidate: () => {},
   };
@@ -167,6 +189,7 @@ function createPullRequestStatus(overrides?: Partial<CurrentPullRequestStatus>) 
     baseRefName: "main",
     headRefName: "feature",
     isMerged: false,
+    mergeable: "UNKNOWN" as const,
     checks: [],
     checksStatus: "none" as const,
     reviewDecision: null,
@@ -502,7 +525,7 @@ describe("checkout git utilities", () => {
     writeFileSync(join(repoDir, "file.txt"), "updated\n");
 
     const status = await getCheckoutStatus(repoDir);
-    expect(status.isGit).toBe(true);
+    expectGitStatus(status);
     expect(status.currentBranch).toBe("main");
     expect(status.isDirty).toBe(true);
     expect(status.hasRemote).toBe(false);
@@ -514,6 +537,7 @@ describe("checkout git utilities", () => {
     await commitAll(repoDir, "update file");
 
     const cleanStatus = await getCheckoutStatus(repoDir);
+    expectGitStatus(cleanStatus);
     expect(cleanStatus.isDirty).toBe(false);
     const message = execFileSync("git", ["log", "-1", "--pretty=%B"], { cwd: repoDir })
       .toString()
@@ -1628,7 +1652,7 @@ const x = 1;
     writeFileSync(join(result.worktreePath, "file.txt"), "worktree change\n");
 
     const status = await getCheckoutStatus(result.worktreePath, { paseoHome });
-    expect(status.isGit).toBe(true);
+    expectGitStatus(status);
     expect(realpathSync.native(status.repoRoot)).toBe(realpathSync.native(result.worktreePath));
     expect(status.isDirty).toBe(true);
     expect(status.isPaseoOwnedWorktree).toBe(true);
@@ -1641,6 +1665,7 @@ const x = 1;
     await commitAll(result.worktreePath, "worktree update");
 
     const cleanStatus = await getCheckoutStatus(result.worktreePath, { paseoHome });
+    expectGitStatus(cleanStatus);
     expect(cleanStatus.isDirty).toBe(false);
     const message = execFileSync("git", ["log", "-1", "--pretty=%B"], {
       cwd: result.worktreePath,
@@ -1687,7 +1712,7 @@ const x = 1;
     });
 
     const status = await getCheckoutStatus(worktree.worktreePath, { paseoHome });
-    expect(status.isGit).toBe(true);
+    expectGitStatus(status);
     expect(status.isPaseoOwnedWorktree).toBe(true);
     expect(realpathSync.native(status.mainRepoRoot ?? "")).toBe(
       realpathSync.native(mainCheckoutDir),
@@ -1701,7 +1726,7 @@ const x = 1;
     });
 
     const status = await getCheckoutStatus(worktreeDir, { paseoHome });
-    expect(status.isGit).toBe(true);
+    expectGitStatus(status);
     expect(realpathSync.native(status.repoRoot)).toBe(realpathSync.native(worktreeDir));
     expect(status.isPaseoOwnedWorktree).toBe(false);
     expect(realpathSync.native(status.mainRepoRoot ?? "")).toBe(realpathSync.native(repoDir));
@@ -2577,6 +2602,7 @@ const x = 1;
         headRefName: "feature",
         isMerged: false,
         isDraft: true,
+        mergeable: "UNKNOWN",
         checks: [
           {
             name: "server-tests",
@@ -3608,7 +3634,7 @@ const x = 1;
     });
 
     const status = await getCheckoutStatus(worktree.worktreePath, { paseoHome });
-    expect(status.isGit).toBe(true);
+    expectGitStatus(status);
     expect(status.baseRef).toBe("develop");
     expect(status.aheadBehind?.ahead).toBe(1);
 
@@ -3761,7 +3787,7 @@ const x = 1;
     rmSync(metadataPath, { force: true });
 
     const status = await getCheckoutStatus(worktree.worktreePath, { paseoHome });
-    expect(status.isGit).toBe(true);
+    expectGitStatus(status);
     expect(status.currentBranch).toBe("feature");
     expect(realpathSync.native(status.repoRoot)).toBe(realpathSync.native(worktree.worktreePath));
     expect(status.isPaseoOwnedWorktree).toBe(true);

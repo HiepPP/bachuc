@@ -81,7 +81,6 @@ describe("daemon E2E (real opencode) - draft feature discovery", () => {
         const response = await client.listProviderFeatures({
           provider: "opencode",
           cwd,
-          title: "OpenCode draft feature discovery",
         });
 
         expect(response.error).toBeNull();
