@@ -20,7 +20,7 @@ export default function contribute(server: PluginServerContext) {
     throw new Error("Install as next-prompt-actions.");
   let api: PaseoApi | undefined;
   server.registerSettings(sendSettings);
-  server.handle(hostRpc, () => ({ serverId }));
+  server.handle(hostRpc, () => ({ serverId, evaluator: readDependencies(configFile).evaluator }));
   const engine = new Engine(
     new Store(path.join(home, "plugin-data/next-prompt-actions/state.json")),
     createDriver(() => {

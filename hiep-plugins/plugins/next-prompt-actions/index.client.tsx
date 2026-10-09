@@ -8,18 +8,27 @@ import { sectionIntro, splitNextSection, splitRecap } from "./shared/section";
 import { sendSettings } from "./shared/settings";
 
 export default function contribute(client: PluginClientContext) {
-  const toggle = client.addCommandCenterItem({
-    id: "toggle-auto-run",
-    title: "Toggle Jev next-prompt auto-run",
-    icon: "Send",
-    context: "agent",
-    async onSelect({ agent, workspace, rpc }) {
-      const { serverId } = await rpc(hostRpc, {});
-      const scope = { serverId, agentId: agent.id, workspaceId: workspace.id };
-      const current = await rpc(inspectRpc, scope);
-      await rpc(toggleRpc, { ...scope, enabled: !current.enabled });
-    },
-  });
+  // Offered only while Jev can judge; re-enabling jev-evaluator needs a reload of this plugin.
+  let stopped = false;
+  let toggle: (() => void) | undefined;
+  void client
+    .rpc(hostRpc, {})
+    .then(({ evaluator }) => {
+      if (stopped || !evaluator) return;
+      toggle = client.addCommandCenterItem({
+        id: "toggle-auto-run",
+        title: "Toggle Jev next-prompt auto-run",
+        icon: "Send",
+        context: "agent",
+        async onSelect({ agent, workspace, rpc }) {
+          const { serverId } = await rpc(hostRpc, {});
+          const scope = { serverId, agentId: agent.id, workspaceId: workspace.id };
+          const current = await rpc(inspectRpc, scope);
+          await rpc(toggleRpc, { ...scope, enabled: !current.enabled });
+        },
+      });
+    })
+    .catch(() => undefined);
   // Cached so a click can leave for the Board at once; the settings screen keeps it current.
   void client
     .rpc(settingsRpc(sendSettings.id).read, {})
@@ -69,6 +78,7 @@ export default function contribute(client: PluginClientContext) {
     renderer();
     transformer();
     settings();
-    toggle();
+    stopped = true;
+    toggle?.();
   };
 }

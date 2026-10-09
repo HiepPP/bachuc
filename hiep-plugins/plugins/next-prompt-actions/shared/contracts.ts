@@ -37,7 +37,7 @@ export type Candidate = z.infer<typeof candidateSchema>;
 export const hostRpc = defineRpc({
   name: "prompts.host",
   input: z.object({}),
-  output: z.object({ serverId: z.string() }),
+  output: z.object({ serverId: z.string(), evaluator: z.boolean() }),
 });
 // Timeline rows know only the agent; the daemon resolves its workspace.
 export const scopeRpc = defineRpc({
