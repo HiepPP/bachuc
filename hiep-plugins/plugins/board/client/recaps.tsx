@@ -244,7 +244,7 @@ export function RecapsView({
     queryFn: () => readRecaps({ days: 7 }),
     enabled: online,
     retry: false,
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
     refetchOnWindowFocus: false,
   });
   const s = (value: number) => value * scale;

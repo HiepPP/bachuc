@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { groupRuns, type BoardRun } from "../shared/board";
+import {
+  ACTIVE_BOARD_POLL_MS,
+  IDLE_BOARD_POLL_MS,
+  boardPollInterval,
+  groupRuns,
+  type BoardRun,
+} from "../shared/board";
 import { createRunStore } from "../server/store";
 
 const card = (id: string, projectKey: string, starred = false): BoardRun => ({
@@ -96,4 +102,12 @@ test("hook-only finished cards resolve project placement; cwd fallback separates
   store.updateProject("b", "/two/app", { projectName: "Atlas", projectKey: "atlas" });
   assert.equal(groupRuns(store.snapshot().runs).projects.length, 1);
   assert.equal(store.unresolvedProjects().length, 0);
+});
+
+test("polls fast only while a run is running", () => {
+  const done: BoardRun = { ...card("d", "one"), status: "completed" };
+  assert.equal(boardPollInterval(undefined), IDLE_BOARD_POLL_MS);
+  assert.equal(boardPollInterval({ runs: [] }), IDLE_BOARD_POLL_MS);
+  assert.equal(boardPollInterval({ runs: [done] }), IDLE_BOARD_POLL_MS);
+  assert.equal(boardPollInterval({ runs: [done, card("r", "one")] }), ACTIVE_BOARD_POLL_MS);
 });

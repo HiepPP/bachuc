@@ -1,9 +1,13 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import type { PluginClientContext, PluginTimelineItemProps } from "@getpaseo/plugin/client";
+import {
+  useAgent,
+  type PluginClientContext,
+  type PluginTimelineItemProps,
+} from "@getpaseo/plugin/client";
 import { Button as HostButton, Markdown, usePrimaryModifier } from "@getpaseo/plugin/client/ui";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { useId, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Platform, Pressable, Text, View } from "react-native";
 import { z } from "zod";
 import {
@@ -15,6 +19,12 @@ import {
   type Scope,
 } from "../shared/contracts";
 import { selectionAllowed } from "../shared/next-prompts";
+import {
+  JEV_REVIEWING,
+  agentBusy,
+  inspectionActivity,
+  inspectionInterval,
+} from "../shared/polling";
 import { gitAction, joinPrompts, parsePrompts, type PromptBlock } from "../shared/prompts";
 import { boldRuns, commitChip, recapSections } from "../shared/section";
 import { layout, reachable, type Group } from "../shared/selection";
@@ -598,17 +608,30 @@ export function createNextPromptPanel(client: Client) {
     const [pending, setPending] = useState(false);
     const [error, setError] = useState("");
     const blocks = useMemo(() => parsePrompts(item.data.section), [item.data.section]);
-    // Shared by this agent's mounted replies; refresh external sends and Jev changes too.
-    const inspection = useQuery({
-      queryKey: ["next-prompt-inspection", host.id, agentId],
-      queryFn: async () => {
-        const scope = await client.rpc(scopeRpc, { agentId });
-        return { scope, snapshot: await client.rpc(inspectRpc, scope) };
-      },
-      refetchInterval: 2500,
+    // Shared by this agent's mounted replies. Agent activity (external sends, turn ends) changes
+    // the key and busy comes from client state; only a Jev review needs a poll.
+    const agent = useAgent(agentId, ({ workspaceId, status, lastActivityAt, attentionReason }) => ({
+      workspaceId,
+      attentionReason,
+      ...inspectionActivity({ status, lastActivityAt }),
+    }));
+    const scopeQuery = useQuery({
+      queryKey: ["next-prompt-scope", host.id, agentId, agent?.workspaceId],
+      queryFn: () => client.rpc(scopeRpc, { agentId }),
+      staleTime: Infinity,
       retry: false,
     });
-    const { scope, snapshot } = inspection.data ?? {};
+    const scope = scopeQuery.data;
+    const inspection = useQuery({
+      queryKey: ["next-prompt-inspection", scope, agent?.status, agent?.lastActivityAt],
+      queryFn: () => client.rpc(inspectRpc, scope!),
+      enabled: !!scope,
+      placeholderData: keepPreviousData,
+      refetchInterval: (query) => inspectionInterval(query.state.data),
+      retry: false,
+    });
+    const snapshot = inspection.data;
+    const loadError = scopeQuery.error ?? inspection.error;
     const run = (task: (target: Scope) => Promise<unknown>) => {
       if (!scope) return;
       setPending(true);
@@ -625,8 +648,7 @@ export function createNextPromptPanel(client: Client) {
       modifier,
       compact: width <= 600,
       touch: Platform.OS !== "web",
-      busy:
-        pending || inspection.isError || !!snapshot?.busy || snapshot?.note === "Jev reviewing...",
+      busy: pending || !!loadError || agentBusy(agent) || snapshot?.note === JEV_REVIEWING,
       edit: (texts) => client.setComposerText({ agentId, text: joinPrompts(texts) }),
       send: (keys) =>
         run(async (target) => {
@@ -828,7 +850,7 @@ export function createNextPromptPanel(client: Client) {
               )}
             </View>
           ) : null}
-          {[error, inspection.error?.message, snapshot?.note, snapshot?.warning]
+          {[error, loadError?.message, snapshot?.note, snapshot?.warning]
             .filter(Boolean)
             .map((notice, index) => (
               <Text key={index} style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>

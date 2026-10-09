@@ -24,7 +24,7 @@ export function useHostSettings<Schema extends ZodType>(
     },
     enabled: online,
     retry: false,
-    refetchInterval: 10_000,
+    // Saves refetch below; Board reads changes from other clients on its next mount.
     gcTime: 0,
   });
   return {

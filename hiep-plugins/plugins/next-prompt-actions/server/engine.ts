@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Candidate, Scope, Snapshot } from "../shared/contracts";
 import { gitAction, joinPrompts, parsePrompts } from "../shared/prompts";
 import { selectionAllowed } from "../shared/next-prompts";
+import { JEV_REVIEWING } from "../shared/polling";
 import { Store } from "./store";
 import { dependencyWarning, type Dependencies } from "./dependencies";
 
@@ -322,7 +323,7 @@ export class Engine {
       if (entry.evaluated.includes(candidate.key)) return;
       entry.evaluated.push(candidate.key);
       this.store.save();
-      this.note(scope.agentId, "Jev reviewing...", stamp);
+      this.note(scope.agentId, JEV_REVIEWING, stamp);
       const context = current.rows
         .filter((r) => r.type === "user_message" && r.text)
         .map((r) => r.text!);

@@ -15,6 +15,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import {
+  boardPollInterval,
   boardRpc,
   editDiffsModeRpc,
   removeRunRpc,
@@ -1344,7 +1345,7 @@ function HostBoard({
     queryFn: readBoard,
     enabled: online,
     retry: false,
-    refetchInterval: 2_000,
+    refetchInterval: (query) => boardPollInterval(query.state.data),
     refetchOnWindowFocus: false,
     // Opening a thread unmounts Board. Drop its cached snapshot so a thread's Remove
     // action cannot briefly show the removed card when Board mounts again.

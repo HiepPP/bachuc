@@ -59,6 +59,18 @@ export const starRunRpc = defineRpc({
   output: z.object({ updated: z.boolean() }),
 });
 
+export const ACTIVE_BOARD_POLL_MS = 2_000;
+export const IDLE_BOARD_POLL_MS = 15_000;
+
+// Running cards show live elapsed time and change state soon; finished cards rarely change.
+export function boardPollInterval(
+  snapshot: { runs: readonly Pick<BoardRun, "status">[] } | undefined,
+) {
+  return snapshot?.runs.some((run) => run.status === "running")
+    ? ACTIVE_BOARD_POLL_MS
+    : IDLE_BOARD_POLL_MS;
+}
+
 export function starredFirst(left: Pick<BoardRun, "starred">, right: Pick<BoardRun, "starred">) {
   return Number(right.starred) - Number(left.starred);
 }
