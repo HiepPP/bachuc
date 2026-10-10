@@ -99,6 +99,20 @@ describe("plugin shortcuts", () => {
     );
   });
 
+  it("skips an unassigned host shortcut instead of throwing", () => {
+    const withUnassigned = buildEffectiveBindings({ "sidebar-toggle-right-cmd-e-mac": null });
+    expect(
+      resolvePluginShortcut({
+        plugins: [installation("srv_1", "Mod+G")],
+        activeServerId: "srv_1",
+        hostBindings: withUnassigned,
+        event: press("g", { metaKey: true }),
+        isMac: true,
+        pathname: workspacePath,
+      })?.kind,
+    ).toBe("press");
+  });
+
   it("matches a surface path by plugin and surface id", () => {
     expect(isPluginSurfacePath(boardPath, "watchtower-board", "watchtower")).toBe(true);
     expect(isPluginSurfacePath(boardPath, "board", "watchtower")).toBe(false);

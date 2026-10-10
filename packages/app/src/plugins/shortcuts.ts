@@ -36,8 +36,12 @@ export function resolvePluginShortcut(input: {
   pathname: string;
 }): PluginShortcutResult | null {
   const { event, isMac } = input;
-  if (input.hostBindings.some((binding) => matchesKeyCombo(binding.parsedChord[0], event, isMac)))
-    return null;
+  // An unassigned host shortcut has an empty chord and takes no keys.
+  const hostTakes = input.hostBindings.some((binding) => {
+    const first = binding.parsedChord[0];
+    return first !== undefined && matchesKeyCombo(first, event, isMac);
+  });
+  if (hostTakes) return null;
   const hostId = input.activeServerId ?? hostIdFromPathname(input.pathname);
   for (const plugin of input.plugins) {
     if (hostId !== null && plugin.serverId !== hostId) continue;

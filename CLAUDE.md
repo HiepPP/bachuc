@@ -234,7 +234,9 @@ The app runs on iOS, Android, web (browser), and web (Electron desktop). Code is
 
 ## Debugging
 
-Find the complete daemon logs and traces in the $PASEO_HOME/daemon.log
+- Daemon logs and traces are in `$PASEO_HOME/daemon.log`. Uncaught errors of the release app, including its renderer, are in `~/Library/Logs/Bachuc/main.log`.
+- When a change works on live but fails on release, read `main.log` and grep the installed bundle in `/Applications/Bachuc.app/Contents/Resources/app-dist` before you name a cause. Do not guess and rebuild.
+- Release runs on the user's real state, which live lacks: unassigned shortcut overrides (an empty `parsedChord`), several hosts in "All machines" mode (`activeServerId` is null), Spaces, and plugin settings. Code that reads this state must handle the empty and null cases, and its tests must include them.
 
 <!-- gitnexus:start -->
 
