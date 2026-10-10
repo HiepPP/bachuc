@@ -7,8 +7,8 @@ Requires the fork daemon and client 0.10.2-beta.900+, Node 22+, and enabled trus
 ## Use
 
 The board has one view, the Watchtower page. Open it with the **Watchtower** pill above an agent
-composer, with **Open Watchtower board** in the Command Center, or with Cmd+E (Ctrl+E off macOS).
-All three open it over the current screen on that workspace, and Cmd+E closes it again. Cmd+E
+composer, with **Open Watchtower board** in the Command Center, or with Cmd+G (Ctrl+G off macOS).
+All three open it over the current screen on that workspace, and Cmd+G closes it again. Cmd+G
 needs a host built on or after 2026-10-10. The plugin adds no sidebar item and no Explorer panel.
 On the new workspace screen, the pill shows the chosen project's tasks in the side panel instead; it
 reads the project root, and it has no run, agent, or attachment search key.

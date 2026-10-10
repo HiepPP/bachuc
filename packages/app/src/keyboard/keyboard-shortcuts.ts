@@ -888,10 +888,9 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
   {
-    // Fork: Cmd+E is free for plugin shortcuts, such as the Watchtower board.
-    id: "sidebar-toggle-right-cmd-shift-f-mac",
+    id: "sidebar-toggle-right-cmd-e-mac",
     action: "sidebar.toggle.right",
-    combo: "Cmd+Shift+F",
+    combo: "Cmd+E",
     when: { mac: true, commandCenter: false },
     help: {
       id: "toggle-right-sidebar",
@@ -900,9 +899,9 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
   {
-    id: "sidebar-toggle-right-ctrl-shift-f-non-mac",
+    id: "sidebar-toggle-right-ctrl-e-non-mac",
     action: "sidebar.toggle.right",
-    combo: "Ctrl+Shift+F",
+    combo: "Ctrl+E",
     when: { mac: false, commandCenter: false, terminal: false },
     help: {
       id: "toggle-right-sidebar",
@@ -962,6 +961,30 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       id: "toggle-settings",
       section: "general",
       label: "Toggle settings",
+    },
+  },
+
+  // --- Focus mode ---
+  {
+    id: "view-toggle-focus-cmd-shift-f-mac",
+    action: "view.toggle.focus",
+    combo: "Cmd+Shift+F",
+    when: { mac: true, commandCenter: false },
+    help: {
+      id: "toggle-focus",
+      section: "layout",
+      label: "Toggle focus mode",
+    },
+  },
+  {
+    id: "view-toggle-focus-ctrl-shift-f-non-mac",
+    action: "view.toggle.focus",
+    combo: "Ctrl+Shift+F",
+    when: { mac: false, commandCenter: false, terminal: false },
+    help: {
+      id: "toggle-focus",
+      section: "layout",
+      label: "Toggle focus mode",
     },
   },
 

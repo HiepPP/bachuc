@@ -44,10 +44,10 @@ const workspacePath = "/h/srv_1/workspace/wks_1";
 const boardPath = "/h/srv_1/plugin/watchtower-board/surface/watchtower";
 
 describe("plugin shortcuts", () => {
-  it("presses on Cmd+E, and closes the surface when it is the current screen", () => {
-    const plugins = [installation("srv_1", "Mod+E")];
+  it("presses on Cmd+G, and closes the surface when it is the current screen", () => {
+    const plugins = [installation("srv_1", "Mod+G")];
     const input = { plugins, activeServerId: "srv_1", hostBindings, isMac: true };
-    const event = press("e", { metaKey: true });
+    const event = press("g", { metaKey: true });
     expect(resolvePluginShortcut({ ...input, event, pathname: workspacePath })?.kind).toBe("press");
     expect(resolvePluginShortcut({ ...input, event, pathname: boardPath })?.kind).toBe("close");
     // Off macOS, Mod is Ctrl.
@@ -55,17 +55,17 @@ describe("plugin shortcuts", () => {
       resolvePluginShortcut({
         ...input,
         isMac: false,
-        event: press("e", { ctrlKey: true }),
+        event: press("g", { ctrlKey: true }),
         pathname: workspacePath,
       })?.kind,
     ).toBe("press");
   });
 
   it("ignores other hosts and combos that a host shortcut uses", () => {
-    const event = press("e", { metaKey: true });
+    const event = press("g", { metaKey: true });
     expect(
       resolvePluginShortcut({
-        plugins: [installation("srv_2", "Mod+E")],
+        plugins: [installation("srv_2", "Mod+G")],
         activeServerId: "srv_1",
         hostBindings,
         event,
@@ -73,17 +73,30 @@ describe("plugin shortcuts", () => {
         pathname: workspacePath,
       }),
     ).toBeNull();
-    // Cmd+Shift+F toggles the Explorer sidebar, so a plugin cannot take it.
+    // Cmd+E toggles the Explorer sidebar, so a plugin cannot take it.
     expect(
       resolvePluginShortcut({
-        plugins: [installation("srv_1", "Mod+Shift+F")],
+        plugins: [installation("srv_1", "Mod+E")],
         activeServerId: "srv_1",
         hostBindings,
-        event: press("f", { metaKey: true, shiftKey: true }),
+        event: press("e", { metaKey: true }),
         isMac: true,
         pathname: workspacePath,
       }),
     ).toBeNull();
+  });
+
+  it("uses the route's host in All machines mode, where no host is active", () => {
+    const plugins = [installation("srv_2", "Mod+G"), installation("srv_1", "Mod+G")];
+    const input = { plugins, activeServerId: null, hostBindings, isMac: true };
+    const event = press("g", { metaKey: true });
+    expect(
+      resolvePluginShortcut({ ...input, event, pathname: workspacePath })?.plugin.serverId,
+    ).toBe("srv_1");
+    // Outside any host route, the first plugin with the combo answers.
+    expect(resolvePluginShortcut({ ...input, event, pathname: "/settings" })?.plugin.serverId).toBe(
+      "srv_2",
+    );
   });
 
   it("matches a surface path by plugin and surface id", () => {

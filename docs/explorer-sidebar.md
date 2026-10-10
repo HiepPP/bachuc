@@ -3,10 +3,10 @@
 The Explorer sidebar and the side pane share panel implementations, but they have different shell
 contracts.
 
-| Surface          | Purpose                      | Lifecycle                                     |
-| ---------------- | ---------------------------- | --------------------------------------------- |
-| Explorer sidebar | Files and Changes navigation | Cmd+Shift+F shows or hides the dedicated dock |
-| Side pane        | Ordinary workspace content   | Created and closed like any workspace pane    |
+| Surface          | Purpose                      | Lifecycle                                  |
+| ---------------- | ---------------------------- | ------------------------------------------ |
+| Explorer sidebar | Files and Changes navigation | Cmd+E shows or hides the dedicated dock    |
+| Side pane        | Ordinary workspace content   | Created and closed like any workspace pane |
 
 ## Panel host contract
 
@@ -47,8 +47,7 @@ launch catalog. Individual tab menus close instances or move compatible tabs to 
 can be reordered, but the dock cannot be split. Selecting an Explorer tab does not change workspace
 focus.
 
-Cmd+Shift+F (Ctrl+Shift+F off macOS) and Ctrl+` show or hide Explorer without changing its
-selected view. This fork leaves Cmd+E to plugins and has no focus mode key. Compact layouts use the combined
+Cmd+E shows or hides Explorer without changing its selected view. Compact layouts use the combined
 full-screen Explorer overlay for Changes, Files, and pull requests, and close it after a file opens. Compact Changes has no tree rail; its overview is the Jump to file action (`packages/app/src/git/jump-to-file/`), a sheet over the same changed-files tree the desktop rail renders.
 Wide native layouts without pane splits use the same combined content in a resizable inline dock;
 opening a file leaves that dock visible. Both presentations keep their selection in the panel store

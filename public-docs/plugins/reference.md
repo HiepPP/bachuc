@@ -762,7 +762,7 @@ closes that surface when it is the current screen, so the same keys open and clo
 ```ts
 client.addShortcut({
   id: "toggle-main",
-  combo: "Mod+E",
+  combo: "Mod+G",
   surface: "main",
   onPress: ({ workspaceId }) => client.openSurface("main", { presentation: "overlay" }),
 });
