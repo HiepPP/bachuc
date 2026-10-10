@@ -2,7 +2,6 @@ import { type PluginSurfaceProps, usePaseo } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { Text, View } from "react-native";
-import { WatchtowerBoard } from "./board";
 import { WatchtowerOverview } from "./overview";
 
 // Surfaces have no workspace context, so the opener names the workspace before it opens the page.
@@ -66,22 +65,12 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
 
   return (
     <View style={styles.screen}>
-      {/* Wide layouts have room for the process overview; compact ones keep the board. */}
-      {layout.compact ? (
-        <WatchtowerBoard
-          {...props}
-          key={workspace.id}
-          source={{ workspaceId: workspace.id }}
-          projectName={workspace.projectDisplayName}
-        />
-      ) : (
-        <WatchtowerOverview
-          {...props}
-          key={workspace.id}
-          workspaceId={workspace.id}
-          projectName={workspace.projectDisplayName}
-        />
-      )}
+      <WatchtowerOverview
+        {...props}
+        key={workspace.id}
+        workspaceId={workspace.id}
+        projectName={workspace.projectDisplayName}
+      />
     </View>
   );
 }

@@ -242,6 +242,50 @@ test("rows that overlap by a few minutes stay on the same day", () => {
   assert.equal(run.nowMinute, 110);
 });
 
+test("dated log times show a gap of several days and clock times continue from them", () => {
+  const day = 24 * 60;
+  const run = parseOverviewRun(
+    `# Run
+
+- Started: 2026-10-05 13:00
+- Finished: -
+
+## Log
+
+| Start | End | TASK | Result | PR or reason |
+| --- | --- | --- | --- | --- |
+| 13:05 | 13:30 | TASK-001 | DONE | #1 |
+| 13:35 | 14:10 | TASK-002 | DONE | #2 |
+| 2026-10-08 09:30 | 2026-10-08 10:00 | TASK-003 | DONE | #3 |
+| 10:05 | 10:40 | TASK-004 | DONE | #4 |
+| 23:50 | 00:20 | TASK-005 | DONE | #5 |
+`,
+    new Date(2026, 9, 9, 0, 30),
+  );
+  assert.deepEqual(
+    run.log.map((row) => [row.task, row.startMinute, row.endMinute]),
+    [
+      ["TASK-001", 5, 30],
+      ["TASK-002", 35, 70],
+      ["TASK-003", 3 * day - 210, 3 * day - 180],
+      ["TASK-004", 3 * day - 175, 3 * day - 140],
+      // Clock times after a dated row still roll over midnight.
+      ["TASK-005", 3 * day + 650, 3 * day + 680],
+    ],
+  );
+  assert.equal(run.log[2].start, "2026-10-08 09:30");
+  assert.equal(run.nowMinute, 3 * day + 690);
+  assert.equal(run.stopped, false);
+  // Without `Started:` a dated time falls back to its clock part.
+  const unstarted = parseOverviewRun(
+    "# Run\n\n## Log\n\n| Start | End | TASK | Result |\n| --- | --- | --- | --- |\n| 2026-10-08 09:30 | 2026-10-08 10:00 | TASK-001 | DONE |\n",
+  );
+  assert.deepEqual(
+    unstarted.log.map((row) => [row.startMinute, row.endMinute]),
+    [[0, 30]],
+  );
+});
+
 test("a run with no finish and no log activity for over two hours has stopped", () => {
   // The last logged activity ends at 00:21, minute 89.
   const recent = parseOverviewRun(runLog, new Date(2026, 9, 7, 2, 21));

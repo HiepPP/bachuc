@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   BAR_HEIGHT,
+  BREAK_WIDTH,
   connector,
+  dayAt,
   laneCenter,
+  MIN_BREAK_MINUTES,
   PAD_X,
   parallelCaption,
   timelineGeometry,
@@ -205,4 +208,76 @@ test("hour ticks thin out so their labels never touch", () => {
   for (let index = 1; index < geometry.ticks.length; index += 1) {
     assert.ok(geometry.ticks[index].x - geometry.ticks[index - 1].x >= 44);
   }
+});
+
+test("a 3-day idle gap collapses to one break and keeps bars readable", () => {
+  const day = 24 * 60;
+  const started = "2026-10-05 13:00";
+  const model = buildTimeline({
+    tasks: [
+      task("TASK-001", "DONE"),
+      task("TASK-002", "DONE"),
+      task("TASK-003", "DONE"),
+      task("TASK-004", "IN PROGRESS"),
+      task("TASK-005", "TODO"),
+    ],
+    run: {
+      runner: "loop",
+      started,
+      finished: null,
+      log: [
+        row("TASK-001", 0, 30),
+        row("TASK-002", 35, 60),
+        row("TASK-003", 3 * day + 10, 3 * day + 40),
+      ],
+      nowMinute: 3 * day + 55,
+      stopped: false,
+    },
+    questions: [],
+  });
+  const width = 640;
+  const geometry = timelineGeometry(model, width, 3 * day + 55, started);
+  assert.equal(geometry.breaks.length, 1);
+  const [gap] = geometry.breaks;
+  assert.equal(gap.width, BREAK_WIDTH);
+  assert.equal(gap.minutes, 3 * day + 10 - 60);
+  assert.equal(gap.label, "2d 23h");
+  const bars = Object.fromEntries(geometry.bars.map((bar) => [bar.id, bar]));
+  // The period after the break starts right after it, and both periods share one scale.
+  assert.equal(bars["TASK-003"].x, gap.x + BREAK_WIDTH);
+  assert.ok(Math.abs(bars["TASK-001"].width - bars["TASK-003"].width) < 0.001);
+  assert.ok(bars["TASK-001"].width > 40, `${bars["TASK-001"].width} px`);
+  const last = geometry.bars.reduce((max, bar) => Math.max(max, bar.x + bar.width), 0);
+  assert.ok(last <= width - PAD_X + 0.001);
+  assert.ok(geometry.ticks.every((tick) => tick.x <= gap.x || tick.x >= gap.x + gap.width));
+  assert.deepEqual(
+    geometry.days.map((entry) => entry.label),
+    [dayAt(started, 0), dayAt(started, 3 * day + 10)],
+  );
+  assert.equal(dayAt(started, 0), "Mon 5");
+  assert.equal(dayAt(started, 3 * day + 10), "Thu 8");
+});
+
+test("a gap shorter than the break threshold stays at scale", () => {
+  const model: Timeline = {
+    ...mock,
+    bars: [
+      { id: "TASK-001", kind: "done", start: 0, end: 20, expectedEnd: null, lane: 0 },
+      {
+        id: "TASK-002",
+        kind: "done",
+        start: 20 + MIN_BREAK_MINUTES,
+        end: 160,
+        expectedEnd: null,
+        lane: 0,
+      },
+    ],
+    edges: [],
+    laneCount: 1,
+    axis: { start: 0, end: 160, ticks: [] },
+  };
+  const geometry = timelineGeometry(model, 160 + PAD_X * 2, null);
+  assert.equal(geometry.breaks.length, 0);
+  assert.equal(geometry.days.length, 0);
+  assert.equal(geometry.bars[1].x, PAD_X + 20 + MIN_BREAK_MINUTES);
 });

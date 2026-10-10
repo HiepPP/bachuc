@@ -73,9 +73,11 @@ export function parseManualChecks(handoff: string | null): ManualCheck[] {
     });
 }
 
-// Log times are clock times with no date. Walking the rows in order, a time over 12 hours earlier
-// than the one before it starts the next day. A smaller step back is an overlap, such as a row that
-// starts a minute before `Started:` or before the previous row ended, and stays on the same day.
+// Log times are clock times such as `22:10`, or dated times such as `2026-10-09 22:10`. Walking the
+// rows in order, a clock time over 12 hours earlier than the one before it starts the next day. A
+// smaller step back is an overlap, such as a row that starts a minute before `Started:` or before
+// the previous row ended, and stays on the same day. A dated time counts from `Started:` exactly,
+// so it can show a gap of several days, and the clock times after it continue from its day.
 export function parseOverviewRun(markdown: string, now = new Date()): OverviewRun {
   const started = field(markdown, "Started");
   const finished = field(markdown, "Finished");
@@ -85,7 +87,15 @@ export function parseOverviewRun(markdown: string, now = new Date()): OverviewRu
   let previous = origin;
   let dayOffset = 0;
   const offset = (value: string): number | null => {
-    const minutes = clockMinutes(value);
+    const dated = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/.test(value) ? dateTime(value) : null;
+    if (dated && startedAt && origin !== null) {
+      const fromStart = Math.round((dated.getTime() - startedAt.getTime()) / 60_000);
+      previous = dated.getHours() * 60 + dated.getMinutes();
+      dayOffset = fromStart + origin - previous;
+      return fromStart;
+    }
+    // Without `Started:` a dated time has no origin to count from, so only its clock part counts.
+    const minutes = clockMinutes(dated ? value.slice(-5) : value);
     if (minutes === null) return null;
     origin ??= minutes;
     previous ??= minutes;

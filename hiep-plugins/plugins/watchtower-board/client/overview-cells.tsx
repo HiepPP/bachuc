@@ -159,9 +159,11 @@ function Segments({ counts, theme }: { counts: StatusCounts } & ThemeProps) {
 export function LifecycleStepper({
   phases,
   counts,
+  compact = false,
   theme,
-}: { phases: readonly Phase[]; counts: StatusCounts } & ThemeProps) {
+}: { phases: readonly Phase[]; counts: StatusCounts; compact?: boolean } & ThemeProps) {
   const { colors } = theme;
+  // A narrow panel gives each step about 60 px: names only, with no icon or meta line.
   return (
     <View
       accessibilityRole="summary"
@@ -188,9 +190,9 @@ export function LifecycleStepper({
             style={{
               flex: 1,
               minWidth: 0,
-              paddingHorizontal: 14,
-              paddingTop: 11,
-              paddingBottom: 12,
+              paddingHorizontal: compact ? 4 : 14,
+              paddingTop: compact ? 8 : 11,
+              paddingBottom: compact ? 9 : 12,
               borderLeftWidth: index === 0 ? 0 : 1,
               borderLeftColor: colors.border,
             }}
@@ -221,23 +223,39 @@ export function LifecycleStepper({
                 />
               </>
             ) : null}
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Icon
-                name={phase.state === "done" ? "CircleCheck" : phaseIcons[phase.name]}
-                size={14}
-                color={color}
-              />
-              <Text style={{ fontSize: 13, fontWeight: "600", color: colors.foreground }}>
+            {compact ? (
+              <Text
+                numberOfLines={1}
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: current ? "700" : "500",
+                  textAlign: "center",
+                  color: current ? colors.foreground : color,
+                }}
+              >
                 {phase.name}
               </Text>
-            </View>
-            <Text
-              numberOfLines={1}
-              style={{ fontSize: 11.5, color: colors.foregroundMuted, marginTop: 3 }}
-            >
-              {phase.meta}
-            </Text>
-            {current && phase.name === "Implement" ? (
+            ) : (
+              <>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Icon
+                    name={phase.state === "done" ? "CircleCheck" : phaseIcons[phase.name]}
+                    size={14}
+                    color={color}
+                  />
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: colors.foreground }}>
+                    {phase.name}
+                  </Text>
+                </View>
+                <Text
+                  numberOfLines={1}
+                  style={{ fontSize: 11.5, color: colors.foregroundMuted, marginTop: 3 }}
+                >
+                  {phase.meta}
+                </Text>
+              </>
+            )}
+            {current && phase.name === "Implement" && !compact ? (
               <Segments counts={counts} theme={theme} />
             ) : null}
           </View>
@@ -253,6 +271,11 @@ export interface RunningTask {
 }
 
 const logColumns = [44, 44, 36] as const;
+
+// A dated log time keeps only its clock part, so it fits the 44 px column.
+function clockOnly(value: string): string {
+  return value.replace(/^\d{4}-\d{2}-\d{2}[ T]/, "");
+}
 
 // The columns keep their width, and the detail gets its own line, so a long detail never squeezes
 // the times together.
@@ -323,7 +346,12 @@ export function RunLogCell({
       {recent.map((row, index) => (
         <LogLine
           key={`${row.task}-${row.start}-${index}`}
-          cells={[row.start, row.end, row.task.replace(/^TASK-/, ""), row.result.toLowerCase()]}
+          cells={[
+            clockOnly(row.start),
+            clockOnly(row.end),
+            row.task.replace(/^TASK-/, ""),
+            row.result.toLowerCase(),
+          ]}
           tail={row.detail}
           first={index === 0}
           theme={theme}

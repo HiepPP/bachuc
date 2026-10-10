@@ -18,24 +18,32 @@ workspace, the page shows that one or says "Workspace not found."; it never show
 sidebar page names none and shows the most recently active workspace.
 The header identifies its project. Each workspace keeps its own board and task selection.
 The board reads `watchtower/NEXT.md` in that workspace, not another checkout or its parent repository.
-The panel summarizes completion and counts for Active, Blocked, Todo, and Done tasks.
-**Waiting on the owner** lists the open questions that block tasks and counts proposed ADRs.
-**Autorun** shows the run's runner, profile, schedule, start and finish, and its five latest
-iterations, newest first. Each task row shows its class next to its ID.
-Expand or collapse a status group, then select a compact task row to read its full title, brief,
-dependencies, class, blocking questions, blocker, and file error. Refresh to read current files.
+Explorer shows the same view as the Watchtower page, described below. The new workspace side panel
+has no workspace, run, or agent, so it shows only completion, status counts, the open questions
+that block tasks, and the task list.
+Each task row shows its class next to its ID. Expand or collapse a status group, then select a
+compact task row to read its full title, brief, dependencies, class, blocking questions, blocker,
+and file error. Refresh to read current files.
 
 The **Watchtower** pill above every agent composer, beside Tasks and Subagents, opens the
 Watchtower page over the current screen, on that composer's workspace. A wide layout shows it as an
 overlay with a dimmed backdrop; a compact layout shows a page. The pill reads `Watchtower 5/10`,
 adds `, 1 question` while an open question blocks a task, and reads `Watchtower` on New workspace,
 which has no workspace yet; there a press shows the chosen project's board in the side panel.
-The page keeps the board on compact layouts. On wider layouts it shows the process overview, read
-in one `watchtower.overview.read` call:
+The page and the Explorer panel show one view, which lays itself out by its own width: three
+columns from 1000 px, stacked cells below 520 px, and a mix between. It reads
+`watchtower.overview.read`, and its Tasks cell reads the board for briefs. It shows:
 
 - the lifecycle: Plan, Implement, Verify, Review, and Archive, with the current step marked;
+- the Autorun strip: run state (running, stopped, or finished), runner, start, iterations, and last
+  activity;
 - the branch timeline: done, running, and planned tasks on lanes, linked to their deps, with a now
-  line, hour ticks, the estimated finish, and four pace stats;
+  line, hour ticks, the estimated finish, and four pace stats. An idle gap longer than
+  max(2 h, 4 x the average task) collapses to a 48 px break labeled with its length, such as
+  `2d 23h`, and each period after a break shows its day. Below 520 px the timeline is one strip;
+- **Running now**: each running task with its minutes against the average, and **Up next**: planned
+  and blocked tasks in order with their expected start;
+- **Tasks**: the status groups, Done collapsed; select a task for its brief and attachment search;
 - **Needs you**: open and defaulted questions, proposed ADRs, and pending manual checks, each with
   actions (below). A blocking question shows the time to answer by;
 - the run log and the pending manual checks;
@@ -88,7 +96,9 @@ Three optional files sit beside NEXT.md, in the Watchtower skill's formats:
 The overview also reads the Tracker Group column, `## Plan Verify` bullets, `## Handoff` bullets
 that start with `Manual check pending:`, every `RUN.md` log row, `DEFAULTED` questions, every ADR
 row, and the `Title:` and `LEARN.md` of the 20 newest real folders in `archive/`. Log times count
-from `Started:` and roll over at midnight. A running task starts at the latest log end. Planned
+from `Started:`. A clock time such as `22:10` rolls over at midnight once; write a dated time such
+as `2026-10-09 22:10` after a gap of a day or more. The run log shows only the clock part. A
+running task starts at the latest log end. Planned
 tasks run one at a time in Tracker order at the average done duration, or 20 minutes.
 
 A missing optional file hides its section; an unreadable one shows a warning. Attachment search

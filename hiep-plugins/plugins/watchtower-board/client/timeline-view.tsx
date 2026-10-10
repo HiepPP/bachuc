@@ -40,8 +40,11 @@ export function BranchTimeline({
 }: BranchTimelineProps) {
   const [width, setWidth] = useState(0);
   const geometry = useMemo(
-    () => (width > 0 && model.bars.length > 0 ? timelineGeometry(model, width, nowMinute) : null),
-    [model, width, nowMinute],
+    () =>
+      width > 0 && model.bars.length > 0
+        ? timelineGeometry(model, width, nowMinute, started)
+        : null,
+    [model, width, nowMinute, started],
   );
   const { colors } = theme;
   const tone: Record<SegmentTone, string> = {
@@ -86,6 +89,41 @@ export function BranchTimeline({
         ) : null}
         {geometry ? (
           <View style={{ height: geometry.height }}>
+            {geometry.breaks.map((gap) => (
+              <Fragment key={`break-${gap.x}`}>
+                <View
+                  accessible
+                  accessibilityLabel={`Idle ${gap.label}, not drawn to scale`}
+                  style={{
+                    position: "absolute",
+                    left: gap.x,
+                    top: 0,
+                    width: gap.width,
+                    height: geometry.axisY,
+                    borderLeftWidth: 1,
+                    borderRightWidth: 1,
+                    borderStyle: "dashed",
+                    borderColor: colors.border,
+                    backgroundColor: colors.surface2,
+                  }}
+                />
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    position: "absolute",
+                    left: gap.x,
+                    width: gap.width,
+                    // The label row, where no dependency link runs through it.
+                    top: 0,
+                    textAlign: "center",
+                    fontSize: 10,
+                    color: colors.foregroundMuted,
+                  }}
+                >
+                  {gap.label}
+                </Text>
+              </Fragment>
+            ))}
             {geometry.segments.map((segment, index) => (
               <View
                 key={`segment-${index}`}
@@ -215,6 +253,22 @@ export function BranchTimeline({
                 {tick.label}
               </Text>
             ))}
+            {geometry.days.map((day) => (
+              <Text
+                key={`day-${day.x}`}
+                numberOfLines={1}
+                style={{
+                  position: "absolute",
+                  left: day.x,
+                  top: geometry.axisY + 3,
+                  fontSize: 10,
+                  fontWeight: "600",
+                  color: colors.foreground,
+                }}
+              >
+                {day.label}
+              </Text>
+            ))}
           </View>
         ) : null}
       </View>
@@ -246,6 +300,96 @@ export function BranchTimeline({
             </Text>
           </View>
         ))}
+      </View>
+    </View>
+  );
+}
+
+const STRIP_HEIGHT = 14;
+
+// The narrow form of the timeline: every bar on one row, with the same x and breaks as the Gantt.
+export function TimelineStrip({ model, nowMinute, started, theme }: BranchTimelineProps) {
+  const [width, setWidth] = useState(0);
+  const geometry = useMemo(
+    () =>
+      width > 0 && model.bars.length > 0
+        ? timelineGeometry(model, width, nowMinute, started)
+        : null,
+    [model, width, nowMinute, started],
+  );
+  const { colors } = theme;
+  const fill = (kind: BarRect["kind"]) =>
+    kind === "done"
+      ? { backgroundColor: colors.statusSuccess, opacity: 0.55 }
+      : kind === "running"
+        ? { backgroundColor: colors.accent }
+        : {
+            borderWidth: 1,
+            borderStyle: "dashed" as const,
+            borderColor: kind === "blocked" ? colors.statusDanger : colors.foregroundMuted,
+          };
+  const first = clockAt(started, model.axis.start);
+  const now = nowMinute === null ? null : clockAt(started, nowMinute);
+  const finish = model.finishMinute === null ? null : clockAt(started, model.finishMinute);
+  const muted = {
+    fontSize: 11,
+    color: colors.foregroundMuted,
+    fontVariant: ["tabular-nums" as const],
+  };
+  return (
+    <View style={{ gap: 6 }}>
+      <View
+        onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
+        style={{ height: STRIP_HEIGHT, borderRadius: 4, backgroundColor: colors.surface2 }}
+      >
+        {geometry?.bars.map((bar) => (
+          <View
+            key={bar.id}
+            style={{
+              position: "absolute",
+              left: bar.x,
+              top: 0,
+              width: bar.width,
+              height: STRIP_HEIGHT,
+              ...fill(bar.kind),
+            }}
+          />
+        ))}
+        {geometry?.breaks.map((gap) => (
+          <View
+            key={`break-${gap.x}`}
+            accessible
+            accessibilityLabel={`Idle ${gap.label}`}
+            style={{
+              position: "absolute",
+              left: gap.x,
+              top: 0,
+              width: gap.width,
+              height: STRIP_HEIGHT,
+              borderLeftWidth: 1,
+              borderRightWidth: 1,
+              borderColor: colors.border,
+              backgroundColor: colors.surface0,
+            }}
+          />
+        ))}
+        {geometry?.nowX != null ? (
+          <View
+            style={{
+              position: "absolute",
+              left: geometry.nowX,
+              top: -2,
+              width: 2,
+              height: STRIP_HEIGHT + 4,
+              backgroundColor: colors.statusDanger,
+            }}
+          />
+        ) : null}
+      </View>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
+        <Text style={muted}>{first ?? ""}</Text>
+        <Text style={muted}>{now ? `now ${now}` : ""}</Text>
+        <Text style={muted}>{finish ? `finish ${finish}` : ""}</Text>
       </View>
     </View>
   );
