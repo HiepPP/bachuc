@@ -315,7 +315,10 @@ export function WatchtowerOverview({
         }
         theme={theme}
       >
-        {narrow ? (
+        {/* Without RUN.md there are no logged times, so the bars would be guesses from minute 0. */}
+        {data.run === null ? (
+          <Text style={{ ...muted, fontSize: 12.5 }}>No autorun yet</Text>
+        ) : narrow ? (
           <TimelineStrip
             model={timeline}
             nowMinute={data.run?.nowMinute ?? null}
