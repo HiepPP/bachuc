@@ -6,7 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "format": "oxfmt index.server.ts index.client.tsx server client shared tests README.md package.json tsconfig.json paseo-plugin.json",
-    "lint": "oxlint index.server.ts index.client.tsx server client shared tests",
+    "lint": "oxlint --disable-nested-config index.server.ts index.client.tsx server client shared tests",
     "test": "tsx --test tests/*.test.ts"
   },
   "devDependencies": {

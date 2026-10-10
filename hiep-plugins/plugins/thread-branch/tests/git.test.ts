@@ -50,7 +50,7 @@ test("reads this repository and reports a non-git directory without throwing", a
   assert.equal(here.repo, true);
   assert.ok(here.branch || here.detached);
   assert.ok(here.sha);
-  assert.equal(here.remoteUrl, "https://github.com/HiepPP/paseo");
+  assert.equal(here.remoteUrl, "https://github.com/HiepPP/bachuc");
   const outside = await reader.get("/");
   assert.equal(outside.repo, false);
   assert.equal(outside.pr, null);
@@ -99,6 +99,59 @@ test("a command killed by its timeout is not reported as success", async () => {
   const result = await run("sh", ["-c", "echo partial; sleep 5"], "/tmp", 300);
   assert.notEqual(result.code, 0);
   assert.equal(result.stdout, "partial\n");
+});
+
+test("finds the PR of a fork branch because gh resolves the checked-out branch itself", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { chmod, mkdir, mkdtemp, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { delimiter, join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "thread-branch-"));
+  const originalPath = process.env.PATH;
+  try {
+    // Given a checked-out branch and a gh that, like the real one, only matches a fork PR when no
+    // bare branch name is passed (a bare name is matched against PR heads in the base repo only).
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", root]);
+    execFileSync(
+      "git",
+      ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"],
+      { cwd: root },
+    );
+    execFileSync("git", ["checkout", "-q", "-b", "fix/from-fork"], { cwd: root });
+    const bin = join(root, "bin");
+    await mkdir(bin);
+    const stub = join(bin, "gh");
+    await writeFile(
+      stub,
+      [
+        "#!/bin/sh",
+        'for arg in "$@"; do',
+        '  case "$arg" in',
+        "    pr|view|--json|number,url,state) ;;",
+        '    *) echo "no pull requests found for branch \\"$arg\\"" >&2; exit 1 ;;',
+        "  esac",
+        "done",
+        'echo \'{"number":83733,"url":"https://github.com/o/r/pull/83733","state":"OPEN"}\'',
+      ].join("\n"),
+    );
+    await chmod(stub, 0o755);
+    process.env.PATH = `${bin}${delimiter}${originalPath ?? ""}`;
+
+    // When the plugin reads the branch.
+    const info = await createBranchReader().get(root, true);
+
+    // Then the fork PR is found.
+    assert.equal(info.branch, "fix/from-fork");
+    assert.equal(info.prLookup, "ok");
+    assert.deepEqual(info.pr, {
+      number: 83733,
+      url: "https://github.com/o/r/pull/83733",
+      state: "OPEN",
+    });
+  } finally {
+    process.env.PATH = originalPath;
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("counts uncommitted tracked files and lines only when the work tree is dirty", async () => {

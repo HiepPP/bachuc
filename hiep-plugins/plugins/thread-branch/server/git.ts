@@ -137,7 +137,9 @@ export function createBranchReader() {
     const key = `${cwd}\0${branch}`;
     const cached = prCache.get(key);
     if (!force && cached && Date.now() - cached.at < PR_TTL) return cached;
-    const result = await run("gh", ["pr", "view", branch, "--json", "number,url,state"], cwd);
+    // No branch argument: a bare name only matches PRs whose head is in the base repo, so a fork PR
+    // would read as "not found". Without it gh resolves the checked-out branch and its tracked remote.
+    const result = await run("gh", ["pr", "view", "--json", "number,url,state"], cwd);
     let entry: { at: number; pr: BranchInfo["pr"]; lookup: BranchInfo["prLookup"] };
     if (result.enoent) entry = { at: Date.now(), pr: null, lookup: "unavailable" };
     else if (result.code === 0) {
