@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useNavigationState, useRoute } from "@react-navigation/native";
 import { StyleSheet, View } from "react-native";
 import { useGlobalSearchParams, useLocalSearchParams, useRootNavigationState } from "expo-router";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { isPluginOverlayRouteAbove } from "@/plugins/routes";
 import { HostRouteBootstrapBoundary } from "@/components/host-route-bootstrap-boundary";
 import { RetainedPanel } from "@/components/retained-panel";
 import {
@@ -22,6 +24,7 @@ import {
   resolveWorkspaceDeckRetentionLimit,
   type RetainedWorkspaceSelection,
   resolveWorkspaceDeckEntries,
+  resolveWorkspaceDeckVisibleSelection,
   shouldKeepWorkspaceDeckEntryMounted,
 } from "@/screens/workspace/workspace-deck-retention";
 import {
@@ -190,11 +193,40 @@ function HostWorkspaceRouteContent() {
     return null;
   }
 
-  return <WorkspaceDeck recoveryRequested={isAgentOpenIntent} />;
+  return (
+    <WorkspaceDeck
+      ownServerId={serverId}
+      ownWorkspaceId={workspaceId}
+      recoveryRequested={isAgentOpenIntent}
+    />
+  );
 }
 
-function WorkspaceDeck({ recoveryRequested }: { recoveryRequested: boolean }) {
-  const activeSelection = useActiveWorkspaceSelection();
+function WorkspaceDeck({
+  ownServerId,
+  ownWorkspaceId,
+  recoveryRequested,
+}: {
+  ownServerId: string;
+  ownWorkspaceId: string;
+  recoveryRequested: boolean;
+}) {
+  const routeSelection = useActiveWorkspaceSelection();
+  const routeKey = useRoute().key;
+  // The overlay shows this screen only when it sits directly above it, and not on a compact
+  // layout, where a plugin surface is a plain page.
+  const isOverlayAbove = useNavigationState((state) => isPluginOverlayRouteAbove(state, routeKey));
+  const compact = useIsCompactFormFactor();
+  const ownSelection = useMemo<ActiveWorkspaceSelection | null>(
+    () =>
+      ownServerId && ownWorkspaceId ? { serverId: ownServerId, workspaceId: ownWorkspaceId } : null,
+    [ownServerId, ownWorkspaceId],
+  );
+  const activeSelection = resolveWorkspaceDeckVisibleSelection({
+    routeSelection,
+    ownSelection,
+    isOverlayOnTop: isOverlayAbove && !compact,
+  });
   const [retainedSelections, setRetainedSelections] = useState<RetainedWorkspaceSelection[]>(() =>
     activeSelection ? [{ selection: activeSelection, inactiveSince: null }] : [],
   );
@@ -223,8 +255,13 @@ function WorkspaceDeck({ recoveryRequested }: { recoveryRequested: boolean }) {
     [nextRetainedSelections],
   );
   const renderedEntries = useMemo(
-    () => resolveWorkspaceDeckEntries({ selections: renderedSelections, activeSelection }),
-    [activeSelection, renderedSelections],
+    () =>
+      resolveWorkspaceDeckEntries({
+        selections: renderedSelections,
+        activeSelection,
+        focusedSelection: routeSelection,
+      }),
+    [activeSelection, renderedSelections, routeSelection],
   );
 
   useLayoutEffect(() => {
@@ -258,12 +295,13 @@ function WorkspaceDeck({ recoveryRequested }: { recoveryRequested: boolean }) {
   return (
     <RenderProfile id="WorkspaceDeck">
       <View style={styles.deck}>
-        {renderedEntries.map(({ selection, active }) => {
+        {renderedEntries.map(({ selection, active, focused }) => {
           return (
             <WorkspaceDeckEntry
               key={getWorkspaceSelectionKey(selection)}
               selection={selection}
               active={active}
+              focused={focused}
               recoveryRequested={recoveryRequested}
               onUnmountInactive={unmountWorkspaceSelection}
             />
@@ -277,11 +315,14 @@ function WorkspaceDeck({ recoveryRequested }: { recoveryRequested: boolean }) {
 function WorkspaceDeckEntry({
   selection,
   active,
+  focused,
   recoveryRequested,
   onUnmountInactive,
 }: {
   selection: ActiveWorkspaceSelection;
+  /** On display. It stays true under a plugin overlay, where `focused` is false. */
   active: boolean;
+  focused: boolean;
   recoveryRequested: boolean;
   onUnmountInactive: (selection: ActiveWorkspaceSelection) => void;
 }) {
@@ -311,8 +352,8 @@ function WorkspaceDeckEntry({
       <WorkspaceScreen
         serverId={selection.serverId}
         workspaceId={selection.workspaceId}
-        isRouteFocused={active}
-        recoveryRequested={active && recoveryRequested}
+        isRouteFocused={focused}
+        recoveryRequested={focused && recoveryRequested}
       />
     </RetainedPanel>
   );

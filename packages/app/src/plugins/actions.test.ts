@@ -71,6 +71,18 @@ describe("plugin surface navigation", () => {
     ]);
     expect(String(push.mock.calls[0][0])).toContain("board");
   });
+
+  it("marks only the overlay presentation in the route, for own and other plugins", () => {
+    const actions = capabilities();
+    actions.openSurface("own", { presentation: "overlay" });
+    actions.openSurface("own", { presentation: "page" });
+    actions.openSurface("board", { pluginId: "board", presentation: "overlay" });
+    expect(push.mock.calls.map(([href]) => String(href))).toEqual([
+      "/h/host-a/plugin/next/surface/own?presentation=overlay",
+      "/h/host-a/plugin/next/surface/own",
+      "/h/host-a/plugin/board/surface/board?presentation=overlay",
+    ]);
+  });
 });
 
 describe("plugin RPC host targeting", () => {

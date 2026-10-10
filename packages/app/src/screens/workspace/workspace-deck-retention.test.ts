@@ -6,6 +6,7 @@ import {
   reconcileRetainedWorkspaceSelections,
   resolveWorkspaceDeckRetentionLimit,
   resolveWorkspaceDeckEntries,
+  resolveWorkspaceDeckVisibleSelection,
   shouldKeepWorkspaceDeckEntryMounted,
   WORKSPACE_DECK_INACTIVE_TTL_MS,
   WORKSPACE_DECK_MAX_MOUNTED_WORKSPACES,
@@ -170,11 +171,57 @@ describe("resolveWorkspaceDeckEntries", () => {
       resolveWorkspaceDeckEntries({
         selections: [workspace("A"), workspace("B")],
         activeSelection: null,
+        focusedSelection: null,
       }),
     ).toEqual([
-      { selection: workspace("A"), active: false },
-      { selection: workspace("B"), active: false },
+      { selection: workspace("A"), active: false, focused: false },
+      { selection: workspace("B"), active: false, focused: false },
     ]);
+  });
+
+  it("shows the held workspace without focusing it under an overlay", () => {
+    expect(
+      resolveWorkspaceDeckEntries({
+        selections: [workspace("A"), workspace("B")],
+        activeSelection: workspace("A"),
+        focusedSelection: null,
+      }),
+    ).toEqual([
+      { selection: workspace("A"), active: true, focused: false },
+      { selection: workspace("B"), active: false, focused: false },
+    ]);
+  });
+});
+
+describe("resolveWorkspaceDeckVisibleSelection", () => {
+  it("prefers the route selection", () => {
+    expect(
+      resolveWorkspaceDeckVisibleSelection({
+        routeSelection: workspace("B"),
+        ownSelection: workspace("A"),
+        isOverlayOnTop: true,
+      }),
+    ).toEqual(workspace("B"));
+  });
+
+  it("holds the screen's own workspace while an overlay is on top", () => {
+    expect(
+      resolveWorkspaceDeckVisibleSelection({
+        routeSelection: null,
+        ownSelection: workspace("A"),
+        isOverlayOnTop: true,
+      }),
+    ).toEqual(workspace("A"));
+  });
+
+  it("shows nothing on another app-wide route", () => {
+    expect(
+      resolveWorkspaceDeckVisibleSelection({
+        routeSelection: null,
+        ownSelection: workspace("A"),
+        isOverlayOnTop: false,
+      }),
+    ).toBeNull();
   });
 });
 

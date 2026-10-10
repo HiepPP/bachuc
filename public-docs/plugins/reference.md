@@ -298,6 +298,8 @@ for remote workspaces; `localhost` URLs refer to that desktop.
 Use the [settings API](#settings-screens) for typed host-scoped persistence across clients.
 Use `openSettings`, `openSurface`, and `openPanel` for your own registered contributions.
 `openSurface(id, { pluginId })` also opens another plugin's surface.
+`openSurface(id, { presentation: "overlay" })` shows the surface over the current screen; see
+[surfaces](#surfaces-and-sidebar-items).
 
 ### Server runtime
 
@@ -780,8 +782,13 @@ instead of calling `onPress`, and `requiresWorkspace` does not disable it.
 
 Paseo owns the route, header, close action, host picker, error boundary, and query client. The plugin owns the surface body.
 
-`openSurface(id, { pluginId, serverId })` opens another plugin's surface or picks a host; both
-default to the calling plugin. `client.openNewWorkspace({ cwd, projectId, name, serverId })` opens
+`openSurface(id, { pluginId, serverId, presentation })` opens another plugin's surface, picks a
+host, or picks how the surface appears; `pluginId` and `serverId` default to the calling plugin
+and the active host. `presentation: "overlay"` shows the surface over the current screen with a
+dimmed backdrop on wide layouts; a backdrop click, the Close button, or Escape (web) closes it.
+Compact layouts, hosts older than this option, a surface on another host, and a reloaded page
+(nothing is left to show behind it) show a page, as does `presentation: "page"`, which is the
+default. `client.openNewWorkspace({ cwd, projectId, name, serverId })` opens
 the new workspace screen for a project directory. `client.openPluginsPage()` opens the Plugins page
 of host settings for the plugin's host.
 
@@ -1495,7 +1502,7 @@ Every callback receives:
 | `context`                 | All                 | Matching discriminator.                                                                                         |
 | `paseo`                   | All                 | Selected host's existing `PaseoApi`.                                                                            |
 | `rpc(contract, input)`    | All                 | Typed call to this installation's daemon-side plugin handler.                                                   |
-| `openSurface(id, opts)`   | All                 | Opens a registered global surface; `opts.pluginId` and `opts.serverId` target another plugin or host.           |
+| `openSurface(id, opts)`   | All                 | Opens a registered global surface; `opts` sets `pluginId`, `serverId`, or `presentation` (`overlay`).           |
 | `workspace`               | Workspace and agent | Synchronous workspace snapshot.                                                                                 |
 | `agent`                   | Agent               | Synchronous matching agent snapshot.                                                                            |
 | `openPanel(id, options?)` | Workspace and agent | Opens a registered panel in the callback's current context. Pass `{ location: "explorer" }` to target Explorer. |

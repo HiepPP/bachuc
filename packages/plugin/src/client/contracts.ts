@@ -408,8 +408,15 @@ export interface PluginCommandCapabilities {
     /** Calls this plugin's installation on another configured, connected host. */
     options?: { serverId: string },
   ): Promise<ZodOutput<OutputSchema>>;
-  /** Opens a surface. `pluginId` opens another plugin's surface; `serverId` picks its host. */
-  openSurface(id: string, options?: { pluginId?: string; serverId?: string }): void;
+  /**
+   * Opens a surface. `pluginId` opens another plugin's surface; `serverId` picks its host.
+   * `presentation: "overlay"` shows the surface over the current screen with a dimmed backdrop
+   * on wide layouts. Compact layouts and older hosts show a page.
+   */
+  openSurface(
+    id: string,
+    options?: { pluginId?: string; serverId?: string; presentation?: "page" | "overlay" },
+  ): void;
   openSettings(id: string): void;
 }
 

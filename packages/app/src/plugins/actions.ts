@@ -10,12 +10,13 @@ import { resolvePluginPanelOpenLocation } from "./workspace-panels/locations";
 import type { PluginSurfaceRuntime } from "./surface-runtime";
 import type { InstalledPlugin } from "./types";
 import { createPluginNavigation } from "./navigation";
+import type { PluginSurfacePresentation } from "./routes";
 import { useActiveHostStore } from "@/stores/active-host-store";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 
 export interface PluginNavigation {
   openSettings(pluginId: string, screenId: string): void;
-  openSurface(pluginId: string, surfaceId: string): void;
+  openSurface(pluginId: string, surfaceId: string, presentation?: PluginSurfacePresentation): void;
   openWorkspacePanel(pluginId: string, panelId: string, location: PluginPanelLocation): void;
   openAgentPanel(
     pluginId: string,
@@ -67,11 +68,15 @@ export function createPluginCapabilities(
         if (!plugin.surfaces.some((surface) => surface.id === surfaceId)) {
           throw new Error(`Plugin surface is unavailable: ${surfaceId}`);
         }
-        navigation.openSurface(plugin.id, surfaceId);
+        navigation.openSurface(plugin.id, surfaceId, options?.presentation);
         return;
       }
       // Another plugin or host: the surface route reports a missing surface itself.
-      createPluginNavigation({ serverId, workspaceId: null }).openSurface(pluginId, surfaceId);
+      createPluginNavigation({ serverId, workspaceId: null }).openSurface(
+        pluginId,
+        surfaceId,
+        options?.presentation,
+      );
     },
   };
 }

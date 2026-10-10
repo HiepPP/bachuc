@@ -1,8 +1,10 @@
+import { useIsFocused, useNavigationState, useRoute } from "@react-navigation/native";
 import { router, useLocalSearchParams } from "expo-router";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { ChevronDown, X } from "lucide-react-native";
-import { useCallback, useMemo, useRef, useState, type ComponentType } from "react";
+import { useCallback, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Platform, Pressable, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { HeaderIconBadge } from "@/components/headers/header-icon-badge";
@@ -11,15 +13,27 @@ import { ScreenHeader } from "@/components/headers/screen-header";
 import { ScreenTitle } from "@/components/headers/screen-title";
 import { HostPicker } from "@/components/hosts/host-picker";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { isWeb } from "@/constants/platform";
+import {
+  getOverlayRoot,
+  OverlayLayerProvider,
+  useGlobalWebOverlayLayer,
+  useWebOverlayRegistration,
+} from "@/lib/overlay-root";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import { useActiveServerId } from "@/hosts/use-visible-hosts";
 import type { Theme } from "@/styles/theme";
 import type { ShortcutKey } from "@/utils/format-shortcut";
+import { WindowChromeRegion } from "@/utils/desktop-window";
 import { usePluginHostNavigation } from "./host-navigation";
 import { resolvePluginIcon } from "./icons";
 import { toPluginTheme } from "./theme";
 import { useInstalledPlugin, usePluginInstallations } from "./registry";
-import { buildPluginSurfaceRoute } from "./routes";
+import {
+  buildPluginSurfaceRoute,
+  isPluginOverlayRoute,
+  type PluginSurfacePresentation,
+} from "./routes";
 import { rememberPluginContributionHost } from "./contribution-host";
 import { SurfaceErrorBoundary } from "./surface-error-boundary";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -79,6 +93,69 @@ function SurfaceRenderer({
 
 const ThemedSurfaceRenderer = withUnistyles(SurfaceRenderer);
 
+// A portal escapes the hidden screen, so a surface covered by a later screen hides itself.
+const HIDDEN_STYLE = { display: "none" } as const;
+
+/**
+ * The popup form of a plugin surface: a dimmed backdrop and a centered card.
+ *
+ * On web it renders into the shared overlay root. Electron paints browser panes in a body-level
+ * layer that sits above the app root, so only that root covers them. A real React portal keeps
+ * the plugin runtime context. The card is a web overlay scope: it owns Escape, traps Tab, and
+ * restores focus on close. A modal opened inside the card registers above it, so one Escape
+ * closes only that modal.
+ */
+function PluginSurfaceOverlay({
+  close,
+  focused,
+  children,
+}: {
+  close: () => void;
+  focused: boolean;
+  children: ReactNode;
+}) {
+  const webOverlayActive = isWeb && focused;
+  const modalLayer = useGlobalWebOverlayLayer("modal", webOverlayActive);
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return false;
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return true;
+    },
+    [close],
+  );
+  const setScope = useWebOverlayRegistration({
+    active: webOverlayActive,
+    layer: modalLayer,
+    onKeyDown: handleKeyDown,
+  });
+  const view = (
+    <View
+      style={[styles.overlayRoot, isWeb && { zIndex: modalLayer }, !focused && HIDDEN_STYLE]}
+      testID="plugin-surface-overlay"
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss overlay"
+        focusable={false}
+        onPress={close}
+        style={styles.backdrop}
+        testID="plugin-surface-backdrop"
+      />
+      <View ref={setScope} style={styles.overlayCard} role="dialog" aria-modal tabIndex={-1}>
+        <OverlayLayerProvider layer={modalLayer}>
+          {/* The card sits away from the window corners, so it owns no window controls. */}
+          <WindowChromeRegion corners="none">{children}</WindowChromeRegion>
+        </OverlayLayerProvider>
+      </View>
+    </View>
+  );
+  if (isWeb) return createPortal(view, getOverlayRoot());
+  return view;
+}
+
 function resolvePlatform(): PluginSurfaceProps["layout"]["platform"] {
   if (Platform.OS === "ios") return "ios";
   if (Platform.OS === "android") return "android";
@@ -89,11 +166,13 @@ function PluginHostSwitcher({
   serverId,
   pluginId,
   identity,
+  presentation,
   serverIds,
 }: {
   serverId: string;
   pluginId: string;
   identity: PluginSurfaceContributionIdentity;
+  presentation: PluginSurfacePresentation;
   serverIds: string[];
 }) {
   const allHosts = useHosts();
@@ -108,9 +187,9 @@ function PluginHostSwitcher({
   const selectHost = useCallback(
     (nextServerId: string) => {
       rememberPluginContributionHost(`${pluginId}/${identity.kind}/${identity.id}`, nextServerId);
-      router.replace(buildPluginSurfaceRoute(nextServerId, pluginId, identity));
+      router.replace(buildPluginSurfaceRoute(nextServerId, pluginId, identity, presentation));
     },
-    [identity, pluginId],
+    [identity, pluginId, presentation],
   );
   const openPicker = useCallback(() => setOpen(true), []);
   // An active host already decides which host this page shows.
@@ -152,6 +231,7 @@ export function PluginSurfaceScreen() {
     pluginId?: string | string[];
     contributionKind?: string | string[];
     contributionId?: string | string[];
+    presentation?: string | string[];
   }>();
   const serverId = routeParam(params.serverId);
   const pluginId = routeParam(params.pluginId);
@@ -166,6 +246,13 @@ export function PluginSurfaceScreen() {
   const hosts = useHosts();
   const client = useHostRuntimeClient(serverId);
   const compact = useIsCompactFormFactor();
+  const presentation: PluginSurfacePresentation =
+    routeParam(params.presentation) === "overlay" ? "overlay" : "page";
+  // The route asks for an overlay and a screen sits below it. `_layout.tsx` applies the same rule
+  // to the stack options, so the transparent screen and this card appear together.
+  const routeKey = useRoute().key;
+  const isOverlayRoute = useNavigationState((state) => isPluginOverlayRoute(state, routeKey));
+  const overlay = isOverlayRoute && !compact;
   const { sidebarItem, surface } = useMemo(
     () => resolvePluginSurfaceContribution(plugin, identity),
     [identity, plugin],
@@ -182,6 +269,7 @@ export function PluginSurfaceScreen() {
     if (router.canGoBack()) router.back();
     else router.replace(`/h/${encodeURIComponent(serverId)}`);
   }, [serverId]);
+  const focused = useIsFocused();
   const layout = useMemo(() => ({ compact, platform: resolvePlatform() }), [compact]);
   const host = useMemo(() => ({ id: serverId, label: hostLabel }), [hostLabel, serverId]);
   const headerLeft = useMemo(
@@ -205,6 +293,7 @@ export function PluginSurfaceScreen() {
             serverId={serverId}
             pluginId={pluginId}
             identity={identity}
+            presentation={presentation}
             serverIds={contributionServerIds}
           />
         ) : null}
@@ -220,11 +309,11 @@ export function PluginSurfaceScreen() {
         </HeaderToggleButton>
       </>
     ),
-    [close, contributionServerIds, identity, pluginId, serverId],
+    [close, contributionServerIds, identity, pluginId, presentation, serverId],
   );
 
-  return (
-    <View style={styles.screen}>
+  const content = (
+    <>
       <ScreenHeader left={headerLeft} right={headerRight} />
       <View style={styles.body}>
         {plugin && surface && client ? (
@@ -248,7 +337,15 @@ export function PluginSurfaceScreen() {
           </Text>
         )}
       </View>
-    </View>
+    </>
+  );
+
+  if (!overlay) return <View style={styles.screen}>{content}</View>;
+
+  return (
+    <PluginSurfaceOverlay close={close} focused={focused}>
+      {content}
+    </PluginSurfaceOverlay>
   );
 }
 
@@ -259,6 +356,28 @@ const styles = StyleSheet.create((theme) => ({
   },
   body: {
     flex: 1,
+  },
+  overlayRoot: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    // The shared overlay root ignores pointer events so its children opt in.
+    pointerEvents: "auto",
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.35)",
+  },
+  overlayCard: {
+    width: "92%",
+    maxWidth: 1180,
+    height: "88%",
+    backgroundColor: theme.colors.surface0,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    overflow: "hidden",
+    ...theme.shadow.lg,
   },
   errorText: {
     color: theme.colors.statusDanger,

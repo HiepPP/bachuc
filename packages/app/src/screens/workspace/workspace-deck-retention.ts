@@ -35,7 +35,17 @@ interface WorkspaceDeckEntryMountInput {
 
 interface ResolveWorkspaceDeckEntriesInput {
   selections: ActiveWorkspaceSelection[];
+  /** The selection the deck shows. */
   activeSelection: ActiveWorkspaceSelection | null;
+  /** The selection the current route points at; it differs from `activeSelection` under an overlay. */
+  focusedSelection: ActiveWorkspaceSelection | null;
+}
+
+interface ResolveWorkspaceDeckVisibleSelectionInput {
+  routeSelection: ActiveWorkspaceSelection | null;
+  /** The workspace of the route screen that hosts the deck. */
+  ownSelection: ActiveWorkspaceSelection | null;
+  isOverlayOnTop: boolean;
 }
 
 export function getWorkspaceSelectionKey(selection: ActiveWorkspaceSelection): string {
@@ -145,16 +155,35 @@ export function orderWorkspaceSelectionsForStableRender(
   );
 }
 
+/**
+ * An overlay route (a plugin surface drawn as a popup) is not a workspace route, so the route
+ * selection is null while it is open. The screen below stays on display, so the deck keeps
+ * showing that screen's own workspace, unfocused.
+ */
+export function resolveWorkspaceDeckVisibleSelection({
+  routeSelection,
+  ownSelection,
+  isOverlayOnTop,
+}: ResolveWorkspaceDeckVisibleSelectionInput): ActiveWorkspaceSelection | null {
+  if (routeSelection) {
+    return routeSelection;
+  }
+  return isOverlayOnTop ? ownSelection : null;
+}
+
 export function resolveWorkspaceDeckEntries({
   selections,
   activeSelection,
+  focusedSelection,
 }: ResolveWorkspaceDeckEntriesInput): Array<{
   selection: ActiveWorkspaceSelection;
   active: boolean;
+  focused: boolean;
 }> {
   return selections.map((selection) => ({
     selection,
     active: areWorkspaceSelectionsEqual(selection, activeSelection),
+    focused: areWorkspaceSelectionsEqual(selection, focusedSelection),
   }));
 }
 
