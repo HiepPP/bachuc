@@ -16,18 +16,20 @@ import {
   LifecycleStepper,
   ManualChecksCell,
   OverviewCell,
-  RunLogCell,
 } from "./overview-cells";
+import { AutorunLogCard, ProgressCard, TasksCard, WaitingCard } from "./board-rail";
 import { AutorunStrip, RunningNowCell, UpNextCell } from "./run-cells";
-import { TaskList } from "./task-list";
 import { buildTimeline } from "./timeline";
 import { clockAt } from "./timeline-geometry";
 import { BranchTimeline, TimelineStrip } from "./timeline-view";
 
-// The view lays itself out by its own width, so the Explorer panel and the page share it. At
-// WIDE_GRID and above the cells sit in three columns. Below NARROW the Gantt becomes one strip
-// and every cell stacks.
-const WIDE_GRID = 1000;
+// From STACK up, the page has a fixed left rail with the former Explorer board (progress, Waiting on
+// the owner, tasks, and the Autorun log) and the timeline-first view on the right. Below STACK
+// everything stacks in one scroll. The right side lays itself out by its own width: three columns
+// from WIDE_GRID, and below NARROW the Gantt becomes one strip.
+const STACK = 720;
+const RAIL_WIDTH = 360;
+const WIDE_GRID = 900;
 const NARROW = 520;
 // Below this width the five lifecycle steps cannot fit an icon, name, and meta line each.
 const COMPACT_STEPPER = 720;
@@ -67,7 +69,10 @@ export function WatchtowerOverview({
     retry: false,
   });
   const [width, setWidth] = useState(0);
-  const narrow = width > 0 && width < NARROW;
+  const stacked = width > 0 && width < STACK;
+  // The width of the timeline-first side.
+  const mainWidth = stacked ? width : width - RAIL_WIDTH;
+  const narrow = mainWidth > 0 && mainWidth < NARROW;
   const data = overview.data;
   const derived = useMemo(() => {
     if (!data) return null;
@@ -94,9 +99,6 @@ export function WatchtowerOverview({
         blocked: counts.blocked,
         todo: counts.todo,
       },
-      running: timeline.bars
-        .filter((bar) => bar.kind === "running")
-        .map((bar) => ({ id: bar.id, minutes: Math.round(bar.end - bar.start) })),
     };
   }, [data]);
   // The ADR the owner is reading, if any.
@@ -161,31 +163,26 @@ export function WatchtowerOverview({
     <DecisionsCell decisions={data.decisions} onOpen={setDecision} theme={theme} />
   ) : null;
   const archived = data ? <ArchivedPlansCell history={data.history} theme={theme} /> : null;
-  const tasksCell = (
-    <OverviewCell
-      title="Tasks"
-      aside={board.data ? `${board.data.tasks.length}` : undefined}
+  // The rail: the former Explorer board. Its log lists every RUN.md row, newest first.
+  const progress = board.data ? <ProgressCard tasks={board.data.tasks} theme={theme} /> : null;
+  const waiting = board.data ? (
+    <WaitingCard
+      questions={board.data.questions}
+      proposedAdrs={board.data.proposedAdrs}
       theme={theme}
-    >
-      {board.error ? (
-        <Text style={{ fontSize: 12.5, color: colors.statusDanger }}>
-          Could not load tasks. {board.error.message}
-        </Text>
-      ) : !board.data ? (
-        <Text style={muted}>Loading tasks…</Text>
-      ) : (
-        <TaskList
-          tasks={board.data.tasks}
-          questions={board.data.questions}
-          workspaceId={workspaceId}
-          sourceKey={workspaceId}
-          dense={width < WIDE_GRID}
-          theme={theme}
-          collapsedGroups={["done"]}
-        />
-      )}
-    </OverviewCell>
+    />
+  ) : null;
+  const tasks = (
+    <TasksCard
+      board={board.data}
+      error={board.error}
+      workspaceId={workspaceId}
+      sourceKey={workspaceId}
+      theme={theme}
+    />
   );
+  const logRows = useMemo(() => [...(data?.run?.log ?? [])].reverse(), [data]);
+  const autorunLog = <AutorunLogCard run={board.data?.run ?? null} rows={logRows} theme={theme} />;
 
   let body: ReactNode;
   if (overview.error) {
@@ -323,6 +320,7 @@ export function WatchtowerOverview({
             model={timeline}
             nowMinute={data.run?.nowMinute ?? null}
             started={started}
+            stopped={data.run?.stopped ?? false}
             theme={theme}
           />
         ) : (
@@ -335,7 +333,6 @@ export function WatchtowerOverview({
         )}
       </OverviewCell>
     );
-    const log = <RunLogCell run={data.run} running={derived.running} theme={theme} />;
     const checks = <ManualChecksCell checks={data.manualChecks} theme={theme} />;
     const runningNow = (
       <RunningNowCell timeline={timeline} tasks={data.tasks} started={started} theme={theme} />
@@ -348,7 +345,7 @@ export function WatchtowerOverview({
         <LifecycleStepper
           phases={derived.phases}
           counts={derived.counts}
-          compact={width > 0 && width < COMPACT_STEPPER}
+          compact={mainWidth > 0 && mainWidth < COMPACT_STEPPER}
           theme={theme}
         />
         {data.warnings.map((warning) => (
@@ -357,7 +354,7 @@ export function WatchtowerOverview({
           </Text>
         ))}
         <AutorunStrip run={data.run} theme={theme} />
-        {width >= WIDE_GRID ? (
+        {mainWidth >= WIDE_GRID ? (
           <>
             {timelineCell}
             <Row>
@@ -367,18 +364,14 @@ export function WatchtowerOverview({
                   {upNext}
                 </View>
               </Column>
-              <Column>{tasksCell}</Column>
+              <Column>{needs}</Column>
               <Column>
                 <View style={{ gap: GAP }}>
-                  {needs}
+                  {checks}
                   {decisions}
                   {archived}
                 </View>
               </Column>
-            </Row>
-            <Row>
-              <Column>{log}</Column>
-              <Column>{checks}</Column>
             </Row>
           </>
         ) : narrow ? (
@@ -386,9 +379,7 @@ export function WatchtowerOverview({
             {runningNow}
             {timelineCell}
             {needs}
-            {tasksCell}
             {upNext}
-            {log}
             {checks}
             {decisions}
             {archived}
@@ -401,32 +392,57 @@ export function WatchtowerOverview({
               <Column>{needs}</Column>
               <Column>{upNext}</Column>
             </Row>
-            {tasksCell}
             <Row>
-              <Column>{log}</Column>
               <Column>{checks}</Column>
-            </Row>
-            <Row>
               <Column>{decisions}</Column>
-              <Column>{archived}</Column>
             </Row>
+            {archived}
           </>
         )}
       </View>
     );
   }
 
+  const pad = stacked ? 12 : 24;
   return (
-    <ScrollView
+    <View
       style={{ flex: 1, backgroundColor: colors.surface0 }}
-      contentContainerStyle={{ padding: narrow ? 12 : 24, paddingTop: narrow ? 12 : 18 }}
       // The outer width does not depend on the padding, so the layout cannot flip back and forth.
       onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
     >
-      <View>
-        {header}
-        {body}
-      </View>
+      {stacked ? (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad, gap: GAP }}>
+          {header}
+          {progress}
+          {waiting}
+          {body}
+          {tasks}
+          {autorunLog}
+        </ScrollView>
+      ) : (
+        <View style={{ flex: 1, flexDirection: "row" }}>
+          <ScrollView
+            style={{
+              width: RAIL_WIDTH,
+              flexGrow: 0,
+              flexShrink: 0,
+              borderRightWidth: 1,
+              borderRightColor: colors.border,
+              backgroundColor: colors.surface1,
+            }}
+            contentContainerStyle={{ padding: 16, gap: GAP }}
+          >
+            {progress}
+            {waiting}
+            {tasks}
+            {autorunLog}
+          </ScrollView>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad, paddingTop: 18 }}>
+            {header}
+            {body}
+          </ScrollView>
+        </View>
+      )}
       <DecisionModal
         target={decision}
         workspaceId={workspaceId}
@@ -434,6 +450,6 @@ export function WatchtowerOverview({
         theme={theme}
         onClose={() => setDecision(null)}
       />
-    </ScrollView>
+    </View>
   );
 }

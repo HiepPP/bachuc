@@ -2,10 +2,9 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { type ReactNode, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
-import type { Decision, History, ManualCheck, OverviewRun } from "../shared/overview";
+import type { Decision, History, ManualCheck } from "../shared/overview";
 import { DECISION_ID } from "../shared/overview";
 import type { Phase, PhaseName } from "./lifecycle";
-import { runningLogLine } from "./run-log";
 
 // Presentational parts of the overview. They take data through props and never fetch.
 export const LIST_LIMIT = 5;
@@ -262,119 +261,6 @@ export function LifecycleStepper({
         );
       })}
     </View>
-  );
-}
-
-export interface RunningTask {
-  id: string;
-  minutes: number;
-}
-
-const logColumns = [44, 44, 36] as const;
-
-// A dated log time keeps only its clock part, so it fits the 44 px column.
-function clockOnly(value: string): string {
-  return value.replace(/^\d{4}-\d{2}-\d{2}[ T]/, "");
-}
-
-// The columns keep their width, and the detail gets its own line, so a long detail never squeezes
-// the times together.
-function LogLine({
-  cells,
-  tail,
-  strong,
-  tone,
-  first,
-  theme,
-}: {
-  cells: readonly [string, string, string, string];
-  tail: string;
-  strong?: boolean;
-  tone?: "active" | "warning";
-  first: boolean;
-} & ThemeProps) {
-  const { colors } = theme;
-  const text = { fontFamily: MONO, fontSize: 11, lineHeight: 18 };
-  const base = strong ? colors.foreground : colors.foregroundMuted;
-  const resultColor =
-    tone === "active" ? colors.accent : tone === "warning" ? colors.statusWarning : base;
-  return (
-    <View
-      style={{
-        paddingVertical: 6,
-        borderTopWidth: first ? 0 : 1,
-        borderTopColor: colors.border,
-      }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center" }}>
-        {logColumns.map((width, index) => (
-          <Text key={width + index} style={{ ...text, width, flexShrink: 0, color: base }}>
-            {cells[index]}
-          </Text>
-        ))}
-        <Text numberOfLines={1} style={{ ...text, flex: 1, color: resultColor }}>
-          {cells[3]}
-        </Text>
-      </View>
-      {tail ? (
-        <Text
-          numberOfLines={2}
-          style={{ ...text, color: tail.startsWith("#") ? colors.accent : base }}
-        >
-          {tail}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
-export function RunLogCell({
-  run,
-  running,
-  theme,
-}: { run: OverviewRun | null; running: readonly RunningTask[] } & ThemeProps) {
-  const log = run?.log ?? [];
-  const live = running.slice(0, LIST_LIMIT);
-  const recent = log.slice(Math.max(0, log.length - (LIST_LIMIT - live.length)));
-  return (
-    <OverviewCell
-      title="Run log"
-      aside={run ? `${log.length} iterations` : undefined}
-      theme={theme}
-    >
-      {!run ? <Empty text="No run yet." theme={theme} /> : null}
-      {recent.map((row, index) => (
-        <LogLine
-          key={`${row.task}-${row.start}-${index}`}
-          cells={[
-            clockOnly(row.start),
-            clockOnly(row.end),
-            row.task.replace(/^TASK-/, ""),
-            row.result.toLowerCase(),
-          ]}
-          tail={row.detail}
-          first={index === 0}
-          theme={theme}
-        />
-      ))}
-      {live.map((task, index) => {
-        const line = runningLogLine(task, Boolean(run?.stopped));
-        return (
-          <LogLine
-            key={`running-${task.id}`}
-            cells={line.cells}
-            tail={line.tail}
-            strong
-            tone={line.tone}
-            first={recent.length === 0 && index === 0}
-            theme={theme}
-          />
-        );
-      })}
-      {run && log.length === 0 && live.length === 0 ? (
-        <Empty text="No iterations logged yet." theme={theme} />
-      ) : null}
-    </OverviewCell>
   );
 }
 

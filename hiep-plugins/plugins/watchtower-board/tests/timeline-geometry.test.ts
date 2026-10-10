@@ -7,6 +7,7 @@ import {
   dayAt,
   laneCenter,
   MIN_BREAK_MINUTES,
+  nowLabel,
   PAD_X,
   parallelCaption,
   timelineGeometry,
@@ -277,6 +278,46 @@ test("a break inside one day keeps a single day label", () => {
     geometry.days.map((entry) => entry.label),
     ["Wed 7"],
   );
+});
+
+test("a Started date with no time starts the axis at the first task, with no break before it", () => {
+  const model = buildTimeline({
+    tasks: [task("TASK-001", "DONE"), task("TASK-002", "DONE"), task("TASK-003", "TODO")],
+    run: {
+      runner: "loop",
+      started: "2026-10-07",
+      finished: null,
+      log: [row("TASK-001", 942, 964), row("TASK-002", 1034, 1038)],
+      nowMinute: 1038,
+      stopped: true,
+    },
+    questions: [],
+  });
+  assert.equal(model.axis.start, 942);
+  assert.ok(model.axis.ticks.every((tick) => tick.minute >= 942));
+  const geometry = timelineGeometry(model, 400, 1038, "2026-10-07");
+  assert.equal(geometry.breaks.length, 0);
+  assert.equal(geometry.bars[0].x, PAD_X);
+  // A Started value with a time keeps its axis from minute 0.
+  const timed = buildTimeline({
+    tasks: [task("TASK-001", "DONE")],
+    run: {
+      runner: "loop",
+      started: "2026-10-07 15:00",
+      finished: null,
+      log: [row("TASK-001", 42, 64)],
+      nowMinute: 64,
+      stopped: false,
+    },
+    questions: [],
+  });
+  assert.equal(timed.axis.start, 0);
+});
+
+test("the now label of a stopped run says stopped", () => {
+  assert.equal(nowLabel("17:18", true), "stopped 17:18");
+  assert.equal(nowLabel("16:01", false), "now 16:01");
+  assert.equal(nowLabel(null, true), "");
 });
 
 test("a gap shorter than the break threshold stays at scale", () => {

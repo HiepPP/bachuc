@@ -31,6 +31,8 @@ import {
   type PluginWorkspaceHeaderSubtitleContribution,
   type PluginComposerStopButtonContribution,
   type PluginNewWorkspacePanelContribution,
+  type PluginShortcutContribution,
+  type PluginSurfaceOptions,
   type PluginSurfaceProps,
   type PluginTimelineRendererContribution,
   type PluginTimelineTransformerContribution,
@@ -40,6 +42,7 @@ import {
 import type { EvaluatedPlugin } from "./types";
 import type { ComponentType } from "react";
 import { resolvePluginIcon } from "./icons";
+import { parseChordString } from "@/keyboard/shortcut-string";
 import { pluginReactNativeRuntime } from "./react-native/runtime";
 import { parsePluginThemeContribution } from "./themes";
 
@@ -196,6 +199,8 @@ export function runPluginClientBundle(
   const composerStopButtonIds = new Set<string>();
   const newWorkspacePanels: PluginNewWorkspacePanelContribution[] = [];
   const newWorkspacePanelIds = new Set<string>();
+  const shortcuts: PluginShortcutContribution[] = [];
+  const shortcutIds = new Set<string>();
   const sidebarContributionIds = new Set<string>();
   const collector: Omit<EvaluatedPlugin, "id" | "cleanup"> = {
     surfaces: [],
@@ -216,6 +221,7 @@ export function runPluginClientBundle(
     workspaceHeaderSubtitles,
     composerStopButtons,
     newWorkspacePanels,
+    shortcuts,
   };
   const composerInterceptorIds = new Set<string>();
   const surfaceIds = new Set<string>();
@@ -287,14 +293,48 @@ export function runPluginClientBundle(
         settingsScreenIds.delete(screenId),
       );
     },
-    addSurface(surfaceId: string, Component: ComponentType<PluginSurfaceProps>) {
+    addSurface(
+      surfaceId: string,
+      Component: ComponentType<PluginSurfaceProps>,
+      options?: PluginSurfaceOptions,
+    ) {
       const normalizedId = requireId(surfaceId, "surface id");
       if (surfaceIds.has(normalizedId)) throw new Error(`Duplicate surface: ${normalizedId}`);
       if (typeof Component !== "function")
         throw new Error(`Surface ${normalizedId} is not a component`);
+      const title = options?.title?.trim();
+      const icon = options?.icon?.trim();
+      if (icon) resolvePluginIcon(icon);
       surfaceIds.add(normalizedId);
-      return register(collector.surfaces, { id: normalizedId, Component }, () =>
-        surfaceIds.delete(normalizedId),
+      return register(
+        collector.surfaces,
+        { id: normalizedId, Component, ...(title ? { title } : {}), ...(icon ? { icon } : {}) },
+        () => surfaceIds.delete(normalizedId),
+      );
+    },
+    addShortcut(contribution: PluginShortcutContribution) {
+      const normalizedId = requireId(contribution.id, "shortcut id");
+      if (shortcutIds.has(normalizedId)) throw new Error(`Duplicate shortcut: ${normalizedId}`);
+      if (typeof contribution.onPress !== "function")
+        throw new Error(`Shortcut ${normalizedId} has no onPress`);
+      const combo = contribution.combo.trim();
+      // Throws on an invalid combo, so a typo fails at load instead of never firing.
+      if (parseChordString(combo).length !== 1)
+        throw new Error(`Shortcut ${normalizedId} must be one key combo, not a chord`);
+      const surface =
+        contribution.surface === undefined
+          ? undefined
+          : requireId(contribution.surface, "shortcut surface id");
+      shortcutIds.add(normalizedId);
+      return register(
+        shortcuts,
+        {
+          id: normalizedId,
+          combo,
+          onPress: contribution.onPress,
+          ...(surface ? { surface } : {}),
+        },
+        () => shortcutIds.delete(normalizedId),
       );
     },
     addSidebarItem(contribution: PluginSidebarContribution) {
@@ -670,6 +710,11 @@ export function runPluginClientBundle(
     entryCleanup = setup(pluginContext);
     if (typeof entryCleanup !== "function")
       throw new Error(`Plugin ${id} contribution must return a cleanup function`);
+    for (const shortcut of shortcuts) {
+      if (shortcut.surface !== undefined && !surfaceIds.has(shortcut.surface)) {
+        throw new Error(`Shortcut ${shortcut.id} references missing surface ${shortcut.surface}`);
+      }
+    }
     for (const item of collector.sidebarItems) {
       if (!surfaceIds.has(item.surface)) {
         throw new Error(`Sidebar item ${item.id} references missing surface ${item.surface}`);
@@ -728,5 +773,6 @@ export function runPluginClientBundle(
     workspaceHeaderSubtitles: collector.workspaceHeaderSubtitles,
     composerStopButtons: collector.composerStopButtons,
     newWorkspacePanels: collector.newWorkspacePanels,
+    shortcuts: collector.shortcuts,
   };
 }

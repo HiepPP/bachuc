@@ -41,6 +41,9 @@ import {
   useActiveWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { dispatchTopWebOverlayKeyDown } from "@/lib/overlay-root";
+import { useInstalledPlugins } from "@/plugins/registry";
+import { resolvePluginShortcut } from "@/plugins/shortcuts";
+import { useActiveHostStore } from "@/stores/active-host-store";
 
 export function useKeyboardShortcuts({
   enabled,
@@ -100,6 +103,41 @@ export function useKeyboardShortcuts({
       keyboardWorkspaceSelectionRef.current = activeWorkspaceSelection;
     }
   }, [activeWorkspaceSelection]);
+
+  const plugins = useInstalledPlugins();
+  const activeServerId = useActiveHostStore((state) => state.activeServerId);
+  // Runs a plugin's own key combo. Returns true when the combo belonged to a plugin.
+  const performPluginShortcut = (event: KeyboardEvent): boolean => {
+    if (isImeComposingKeyboardEvent(event)) return false;
+    const store = useKeyboardShortcutsStore.getState();
+    if (store.capturingShortcut) return false;
+    const result = resolvePluginShortcut({
+      plugins,
+      activeServerId,
+      hostBindings: bindings,
+      event,
+      isMac,
+      pathname,
+    });
+    if (!result) return false;
+    // A press opens something new, so it waits while a dialog or the Command Center is open.
+    if (result.kind === "press" && (store.commandCenterOpen || hasActiveWebOverlay())) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    if (result.kind === "close") {
+      if (router.canGoBack()) router.back();
+      return true;
+    }
+    const selection = keyboardWorkspaceSelectionRef.current ?? activeWorkspaceSelection;
+    const workspaceId =
+      selection?.serverId === result.plugin.serverId ? selection.workspaceId : null;
+    try {
+      result.shortcut.onPress({ workspaceId });
+    } catch (error) {
+      console.warn(`[Plugins] Shortcut ${result.plugin.id}/${result.shortcut.id} failed`, error);
+    }
+    return true;
+  };
 
   useEffect(() => {
     if (!isDesktopApp) {
@@ -317,6 +355,11 @@ export function useKeyboardShortcuts({
   // of being re-registered whenever a route, callback, or selection changes.
   const handleKeyDown = useStableEvent((event: KeyboardEvent) => {
     if (!shouldHandle()) {
+      return;
+    }
+
+    // Before the overlay scope: a plugin shortcut closes its own surface overlay.
+    if (performPluginShortcut(event)) {
       return;
     }
 

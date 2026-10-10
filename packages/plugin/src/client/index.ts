@@ -14,6 +14,8 @@ export type {
   PluginNewWorkspacePanelContribution,
   PluginSettingsScreenContribution,
   PluginSurfaceContribution,
+  PluginSurfaceOptions,
+  PluginShortcutContribution,
   PluginSidebarAction,
   PluginSidebarContribution,
   PluginTimelineTransformerContribution,

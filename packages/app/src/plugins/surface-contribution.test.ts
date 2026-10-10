@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { InstalledPlugin } from "./types";
 import {
   getPluginSurfaceContributionServerIds,
+  pluginSurfaceHeading,
   resolvePluginSurfaceContribution,
 } from "./surface-contribution";
 
@@ -89,5 +90,25 @@ describe("plugin surface contribution identity", () => {
       "host-v2",
       "same-surface",
     ]);
+  });
+
+  it("names a surface by its sidebar item, then its own title and icon, then its id", () => {
+    const Component = () => null;
+    const surface = { id: "board", Component, title: "Watchtower", icon: "ListTodo" };
+    expect(pluginSurfaceHeading(null, surface, "watchtower-board")).toEqual({
+      title: "Watchtower",
+      icon: "ListTodo",
+    });
+    expect(
+      pluginSurfaceHeading(
+        { id: "nav", title: "Board", icon: "Blocks", surface: "board" },
+        surface,
+        "watchtower-board",
+      ),
+    ).toEqual({ title: "Board", icon: "Blocks" });
+    expect(pluginSurfaceHeading(null, { id: "board", Component }, "watchtower-board")).toEqual({
+      title: "board",
+      icon: null,
+    });
   });
 });

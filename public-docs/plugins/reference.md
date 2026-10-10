@@ -748,6 +748,26 @@ export default function contribute(client: PluginClientContext) {
 }
 ```
 
+A surface opened with no sidebar item, for example from a composer pill, takes its header from
+`addSurface` options. A sidebar item that opens the surface overrides them.
+
+```ts
+client.addSurface("main", Main, { title: "My plugin", icon: "Blocks" });
+```
+
+`addShortcut` binds one key combo while the app shows the plugin's host. `Mod` is Cmd on macOS and
+Ctrl elsewhere. A combo that a host shortcut already uses never fires. With `surface`, the combo
+closes that surface when it is the current screen, so the same keys open and close it.
+
+```ts
+client.addShortcut({
+  id: "toggle-main",
+  combo: "Mod+E",
+  surface: "main",
+  onPress: ({ workspaceId }) => client.openSurface("main", { presentation: "overlay" }),
+});
+```
+
 A sidebar item can run code instead of opening its surface. `surface` stays required and names the
 fallback surface.
 

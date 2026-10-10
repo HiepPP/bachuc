@@ -7,8 +7,9 @@ Requires the fork daemon and client 0.10.2-beta.900+, Node 22+, and enabled trus
 ## Use
 
 The board has one view, the Watchtower page. Open it with the **Watchtower** pill above an agent
-composer, or with **Open Watchtower board** in the Command Center. Both open it over the current
-screen on that workspace. The plugin adds no sidebar item and no Explorer panel.
+composer, with **Open Watchtower board** in the Command Center, or with Cmd+E (Ctrl+E off macOS).
+All three open it over the current screen on that workspace, and Cmd+E closes it again. Cmd+E
+needs a host built on or after 2026-10-10. The plugin adds no sidebar item and no Explorer panel.
 On the new workspace screen, the pill shows the chosen project's tasks in the side panel instead; it
 reads the project root, and it has no run, agent, or attachment search key.
 The Watchtower page shows one workspace only, with no workspace picker. If the opener names a
@@ -25,9 +26,18 @@ Watchtower page over the current screen, on that composer's workspace. A wide la
 overlay with a dimmed backdrop; a compact layout shows a page. The pill reads `Watchtower 5/10`,
 adds `, 1 question` while an open question blocks a task, and reads `Watchtower` on New workspace,
 which has no workspace yet; there a press shows the chosen project's board in the side panel.
-The page lays itself out by its own width, so it also fits a phone: three
-columns from 1000 px, stacked cells below 520 px, and a mix between. It reads
-`watchtower.overview.read`, and its Tasks cell reads the board for briefs. It shows:
+From 720 px wide the page has a fixed 360 px left rail, the former Explorer board, and the
+timeline-first view on its right; each side scrolls on its own. Below 720 px, such as on a phone,
+everything stacks in one scroll. The rail reads the board RPC, and the right side reads
+`watchtower.overview.read`. The rail shows:
+
+- the completion percentage and the Active, Blocked, Todo, and Done counts;
+- **Waiting on the owner**: the open questions that block tasks and the count of proposed ADRs;
+- **Tasks**: the status groups, Done collapsed; select a task for its brief and attachment search;
+- **Autorun**: runner, profile, schedule, start and finish, and every log row, newest first.
+
+The right side lays itself out by its own width: three columns from 900 px, and the timeline is
+one strip below 520 px. It shows:
 
 - the lifecycle: Plan, Implement, Verify, Review, and Archive, with the current step marked;
 - the Autorun strip: run state (running, stopped, or finished), runner, start, iterations, and last
@@ -38,16 +48,15 @@ columns from 1000 px, stacked cells below 520 px, and a mix between. It reads
   `2d 23h`, and each period after a break shows its day. Below 520 px the timeline is one strip;
 - **Running now**: each running task with its minutes against the average, and **Up next**: planned
   and blocked tasks in order with their expected start;
-- **Tasks**: the status groups, Done collapsed; select a task for its brief and attachment search;
 - **Needs you**: open and defaulted questions, proposed ADRs, and pending manual checks, each with
   actions (below). A blocking question shows the time to answer by;
-- the run log and the pending manual checks;
+- the pending manual checks;
 - **Decisions**: every ADR, proposed first, then newest ID first. Select one to read its file in a
   dialog. The dialog shows headings, bullets, paragraphs, and code as plain text, with no links or
   HTML. It reads `watchtower/decisions/<ID>.md` or `<ID>-*.md` through `watchtower.decision.read`;
 - **Archived plans**: the 20 newest archive folders.
 
-Needs you, Manual checks, Decisions, and Archived plans list five rows. **Show N more** expands a
+The Autorun log, Needs you, Manual checks, Decisions, and Archived plans list five rows. **Show N more** expands a
 list, and **Show less** collapses it.
 
 The Needs you actions edit no file themselves. Each one sends a prompt that starts with

@@ -118,6 +118,12 @@ export function parallelCaption(count: number): string {
   return count === 1 ? "branch at once" : "branches at once";
 }
 
+// The label under the now mark. A stopped run's "now" is its last activity, not the clock.
+export function nowLabel(clock: string | null, stopped: boolean): string {
+  if (!clock) return "";
+  return stopped ? `stopped ${clock}` : `now ${clock}`;
+}
+
 // The clock time of a timeline minute, from the run's `Started:` value.
 export function clockAt(started: string | null, minute: number): string | null {
   const origin = startedAt(started);

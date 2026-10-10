@@ -4,10 +4,27 @@ import { preselectWorkspace, WatchtowerPage } from "./client/page";
 import { WatchtowerPillLabel } from "./client/pill";
 import { taskAttachments } from "./shared/board";
 
-// The composer pill is the one way into Watchtower: it opens the page over the current screen.
-// There is no sidebar item and no Explorer panel, so the board has a single view.
+// The composer pill, the Command Center, and Mod+E open the page over the current screen. There
+// is no sidebar item and no Explorer panel, so the board has a single view.
 export default function contribute(client: PluginClientContext) {
-  const removeSurface = client.addSurface("watchtower", WatchtowerPage);
+  const removeSurface = client.addSurface("watchtower", WatchtowerPage, {
+    title: "Watchtower",
+    icon: "ListTodo",
+  });
+  // Mod+E toggles the board: it opens on the active workspace, and closes when it is open.
+  // COMPAT(addShortcut): added 2026-10-10; release builds before then lack the method and ignore
+  // the surface title. Remove after 2026-11-10, once release is rebuilt.
+  const removeShortcut =
+    client.addShortcut?.({
+      id: "toggle-board",
+      combo: "Mod+E",
+      surface: "watchtower",
+      onPress: ({ workspaceId }) => {
+        if (!workspaceId) return;
+        preselectWorkspace(workspaceId);
+        client.openSurface("watchtower", { presentation: "overlay" });
+      },
+    }) ?? (() => {});
   // COMPAT(newWorkspacePanel): added 2026-10-06; apps built earlier lack the method. Remove after
   // 2026-11-06, once release is rebuilt.
   const removeNewWorkspacePanel =
@@ -54,6 +71,7 @@ export default function contribute(client: PluginClientContext) {
     removeAttachments();
     removeCommand();
     removeNewWorkspacePanel();
+    removeShortcut();
     removeSurface();
   };
 }

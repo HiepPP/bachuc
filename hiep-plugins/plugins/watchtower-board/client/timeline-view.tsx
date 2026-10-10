@@ -6,6 +6,7 @@ import {
   BAR_HEIGHT,
   type BarRect,
   clockAt,
+  nowLabel,
   parallelCaption,
   type SegmentTone,
   shortId,
@@ -18,6 +19,8 @@ interface BranchTimelineProps {
   started: string | null;
   theme: PluginTheme;
   onSelectTask?: (id: string) => void;
+  // The run has stopped, so its now mark is the last activity.
+  stopped?: boolean;
 }
 
 function describe(bar: TimelineBar, started: string | null): string {
@@ -308,7 +311,13 @@ export function BranchTimeline({
 const STRIP_HEIGHT = 14;
 
 // The narrow form of the timeline: every bar on one row, with the same x and breaks as the Gantt.
-export function TimelineStrip({ model, nowMinute, started, theme }: BranchTimelineProps) {
+export function TimelineStrip({
+  model,
+  nowMinute,
+  started,
+  theme,
+  stopped = false,
+}: BranchTimelineProps) {
   const [width, setWidth] = useState(0);
   const geometry = useMemo(
     () =>
@@ -388,7 +397,7 @@ export function TimelineStrip({ model, nowMinute, started, theme }: BranchTimeli
       </View>
       <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
         <Text style={muted}>{first ?? ""}</Text>
-        <Text style={muted}>{now ? `now ${now}` : ""}</Text>
+        <Text style={muted}>{nowLabel(now, stopped)}</Text>
         <Text style={muted}>{finish ? `finish ${finish}` : ""}</Text>
       </View>
     </View>

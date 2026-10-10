@@ -40,6 +40,7 @@ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { PluginRuntimeBoundary } from "./runtime-boundary";
 import {
   getPluginSurfaceContributionServerIds,
+  pluginSurfaceHeading,
   resolvePluginSurfaceContribution,
   type PluginSurfaceContributionIdentity,
 } from "./surface-contribution";
@@ -263,8 +264,9 @@ export function PluginSurfaceScreen() {
       identity ? getPluginSurfaceContributionServerIds(installations, pluginId, identity) : [],
     [identity, installations, pluginId],
   );
-  const title = sidebarItem?.title ?? surface?.id ?? (pluginId || "Plugin");
-  const Icon = sidebarItem ? resolvePluginIcon(sidebarItem.icon) : null;
+  const heading = pluginSurfaceHeading(sidebarItem, surface, pluginId);
+  const title = heading.title;
+  const Icon = heading.icon ? resolvePluginIcon(heading.icon) : null;
   const close = useCallback(() => {
     if (router.canGoBack()) router.back();
     else router.replace(`/h/${encodeURIComponent(serverId)}`);

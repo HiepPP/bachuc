@@ -64,6 +64,10 @@ export function startedAt(
   };
 }
 
+function dateOnly(started: string | null | undefined): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(started?.trim() ?? "");
+}
+
 function clockOrigin(started: string | null | undefined): number | null {
   return startedAt(started)?.minutes ?? null;
 }
@@ -220,15 +224,18 @@ export function buildTimeline({ tasks, run, questions }: TimelineInput): Timelin
     return over > 0 && (!worst || over > worst.minutes) ? { id: bar.id, minutes: over } : worst;
   }, null);
   const axisEnd = Math.max(now ?? 0, 0, ...bars.map(barEnd));
+  // A row logged a minute before `Started:` has a negative start. A `Started:` date with no time
+  // counts from an assumed midnight, so the axis starts at the first task instead.
+  const firstStart = Math.min(...bars.map((bar) => bar.start));
+  const axisStart = dateOnly(run?.started) && bars.length ? firstStart : Math.min(0, firstStart);
   return {
     bars,
     edges,
     laneCount,
-    // A row logged a minute before `Started:` has a negative start.
     axis: {
-      start: Math.min(0, ...bars.map((bar) => bar.start)),
+      start: axisStart,
       end: axisEnd,
-      ticks: hourTicks(run?.started, axisEnd),
+      ticks: hourTicks(run?.started, axisEnd).filter((tick) => tick.minute >= axisStart),
     },
     stats: { averageMinutes: average, longest, overAverage, maxParallel: maxParallel(bars) },
     finishMinute,

@@ -106,7 +106,18 @@ export interface PluginClientOpenPanelOptions extends PluginOpenPanelOptions {
 
 export interface PluginClientContext extends PluginCommandCapabilities {
   addSettingsScreen(contribution: PluginSettingsScreenContribution): PluginCleanup;
-  addSurface(id: string, Component: ComponentType<PluginSurfaceProps>): PluginCleanup;
+  /** `options` names the surface where no sidebar item opens it, such as an overlay page. */
+  addSurface(
+    id: string,
+    Component: ComponentType<PluginSurfaceProps>,
+    options?: PluginSurfaceOptions,
+  ): PluginCleanup;
+  /**
+   * Binds a key combo, such as `Mod+E`, while the app shows this plugin's host. A combo that a
+   * host shortcut already uses is ignored. With `surface`, the combo closes that surface when it
+   * is the current screen, so the combo toggles it.
+   */
+  addShortcut(contribution: PluginShortcutContribution): PluginCleanup;
   addSidebarItem(contribution: PluginSidebarContribution): PluginCleanup;
   addWorkspacePanel(contribution: PluginWorkspacePanelContribution): PluginCleanup;
   /** Adds a panel to the side panel of the new workspace screen, for projects on this plugin's host. */
@@ -336,9 +347,26 @@ export interface PluginSettingsScreenContribution {
   Component: ComponentType<PluginSurfaceProps>;
 }
 
-export interface PluginSurfaceContribution {
+export interface PluginSurfaceOptions {
+  /** Shown in the surface header. A sidebar item that opens the surface overrides it. */
+  title?: string;
+  /** A lucide icon name, like the sidebar item icon. */
+  icon?: string;
+}
+
+export interface PluginSurfaceContribution extends PluginSurfaceOptions {
   id: string;
   Component: ComponentType<PluginSurfaceProps>;
+}
+
+export interface PluginShortcutContribution {
+  id: string;
+  /** Host shortcut syntax: `Mod` is Cmd on macOS and Ctrl elsewhere, for example `Mod+E`. */
+  combo: string;
+  /** This plugin's surface that the combo closes when it is the current screen. */
+  surface?: string;
+  /** `workspaceId` is the active workspace on this plugin's host, or null outside one. */
+  onPress(context: { workspaceId: string | null }): void;
 }
 
 export interface PluginSidebarAction {

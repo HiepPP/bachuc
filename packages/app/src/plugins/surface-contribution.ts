@@ -27,6 +27,19 @@ export function resolvePluginSurfaceContribution(
   return { sidebarItem, surface };
 }
 
+// The header of a surface: the sidebar item that opens it wins, then the surface's own title and
+// icon, then its id.
+export function pluginSurfaceHeading(
+  sidebarItem: InstalledPlugin["sidebarItems"][number] | null,
+  surface: InstalledPlugin["surfaces"][number] | null,
+  pluginId: string,
+): { title: string; icon: string | null } {
+  return {
+    title: sidebarItem?.title ?? surface?.title ?? surface?.id ?? (pluginId || "Plugin"),
+    icon: sidebarItem?.icon ?? surface?.icon ?? null,
+  };
+}
+
 export function getPluginSurfaceContributionServerIds(
   installations: readonly InstalledPlugin[],
   pluginId: string,

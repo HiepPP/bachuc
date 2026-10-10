@@ -17,6 +17,7 @@ import type {
   PluginSidebarSectionContribution,
   PluginSurfaceContribution,
   PluginSettingsScreenContribution,
+  PluginShortcutContribution,
   PluginTimelineRendererContribution,
   PluginWorkspaceHeaderSubtitleContribution,
   PluginComposerStopButtonContribution,
@@ -51,6 +52,7 @@ export interface EvaluatedPlugin {
   workspaceHeaderSubtitles?: PluginWorkspaceHeaderSubtitleContribution[];
   composerStopButtons?: PluginComposerStopButtonContribution[];
   newWorkspacePanels?: PluginNewWorkspacePanelContribution[];
+  shortcuts?: PluginShortcutContribution[];
 }
 
 export interface InstalledPlugin extends EvaluatedPlugin {

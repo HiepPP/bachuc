@@ -609,6 +609,53 @@ describe("evaluatePluginClientBundle", () => {
     ).toThrow("references missing new workspace panel board");
   });
 
+  it("keeps a surface title and icon from addSurface options", () => {
+    const plugin = evaluatePluginClientBundle(
+      "example",
+      bundle(`
+        function Surface() { return null; }
+        plugin.addSurface("main", Surface, { title: " Board ", icon: "Blocks" });
+        plugin.addSurface("plain", Surface);
+      `),
+    );
+    expect(plugin.surfaces.map(({ id, title, icon }) => ({ id, title, icon }))).toEqual([
+      { id: "main", title: "Board", icon: "Blocks" },
+      { id: "plain", title: undefined, icon: undefined },
+    ]);
+  });
+
+  it("collects a shortcut and rejects a chord, a bad combo, or a missing surface", () => {
+    const plugin = evaluatePluginClientBundle(
+      "example",
+      bundle(`
+        function Surface() { return null; }
+        plugin.addSurface("main", Surface);
+        plugin.addShortcut({ id: "toggle", combo: "Mod+E", surface: "main", onPress() {} });
+      `),
+    );
+    expect(plugin.shortcuts?.map(({ id, combo, surface }) => ({ id, combo, surface }))).toEqual([
+      { id: "toggle", combo: "Mod+E", surface: "main" },
+    ]);
+    const failing = (body: string) => () =>
+      evaluatePluginClientBundle(
+        "example",
+        bundle(`
+          function Surface() { return null; }
+          plugin.addSurface("main", Surface);
+          ${body}
+        `),
+      );
+    expect(
+      failing(`plugin.addShortcut({ id: "chord", combo: "Mod+K Mod+E", onPress() {} });`),
+    ).toThrow("must be one key combo");
+    expect(failing(`plugin.addShortcut({ id: "bad", combo: "Mod+E+F", onPress() {} });`)).toThrow();
+    expect(
+      failing(
+        `plugin.addShortcut({ id: "lost", combo: "Mod+E", surface: "missing", onPress() {} });`,
+      ),
+    ).toThrow("references missing surface missing");
+  });
+
   it("collects a workspace header subtitle and rejects a duplicate id", () => {
     const plugin = evaluatePluginClientBundle(
       "example",
