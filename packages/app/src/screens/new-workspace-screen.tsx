@@ -2467,6 +2467,7 @@ export function NewWorkspaceScreen({
             <PluginDraftComposerPills
               serverId={selectedServerId}
               draft={pluginDraft}
+              cwd={selectedSourceDirectory}
               compact={isCompact}
               hidden={isTerminalLaunch}
             />

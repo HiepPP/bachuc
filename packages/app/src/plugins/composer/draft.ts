@@ -8,9 +8,10 @@ export class PluginComposerDraftState {
   private values: Record<string, unknown> = {};
   constructor(readonly id: string) {}
 
-  forPlugin(pluginId: string): Draft {
+  forPlugin(pluginId: string, cwd?: string): Draft {
     return {
       id: this.id,
+      cwd,
       get: () => this.snapshot()[pluginId],
       set: (value) => {
         this.values[pluginId] = JSON.parse(JSON.stringify(value));

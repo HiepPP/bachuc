@@ -11,6 +11,13 @@ export function pillLabel(info: BranchInfo) {
   return truncate(name);
 }
 
+/** New workspace label: the branch of the selected project, before any agent exists. */
+export function draftPillLabel(cwd: string | undefined, info: BranchInfo | undefined) {
+  if (!cwd) return "No project";
+  if (!info) return "…";
+  return info.repo ? pillLabel(info) : "Not a git repo";
+}
+
 export function pillTitle(info: BranchInfo) {
   const parts = [
     info.detached ? `Detached at ${info.sha ?? "HEAD"}` : `Branch ${info.branch ?? "unknown"}`,

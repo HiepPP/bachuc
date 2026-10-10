@@ -343,6 +343,7 @@ interface RenderLeftContentArgs {
   agentId: string;
   serverId: string;
   workspaceId: string | null | undefined;
+  cwd: string;
   focusInput: () => void;
   isCompactLayout: boolean;
   showAgentControls: boolean;
@@ -356,7 +357,7 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement | null {
       <>
         {/* A draft without plugin preferences has no agent for a pill to address. */}
         {pluginDraft ? (
-          <PluginComposerToolbarPills serverId={serverId} draft={pluginDraft} />
+          <PluginComposerToolbarPills serverId={serverId} draft={pluginDraft} cwd={args.cwd} />
         ) : null}
         <DraftAgentControls {...agentControls} isCompactLayout={isCompactLayout} />
       </>
@@ -2601,6 +2602,7 @@ function ComposerContentImpl({
         agentId,
         serverId,
         workspaceId,
+        cwd,
         focusInput,
         isCompactLayout,
         showAgentControls: mode.showAgentControls,
@@ -2609,6 +2611,7 @@ function ComposerContentImpl({
       agentControls,
       pluginDraft,
       agentId,
+      cwd,
       focusInput,
       isCompactLayout,
       mode.showAgentControls,

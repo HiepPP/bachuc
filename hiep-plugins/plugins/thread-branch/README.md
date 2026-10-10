@@ -24,6 +24,12 @@ The branch pill menu offers **Copy branch name**, **Fetch** (runs `git fetch`, s
 has an upstream), and **Refresh**.
 A detached HEAD shows `@<short sha>`. Non-git directories show no pill.
 
+New workspace shows one branch pill for the selected project's directory, before any thread
+exists. It reads **No project** until a project is chosen and **Not a git repo** outside git. Its
+menu has the same three items. It names the branch checked out in the project directory. With
+**New worktree**, the new thread runs on its own branch instead. The pill polls every 15 seconds
+while New workspace is open. It needs the fork host (`draft.cwd`, `showOnDraft: "only"`).
+
 ## Turn diff
 
 After each agent turn that changed files or made commits, the thread gets one row:

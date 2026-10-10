@@ -205,6 +205,15 @@ describe("plugin buttons", () => {
     ]);
   });
 
+  it("keeps a draft-only pill off every agent composer", () => {
+    const buttons = store();
+    buttons.addComposerPill(installation(), { id: "draft", showOnDraft: "only", button: button() });
+    buttons.addComposerPill(installation(), { id: "both", showOnDraft: true, button: button() });
+    const [draftOnly, both] = buttons.getSnapshot();
+    expect(buttonMatches(draftOnly, "host-a", "workspace-1", "agent-1")).toBe(false);
+    expect(buttonMatches(both, "host-a", "workspace-1", "agent-1")).toBe(true);
+  });
+
   it("opens a shared composer pill only for the agent that opened it", () => {
     const buttons = store();
     buttons.addComposerPill(installation(), {

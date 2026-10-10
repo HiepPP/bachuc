@@ -4,6 +4,8 @@ import type { PluginHostProps } from "./contracts.js";
 /** Local JSON preferences, transferred to the new agent through its creation environment. */
 export interface PluginComposerDraft {
   id: string;
+  /** Source directory of the project selected on New workspace; absent until one is chosen. */
+  cwd?: string;
   get(): unknown;
   set(value: unknown): void;
 }
@@ -85,8 +87,8 @@ export type PluginComposerPillButton = Omit<PluginButton, "icon"> & {
 /** Omit `agentId` or `workspaceId` to show the pill on every matching agent composer. */
 export interface PluginComposerPillContribution {
   id: string;
-  /** Opt in to New workspace. Only unscoped pills can appear there. */
-  showOnDraft?: boolean;
+  /** Opt in to New workspace. Only unscoped pills can appear there. "only" skips agent composers. */
+  showOnDraft?: boolean | "only";
   /**
    * "toolbar" puts the pill beside the model selector. "corner" stacks it at the top-right corner
    * of the agent's pane. Compact layouts have room for neither, so the pill stays in the track bar.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pillLabel, pillTitle } from "../client/label";
+import { draftPillLabel, pillLabel, pillTitle } from "../client/label";
 import {
   describeBranchPill,
   describeChangesPill,
@@ -42,6 +42,13 @@ test("label shows branch without PR suffix, detached sha, and truncation", () =>
     pillLabel({ ...base, branch: "feature/very-long-branch-name-that-overflows" }),
     "feature/very-long-branc…",
   );
+});
+
+test("New workspace label names the selected project's branch or why there is none", () => {
+  assert.equal(draftPillLabel(undefined, undefined), "No project");
+  assert.equal(draftPillLabel("/repo", undefined), "…");
+  assert.equal(draftPillLabel("/repo", base), "feat/board-avatars");
+  assert.equal(draftPillLabel("/tmp", { ...base, repo: false, branch: null }), "Not a git repo");
 });
 
 test("title carries upstream, sync counts, dirty state, and PR state", () => {

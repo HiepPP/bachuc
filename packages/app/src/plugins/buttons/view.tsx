@@ -697,16 +697,20 @@ export function PluginComposerCornerPills({
 export function PluginDraftComposerPills({
   serverId,
   draft,
+  cwd,
   compact,
   hidden = false,
   toolbar = false,
 }: {
   serverId: string;
   draft: PluginComposerDraftState;
+  /** Source directory of the selected project, handed to pills as `draft.cwd`. */
+  cwd?: string | null;
   compact: boolean;
   hidden?: boolean;
   toolbar?: boolean;
 }) {
+  const draftCwd = cwd || undefined;
   const entries = useSyncExternalStore(pluginButtonStore.subscribe, pluginButtonStore.getSnapshot);
   const hosts = useHosts();
   const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
@@ -732,12 +736,12 @@ export function PluginDraftComposerPills({
             context: {
               context: "draft",
               workspaceId: "",
-              draft: draft.forPlugin(entry.installation.id),
+              draft: draft.forPlugin(entry.installation.id, draftCwd),
             },
             open: entry.open && entry.openContextKey === draft.id,
           }),
         ),
-    [entries, serverId, draft, compact, toolbar],
+    [entries, serverId, draft, draftCwd, compact, toolbar],
   );
   if (hidden || !pills.length) return null;
   const buttons = pills.map((entry) => (
@@ -758,15 +762,25 @@ export function PluginComposerToolbarPills({
   workspaceId,
   agentId,
   draft,
+  cwd,
 }: {
   serverId: string;
   workspaceId?: string | null;
   agentId?: string;
   draft?: PluginComposerDraftState;
+  cwd?: string;
 }) {
   if (useIsCompactFormFactor()) return null;
   if (draft)
-    return <PluginDraftComposerPills serverId={serverId} draft={draft} compact={false} toolbar />;
+    return (
+      <PluginDraftComposerPills
+        serverId={serverId}
+        draft={draft}
+        cwd={cwd}
+        compact={false}
+        toolbar
+      />
+    );
   if (!agentId) return null;
   return (
     <PluginComposerPills

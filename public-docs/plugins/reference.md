@@ -1619,7 +1619,10 @@ actions on the whole thread that should stay out of the composer. Compact layout
 workspace have no pane corner, so the pill stays in the track there.
 
 Set `showOnDraft: true` on an unscoped pill to also show it in New workspace's chat composer.
+Set `showOnDraft: "only"` to show it there and on no agent composer.
 Its content receives `{ context: "draft", workspaceId: "", draft }`, without an agent ID.
+`draft.cwd` is the source directory of the selected project, or absent until one is chosen; a new
+context arrives when the selection changes.
 `draft.get()` reads this plugin's JSON preferences; `draft.set(value)` saves them synchronously.
 Values are isolated by host and New workspace draft for the lifetime of that screen.
 Composer interceptors receive the same choices in `target.draftValues[pluginId]`.

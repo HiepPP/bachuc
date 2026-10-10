@@ -1,4 +1,5 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { installDraftBranchPill } from "./client/draft-pill";
 import { installBranchPills } from "./client/pills";
 import { createTurnDiffCard } from "./client/turn-diff-card";
 import { selectFile } from "./client/selection";
@@ -13,6 +14,7 @@ import {
 
 export default function contribute(client: PluginClientContext) {
   const removePills = installBranchPills(client);
+  const removeDraftPill = installDraftBranchPill(client);
   const removePanel = client.addWorkspacePanel({
     id: TURN_DIFF_PANEL,
     title: "Turn diff",
@@ -42,6 +44,7 @@ export default function contribute(client: PluginClientContext) {
   const removeAttachments = client.addAttachmentSource(prAttachments);
   return () => {
     removePills();
+    removeDraftPill();
     removeRenderer();
     removeCommand();
     removePanel();

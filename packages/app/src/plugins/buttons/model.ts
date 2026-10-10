@@ -21,7 +21,7 @@ export interface RegisteredPluginButton {
   id: string;
   installation: InstalledPlugin;
   placement: ButtonPlacement;
-  showOnDraft?: boolean;
+  showOnDraft?: PluginComposerPillContribution["showOnDraft"];
   /** Where a composer pill asked to sit. Header buttons keep "track". */
   slot: ComposerPillSlot;
   context: PluginButtonContext;
@@ -195,6 +195,7 @@ export function buttonMatches(
   if (agentId === null) return entry.placement === "header";
   return (
     entry.placement === "composer" &&
+    entry.showOnDraft !== "only" &&
     entry.context.context === "agent" &&
     (entry.context.agentId === ANY || entry.context.agentId === agentId)
   );
