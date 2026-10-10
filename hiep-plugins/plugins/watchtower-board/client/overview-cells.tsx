@@ -1,20 +1,21 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import { copyText, Icon } from "@getpaseo/plugin/client/react-native";
+import { Icon } from "@getpaseo/plugin/client/react-native";
 import { type ReactNode, useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import type { Decision, History, ManualCheck, OverviewRun } from "../shared/overview";
-import type { NeedsYouRow, Phase, PhaseName } from "./lifecycle";
+import { DECISION_ID } from "../shared/overview";
+import type { Phase, PhaseName } from "./lifecycle";
 import { runningLogLine } from "./run-log";
 
 // Presentational parts of the overview. They take data through props and never fetch.
 export const LIST_LIMIT = 5;
-const MONO = Platform.select({
+export const MONO = Platform.select({
   ios: "Menlo",
   android: "monospace",
   default: "ui-monospace, Menlo, monospace",
 });
 
-type ThemeProps = { theme: PluginTheme };
+export type ThemeProps = { theme: PluginTheme };
 
 export interface StatusCounts {
   done: number;
@@ -23,16 +24,42 @@ export interface StatusCounts {
   todo: number;
 }
 
-function More({ count, theme }: { count: number } & ThemeProps) {
-  if (count <= 0) return null;
+/** Shows the first `LIST_LIMIT` items until the owner expands the list. */
+export function useLimit<Item>(items: readonly Item[]) {
+  const [expanded, setExpanded] = useState(false);
+  return {
+    shown: expanded ? items : items.slice(0, LIST_LIMIT),
+    more: { total: items.length, expanded, onToggle: () => setExpanded((value) => !value) },
+  };
+}
+
+export function ShowMore({
+  total,
+  expanded,
+  onToggle,
+  theme,
+}: { total: number; expanded: boolean; onToggle(): void } & ThemeProps) {
+  if (total <= LIST_LIMIT) return null;
   return (
-    <Text style={{ fontSize: 11.5, color: theme.colors.foregroundMuted, marginTop: 6 }}>
-      {count} more
-    </Text>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ expanded }}
+      onPress={onToggle}
+      style={({ pressed }) => ({
+        alignSelf: "flex-start",
+        paddingVertical: 4,
+        marginTop: 4,
+        opacity: pressed ? 0.6 : 1,
+      })}
+    >
+      <Text style={{ fontSize: 11.5, fontWeight: "500", color: theme.colors.accent }}>
+        {expanded ? "Show less" : `Show ${total - LIST_LIMIT} more`}
+      </Text>
+    </Pressable>
   );
 }
 
-function Empty({ text, theme }: { text: string } & ThemeProps) {
+export function Empty({ text, theme }: { text: string } & ThemeProps) {
   return <Text style={{ fontSize: 12.5, color: theme.colors.foregroundMuted }}>{text}</Text>;
 }
 
@@ -220,84 +247,6 @@ export function LifecycleStepper({
   );
 }
 
-function rowIcon(row: NeedsYouRow, theme: PluginTheme): { name: string; color: string } {
-  const { colors } = theme;
-  if (row.tone === "danger") return { name: "CircleAlert", color: colors.statusDanger };
-  if (row.kind === "adr") return { name: "Scale", color: colors.foregroundMuted };
-  if (row.kind === "checks") return { name: "ClipboardCheck", color: colors.foregroundMuted };
-  return {
-    name: "MessageCircleQuestion",
-    color: row.tone === "warning" ? colors.statusWarning : colors.foregroundMuted,
-  };
-}
-
-// Read-only (Q-001): each row copies its text so the owner can paste it into the composer.
-export function NeedsYouCell({ rows, theme }: { rows: readonly NeedsYouRow[] } & ThemeProps) {
-  const { colors } = theme;
-  const [copied, setCopied] = useState<string | null>(null);
-  const shown = rows.slice(0, LIST_LIMIT);
-  return (
-    <OverviewCell
-      title="Needs you"
-      aside={rows.length ? String(rows.length) : undefined}
-      tone={rows.some((row) => row.tone === "danger") ? "warning" : undefined}
-      theme={theme}
-    >
-      {shown.length === 0 ? <Empty text="Nothing waits on you." theme={theme} /> : null}
-      {shown.map((row, index) => {
-        const icon = rowIcon(row, theme);
-        return (
-          <View
-            key={`${row.kind}-${row.id}`}
-            style={{
-              flexDirection: "row",
-              alignItems: "flex-start",
-              gap: 8,
-              paddingVertical: 7,
-              borderTopWidth: index === 0 ? 0 : 1,
-              borderTopColor: colors.border,
-            }}
-          >
-            <View style={{ marginTop: 2 }}>
-              <Icon name={icon.name} size={14} color={icon.color} />
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text
-                numberOfLines={2}
-                style={{ fontSize: 12.5, lineHeight: 17, color: colors.foreground }}
-              >
-                {row.title}
-              </Text>
-              <Text
-                numberOfLines={1}
-                style={{ fontSize: 11, color: colors.foregroundMuted, marginTop: 1 }}
-              >
-                {row.meta}
-              </Text>
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Copy ${row.id}`}
-              hitSlop={6}
-              onPress={() => {
-                void copyText(`${row.meta}: ${row.title}`).then(() => setCopied(row.id));
-              }}
-              style={{ paddingHorizontal: 4, paddingVertical: 2 }}
-            >
-              {copied === row.id ? (
-                <Text style={{ fontSize: 11.5, color: colors.statusSuccess }}>Copied</Text>
-              ) : (
-                <Icon name="Copy" size={13} color={colors.foregroundMuted} />
-              )}
-            </Pressable>
-          </View>
-        );
-      })}
-      <More count={rows.length - shown.length} theme={theme} />
-    </OverviewCell>
-  );
-}
-
 export interface RunningTask {
   id: string;
   minutes: number;
@@ -406,7 +355,7 @@ export function ManualChecksCell({
   theme,
 }: { checks: readonly ManualCheck[] } & ThemeProps) {
   const { colors } = theme;
-  const shown = checks.slice(0, LIST_LIMIT);
+  const { shown, more } = useLimit(checks);
   return (
     <OverviewCell
       title="Manual checks"
@@ -452,12 +401,10 @@ export function ManualChecksCell({
           </View>
         </View>
       ))}
-      <More count={checks.length - shown.length} theme={theme} />
+      <ShowMore {...more} theme={theme} />
     </OverviewCell>
   );
 }
-
-const HISTORY_ROWS = 3;
 
 function HistoryRow({
   icon,
@@ -465,20 +412,22 @@ function HistoryRow({
   title,
   meta,
   first,
+  onPress,
+  label,
   theme,
-}: { icon: string; iconColor: string; title: string; meta: string; first: boolean } & ThemeProps) {
+}: {
+  icon: string;
+  iconColor: string;
+  title: string;
+  meta: string;
+  first: boolean;
+  // Makes the row a button.
+  onPress?(): void;
+  label?: string;
+} & ThemeProps) {
   const { colors } = theme;
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "flex-start",
-        gap: 8,
-        paddingVertical: 7,
-        borderTopWidth: first ? 0 : 1,
-        borderTopColor: colors.border,
-      }}
-    >
+  const content = (
+    <>
       <View style={{ marginTop: 2 }}>
         <Icon name={icon} size={14} color={iconColor} />
       </View>
@@ -493,46 +442,79 @@ function HistoryRow({
           {meta}
         </Text>
       </View>
-    </View>
+    </>
+  );
+  const row = {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    paddingVertical: 7,
+    borderTopWidth: first ? 0 : 1,
+    borderTopColor: colors.border,
+  } as const;
+  if (!onPress) return <View style={row}>{content}</View>;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => ({ ...row, opacity: pressed ? 0.6 : 1 })}
+    >
+      {content}
+    </Pressable>
   );
 }
 
 // Proposed ADRs come first, because the owner still has to accept or reject them.
-export function HistoryCell({
+export function DecisionsCell({
   decisions,
-  history,
+  onOpen,
   theme,
-}: { decisions: readonly Decision[]; history: readonly History[] } & ThemeProps) {
+}: {
+  decisions: readonly Decision[];
+  onOpen(decision: { id: string; title: string }): void;
+} & ThemeProps) {
   const { colors } = theme;
+  const proposed = (decision: Decision) => decision.status.toLowerCase() === "proposed";
   const ordered = [...decisions].sort(
-    (a, b) =>
-      Number(b.status.toLowerCase() === "proposed") -
-        Number(a.status.toLowerCase() === "proposed") || b.id.localeCompare(a.id),
+    (a, b) => Number(proposed(b)) - Number(proposed(a)) || b.id.localeCompare(a.id),
   );
-  const adrs = ordered.slice(0, HISTORY_ROWS);
-  const plans = history.slice(0, HISTORY_ROWS);
-  const hidden = ordered.length - adrs.length + (history.length - plans.length);
+  const { shown, more } = useLimit(ordered);
   return (
-    <OverviewCell title="Decisions and history" theme={theme}>
-      {adrs.length === 0 && plans.length === 0 ? (
-        <Empty text="No decisions or archived plans yet." theme={theme} />
-      ) : null}
-      {adrs.map((decision, index) => (
+    <OverviewCell title="Decisions" theme={theme}>
+      {shown.length === 0 ? <Empty text="No decisions yet." theme={theme} /> : null}
+      {shown.map((decision, index) => (
         <HistoryRow
           key={decision.id}
           icon="Scale"
-          iconColor={
-            decision.status.toLowerCase() === "proposed"
-              ? colors.statusWarning
-              : colors.foregroundMuted
-          }
+          iconColor={proposed(decision) ? colors.statusWarning : colors.foregroundMuted}
           title={decision.title}
-          meta={`${decision.id}, ${decision.status}`}
+          meta={[decision.id, decision.status, decision.date].filter(Boolean).join(", ")}
           first={index === 0}
+          label={`Open ${decision.id} ${decision.title}`}
+          onPress={
+            DECISION_ID.test(decision.id)
+              ? () => onOpen({ id: decision.id, title: decision.title })
+              : undefined
+          }
           theme={theme}
         />
       ))}
-      {plans.map((plan, index) => (
+      <ShowMore {...more} theme={theme} />
+    </OverviewCell>
+  );
+}
+
+export function ArchivedPlansCell({
+  history,
+  theme,
+}: { history: readonly History[] } & ThemeProps) {
+  const { colors } = theme;
+  const { shown, more } = useLimit(history);
+  return (
+    <OverviewCell title="Archived plans" theme={theme}>
+      {shown.length === 0 ? <Empty text="No archived plans yet." theme={theme} /> : null}
+      {shown.map((plan, index) => (
         <HistoryRow
           key={plan.slug}
           icon="Archive"
@@ -541,11 +523,11 @@ export function HistoryCell({
           meta={[plan.date ? `Archived ${plan.date}` : plan.slug, plan.hasLearn ? "LEARN.md" : null]
             .filter(Boolean)
             .join(", ")}
-          first={adrs.length === 0 && index === 0}
+          first={index === 0}
           theme={theme}
         />
       ))}
-      <More count={hidden} theme={theme} />
+      <ShowMore {...more} theme={theme} />
     </OverviewCell>
   );
 }

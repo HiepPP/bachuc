@@ -2,6 +2,7 @@ import { lstat, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import {
   type Decision,
+  type DecisionDetail,
   HISTORY_LIMIT,
   type History,
   type ManualCheck,
@@ -202,6 +203,38 @@ export async function readOverview(directory: string, now = new Date()): Promise
   if (decisions !== null) overview.decisions = parseDecisions(decisions);
   overview.history = await readHistory(watchtower, optional, overview.warnings);
   return overview;
+}
+
+// The ADR file is `<id>.md` or `<id>-*.md` in decisions/. The ID only picks a directory entry; it
+// never becomes part of a path, and the read goes through the same checks as every other file.
+export async function readDecision(directory: string, id: string): Promise<DecisionDetail> {
+  const place = await locate(directory);
+  if (!place) throw new Error("This workspace has no watchtower directory.");
+  const folder = path.join(place.watchtower, "decisions");
+  let name: string | undefined;
+  try {
+    name = (await readdir(folder)).sort().find((entry) => {
+      return entry.endsWith(".md") && (entry === `${id}.md` || entry.startsWith(`${id}-`));
+    });
+  } catch (error) {
+    throw new Error(`Cannot read watchtower/decisions. ${message(error)}`);
+  }
+  if (!name) throw new Error(`${id} has no file in watchtower/decisions.`);
+  const target = path.join(folder, name);
+  let markdown: string;
+  try {
+    markdown = await readFile(place.watchtower, target);
+  } catch (error) {
+    throw new Error(`${name}: ${message(error)}`);
+  }
+  const heading = markdown.match(/^#\s+(.+)$/m)?.[1] ?? "";
+  return {
+    id,
+    title: plain(heading).replace(/^ADR-\d+\b[\s:-]*/, ""),
+    status: plain(markdown.match(/^Status:(.*)$/m)?.[1] ?? ""),
+    file: path.relative(place.root, target).split(path.sep).join("/"),
+    markdown,
+  };
 }
 
 // The newest archive folders by name. Symlinks and files are skipped.

@@ -13,15 +13,22 @@ import {
 import path from "node:path";
 import os from "node:os";
 import type { PaseoApi, PaseoWorkspace } from "@getpaseo/client";
-import { loadWorkspaceOverview } from "../server/handlers";
+import { loadWorkspaceDecision, loadWorkspaceOverview } from "../server/handlers";
 import {
   parseDecisions,
   parseManualChecks,
   parseOverviewQuestions,
   parseOverviewRun,
+  readDecision,
   readOverview,
 } from "../server/overview";
-import { overviewSchema, readOverviewRpc } from "../shared/overview";
+import {
+  decisionDetailSchema,
+  HISTORY_LIMIT,
+  overviewSchema,
+  readDecisionRpc,
+  readOverviewRpc,
+} from "../shared/overview";
 
 const manifest = `# NEXT
 
@@ -289,9 +296,10 @@ test("questions keep OPEN and DEFAULTED rows only", () => {
   );
 });
 
-test("history lists the 5 newest real archive folders", async (t) => {
+test("history lists the 20 newest real archive folders", async (t) => {
+  assert.equal(HISTORY_LIMIT, 20);
   const files: Files = { "NEXT.md": manifest, ...specs };
-  for (let day = 1; day <= 8; day++) {
+  for (let day = 1; day <= 24; day++) {
     const slug = `202609${String(day).padStart(2, "0")}-plan-${day}`;
     files[`archive/${slug}/NEXT.md`] = `# NEXT\n\n- Title: Plan ${day}\n`;
     if (day % 2 === 0) files[`archive/${slug}/LEARN.md`] = "# Learn\n";
@@ -306,13 +314,93 @@ test("history lists the 5 newest real archive folders", async (t) => {
   );
   const overview = overviewSchema.parse(await readOverview(root));
   assert.deepEqual(overview.warnings, []);
-  assert.deepEqual(overview.history, [
-    { slug: "20260908-plan-8", date: "2026-09-08", title: "Plan 8", hasLearn: true },
-    { slug: "20260907-plan-7", date: "2026-09-07", title: "Plan 7", hasLearn: false },
-    { slug: "20260906-plan-6", date: "2026-09-06", title: "Plan 6", hasLearn: true },
-    { slug: "20260905-plan-5", date: "2026-09-05", title: "Plan 5", hasLearn: false },
-    { slug: "20260904-plan-4", date: "2026-09-04", title: "Plan 4", hasLearn: true },
+  assert.equal(overview.history.length, 20);
+  assert.deepEqual(overview.history.slice(0, 2), [
+    { slug: "20260924-plan-24", date: "2026-09-24", title: "Plan 24", hasLearn: true },
+    { slug: "20260923-plan-23", date: "2026-09-23", title: "Plan 23", hasLearn: false },
   ]);
+  assert.deepEqual(overview.history.at(-1), {
+    slug: "20260905-plan-5",
+    date: "2026-09-05",
+    title: "Plan 5",
+    hasLearn: false,
+  });
+});
+
+const adr =
+  "# ADR-0003 Chip-only sources\n\nStatus: proposed\nDate: 2026-10-07\n\n## Decision\n\n- Use chips.\n";
+
+test("the decision RPC has its own name and takes only ADR IDs", () => {
+  assert.equal(readDecisionRpc.name, "watchtower.decision.read");
+  const parses = (id: string) => readDecisionRpc.input.safeParse({ workspaceId: "ws", id }).success;
+  for (const id of ["ADR-0003", "ADR-1", "ADR-123456"]) assert.equal(parses(id), true, id);
+  for (const id of ["ADR-", "ADR-1234567", "adr-0003", "../ADR-0003", "ADR-0003/x", "ADR-0003.md"])
+    assert.equal(parses(id), false, id);
+});
+
+test("a decision reads the ADR file named by its ID", async (t) => {
+  const root = await fixture(t, {
+    "NEXT.md": manifest,
+    "decisions/ADR-0003-chip-only-sources.md": adr,
+    "decisions/ADR-0030-other.md": "# ADR-0030 Other\n",
+    "decisions/ADR-0004.md": "# ADR-0004: Exact name\n\nStatus: accepted\n",
+  });
+  assert.deepEqual(decisionDetailSchema.parse(await readDecision(root, "ADR-0003")), {
+    id: "ADR-0003",
+    title: "Chip-only sources",
+    status: "proposed",
+    file: "watchtower/decisions/ADR-0003-chip-only-sources.md",
+    markdown: adr,
+  });
+  const exact = await readDecision(root, "ADR-0004");
+  assert.deepEqual(
+    [exact.title, exact.status, exact.file],
+    ["Exact name", "accepted", "watchtower/decisions/ADR-0004.md"],
+  );
+});
+
+test("a decision without a readable file gives a clear error", async (t) => {
+  const root = await fixture(t, {
+    "NEXT.md": manifest,
+    "decisions/ADR-0003-chip-only-sources.md": adr,
+    "decisions/ADR-0005-big.md": `# ADR-0005 Big\n${"x".repeat(128 * 1024)}`,
+    "../elsewhere/secret.md": "# ADR-0006 Outside\n",
+  });
+  await assert.rejects(
+    readDecision(root, "ADR-0099"),
+    /ADR-0099 has no file in watchtower\/decisions/,
+  );
+  await assert.rejects(readDecision(root, "ADR-0005"), /ADR-0005-big\.md: .*128 KiB/);
+  await symlink(
+    path.join(root, "elsewhere/secret.md"),
+    path.join(root, "watchtower/decisions/ADR-0006-link.md"),
+  );
+  await assert.rejects(readDecision(root, "ADR-0006"), /outside the workspace Watchtower/);
+
+  const noFolder = await fixture(t, { "NEXT.md": manifest });
+  await assert.rejects(
+    readDecision(noFolder, "ADR-0003"),
+    /Cannot read watchtower\/decisions\. File not found\./,
+  );
+  const empty = await mkdtemp(path.join(os.tmpdir(), "watchtower-decision-empty-"));
+  t.after(() => rmdir(empty));
+  await assert.rejects(readDecision(empty, "ADR-0003"), /no watchtower directory/);
+});
+
+test("the decision handler reads the workspace directory", async (t) => {
+  const root = await fixture(t, { "decisions/ADR-0003-chip-only-sources.md": adr });
+  const workspace = { id: "ws-1", workspaceDirectory: root } as PaseoWorkspace;
+  const paseo = {
+    workspaces: { ref: () => ({ refresh: async () => workspace }) },
+  } as unknown as PaseoApi;
+  assert.equal((await loadWorkspaceDecision("ws-1", "ADR-0003", paseo)).status, "proposed");
+  const missing = {
+    workspaces: { ref: () => ({ refresh: async () => null }) },
+  } as unknown as PaseoApi;
+  await assert.rejects(
+    loadWorkspaceDecision("ws-2", "ADR-0003", missing),
+    /Workspace is unavailable/,
+  );
 });
 
 test("an unreadable run file warns and the plan still loads", async (t) => {

@@ -4,13 +4,16 @@ import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { readOverviewRpc } from "../shared/overview";
+import { useAgentSender } from "./agent-target";
 import { dashboardSummary } from "./dashboard";
+import { type DecisionTarget, DecisionModal } from "./decision-modal";
 import { lifecyclePhases, needsYou } from "./lifecycle";
+import { NeedsYouCell } from "./needs-you";
 import {
-  HistoryCell,
+  ArchivedPlansCell,
+  DecisionsCell,
   LifecycleStepper,
   ManualChecksCell,
-  NeedsYouCell,
   OverviewCell,
   RunLogCell,
 } from "./overview-cells";
@@ -80,6 +83,9 @@ export function WatchtowerOverview({
         .map((bar) => ({ id: bar.id, minutes: Math.round(bar.end - bar.start) })),
     };
   }, [data]);
+  // The ADR the owner is reading, if any.
+  const [decision, setDecision] = useState<DecisionTarget | null>(null);
+  const agent = useAgentSender(host.id, workspaceId, (derived?.rows.length ?? 0) > 0);
 
   const muted = { fontSize: 12, color: colors.foregroundMuted };
   const header = (
@@ -121,6 +127,21 @@ export function WatchtowerOverview({
       </Pressable>
     </View>
   );
+
+  // The cells that both layouts use. They render only once `data` has loaded.
+  const needs = derived ? (
+    <NeedsYouCell
+      rows={derived.rows}
+      target={agent.target}
+      send={agent.send}
+      onOpenDecision={setDecision}
+      theme={theme}
+    />
+  ) : null;
+  const decisions = data ? (
+    <DecisionsCell decisions={data.decisions} onOpen={setDecision} theme={theme} />
+  ) : null;
+  const archived = data ? <ArchivedPlansCell history={data.history} theme={theme} /> : null;
 
   let body: ReactNode;
   if (overview.error) {
@@ -194,7 +215,10 @@ export function WatchtowerOverview({
         <Row>
           {placeholder("log", 200)}
           {placeholder("checks", 200)}
-          {placeholder("history", 200)}
+        </Row>
+        <Row>
+          {placeholder("decisions", 200)}
+          {placeholder("archive", 200)}
         </Row>
       </View>
     );
@@ -224,12 +248,9 @@ export function WatchtowerOverview({
           </Text>
         </View>
         <Row>
-          <Column>
-            <NeedsYouCell rows={derived.rows} theme={theme} />
-          </Column>
-          <Column>
-            <HistoryCell decisions={data.decisions} history={data.history} theme={theme} />
-          </Column>
+          <Column>{needs}</Column>
+          <Column>{decisions}</Column>
+          <Column>{archived}</Column>
         </Row>
       </View>
     );
@@ -261,10 +282,8 @@ export function WatchtowerOverview({
         />
       </OverviewCell>
     );
-    const needs = <NeedsYouCell rows={derived.rows} theme={theme} />;
     const log = <RunLogCell run={data.run} running={derived.running} theme={theme} />;
     const checks = <ManualChecksCell checks={data.manualChecks} theme={theme} />;
-    const history = <HistoryCell decisions={data.decisions} history={data.history} theme={theme} />;
     body = (
       <View style={{ gap: GAP }}>
         <LifecycleStepper phases={derived.phases} counts={derived.counts} theme={theme} />
@@ -282,7 +301,10 @@ export function WatchtowerOverview({
             <Row>
               <Column>{log}</Column>
               <Column>{checks}</Column>
-              <Column>{history}</Column>
+            </Row>
+            <Row>
+              <Column>{decisions}</Column>
+              <Column>{archived}</Column>
             </Row>
           </>
         ) : (
@@ -294,8 +316,9 @@ export function WatchtowerOverview({
             </Row>
             <Row>
               <Column>{checks}</Column>
-              <Column>{history}</Column>
+              <Column>{archived}</Column>
             </Row>
+            {decisions}
           </>
         )}
       </View>
@@ -311,6 +334,13 @@ export function WatchtowerOverview({
         {header}
         {body}
       </View>
+      <DecisionModal
+        target={decision}
+        workspaceId={workspaceId}
+        host={host}
+        theme={theme}
+        onClose={() => setDecision(null)}
+      />
     </ScrollView>
   );
 }

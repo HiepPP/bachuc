@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import path from "node:path";
 import { attachmentKey } from "../shared/board";
 import { readBoard } from "./board";
-import { readOverview } from "./overview";
+import { readDecision, readOverview } from "./overview";
 
 export async function loadWorkspaceBoard(workspaceId: string, paseo: PaseoApi) {
   const workspace = await paseo.workspaces.ref(workspaceId).refresh();
@@ -16,6 +16,12 @@ export async function loadWorkspaceOverview(workspaceId: string, paseo: PaseoApi
   const workspace = await paseo.workspaces.ref(workspaceId).refresh();
   if (!workspace) throw new Error("Workspace is unavailable on this host.");
   return readOverview(workspace.workspaceDirectory);
+}
+
+export async function loadWorkspaceDecision(workspaceId: string, id: string, paseo: PaseoApi) {
+  const workspace = await paseo.workspaces.ref(workspaceId).refresh();
+  if (!workspace) throw new Error("Workspace is unavailable on this host.");
+  return readDecision(workspace.workspaceDirectory, id);
 }
 
 export async function loadProjectBoard(projectId: string, paseo: PaseoApi) {

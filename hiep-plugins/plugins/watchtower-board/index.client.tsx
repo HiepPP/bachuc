@@ -61,8 +61,9 @@ export default function contribute(client: PluginClientContext) {
   });
   const removeAttachments = client.addAttachmentSource(taskAttachments);
   // One unscoped pill serves every agent composer and New workspace (Q-002). Its label reads the
-  // composer's own board; a press opens the full-screen surface on that workspace. New workspace
-  // has no workspace yet, so the host shows the chosen project's board in the side panel instead.
+  // composer's own board; a press opens the overview surface over the current screen on that
+  // workspace. New workspace has no workspace yet, so the host shows the chosen project's board in
+  // the side panel instead.
   const pill = client.addComposerPill({
     id: "watchtower",
     showOnDraft: true,
@@ -75,7 +76,7 @@ export default function contribute(client: PluginClientContext) {
         newWorkspacePanel: "board",
         onPress: (context) => {
           if (context && context.context !== "draft") preselectWorkspace(context.workspaceId);
-          client.openSurface("watchtower");
+          client.openSurface("watchtower", { presentation: "overlay" });
         },
       },
     },

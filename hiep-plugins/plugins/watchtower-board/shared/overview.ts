@@ -64,7 +64,7 @@ export const historySchema = z.object({
   title: z.string(),
   hasLearn: z.boolean(),
 });
-export const HISTORY_LIMIT = 5;
+export const HISTORY_LIMIT = 20;
 export const overviewSchema = z.object({
   plan: overviewPlanSchema,
   tasks: z.array(overviewTaskSchema),
@@ -89,4 +89,21 @@ export const readOverviewRpc = defineRpc({
   name: "watchtower.overview.read",
   input: z.object({ workspaceId: z.string().min(1).max(256) }),
   output: overviewSchema,
+});
+
+// The ID of a DECISIONS.md row. The server matches it against file names, never joins it into a path.
+export const DECISION_ID = /^ADR-\d{1,6}$/;
+export const decisionDetailSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  status: z.string(),
+  // The ADR file, relative to the workspace root.
+  file: z.string(),
+  markdown: z.string(),
+});
+export type DecisionDetail = z.infer<typeof decisionDetailSchema>;
+export const readDecisionRpc = defineRpc({
+  name: "watchtower.decision.read",
+  input: z.object({ workspaceId: z.string().min(1).max(256), id: z.string().regex(DECISION_ID) }),
+  output: decisionDetailSchema,
 });

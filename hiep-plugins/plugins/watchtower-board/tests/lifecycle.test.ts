@@ -186,6 +186,31 @@ test("Needs you orders blocking questions, defaults, ADRs, then checks", () => {
   assert.deepEqual(needsYou(overview()), []);
 });
 
+test("Needs you rows carry what their actions send", () => {
+  const rows = needsYou(
+    overview({
+      questions: ["", "-", "None", "Yes."].map((answer, index) => ({
+        id: `Q-00${index}`,
+        tasks: [],
+        blocks: index === 3 ? ["TASK-001"] : [],
+        question: "Why?",
+        default: answer,
+        status: "OPEN",
+      })),
+      manualChecks: [
+        { text: "Stop a parent (TASK-001).", tasks: ["TASK-001"] },
+        { text: "Queued message.", tasks: [] },
+      ],
+    }),
+  );
+  // A blocking question comes first, and it keeps its default.
+  assert.deepEqual(
+    rows.map((row) => row.defaultAnswer),
+    ["Yes.", null, null, null, undefined],
+  );
+  assert.deepEqual(rows[4].checks, ["Stop a parent (TASK-001).", "Queued message."]);
+});
+
 test("the model stays cheap on a 200-task plan", (t) => {
   const tasks = Array.from({ length: 200 }, (_, index) =>
     task(

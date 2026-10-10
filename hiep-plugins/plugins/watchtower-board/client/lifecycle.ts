@@ -18,6 +18,10 @@ export interface NeedsYouRow {
   title: string;
   meta: string;
   tone: NeedsYouTone;
+  // Question rows: the default answer, or null when the question has none.
+  defaultAnswer?: string | null;
+  // Checks row: the text of each pending manual check.
+  checks?: string[];
 }
 
 type LifecycleInput = Pick<Overview, "plan" | "tasks" | "run" | "planVerify" | "manualChecks">;
@@ -64,6 +68,9 @@ export function needsYou({ questions, decisions, manualChecks }: NeedsYouInput):
   const blocking = (question: NeedsYouInput["questions"][number]) =>
     question.status === "OPEN" && question.blocks.length > 0;
   const rows: NeedsYouRow[] = [];
+  // An empty cell, `-`, and `none` all mean the question has no default.
+  const realDefault = (question: NeedsYouInput["questions"][number]) =>
+    ["", "-", "none"].includes(question.default.trim().toLowerCase()) ? null : question.default;
   for (const question of questions.filter(blocking))
     rows.push({
       kind: "question",
@@ -71,15 +78,17 @@ export function needsYou({ questions, decisions, manualChecks }: NeedsYouInput):
       title: question.question,
       meta: `${question.id} blocks ${question.blocks.join(", ")}`,
       tone: "danger",
+      defaultAnswer: realDefault(question),
     });
   for (const question of questions.filter((candidate) => !blocking(candidate))) {
-    const hasDefault = Boolean(question.default) && question.default.toLowerCase() !== "none";
+    const defaultAnswer = realDefault(question);
     rows.push({
       kind: "question",
       id: question.id,
       title: question.question,
-      meta: `${question.id}, ${hasDefault ? "has a default" : "open"}`,
-      tone: hasDefault ? "warning" : "neutral",
+      meta: `${question.id}, ${defaultAnswer ? "has a default" : "open"}`,
+      tone: defaultAnswer ? "warning" : "neutral",
+      defaultAnswer,
     });
   }
   for (const decision of decisions.filter((row) => row.status.toLowerCase() === "proposed"))
@@ -98,6 +107,7 @@ export function needsYou({ questions, decisions, manualChecks }: NeedsYouInput):
       title: `${plural(manualChecks.length, "manual check")} pending`,
       meta: tasks.length > 0 ? `From ${tasks.join(", ")}` : "From the Handoff",
       tone: "neutral",
+      checks: manualChecks.map((check) => check.text),
     });
   }
   return rows;

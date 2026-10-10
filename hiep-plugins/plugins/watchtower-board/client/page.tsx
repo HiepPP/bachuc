@@ -13,18 +13,28 @@ export function preselectWorkspace(workspaceId: string) {
   lastWorkspaceId = workspaceId;
 }
 
-// The page shows one workspace's board only: the one its opener named, or, when opened from the
-// mobile sidebar, the most recently active workspace.
+// The page shows one workspace's board only: the one its opener named, or, when no opener named
+// one (the mobile sidebar), the most recently active workspace. A named workspace never falls
+// back to another one, because the overview's actions send prompts to that workspace's agent.
 export function WatchtowerPage(props: PluginSurfaceProps) {
   const { host, theme, layout } = props;
   const paseo = usePaseo();
+  const named = lastWorkspaceId;
   const workspaces = useQuery({
     queryKey: ["watchtower-board", host.id, "workspaces"],
     queryFn: async () =>
       (await paseo.workspaces.list({ sort: [{ key: "activity_at", direction: "desc" }] })).entries,
   });
   const entries = workspaces.data ?? [];
-  const workspace = entries.find((entry) => entry.id === lastWorkspaceId) ?? entries[0] ?? null;
+  const listed = entries.find((entry) => entry.id === named) ?? null;
+  // The list can lag a new workspace or hold only its first page, so ask for the named one by ID.
+  const lookup = useQuery({
+    queryKey: ["watchtower-board", host.id, "workspace", named],
+    queryFn: async () => (named ? await paseo.workspaces.ref(named).refresh() : null),
+    enabled: named !== null && !listed && !workspaces.isPending,
+    retry: false,
+  });
+  const workspace = named === null ? (entries[0] ?? null) : (listed ?? lookup.data ?? null);
   const styles = useMemo(
     () => ({
       screen: { flex: 1, backgroundColor: theme.colors.surface0 },
@@ -34,11 +44,19 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
   );
 
   if (!workspace) {
-    const message = workspaces.isError
-      ? "Could not load workspaces."
-      : workspaces.isPending
-        ? "Loading workspaces…"
-        : "No workspaces on this host.";
+    const looking = workspaces.isPending || lookup.isPending;
+    const message =
+      named !== null
+        ? looking
+          ? "Loading workspace…"
+          : lookup.isError
+            ? "Could not load the workspace."
+            : "Workspace not found."
+        : workspaces.isError
+          ? "Could not load workspaces."
+          : workspaces.isPending
+            ? "Loading workspaces…"
+            : "No workspaces on this host.";
     return (
       <View style={styles.screen}>
         <Text style={styles.message}>{message}</Text>
