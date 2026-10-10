@@ -1,9 +1,7 @@
 import {
   type PluginHostProps,
   type PluginNewWorkspacePanelProps,
-  type PluginWorkspacePanelProps,
   useRpc,
-  useWorkspace,
 } from "@getpaseo/plugin/client";
 import { ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useQuery } from "@tanstack/react-query";
@@ -11,16 +9,7 @@ import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { readProjectBoardRpc } from "../shared/board";
 import { dashboardSummary, groupOrder, plural } from "./dashboard";
-import { WatchtowerOverview } from "./overview";
 import { groupLabels, TaskList } from "./task-list";
-
-// Explorer shows the same view as the Watchtower page; it lays itself out for the panel width.
-export function WatchtowerPanel(props: PluginWorkspacePanelProps) {
-  const projectName = useWorkspace(props.workspaceId, (workspace) => workspace.projectDisplayName);
-  return (
-    <WatchtowerOverview {...props} workspaceId={props.workspaceId} projectName={projectName} />
-  );
-}
 
 // The new workspace screen has no workspace yet, so it has no run, agent, or overview. It shows
 // the tasks of the project's root.

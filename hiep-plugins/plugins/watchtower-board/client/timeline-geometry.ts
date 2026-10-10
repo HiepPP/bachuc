@@ -1,4 +1,4 @@
-import { type BarKind, barEnd, type Timeline } from "./timeline";
+import { type BarKind, barEnd, startedAt, type Timeline } from "./timeline";
 
 // Pixel layout of the branch timeline. Kept apart from the view so tests can run without React.
 export const PAD_X = 4;
@@ -74,10 +74,10 @@ export function idleLabel(minutes: number): string {
 
 // The weekday and date of a timeline minute, from the run's `Started:` value.
 export function dayAt(started: string | null, minute: number): string | null {
-  const match = started?.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
-  if (!match) return null;
-  const [, year, month, day, hour, min] = match.map(Number);
-  const date = new Date(year, month - 1, day, hour, min + Math.round(minute));
+  const origin = startedAt(started);
+  if (!origin) return null;
+  const { year, month, day, minutes } = origin;
+  const date = new Date(year, month - 1, day, 0, minutes + Math.round(minute));
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()];
   return `${weekday} ${date.getDate()}`;
 }
@@ -120,9 +120,9 @@ export function parallelCaption(count: number): string {
 
 // The clock time of a timeline minute, from the run's `Started:` value.
 export function clockAt(started: string | null, minute: number): string | null {
-  const match = started?.match(/\d{4}-\d{2}-\d{2}[ T](\d{2}):(\d{2})/);
-  if (!match) return null;
-  const total = (Number(match[1]) * 60 + Number(match[2]) + Math.round(minute)) % (24 * 60);
+  const origin = startedAt(started);
+  if (!origin) return null;
+  const total = (((origin.minutes + Math.round(minute)) % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
@@ -191,7 +191,8 @@ export function timelineGeometry(
   if (gaps.length) {
     for (const minute of [model.axis.start, ...gaps.map((gap) => gap.end)]) {
       const label = dayAt(started, minute);
-      if (label) days.push({ x: x(minute), label });
+      // A break inside one day needs no second label for that day.
+      if (label && label !== days.at(-1)?.label) days.push({ x: x(minute), label });
     }
   }
   const byId = new Map(model.bars.map((bar) => [bar.id, bar]));

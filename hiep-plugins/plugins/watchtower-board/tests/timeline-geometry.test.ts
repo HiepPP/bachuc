@@ -258,6 +258,27 @@ test("a 3-day idle gap collapses to one break and keeps bars readable", () => {
   assert.equal(dayAt(started, 3 * day + 10), "Thu 8");
 });
 
+test("a break inside one day keeps a single day label", () => {
+  const model: Timeline = {
+    ...mock,
+    bars: [
+      { id: "TASK-001", kind: "done", start: 0, end: 20, expectedEnd: null, lane: 0 },
+      { id: "TASK-002", kind: "done", start: 400, end: 420, expectedEnd: null, lane: 0 },
+    ],
+    edges: [],
+    laneCount: 1,
+    axis: { start: 0, end: 420, ticks: [] },
+    stats: { ...mock.stats, averageMinutes: 20 },
+  };
+  // A date with no time counts from midnight.
+  const geometry = timelineGeometry(model, 400, null, "2026-10-07");
+  assert.equal(geometry.breaks.length, 1);
+  assert.deepEqual(
+    geometry.days.map((entry) => entry.label),
+    ["Wed 7"],
+  );
+});
+
 test("a gap shorter than the break threshold stays at scale", () => {
   const model: Timeline = {
     ...mock,

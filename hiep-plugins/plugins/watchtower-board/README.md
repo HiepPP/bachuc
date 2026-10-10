@@ -6,21 +6,16 @@ Requires the fork daemon and client 0.10.2-beta.900+, Node 22+, and enabled trus
 
 ## Use
 
-With a thread open, click **Watchtower** in the sidebar, below **Board**, or choose
-**Open Watchtower board** in the Command Center. Both open the board in Explorer, beside
-**Files** and **Changes**, for the current workspace. On the new workspace screen, the board of the
-chosen project opens in the side panel; it reads the project root and has no attachment search key.
-On desktop and web the sidebar item is disabled elsewhere outside a thread, such as on the Board
-page. In a web window narrower than 720 px, the compact Explorer has no plugin tabs, so the sidebar
-item opens the Watchtower page on the current workspace instead.
+The board has one view, the Watchtower page. Open it with the **Watchtower** pill above an agent
+composer, or with **Open Watchtower board** in the Command Center. Both open it over the current
+screen on that workspace. The plugin adds no sidebar item and no Explorer panel.
+On the new workspace screen, the pill shows the chosen project's tasks in the side panel instead; it
+reads the project root, and it has no run, agent, or attachment search key.
 The Watchtower page shows one workspace only, with no workspace picker. If the opener names a
-workspace, the page shows that one or says "Workspace not found."; it never shows another. Mobile's
-sidebar page names none and shows the most recently active workspace.
+workspace, the page shows that one or says "Workspace not found."; it never shows another. If no
+opener named one, such as after a plugin reload, it shows the most recently active workspace.
 The header identifies its project. Each workspace keeps its own board and task selection.
 The board reads `watchtower/NEXT.md` in that workspace, not another checkout or its parent repository.
-Explorer shows the same view as the Watchtower page, described below. The new workspace side panel
-has no workspace, run, or agent, so it shows only completion, status counts, the open questions
-that block tasks, and the task list.
 Each task row shows its class next to its ID. Expand or collapse a status group, then select a
 compact task row to read its full title, brief, dependencies, class, blocking questions, blocker,
 and file error. Refresh to read current files.
@@ -30,7 +25,7 @@ Watchtower page over the current screen, on that composer's workspace. A wide la
 overlay with a dimmed backdrop; a compact layout shows a page. The pill reads `Watchtower 5/10`,
 adds `, 1 question` while an open question blocks a task, and reads `Watchtower` on New workspace,
 which has no workspace yet; there a press shows the chosen project's board in the side panel.
-The page and the Explorer panel show one view, which lays itself out by its own width: three
+The page lays itself out by its own width, so it also fits a phone: three
 columns from 1000 px, stacked cells below 520 px, and a mix between. It reads
 `watchtower.overview.read`, and its Tasks cell reads the board for briefs. It shows:
 

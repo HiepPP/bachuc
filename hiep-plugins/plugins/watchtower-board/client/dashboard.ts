@@ -36,14 +36,6 @@ export function groupTasks(tasks: readonly Task[]): Record<TaskGroup, Task[]> {
   return groups;
 }
 
-// The host's compact layout ends at its `md` breakpoint, 720 px
-// (packages/app/src/styles/unistyles.ts). Its compact Explorer shows no plugin tabs.
-const COMPACT_MAX_WIDTH = 720;
-
-export function isCompactWidth(windowWidth: number): boolean {
-  return windowWidth < COMPACT_MAX_WIDTH;
-}
-
 export function questionsFor(taskId: string, questions: readonly Question[]): Question[] {
   return questions.filter((question) => question.blocks.includes(taskId));
 }

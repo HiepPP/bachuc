@@ -49,9 +49,23 @@ export function barEnd(bar: TimelineBar): number {
   return Math.max(bar.end, bar.expectedEnd ?? bar.end);
 }
 
+// `Started:` as `YYYY-MM-DD HH:MM`, or a date alone, which counts from midnight like the server.
+export function startedAt(
+  started: string | null | undefined,
+): { year: number; month: number; day: number; minutes: number } | null {
+  const match = started?.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+  if (!match) return null;
+  const [, year, month, day, hour = "0", minute = "0"] = match;
+  return {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+    minutes: Number(hour) * 60 + Number(minute),
+  };
+}
+
 function clockOrigin(started: string | null | undefined): number | null {
-  const match = started?.match(/\d{4}-\d{2}-\d{2}[ T](\d{2}):(\d{2})/);
-  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+  return startedAt(started)?.minutes ?? null;
 }
 
 function hourTicks(started: string | null | undefined, end: number): TimelineTick[] {

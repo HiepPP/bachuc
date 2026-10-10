@@ -312,7 +312,7 @@ export function WatchtowerOverview({
               ? `Finish about ${finish}`
               : data.run?.finished
                 ? "Run finished"
-                : started
+                : clockAt(started, 0)
                   ? `Autorun since ${clockAt(started, 0)}`
                   : undefined
         }

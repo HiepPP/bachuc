@@ -82,7 +82,10 @@ export function parseOverviewRun(markdown: string, now = new Date()): OverviewRu
   const started = field(markdown, "Started");
   const finished = field(markdown, "Finished");
   const rows = tableRows(section(markdown, "Log") ?? "", ["start", "end", "task", "result"]);
-  const startedAt = dateTime(started);
+  // A `Started:` date with no time counts from midnight, so a stale run still reads as stopped.
+  const startedAt =
+    dateTime(started) ??
+    dateTime(started?.match(/^\d{4}-\d{2}-\d{2}$/) ? `${started} 00:00` : null);
   let origin = startedAt ? startedAt.getHours() * 60 + startedAt.getMinutes() : null;
   let previous = origin;
   let dayOffset = 0;

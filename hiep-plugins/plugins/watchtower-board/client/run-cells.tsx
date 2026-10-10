@@ -20,7 +20,7 @@ export function AutorunStrip({ run, theme }: { run: OverviewRun | null } & Theme
   const last = [...run.log].reverse().find((row) => row.endMinute !== null);
   const items = [
     run.runner ? ["runner", run.runner] : null,
-    run.started ? ["started", clockAt(run.started, 0) ?? run.started] : null,
+    run.started ? ["started", run.started] : null,
     ["iterations", String(run.log.length)],
     last ? ["last activity", clockAt(run.started, last.endMinute ?? 0) ?? last.end] : null,
     run.finished ? ["finished", run.finished] : null,

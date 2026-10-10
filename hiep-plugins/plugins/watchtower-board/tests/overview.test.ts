@@ -286,6 +286,22 @@ test("dated log times show a gap of several days and clock times continue from t
   );
 });
 
+test("a Started date with no time counts from midnight, so a stale run has stopped", () => {
+  const run = parseOverviewRun(
+    "# Run\n\n- Started: 2026-10-07\n- Finished: -\n\n## Log\n\n| Start | End | TASK | Result |\n| --- | --- | --- | --- |\n| 15:42 | 16:04 | TASK-001 | DONE |\n| 17:14 | 17:18 | TASK-002 | DONE |\n",
+    new Date(2026, 9, 10, 16, 0),
+  );
+  assert.deepEqual(
+    run.log.map((row) => [row.startMinute, row.endMinute]),
+    [
+      [942, 964],
+      [1034, 1038],
+    ],
+  );
+  assert.equal(run.stopped, true);
+  assert.equal(run.nowMinute, 1038);
+});
+
 test("a run with no finish and no log activity for over two hours has stopped", () => {
   // The last logged activity ends at 00:21, minute 89.
   const recent = parseOverviewRun(runLog, new Date(2026, 9, 7, 2, 21));
