@@ -51,10 +51,11 @@ This folder lives inside `HiepPP/bachuc`, a Paseo fork dedicated to one user. It
 source: "code a plugin" means editing `hiep-plugins/plugins/<plugin-id>`. The old standalone repo
 `HiepPP/hiep-paseo-plugin` is frozen; never edit it or install from it.
 
-Every extension goes through a plugin. When a plugin cannot reach deep enough into Paseo, add the
-smallest generic host API in `packages/*` that unblocks it, then build the feature in the plugin.
-Keep host changes thin: a hook, a contribution point, or a context field, never the feature itself.
-Plugins may require the fork version (`requirements.paseo >=0.10.2-beta.900`); stock Paseo support
+Put each feature where it runs natively with the fewest bugs (ADR-0017 in
+`watchtower/decisions/`). Build it in the host (`packages/*`) when it needs app internals such as
+the stream model, layout, navigation, or a hot path, or when a plugin would need a new plugin API.
+Use a plugin for a self-contained extra that the existing plugin APIs already cover. Upstream merge
+cost is not a reason to pick a plugin. Plugins may require the fork version (`requirements.paseo >=0.10.2-beta.900`); stock Paseo support
 is not a goal.
 
 ## Explore Paseo source
