@@ -4,7 +4,7 @@
 
 - Title: Repo-wide Watchtower IDs and Board task lanes
 - Slug: 20261012-repo-wide-ids-and-board-lanes
-- Status: ACTIVE
+- Status: ARCHIVED
 - Updated: 2026-10-12
 
 ## Tracker
@@ -39,4 +39,4 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Archive
 
-- None.
+- Archived: 2026-10-12 -> watchtower/archive/20261012-repo-wide-ids-and-board-lanes/
