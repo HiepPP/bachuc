@@ -25,7 +25,7 @@ One row per TASK. Group ties together items that ship as one transaction.
 | 10    | TASK-068 Board search and keys on the two columns                      | B3    | DONE   | [watchtower/tasks/TASK-068-board-search-keys-on-columns.md](watchtower/tasks/TASK-068-board-search-keys-on-columns.md)       | TASK-067           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares the Board client files with TASK-067.        |
 | 11    | TASK-070 Board Needs you holds thread input only                       | B4    | DONE   | [watchtower/tasks/TASK-070-board-needs-you-input-only.md](watchtower/tasks/TASK-070-board-needs-you-input-only.md)           | TASK-068           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | ADR-0013. Counts move to the plan line.             |
 | 12    | TASK-071 Watchtower Needs you: full text, target link, no mock targets | W2    | DONE   | [watchtower/tasks/TASK-071-watchtower-needs-you-clarity.md](watchtower/tasks/TASK-071-watchtower-needs-you-clarity.md)       | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | ADR-0013. watchtower-board only.                    |
-| 13    | TASK-069 Board Timeline tab                                            | B4    | TODO   | [watchtower/tasks/TASK-069-board-timeline-tab.md](watchtower/tasks/TASK-069-board-timeline-tab.md)                           | TASK-070           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Design 1a with the 1c load strip. Q-024             |
+| 13    | TASK-069 Board Timeline tab                                            | B4    | DONE   | [watchtower/tasks/TASK-069-board-timeline-tab.md](watchtower/tasks/TASK-069-board-timeline-tab.md)                           | TASK-070           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Live checked. Q-024 defaulted.                      |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
@@ -39,7 +39,9 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Handoff
 
-- Next action: commit the done work, then run `implement` for TASK-069 (Board Timeline tab).
+- Next action: decide how to restore the lost Board work of TASK-063 to TASK-068 and TASK-070, then archive the plan.
+- Lost work, found 2026-10-12 during TASK-069: the Board files of TASK-063 to TASK-068 and TASK-070 are not in git and not on disk. Missing examples: `board/server/watchtower.ts`, `board/shared/lanes.ts`, `board/client/plan-line.tsx`. Commit `067acee2f` holds only the TASK chip and `openWatchtower`; no stash or unreachable git object has the files. Board on live shows Running and Just finished, without Needs you or the plan line.
+- TASK-069 passed the live check on 2026-10-12 and does not depend on the lost files. It is committed and pushed to `main`.
 - TASK-070 and TASK-071 passed the live check on 2026-10-12 (Expo web on daemon 6768).
 - All live test agents of this plan are archived. Their extra local bachuc workspaces (each `npm run cli -- run` made one) stay on live.
 - TASK-067 and TASK-068 passed the live check on 2026-10-12 (Expo web on daemon 6768), including a compact-height fix.
