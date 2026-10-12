@@ -11,6 +11,7 @@ the Overview tool call groups, so they show even when the commands around them a
   button on a Board card. An off thread shows Paseo's own edit rows, which collapse into the tool
   call groups. The choice is the agent label `edit-diffs.mode` (`off` or `on`), so it lasts and
   every client sees it.
+- The row is one line: chevron, path, a change bar, and `+added −removed`. The bar has 7 squares split by the added and removed share (green and red), so a write is all green and a pure delete is all red. Press the row to hide or show the diff.
 - Removed lines show their old line number; added and unchanged lines show the new one.
 - A write shows the whole written file as added lines, numbered from line 1. The provider
   sends no old content, so overwriting an existing file also shows only added lines.

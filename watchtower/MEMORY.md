@@ -137,3 +137,6 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: `TranslationResources` derives from `en`, so a new key in `en.ts` must also land in all 8 other locale files under `packages/app/src/i18n/resources/` for typecheck to pass.
 - Source: TASK-073 outcome.
 - Use next time: plan locale edits for every resource file when a TASK adds UI strings.
+- Learned: the root `npm run format:files` and `format:check:files` skip `hiep-plugins/` and exit 2 with "Expected at least one target file" when only plugin files are passed.
+- Source: TASK-074 outcome.
+- Use next time: format plugin files with the plugin's own `npm run format`, and check them with `npx oxfmt --check` from the plugin folder.
