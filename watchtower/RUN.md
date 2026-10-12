@@ -8,5 +8,6 @@
 
 ## Log
 
-| Start | End | TASK | Result | PR or reason |
-| ----- | --- | ---- | ------ | ------------ |
+| Start | End   | TASK     | Result | PR or reason |
+| ----- | ----- | -------- | ------ | ------------ |
+| 15:50 | 16:35 | TASK-072 | DONE   | #55          |
