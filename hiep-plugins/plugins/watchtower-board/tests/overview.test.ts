@@ -488,7 +488,10 @@ test("the real t3code plan parses without warnings and stays small", async (t) =
   assert.equal(overview.run?.log.length, 10);
   assert.equal(overview.run?.log.at(-1)?.endMinute, 203);
   assert.equal(overview.run?.nowMinute, 206);
-  assert.ok(overview.decisions.some((decision) => decision.status === "proposed"));
+  // The real index changes as decisions move; the fixture cases above cover each status.
+  assert.ok(overview.decisions.length > 0);
+  for (const decision of overview.decisions)
+    assert.match(decision.status, /^(proposed|accepted|superseded by ADR-\d{4})$/);
   const size = Buffer.byteLength(JSON.stringify(overview));
   t.diagnostic(`overview JSON bytes: ${size}`);
   assert.ok(size <= 32 * 1024, `overview JSON is ${size} bytes`);
