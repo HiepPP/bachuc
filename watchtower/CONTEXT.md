@@ -17,14 +17,13 @@
 - IDs: TASK and Q-IDs increase across the repo and never restart. A repo migrates its archive the first time a new plan is created there. See [ADR-0011](watchtower/decisions/ADR-0011-repo-wide-ids-over-per-plan-ids.md).
 - Migration order: archive date prefix, then slug, then the old ID.
 - The migration rewrites ID references in ADR bodies and `watchtower/MEMORY.md`. This is the only exception to R3. No ID map file is kept, so 42 old commit messages keep IDs that no longer match.
-- Board layout (from TASK-067): Needs you on the left, then Running and Just finished. Each card shows its TASK chip, and each plan project gets one plan line that opens Watchtower. See [ADR-0012](watchtower/decisions/ADR-0012-status-columns-with-task-chips-over-task-lanes.md), which supersedes the task lanes of ADR-0010 (TASK-064).
-- A chip for a TASK outside the active plan, such as one of an archived plan, still shows and opens Watchtower without a TASK.
-- Needs you (from TASK-070 and TASK-071): Board lists only threads waiting for input; questions and checks are counts on the plan line and live on the Watchtower page, which shows full text and links the answer target. See [ADR-0013](watchtower/decisions/ADR-0013-thread-input-only-in-board-needs-you.md).
+- Board stays on Running and Just finished; a card shows its TASK chip, which opens Watchtower. See [ADR-0012](watchtower/decisions/ADR-0012-status-columns-with-task-chips-over-task-lanes.md). The plan line and Board Needs you were dropped.
+- Questions and checks live on the Watchtower page, which shows full text and links the answer target (TASK-063). See [ADR-0013](watchtower/decisions/ADR-0013-thread-input-only-in-board-needs-you.md).
 - Answers stay in the thread or on the Watchtower page. Board shows no answer form.
 
 ## Open Decisions
 
-- None. Q-022 and Q-023 are answered in [watchtower/QUESTIONS.md](watchtower/QUESTIONS.md).
+- None. Q-022 and Q-023 are answered, and Q-024 is defaulted, in [watchtower/QUESTIONS.md](watchtower/QUESTIONS.md).
 
 ## References
 

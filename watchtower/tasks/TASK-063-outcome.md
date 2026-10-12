@@ -6,32 +6,32 @@ Status: DONE
 
 Changed:
 
-- New `hiep-plugins/plugins/board/server/watchtower.ts`: trimmed copies of watchtower-board's table parsers, `parsePlan`, `gitRoot`, `readPlan`, `runTask`, and `attachPlans`.
-- `shared/board.ts`: runs carry optional `taskId`, `planRoot`, and `workspaceId`; the snapshot carries optional `plans`; new `WATCHTOWER_TASK_LABEL` and `SCHEDULE_RUN_LABEL`.
-- `server/snapshot.ts`: `listBoardAgents` also returns `facts` per agent: the TASK label, whether it is a schedule run, and its workspace.
-- `index.server.ts`: the snapshot handler calls `attachPlans`.
-- New `tests/watchtower.test.ts`; `tests/snapshot.test.ts` expects the new `facts` field.
+- `client/actions.ts`: `AgentCandidate` includes `provider`; `chooseAgent` skips agents whose provider starts with `mock`.
+- `client/needs-you.tsx`: pressing a row's text toggles its full text and, for a question, its default; one row opens at a time; "Actions go to X" is a link that opens thread X.
+- `client/overview.tsx`: passes `navigation.openAgent` to `NeedsYouCell`.
+- `tests/actions.test.ts`: a newer idle mock and an older idle real agent -> the real agent; only a mock -> none.
+- `README.md`: target rule, link, and expand behavior, linking ADR-0013.
+- `client/agent-target.ts` needed no change: the agent list already carries `provider`.
 
 Contract:
 
-- A run's TASK comes from `watchtower.task`; for a schedule iteration, from the RUN.md row that covers its start; while it runs with no row yet, from the only IN PROGRESS TASK.
-- Plans are read from the git root above each run's `cwd`, once per root per snapshot. Files over 128 KiB, an ARCHIVED plan, or a Tracker with no TASK give no plan.
-- New fields are optional, so an older client still parses the snapshot.
+- A prompt still never goes to a working agent.
 
 Verified:
 
-- `npx tsx --test tests/watchtower.test.ts tests/snapshot.test.ts` -> 12 pass.
-- `npm test` -> 118 pass, 0 fail.
-- `npm run typecheck` -> exit 0.
-- `npm run-script lint` -> 0 warnings, 0 errors.
+- `npm run typecheck` -> exit 0; `npm run-script lint` -> 0 warnings, 0 errors; `npm test` -> 75 pass, 1 fail (the pre-existing proposed-ADR case in `tests/overview.test.ts`).
+- Live check, 2026-10-12, Expo web on daemon 6768, light theme, workspace `wks_a70c2b9cc272dae9` with a real Claude Haiku agent ("Watchtower target check", idle) and a newer mock agent ("Mock newer"):
+  - Q-024 expanded to its full sentence and "Default: No. Keep 50; Timeline says "Older threads are not kept" when the window lost some." Screenshot `/tmp/nyu-wt.png`.
+  - "Actions go to Watchtower target check" was an underlined link; pressing it opened that thread.
+  - After "Mock newer" went idle and was the newest agent, the target stayed "Watchtower target check".
+- Both test agents were archived after the check.
 
 Anti-goal:
 
-- Before the readers: no timing case existed; `attachPlans` was not called (0 ms added).
-- After the mapping: the 50-run, 3-root case passes its 50 ms assertion; whole test 10.0 ms; 2026-10-12.
-- Final: same case, 10.0 ms including a warm-up call; `tests/watchtower.test.ts`, 2026-10-12.
-- Result: PASS against 50 ms.
+- Before: 74 pass, 1 fail (pre-existing); 2026-10-12.
+- Final: 75 pass, 1 fail, the same case; 2026-10-12.
+- Result: PASS, 0 new failures.
 
 Lessons:
 
-- Board's tests run with `tsx --test` (node:test), not vitest.
+- A Claude test agent asked to run `git branch --show-current` because of the global recap rule; deny it to end the turn quickly.

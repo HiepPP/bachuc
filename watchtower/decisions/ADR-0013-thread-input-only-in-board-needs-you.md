@@ -7,7 +7,7 @@ Scope: `hiep-plugins/plugins/board/**`, `hiep-plugins/plugins/watchtower-board/c
 
 ## Context
 
-- After TASK-064, Board's Needs you listed running threads that need input, plan questions, and manual checks. A question or check opened the Watchtower page, which listed the same item again, cut at 2 lines.
+- After the task-lanes TASK, since dropped, Board's Needs you listed running threads that need input, plan questions, and manual checks. A question or check opened the Watchtower page, which listed the same item again, cut at 2 lines.
 - On the Watchtower page, Answer and Use default send a prompt to the newest idle agent of the workspace. On live on 2026-10-12 that was a mock test agent, "Columns check", and its name was plain text, not a link.
 - `watchtower/QUESTIONS.md` does not record which thread asked, so neither page can open the asking session.
 - The owner found the two-step path confusing.

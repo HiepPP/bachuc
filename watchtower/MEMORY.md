@@ -124,5 +124,5 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Source: TASK-062 outcome.
 - Use next time: rebuild the plugin package before you read an app type error after a contract edit.
 - Learned: watchtower-board's `tests/overview.test.ts` reads this repo's real `watchtower/` files, so an ADR status change or archive edit can fail it.
-- Source: TASK-066 outcome.
+- Source: `hiep-plugins/plugins/watchtower-board/tests/overview.test.ts`.
 - Use next time: run that test after you change `watchtower/DECISIONS.md` or an archived plan.

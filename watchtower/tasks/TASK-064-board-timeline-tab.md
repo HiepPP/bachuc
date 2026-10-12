@@ -1,4 +1,4 @@
-# TASK-069 Board Timeline tab
+# TASK-064 Board Timeline tab
 
 Group: B4 (`hiep-plugins/plugins/board/server/timeline.ts`, `hiep-plugins/plugins/board/shared/timeline.ts`, `hiep-plugins/plugins/board/client/timeline.tsx`, the view switch in `client/recaps.tsx`, Board README and tests)
 Class: code
@@ -19,7 +19,7 @@ Boundaries:
 - Gap folding follows watchtower-board: an idle gap longer than max(2 h, 4 x the average thread) becomes a 48 px break labelled with its length. Copy the rule; plugins never import each other.
 - Rows: one per top-level thread, grouped by host, then project; a thread's subagents share one thin row under it. Bars use the project tint when finished, dark while running, red when failed, dashed gray when cancelled, amber when it needs input.
 - Load strip: agents running at once, per hour, top-level threads only; the peak is labelled.
-- A bar press opens the thread; a TASK chip opens Watchtower at that TASK (TASK-066).
+- A bar press opens the thread; a TASK chip opens Watchtower at that TASK.
 - Each host loads its own timeline; an offline host shows its lane as unavailable, as on Runs.
 
 How:

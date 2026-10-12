@@ -6,36 +6,32 @@ Status: DONE
 
 Changed:
 
-- New `shared/lanes.ts`: `laneModel` places run clusters into project grids (TASK rows plus Ad-hoc, columns Todo, Running, Finished, Verified) with hints; `treeTask` lets a rootless cluster follow its newest labelled subagent; `needsYouItems` builds the Needs you list.
-- New `client/lanes.tsx` (`TaskLanes`) and `client/needs-you.tsx` (`NeedsYouColumn`).
-- `client/page.tsx`: each host lane shows Needs you beside the task lanes; the old `RunColumn` and its two status columns are gone. Cards render through the existing `RunCluster` via a render prop.
-- `README.md`: new Task lanes section; column wording updated.
-- New `tests/lanes.test.ts`; `tests/host-lanes.test.ts` reads card actions through the lane grid's `renderTree` and asserts the new layout.
+- New [shared/timeline.ts](hiep-plugins/plugins/board/shared/timeline.ts): the `board.timeline` contract and the pure model: 24-hour window, gap folding copied from watchtower-board, x positions, hour ticks, hourly load buckets with the peak, rows per host and project with one subagent row, and the host notes.
+- New [server/timeline.ts](hiep-plugins/plugins/board/server/timeline.ts): `timelineSnapshot` keeps runs that overlap the window, leaves out and counts runs without a start time, and sets `olderDropped` when the full store dropped runs inside the window.
+- [index.server.ts](hiep-plugins/plugins/board/index.server.ts): the snapshot refresh moved into `refresh`, shared by `board.snapshot` and the new `board.timeline` handler. [server/store.ts](hiep-plugins/plugins/board/server/store.ts) names the limit `FINISHED_LIMIT`.
+- New [client/timeline.tsx](hiep-plugins/plugins/board/client/timeline.tsx): legend, load strip, axis with break labels, host sections, thread and subagent rows, and the footer. Each host runs its own query; all hosts share one axis.
+- [client/recaps.tsx](hiep-plugins/plugins/board/client/recaps.tsx): Runs, Timeline, and Recaps tabs. [client/page.tsx](hiep-plugins/plugins/board/client/page.tsx): renders `TimelineView` for the Timeline tab.
+- New [tests/timeline.test.ts](hiep-plugins/plugins/board/tests/timeline.test.ts) with 9 cases. [README.md](hiep-plugins/plugins/board/README.md): new Timeline section.
 
 Contract:
 
-- Stars, Remove, unread fading, project colors, subagent clusters, the size control, and host lanes keep working; the host-specific action test still checks every call per host.
-- "N new" moved from the Just finished header to the Finished and Verified headers of each grid.
-- Deviation from the spec's How: cells hold the full existing cards, not one-line cards with a selection step. It reuses every card action with no new UI state; one-line cards can follow as their own TASK.
-- Needs you is per host lane, not one list across hosts.
+- Follows ADR-0012: Runs stays the triage view.
+- Q-024 took the default: the store keeps 50 finished runs, and a host that lost runs in the window says "Older threads are not kept".
+- The timeline uses the same visible runs as Runs, so a thread removed from Board or archived is not drawn.
+- An empty window does not fold; a fold needs at least one thread.
 
 Verified:
 
-- `npx tsx --test tests/lanes.test.ts` -> 6 pass.
-- `npm test` -> 124 pass, 0 fail.
-- `npm run typecheck` -> exit 0; `npm run-script lint` -> 0 warnings, 0 errors.
-- `npm run cli -- plugin reload board` on live -> `running`, log "Plugin ready".
-- Human check on live, 2026-10-12, light theme: PASS after one fix. Seen in the Expo web app (`npm run dev:app`, headless agent-browser) on the live daemon 6768, with mock agents labelled `watchtower.task`. At 1440 px, bachuc showed rows TASK-059 to TASK-066 plus Ad-hoc, "8/8", Needs you on the left with the 3 manual checks, a TASK-064 run in Verified, an unlabelled running run in Ad-hoc Running, and edit-diffs-demo as only its Ad-hoc row. Screenshot `/tmp/lanes-1.png`.
-- Compact (420 px) first showed the grid about 280 px wide. Fix: the lane container uses `alignItems: "stretch"` on compact layouts (`client/page.tsx`). After reload the grid and Needs you fill the width. Screenshot `/tmp/lanes-compact2.png`.
-- The `npm run dev:desktop` Electron window could not be checked: its screenshots stayed on an old frame and its Board did not poll, as if the window were occluded. The same app code was checked in the web build on the same daemon.
+- `npx tsx --test tests/timeline.test.ts` -> 9 pass, including the timing case.
+- `npm run typecheck && npm run-script lint && npm test` in the Board plugin -> exit 0, 0 warnings, 123 pass.
+- Root `npm run typecheck` -> exit 0.
+- Live check, 2026-10-12, Expo web on daemon 6768, light theme: with no threads the host said "Nothing ran in the last 24 hours". After a mock thread, the strip read "peak 1 · 14:00–14:21", a 48 px break read "23h 57m", and the running bar ended at the now line. Screenshot `/tmp/t069-timeline.png`.
+- Pressing the bar opened the thread "Timeline check one". After a stop, the bar turned dashed gray as cancelled. Screenshot `/tmp/t069-cancelled.png`. The test agent is archived.
+- The live check found one bug, now fixed: an empty window folded into one 24h break.
+- Not checked on live: subagent rows, the TASK chip on a bar, and a second host. Tests cover the rows; live had no labelled or nested threads.
 
 Anti-goal:
 
-- Before changes: `client/page.tsx` 1764 lines; `wc -l`, 2026-10-12.
-- After mounting lanes: 1659 lines (the `RunColumn` removal offsets the new mount).
-- Final: 1659 lines; `wc -l`, 2026-10-12.
-- Result: PASS against the 1764-line tripwire.
-
-Lessons:
-
-- `tests/host-lanes.test.ts` transpiles `page.tsx` and stubs unknown imports as `{}`; new client modules render as elements with an undefined type, so tests read their props.
+- After the model: 50 runs through `timelineSnapshot` and `timelineModel` took 0.19 ms; `tests/timeline.test.ts`, 2026-10-12.
+- At completion: 0.17 ms; `tests/timeline.test.ts`, 2026-10-12.
+- Result: PASS against the 30 ms limit. The case measures the RPC's own work; the host agent list read is not included.

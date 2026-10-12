@@ -8,7 +8,7 @@ Scope: `hiep-plugins/plugins/board/**`
 ## Context
 
 - ADR-0010 put each project in a grid of TASK rows across Todo, Running, Finished, and Verified.
-- The live check on 2026-10-12 (TASK-064 outcome) showed bachuc as 8 rows where 7 held only the hint "Done" and no card; the grid took about 560 px. A project without a plan was one Ad-hoc row with two shaded, unused columns, and its 7 cards stacked in one cell.
+- The live check on 2026-10-12 (outcome of the task-lanes TASK, since dropped) showed bachuc as 8 rows where 7 held only the hint "Done" and no card; the grid took about 560 px. A project without a plan was one Ad-hoc row with two shaded, unused columns, and its 7 cards stacked in one cell.
 - The Watchtower page already shows TASK status, deps, blockers, progress, and a timeline per plan, one click away from Board.
 - Board's own job is triage across every project and host: what needs the owner, what runs, what just finished, what to remove.
 
