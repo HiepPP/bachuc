@@ -286,12 +286,12 @@ function isRunningWork(item: StreamItem): boolean {
 }
 
 /**
- * Where the turn's answer starts: its last assistant message, with every Markdown block of
- * it, when only thoughts follow. Returns `items.length` when the turn has no answer.
+ * Where the turn's answer starts: every assistant message after its last tool work, with
+ * thoughts between them. A provider can send one answer as several messages, so the answer
+ * is not only the last one. Returns `items.length` when the turn has no answer.
  */
 function findAnswerStart(items: readonly StreamItem[]): number {
   let start = items.length;
-  let messageId: string | null = null;
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index]!;
     if (item.kind === "thought") {
@@ -300,11 +300,6 @@ function findAnswerStart(items: readonly StreamItem[]): number {
     if (item.kind !== "assistant_message") {
       break;
     }
-    const itemMessageId = item.blockGroupId ?? item.id;
-    if (messageId !== null && itemMessageId !== messageId) {
-      break;
-    }
-    messageId = itemMessageId;
     start = index;
   }
   return start;

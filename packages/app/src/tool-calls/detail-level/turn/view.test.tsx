@@ -3,6 +3,7 @@
  */
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { AccessibilityInfo } from "react-native";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolCallDetail } from "@getpaseo/protocol/agent-types";
 import type {
@@ -278,6 +279,72 @@ describe("TurnStepListView", () => {
 
     click(one('[data-testid="turn-step-row-3"]'));
     expect(all("[data-dimmed='true']")).toHaveLength(0);
+  });
+
+  it("scrolls to a row only when the strip selects it", () => {
+    // jsdom has no scrollIntoView.
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    mount(buildGroup(doneTurn));
+
+    click(one('[data-testid="turn-step-row-3"]'));
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    click(one('[data-testid="turn-step-row-3"]'));
+
+    click(one('[data-testid="turn-segment-1"]'));
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+  });
+
+  it("keeps edit rows and notes outside the step's button", () => {
+    mount(buildGroup(doneTurn));
+
+    expect(one('[data-testid="turn-step-row-0"]').getAttribute("role")).toBe("button");
+    expect(one('[data-testid="note-note1"]').closest('[role="button"]')).toBeNull();
+    expect(one('[data-testid="item-edit-diffs/e1"]').closest('[role="button"]')).toBeNull();
+    // A press in the step body does not toggle the highlight.
+    click(one('[data-testid="turn-step-body-0"]'));
+    expect(all('[data-testid^="turn-step-row-"][aria-pressed="true"]')).toHaveLength(0);
+  });
+
+  it("marks each note with its message id for chat find", () => {
+    mount(buildGroup(doneTurn));
+
+    expect(
+      one('[data-testid="note-note1"]')
+        .closest("[data-message-id]")
+        ?.getAttribute("data-message-id"),
+    ).toBe("note1");
+  });
+
+  it("counts header lines with a line diff, as the edit rows do", () => {
+    const edit: PluginTimelineStreamItem = {
+      ...editRow("e1", 7, "/repo/calc.py"),
+      sourceToolCall: call("e1", 7, {
+        type: "edit",
+        filePath: "/repo/calc.py",
+        oldString: "def add(a, b):\n    return a - b\n",
+        newString: "def add(a, b):\n    return a + b\n",
+      }),
+    };
+    mount(buildGroup([user, read("r1", 1), edit, shell("test", 9), note("final", 12)]));
+
+    const summary = one('[data-testid="turn-summary"]').textContent;
+    expect(summary).toContain("+1");
+    expect(summary).toContain("−1");
+  });
+
+  it("listens for reduce motion only on running steps", () => {
+    const addEventListener = vi.spyOn(AccessibilityInfo, "addEventListener");
+    mount(buildGroup(doneTurn));
+    expect(addEventListener).not.toHaveBeenCalled();
+    act(() => root!.unmount());
+    root = null;
+
+    mount(buildGroup(runningTurn, true));
+    // The running step's strip segment and its number.
+    expect(addEventListener).toHaveBeenCalledTimes(2);
+    addEventListener.mockRestore();
   });
 
   it("shows the running state: Working, a ticking clock, now, and the live box", () => {

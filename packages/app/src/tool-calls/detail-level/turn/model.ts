@@ -1,5 +1,15 @@
-import type { AssistantMessageItem, PluginTimelineStreamItem, ToolCallItem } from "@/types/stream";
-import { describeToolCall, turnWorkCall, type TurnRun } from "../grouping";
+import type {
+  AssistantMessageItem,
+  PluginTimelineStreamItem,
+  StreamItem,
+  ToolCallItem,
+} from "@/types/stream";
+import {
+  describeToolCall,
+  turnWorkCall,
+  type ToolCallGroupLookup,
+  type TurnRun,
+} from "../grouping";
 import { buildOverviewGroup, type OverviewSummary } from "../overview/model";
 
 export type TurnStepLabel = "explore" | "edit" | "verify";
@@ -166,4 +176,25 @@ export function buildTurnGroup(run: TurnRun): TurnStepGroup {
     runningStep: steps.find((step) => step.isRunning) ?? null,
     isLoading: !run.isSealed,
   };
+}
+
+/**
+ * The host row of each step note, by message id. A note has no row of its own, so chat find
+ * and scrolling reach it through the turn's host row.
+ */
+export function collectTurnNoteHosts(
+  rows: readonly StreamItem[],
+  groupsByHostId: ToolCallGroupLookup<TurnStepGroup>,
+): Map<string, string> {
+  const hosts = new Map<string, string>();
+  for (const row of rows) {
+    const group = groupsByHostId.get(row.id);
+    if (!group) continue;
+    for (const step of group.steps) {
+      for (const block of step.note) {
+        hosts.set(block.blockGroupId ?? block.id, row.id);
+      }
+    }
+  }
+  return hosts;
 }

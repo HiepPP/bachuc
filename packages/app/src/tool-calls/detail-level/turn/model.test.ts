@@ -9,7 +9,7 @@ import type {
 import type { TimelineItemTransform } from "@/plugins/timeline/model";
 import { createStreamPresentation } from "@/agent-stream/presentation";
 import { prepareToolCallHistory, projectToolCallDetailLevel } from "../projection";
-import type { TurnStepGroup } from "./model";
+import { collectTurnNoteHosts, type TurnStepGroup } from "./model";
 
 function at(second: number): Date {
   return new Date(Date.UTC(2026, 0, 1, 0, 0, second));
@@ -191,6 +191,8 @@ describe("turn step model", () => {
       split,
       shell("s1", 7),
       note("n2", 8),
+      // A tool call keeps n2 a step note: every message after the last tool call is the answer.
+      shell("s2", 9),
       final,
     ]);
     const window = onlyGroup([read("r1", 2), note("n1", 3), final]);
@@ -264,6 +266,31 @@ describe("turn step model", () => {
     expect(group.steps[0]).toMatchObject({ note: blocks, items: [{ id: "r1" }], startedAt: at(0) });
   });
 
+  it("maps each step note message to the host row of its turn", () => {
+    const blocks = [
+      note("n1:block:0", 3, { group: "n1", index: 0 }),
+      note("n1:block:1", 3, { group: "n1", index: 1 }),
+    ];
+    const { result } = projectTurn([user, read("r1", 1), ...blocks, shell("s1", 4), final]);
+
+    const hosts = collectTurnNoteHosts(result.tail, result.turnGroupsByHostId);
+    expect([...hosts]).toEqual([["n1", "r1"]]);
+  });
+
+  it("keeps an answer sent as several messages outside the run", () => {
+    const answer = [
+      note("a:block:0", 12, { group: "a", index: 0 }),
+      note("b:block:0", 13, { group: "b", index: 0 }),
+      note("b:block:1", 13, { group: "b", index: 1 }),
+    ];
+    const { result, groups } = projectTurn([...turn.slice(0, -1), ...answer]);
+    const group = groups[0]!;
+
+    expect(result.tail).toEqual([user, expect.objectContaining({ id: "r1" }), ...answer]);
+    expect(group.steps.at(-1)?.note).toEqual([]);
+    expect(group.run.items).toEqual(turn.slice(1, -1));
+  });
+
   it("builds the 5-step turn through the live head and moves the answer out once it ends", () => {
     const present = createStreamPresentation();
     const tail = turn.slice(0, -1);
@@ -329,7 +356,7 @@ describe("turn step model", () => {
       item.type === "tool_call" && item.detail.type === "edit"
         ? [{ type: "plugin", id: sourceId, pluginId: "diffs", kind: "row", version: 1, data: null }]
         : undefined;
-    const tail = [user, read("r1", 1), edit, note("n1", 3), final];
+    const tail = [user, read("r1", 1), edit, final];
     const present = createStreamPresentation();
     const input = { tail, head: [], transform, level: "overview" as const, isTurnActive: false };
 
@@ -344,7 +371,6 @@ describe("turn step model", () => {
       "user",
       "r1",
       "diffs/e1",
-      "n1:block:0",
       "final:block:0",
     ]);
   });

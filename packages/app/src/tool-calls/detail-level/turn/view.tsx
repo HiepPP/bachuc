@@ -13,6 +13,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { isWeb } from "@/constants/platform";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import type { AssistantMessageItem } from "@/types/stream";
+import { buildLineDiff, parseUnifiedDiff, type DiffLine } from "@/utils/tool-call-parsers";
 import { describeToolCall, turnWorkCall } from "../grouping";
 import type { OverviewSummary } from "../overview/model";
 import type { TurnStep, TurnStepGroup, TurnStepItem, TurnStepLabel } from "./model";
@@ -138,7 +139,18 @@ function countLines(text: string | undefined): number {
   return text ? text.replace(/\n$/, "").split("\n").length : 0;
 }
 
-function editLineStats(item: TurnStepItem): LineStats {
+function countDiffLines(lines: readonly DiffLine[]): LineStats {
+  return {
+    additions: lines.filter((line) => line.type === "add").length,
+    deletions: lines.filter((line) => line.type === "remove").length,
+  };
+}
+
+/**
+ * Counts with a line diff, as the edit rows do. Counting whole old and new strings would add
+ * every unchanged context line that the agent sent with the edit.
+ */
+export function editLineStats(item: TurnStepItem): LineStats {
   const cached = lineStatsCache.get(item);
   if (cached) {
     return cached;
@@ -147,12 +159,9 @@ function editLineStats(item: TurnStepItem): LineStats {
   const detail = call ? describeToolCall(call).detail : null;
   let stats: LineStats = { additions: 0, deletions: 0 };
   if (detail?.type === "edit" && detail.unifiedDiff) {
-    for (const line of detail.unifiedDiff.split("\n")) {
-      if (line.startsWith("+") && !line.startsWith("+++")) stats.additions += 1;
-      if (line.startsWith("-") && !line.startsWith("---")) stats.deletions += 1;
-    }
+    stats = countDiffLines(parseUnifiedDiff(detail.unifiedDiff));
   } else if (detail?.type === "edit") {
-    stats = { additions: countLines(detail.newString), deletions: countLines(detail.oldString) };
+    stats = countDiffLines(buildLineDiff(detail.oldString ?? "", detail.newString ?? ""));
   } else if (detail?.type === "write") {
     stats = { additions: countLines(detail.content), deletions: 0 };
   }
@@ -189,9 +198,13 @@ function useNow(enabled: boolean): number {
   return now;
 }
 
-function useReduceMotion(): boolean {
+/** Subscribes only while `isListening`: a long history mounts many steps, and few of them run. */
+function useReduceMotion(isListening: boolean): boolean {
   const [reduce, setReduce] = useState(false);
   useEffect(() => {
+    if (!isListening) {
+      return undefined;
+    }
     let active = true;
     AccessibilityInfo.isReduceMotionEnabled()
       .then((enabled) => {
@@ -204,13 +217,13 @@ function useReduceMotion(): boolean {
       active = false;
       subscription.remove();
     };
-  }, []);
+  }, [isListening]);
   return reduce;
 }
 
 /** An opacity value that pulses while `active`, unless the system asks for less motion. */
 function usePulse(active: boolean): Animated.Value {
-  const reduceMotion = useReduceMotion();
+  const reduceMotion = useReduceMotion(active);
   const opacity = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!active || reduceMotion) {
@@ -425,39 +438,42 @@ function TurnStepRowView({
   // react-native-web already drops the click that ends a text-selecting drag.
   const handlePress = useCallback(() => onPress(step.id), [onPress, step.id]);
   const setRef = useCallback((node: unknown) => registerRow(step.id, node), [registerRow, step.id]);
+  const accessibilityState = useMemo(() => ({ selected: isSelected }), [isSelected]);
   const time = step.endedAt
     ? formatTurnClock(step.endedAt.getTime() - runStartedAt)
     : t("toolCallGroup.turn.now");
 
+  // Only the header line is a button: a press in a diff or a note must not toggle the
+  // highlight, and the edit row toggles and note links inside stay reachable by a screen reader.
   return (
-    <Pressable
-      ref={setRef}
-      testID={`turn-step-row-${index}`}
-      accessibilityRole="button"
-      aria-pressed={isSelected}
-      onPress={handlePress}
-      style={[styles.row, isSelected && styles.rowSelected]}
-    >
-      <Animated.View
-        style={[
-          styles.number,
-          inlineUnistylesStyle(
-            step.isRunning
-              ? { borderColor: RUNNING_COLOR, borderWidth: 1.5, opacity: pulse }
-              : { borderColor: colors.border },
-          ),
-        ]}
+    <View ref={setRef} style={[styles.row, isSelected && styles.rowSelected]}>
+      <Pressable
+        testID={`turn-step-row-${index}`}
+        accessibilityRole="button"
+        accessibilityState={accessibilityState}
+        aria-pressed={isSelected}
+        onPress={handlePress}
+        style={styles.rowHeader}
       >
-        <Text
+        <Animated.View
           style={[
-            styles.numberText,
-            inlineUnistylesStyle({ color: step.isRunning ? RUNNING_COLOR : colors.text }),
+            styles.number,
+            inlineUnistylesStyle(
+              step.isRunning
+                ? { borderColor: RUNNING_COLOR, borderWidth: 1.5, opacity: pulse }
+                : { borderColor: colors.border },
+            ),
           ]}
         >
-          {index + 1}
-        </Text>
-      </Animated.View>
-      <View style={styles.body}>
+          <Text
+            style={[
+              styles.numberText,
+              inlineUnistylesStyle({ color: step.isRunning ? RUNNING_COLOR : colors.text }),
+            ]}
+          >
+            {index + 1}
+          </Text>
+        </Animated.View>
         <View style={styles.meta}>
           <Text
             style={[styles.label, inlineUnistylesStyle({ color: colors.text })]}
@@ -471,21 +487,42 @@ function TurnStepRowView({
             </Text>
           ) : null}
         </View>
+        <Text style={styles.time} testID={`turn-step-time-${index}`}>
+          {time}
+        </Text>
+      </Pressable>
+      <View style={styles.body} testID={`turn-step-body-${index}`}>
         {step.edits.map((item) => (
           <View key={item.id}>{renderItem(item)}</View>
         ))}
         {step.note.map((block, blockIndex) => (
-          <View key={block.id}>
-            {renderNote(block, step.isRunning && blockIndex === step.note.length - 1)}
-          </View>
+          <NoteBlock
+            key={block.id}
+            block={block}
+            isStreaming={step.isRunning && blockIndex === step.note.length - 1}
+            renderNote={renderNote}
+          />
         ))}
         {step.isRunning ? <TurnLiveBox step={step} /> : null}
       </View>
-      <Text style={styles.time} testID={`turn-step-time-${index}`}>
-        {time}
-      </Text>
-    </Pressable>
+    </View>
   );
+}
+
+/** Chat find and passage reveal look a message up by `data-message-id`, as on a stream row. */
+function NoteBlock({
+  block,
+  isStreaming,
+  renderNote,
+}: {
+  block: AssistantMessageItem;
+  isStreaming: boolean;
+  renderNote: (item: AssistantMessageItem, isStreaming: boolean) => ReactNode;
+}) {
+  // The message id of `getStreamItemMessageId` in agent-stream/presentation.
+  const messageId = block.blockGroupId ?? block.id;
+  const dataSet = useMemo(() => ({ messageId }), [messageId]);
+  return <View dataSet={dataSet}>{renderNote(block, isStreaming)}</View>;
 }
 
 const TurnStepRow = memo(TurnStepRowView, (prev, next) => {
@@ -517,9 +554,18 @@ export const TurnStepListView = memo(function TurnStepListView({
   // Highlight lives in the view: it belongs to this turn only and nothing else reads it.
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const rows = useRef(new Map<string, unknown>());
+  // Only a strip press scrolls: a pressed row is already on screen, and a tall row would jump.
+  const scrollOnSelect = useRef(false);
   const toggle = useCallback((stepId: string) => {
     setSelectedStepId((current) => (current === stepId ? null : stepId));
   }, []);
+  const selectFromStrip = useCallback(
+    (stepId: string) => {
+      scrollOnSelect.current = true;
+      toggle(stepId);
+    },
+    [toggle],
+  );
   const registerRow = useCallback((stepId: string, node: unknown) => {
     if (node) {
       rows.current.set(stepId, node);
@@ -529,7 +575,9 @@ export const TurnStepListView = memo(function TurnStepListView({
   }, []);
 
   useEffect(() => {
-    const node = selectedStepId ? rows.current.get(selectedStepId) : null;
+    const shouldScroll = scrollOnSelect.current;
+    scrollOnSelect.current = false;
+    const node = shouldScroll && selectedStepId ? rows.current.get(selectedStepId) : null;
     // "nearest" scrolls only when the row is off screen.
     if (isWeb && node instanceof HTMLElement) {
       node.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
@@ -539,7 +587,7 @@ export const TurnStepListView = memo(function TurnStepListView({
   const runStartedAt = group.run.startedAt.getTime();
   return (
     <View style={styles.container} testID="turn-step-list">
-      <TurnHeader group={group} selectedStepId={selectedStepId} onSelect={toggle} />
+      <TurnHeader group={group} selectedStepId={selectedStepId} onSelect={selectFromStrip} />
       <View style={styles.list}>
         <View style={styles.rail} />
         {group.steps.map((step, index) => (
@@ -630,13 +678,16 @@ const styles = StyleSheet.create((theme) => ({
   },
   // Padding plus an equal negative margin gives the highlight its 6px spread without moving content.
   row: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
+    gap: 3,
     marginHorizontal: -6,
     paddingHorizontal: 6,
     paddingVertical: 4,
     borderRadius: 4,
+  },
+  rowHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
   rowSelected: {
     backgroundColor: theme.colors.surface2,
@@ -657,12 +708,16 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: MONO_LABEL_SIZE,
     fontWeight: "600",
   },
+  // The body sits under the label, between the number column and the time column.
   body: {
-    flex: 1,
     minWidth: 0,
     gap: 3,
+    marginLeft: 34,
+    marginRight: 52,
   },
   meta: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "baseline",
     gap: 6,

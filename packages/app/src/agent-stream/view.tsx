@@ -64,7 +64,7 @@ import { QuestionFormCard } from "@/components/question-form-card";
 import { ToolCallSheetProvider } from "@/components/tool-call-sheet";
 import { createStreamPresentation, getStreamItemMessageId } from "./presentation";
 import { OverviewToolCallGroupView } from "@/tool-calls/detail-level/overview/view";
-import type { TurnStepItem } from "@/tool-calls/detail-level/turn/model";
+import { collectTurnNoteHosts, type TurnStepItem } from "@/tool-calls/detail-level/turn/model";
 import { TurnStepListView } from "@/tool-calls/detail-level/turn/view";
 import { type AgentStreamRenderModel, buildAgentStreamRenderModel } from "./model";
 import { resolveStreamRenderStrategy } from "./strategy-resolver";
@@ -612,17 +612,31 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const handleTimelineHistoryLoadError = useCallback(() => {
       toast?.error(t("agentStream.historyLoadFailed"));
     }, [t, toast]);
-    // Chat find and the chat outline address messages, and an assistant message is a
-    // group of block rows, so this is a set of message ids and never of row ids.
-    const visibleMessageIds = useMemo(
+    const turnNoteHosts = useMemo(
       () =>
-        new Set(
-          [...baseRenderModel.history, ...baseRenderModel.segments.liveHead].map(
-            getStreamItemMessageId,
-          ),
+        collectTurnNoteHosts(
+          [...presentation.tail, ...presentation.head],
+          presentation.turnGroupsByHostId,
         ),
-      [baseRenderModel.history, baseRenderModel.segments.liveHead],
+      [presentation.head, presentation.tail, presentation.turnGroupsByHostId],
     );
+    const resolveMessageHostId = useStableEvent((messageId: string) =>
+      turnNoteHosts.get(messageId),
+    );
+    // Chat find and the chat outline address messages, and an assistant message is a
+    // group of block rows, so this is a set of message ids and never of row ids. A turn
+    // step note is visible when the row of its turn is.
+    const visibleMessageIds = useMemo(() => {
+      const ids = new Set(
+        [...baseRenderModel.history, ...baseRenderModel.segments.liveHead].map(
+          getStreamItemMessageId,
+        ),
+      );
+      for (const [noteId, hostId] of turnNoteHosts) {
+        if (ids.has(hostId)) ids.add(noteId);
+      }
+      return ids;
+    }, [baseRenderModel.history, baseRenderModel.segments.liveHead, turnNoteHosts]);
     const chatOutline = useChatOutline({
       agentId,
       serverId: resolvedServerId,
@@ -1193,6 +1207,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                   isAuthoritativeHistoryReady,
                   onNearBottomChange: setIsNearBottom,
                   onReadingPositionChange: handleReadingPositionChange,
+                  resolveMessageHostId,
                   onNearHistoryStart: loadOlder,
                   isLoadingOlderHistory: isLoadingOlder,
                   hasOlderHistory: hasOlder,
