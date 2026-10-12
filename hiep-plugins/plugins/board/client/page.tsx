@@ -25,7 +25,8 @@ import {
 } from "../shared/board";
 import { boardColumns, type RunTree } from "../shared/tree";
 import { BoardSizeControl } from "./size-control";
-import { BoardViewSwitch, RecapsView } from "./recaps";
+import { BoardViewSwitch, RecapsView, type BoardView } from "./recaps";
+import { TimelineView } from "./timeline";
 import { BOARD_SIZE_DEFAULT, boardScale, boardSize, clampBoardSize } from "../shared/board-size";
 import { effortColor } from "../shared/effort";
 import { allocateColors, projectColors } from "../shared/project-colors";
@@ -1344,7 +1345,7 @@ function HostBoard({
   client: BoardHostClient;
   status: PluginHostSummary["status"];
   scale: number;
-  view: "runs" | "recaps";
+  view: Exclude<BoardView, "timeline">;
 }) {
   const online = status === "online";
   const palette = useHostSettings(projectColors, host.id, client, online);
@@ -1681,7 +1682,7 @@ export function BoardPage(
   );
   // Host settings keep the size across plugin reloads and restarts without changing host appearance.
   const sizeSettings = useSettings(boardSize);
-  const [view, setView] = useState<"runs" | "recaps">("runs");
+  const [view, setView] = useState<BoardView>("runs");
   const savingSize = useRef(false);
   const failedSize = useRef<number | null>(null);
   // Latest unsaved choice; saved one write at a time so rapid clicks never reuse a stale revision.
@@ -1744,7 +1745,18 @@ export function BoardPage(
             paddingTop: s(8),
           }}
         >
+          {view === "timeline" ? (
+            <TimelineView
+              hosts={hosts}
+              clients={clients}
+              theme={theme}
+              compact={layout.compact}
+              scale={scale}
+              navigation={props.navigation}
+            />
+          ) : null}
           {hosts.map((target) => {
+            if (view === "timeline") return null;
             const client = clients.get(target.serverId);
             return client ? (
               <HostBoard

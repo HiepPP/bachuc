@@ -15,10 +15,13 @@ const persistedRunSchema = runSchema.extend({
   // Goal from the first prompt when the host title is a Caveman command; null when unavailable.
   promptTitle: z.string().nullable().optional(),
 });
+export const FINISHED_LIMIT = 50;
 export const runStateSchema = z.object({
   version: z.literal(1),
   active: z.array(persistedRunSchema.refine((run) => run.status === "running")),
-  finished: z.array(persistedRunSchema.refine((run) => run.status !== "running")).max(50),
+  finished: z
+    .array(persistedRunSchema.refine((run) => run.status !== "running"))
+    .max(FINISHED_LIMIT),
 });
 export type RunState = z.infer<typeof runStateSchema>;
 type Run = RunState["active"][number];
@@ -90,7 +93,7 @@ export function createRunStore(now = () => new Date().toISOString()) {
     run.endedAt = now();
     if (active.get(run.agentId) === run) active.delete(run.agentId);
     finished.unshift(run);
-    finished.splice(50);
+    finished.splice(FINISHED_LIMIT);
   }
   // Retain bounded metadata so repeated terminal events cannot restore a removed card.
   // Finished subagents leave with their parent; a running subagent keeps its own subtree.

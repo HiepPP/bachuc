@@ -40,9 +40,17 @@ Requires the Paseo fork `>=0.10.2-beta.900` with host-targeted plugin RPC. Host 
 - Project names use the host placement when available, otherwise the working directory name.
 - Data stays on each owning host and the connected client. The runs file contains card metadata such as title and working directory, but no credentials, prompts, or transcripts; the Recaps log keeps only each reply's `## Recap` block.
 
+## Timeline
+
+- Timeline looks back over the last 24 hours; Runs stays the triage view (ADR-0012). Each host answers `board.timeline` with the runs from its store that overlap the window, and the page lays every host on one shared time axis.
+- One row per top-level thread, grouped by host, then by project in order of its first thread. A thread's subagents share one thin row under it. Bars are tinted by project when finished, dark while running, amber when the thread needs input, red when failed, and dashed gray when cancelled. A bar press opens the thread; its TASK chip opens Watchtower at that TASK.
+- An idle gap longer than max(2 h, 4 x the average top-level thread) draws as a 48 px break labelled with its length. The rule is copied from watchtower-board; plugins never import each other.
+- The load strip on top counts top-level threads running at once in each clock hour and labels the peak. The footer sums threads, agent time, the peak, and the folded idle time.
+- The store keeps 50 finished runs, so a busy day can lose its oldest threads; the host then says "Older threads are not kept" (Q-024). A run without a start time is left out and counted. An offline or outdated host shows a note under its header.
+
 ## Recaps
 
-- Use **Runs / Recaps** in the Board header to switch views. Both views keep every host visible in its own lane. Stars, removals, parent clusters, project colors, recaps, and project navigation stay scoped to the owning host, even if IDs or project names match across hosts.
+- Use **Runs / Timeline / Recaps** in the Board header to switch views. Every view keeps each host visible in its own lane. Stars, removals, parent clusters, project colors, recaps, and project navigation stay scoped to the owning host, even if IDs or project names match across hosts.
 - When a turn completes, Board reads the `## Recap` section at the end of the last assistant reply: the lines up to the next `## ` heading or the end. It records `Branch:`, `Did:`, and `Commit/push:` (with or without a leading `- `) plus the raw block, cut to 2,000 characters. Failed or cancelled turns and replies without `## Recap` add nothing.
 - Entries are appended to `$PASEO_HOME/plugin-data/board/recaps.jsonl` (default `~/.paseo`) with mode `0600`. A repeated delivery of the same turn is skipped; a later turn that reuses a turn id after a session reload is kept. The log keeps at most 90 days and 2,000 entries. Logging starts when the plugin is installed; older threads are not backfilled.
 - Recaps shows the last 7 days, newest first. Each day lists projects, named like run cards (host placement, else the working directory name) with the project color when one is assigned, then one row per recap: thread title, did, branch, and commit/push. Click a row to open its thread.

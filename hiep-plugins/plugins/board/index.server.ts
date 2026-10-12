@@ -5,7 +5,9 @@ import path from "node:path";
 import { boardSize } from "./shared/board-size";
 import { orbSettings } from "./shared/orb";
 import { projectColors } from "./shared/project-colors";
-import { createRunStore } from "./server/store";
+import { FINISHED_LIMIT, createRunStore } from "./server/store";
+import { timelineSnapshot } from "./server/timeline";
+import { timelineRpc } from "./shared/timeline";
 import { createRunPersistence } from "./server/persistence";
 import { z } from "zod";
 import { listBoardAgents } from "./server/snapshot";
@@ -178,7 +180,8 @@ export default function contribute(server: PluginServerContext) {
       })),
     };
   });
-  server.handle(boardRpc, async (_, { paseo }) => {
+  // Runs and Timeline share one host read; a poll from either waits for the one in flight.
+  const refresh = async (paseo: PaseoApi) => {
     await ready;
     ensureActive();
     if (!pending) {
@@ -240,6 +243,24 @@ export default function contribute(server: PluginServerContext) {
     await pending;
     ensureActive();
     await persistence.save(store.exportState());
+  };
+  server.handle(timelineRpc, async (_, { paseo }) => {
+    await refresh(paseo);
+    const { projects } = await paseo.projects.list();
+    const ids = new Map(
+      projects.map((project) => [`project:${project.projectId}`, project.projectId]),
+    );
+    const runs = store.snapshot().runs.map((run) => ({
+      ...run,
+      projectId: ids.get(run.projectKey),
+      ...agentTasks.get(run.agentId),
+    }));
+    const { finished } = store.exportState();
+    const dropped = finished.length >= FINISHED_LIMIT ? (finished.at(-1)?.endedAt ?? null) : null;
+    return timelineSnapshot(runs, dropped);
+  });
+  server.handle(boardRpc, async (_, { paseo }) => {
+    await refresh(paseo);
     const { projects } = await paseo.projects.list();
     const ids = new Map(
       projects.map((project) => [`project:${project.projectId}`, project.projectId]),

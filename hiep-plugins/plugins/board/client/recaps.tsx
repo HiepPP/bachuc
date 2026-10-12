@@ -11,17 +11,24 @@ import { focusRing, keyboardFocus } from "./focus";
 const CARD_RADIUS = 8;
 const CONTROL_RADIUS = 6;
 
+export type BoardView = "runs" | "timeline" | "recaps";
+const VIEW_LABELS: Record<BoardView, string> = {
+  runs: "Runs",
+  timeline: "Timeline",
+  recaps: "Recaps",
+};
+
 export function BoardViewSwitch({
   view,
   onChange,
   theme,
 }: {
-  view: "runs" | "recaps";
-  onChange: (view: "runs" | "recaps") => void;
+  view: BoardView;
+  onChange: (view: BoardView) => void;
   theme: PluginSurfaceProps["theme"];
 }) {
   const colors = theme.colors;
-  const [focused, setFocused] = useState<"runs" | "recaps" | null>(null);
+  const [focused, setFocused] = useState<BoardView | null>(null);
   return (
     // Quiet segmented control: the track is the only chrome, the selected segment lifts off it.
     <View
@@ -34,7 +41,7 @@ export function BoardViewSwitch({
         backgroundColor: colors.surface2,
       }}
     >
-      {(["runs", "recaps"] as const).map((item) => (
+      {(["runs", "timeline", "recaps"] as const).map((item) => (
         <Pressable
           key={item}
           accessibilityRole="tab"
@@ -63,7 +70,7 @@ export function BoardViewSwitch({
               fontWeight: view === item ? "600" : "500",
             }}
           >
-            {item === "runs" ? "Runs" : "Recaps"}
+            {VIEW_LABELS[item]}
           </Text>
         </Pressable>
       ))}
