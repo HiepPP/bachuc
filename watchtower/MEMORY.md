@@ -37,6 +37,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid renaming internal identifiers (the `paseo` CLI, `PASEO_*` env vars, the `@getpaseo/*` scope, the plugin API, and `paseo://`), a move of the old `~/.paseo` instead of a clone, and a mobile rebrand while the fork merges upstream and plugins depend on these names. Reason: [ADR-0009](watchtower/decisions/ADR-0009-bachuc-home-over-paseo-home.md).
 - Avoid upstream hosted services (relay, web app, hub, update feed, EAS) and a self-hosted relay while the owner reaches the host over LAN or Tailscale. Reason: [ADR-0005](watchtower/decisions/ADR-0005-upstream-services-off-over-self-hosting.md).
 - Avoid required picker fields on every attachment source, a separate `addComposerAttachmentOpener` API, and an `onOpen` on `addComposerAttachment` while chip press handlers must survive a reload and work on other clients. Reason: [ADR-0003](watchtower/decisions/ADR-0003-chip-only-attachment-sources.md).
+- Avoid TASK rows, plan grids, or a Gantt as Board's main view while the Watchtower page shows plan depth one click away; keep Board on triage and show a thread's TASK as a chip. Reason: [ADR-0012](watchtower/decisions/ADR-0012-status-columns-with-task-chips-over-task-lanes.md).
+- Avoid plan questions or manual checks in Board's Needs you, and answer targets picked without showing them, while `QUESTIONS.md` does not record the asking thread. Reason: [ADR-0013](watchtower/decisions/ADR-0013-thread-input-only-in-board-needs-you.md).
+- Avoid restarting TASK or Q-IDs at 001 in a new plan, and avoid per-plan or per-kind ID prefixes, while one repo has one `watchtower/` folder. Reason: [ADR-0011](watchtower/decisions/ADR-0011-repo-wide-ids-over-per-plan-ids.md).
 
 ## Learnings
 
@@ -58,59 +61,68 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Source: `packages/server/src/server/agent/agent-prompt.ts`; `packages/server/src/server/agent/mcp-server.test.ts`.
 - Use next time: give finish-notice waits a longer timeout, and keep fake timers on through `vi.waitFor`.
 - Learned: `session.test.ts` mocks count `getAgent` calls, so an extra lookup in a lifecycle command fails it even when the code is correct.
-- Source: `packages/server/src/server/session.test.ts` ("cancel_agent_request reports refusal only through its response"); TASK-003 outcome.
+- Source: `packages/server/src/server/session.test.ts` ("cancel_agent_request reports refusal only through its response"); TASK-027 outcome.
 - Use next time: run `session.test.ts` after any change to `packages/server/src/server/agent/lifecycle-command.ts`.
 
 ### 2026-10-07 - Autorun 20261006-t3code-orchestration-port
 
 - Learned: after a `packages/plugin` type change, the app typecheck reads stale declarations until the SDK is rebuilt.
-- Source: TASK-006 and TASK-010 outcomes.
+- Source: TASK-030 and TASK-034 outcomes.
 - Use next time: run `npm run build:plugin` before `npm run typecheck`.
 - Learned: app tests that load Expo fail from the repo root with `__DEV__ is not defined`.
-- Source: TASK-006 and TASK-010 runs.
+- Source: TASK-030 and TASK-034 runs.
 - Use next time: run app vitest files from `packages/app`, with `--project browser` for `*.browser.test.ts`.
 - Learned: the agent stream view mounts before its authoritative history arrives, and the vitest Lucide stub lacks many icons, such as `Quote`.
-- Source: `packages/app/src/panels/agent-panel.tsx`; `packages/app/test-stubs/lucide-react-native.ts`; TASK-010 outcome.
+- Source: `packages/app/src/panels/agent-panel.tsx`; `packages/app/test-stubs/lucide-react-native.ts`; TASK-034 outcome.
 - Use next time: wait for `isAuthoritativeHistoryReady` before checking loaded items, and use `Blocks` as the icon in plugin tests.
 - Learned: in vitest browser tests, app sources compile with the classic JSX runtime, and the Unistyles stub ignores `withUnistyles` mappings.
-- Source: `packages/app/src/components/question-form-card.browser.test.tsx`; `packages/app/test-stubs/react-native-unistyles.ts`; TASK-008 outcome.
+- Source: `packages/app/src/components/question-form-card.browser.test.tsx`; `packages/app/test-stubs/react-native-unistyles.ts`; TASK-032 outcome.
 - Use next time: call `vi.stubGlobal("React", React)` before rendering app components, and test theme mappings as pure functions.
 
 ### 2026-10-07 - Autorun 20261007-watchtower-process-overview
 
 - Learned: a plugin `lint` script without `--disable-nested-config` fails before it reads any file. oxlint treats the repo root `.oxlintrc.json` as a nested config and rejects its `options.typeAware` key.
-- Source: `hiep-plugins/plugins/watchtower-board/package.json`; `hiep-plugins/plugins/pr-watch/package.json`; TASK-001 outcome.
+- Source: `hiep-plugins/plugins/watchtower-board/package.json`; `hiep-plugins/plugins/pr-watch/package.json`; TASK-047 outcome.
 - Use next time: give every plugin `lint` script the `--disable-nested-config` flag.
 
 ### 2026-10-08 - Autorun 20261007-bachuc-rebrand
 
 - Learned: electron-builder names the macOS bundle after `executableName`, and names `CFBundleName` and the helper apps after `productName`. The packaging hooks and the nix build expect `Paseo.app`.
-- Source: `node_modules/app-builder-lib/out/appInfo.js`; `packages/desktop/scripts/after-pack.js`; TASK-003 outcome.
+- Source: `node_modules/app-builder-lib/out/appInfo.js`; `packages/desktop/scripts/after-pack.js`; TASK-037 outcome.
 - Use next time: keep `executableName: Paseo`, and check that `IS_RELEASE_APP` cannot match the build output path.
 - Learned: the desktop daemon starts through `<name> Helper.app`, found by the executable name, `app.name`, or the one helper in Frameworks. The release script builds with `-c.productName=Bachuc`.
 - Source: `packages/desktop/src/daemon/runtime-paths.ts`; `scripts/paseo-release.sh`.
 - Use next time: when an app name changes, check that the daemon still finds its helper app.
 - Learned: `magick` on this machine has no SVG delegate, because `rsvg-convert` is missing, and it writes `.ico` entries as BMP only. `sharp` in `node_modules` bundles librsvg.
-- Source: `magick -list delegate`; TASK-004 outcome.
+- Source: `magick -list delegate`; TASK-038 outcome.
 - Use next time: render SVG to PNG with `sharp`, give the SVG root a `width` and `height` instead of a density, and pack PNG files into `.ico` with a short script.
 - Learned: CLI tests import `@getpaseo/server` from its `dist`, so after a server change they test the old code and can pass falsely.
-- Source: `packages/server/package.json` exports; `packages/cli/src/commands/daemon/pair.test.ts`; TASK-005 outcome.
+- Source: `packages/server/package.json` exports; `packages/cli/src/commands/daemon/pair.test.ts`; TASK-039 outcome.
 - Use next time: run `npm run build:server` before CLI tests that touch server code.
 - Learned: desktop updates are off through two constants, `APP_UPDATES_ENABLED` in the desktop package and `DESKTOP_APP_UPDATES_ENABLED` in the app. An upstream merge that restores the `publish` block in `electron-builder.yml` does not turn updates on again.
-- Source: `packages/desktop/src/features/app-updates-enabled.ts`; `packages/app/src/desktop/updates/desktop-updates.ts`; TASK-006 outcome.
+- Source: `packages/desktop/src/features/app-updates-enabled.ts`; `packages/app/src/desktop/updates/desktop-updates.ts`; TASK-040 outcome.
 - Use next time: after an upstream merge that touches the updater or the About rows, check that both constants are still `false` and still read by `isPackaged` and `shouldShowDesktopUpdateSection`.
 - Learned: the old name `Paseo Fork` stays on purpose in `OLD_APP` (the Trash move of the old app) and `SIGN_IDENTITY` (the `Paseo Fork Local` certificate). The desktop log folder follows `app.name`, so release logs go to `~/Library/Logs/Bachuc/`.
-- Source: `scripts/paseo-release.sh`; `packages/desktop/src/main.ts`; TASK-003 and TASK-008 outcomes.
+- Source: `scripts/paseo-release.sh`; `packages/desktop/src/main.ts`; TASK-037 and TASK-042 outcomes.
 - Use next time: grep for `Paseo Fork\.app` to find stale install paths, not for `Paseo Fork`.
 
-### 2026-10-08 - Autorun 20261007-bachuc-rebrand, TASK-009
+### 2026-10-08 - Autorun 20261007-bachuc-rebrand, TASK-043
 
-- Learned: TASK-009 replaced the earlier advice to keep `executableName: Paseo`. The macOS build is now `Bachuc.app` with `Contents/MacOS/Bachuc`, through `mac.executableName`. The top-level `executableName: Paseo` stays, because electron-builder also names the Linux binary and the Windows `.exe` after it.
-- Source: `packages/desktop/electron-builder.yml`; `node_modules/app-builder-lib/out/appInfo.js`; TASK-009 outcome.
+- Learned: TASK-043 replaced the earlier advice to keep `executableName: Paseo`. The macOS build is now `Bachuc.app` with `Contents/MacOS/Bachuc`, through `mac.executableName`. The top-level `executableName: Paseo` stays, because electron-builder also names the Linux binary and the Windows `.exe` after it.
+- Source: `packages/desktop/electron-builder.yml`; `node_modules/app-builder-lib/out/appInfo.js`; TASK-043 outcome.
 - Use next time: `IS_RELEASE_APP` in `packages/desktop/src/main.ts` must check the install path `/Applications/Bachuc.app/`, because the build output has the same bundle name. The macOS consumers of the executable name use `Bachuc`; the Linux and Windows consumers use `Paseo`.
 
-### 2026-10-08 - Autorun 20261007-bachuc-rebrand, TASK-010
+### 2026-10-08 - Autorun 20261007-bachuc-rebrand, TASK-044
 
 - Learned: the fork hides the sidebar footer Hosts, Import session, and Help buttons with `SHOW_FOOTER_EXTRAS = false` since 2026-09-30. An e2e spec that clicks `sidebar-help`, `sidebar-import-session`, or the host picker fails before its own checks.
-- Source: `packages/app/src/components/left-sidebar.tsx`; commit `5e8568f6d`; TASK-010 outcome.
-- Use next time: before you fix a sidebar e2e failure, check that the control renders. The help menu tests in `packages/app/e2e/browser/sidebar-help.spec.ts` are `test.fixme` until the button shows (Q-008).
+- Source: `packages/app/src/components/left-sidebar.tsx`; commit `5e8568f6d`; TASK-044 outcome.
+- Use next time: before you fix a sidebar e2e failure, check that the control renders. The help menu tests in `packages/app/e2e/browser/sidebar-help.spec.ts` are `test.fixme` until the button shows (Q-019).
+
+### 2026-10-12 - Plan 20261012-repo-wide-ids-and-board-lanes
+
+- Learned: the app typechecks against `@getpaseo/plugin` in `dist`, so a client contract change needs `npm run build --workspace=@getpaseo/plugin` first. Plugins in `hiep-plugins/plugins/*` link the SDK to `packages/plugin` and see the change at once.
+- Source: TASK-062 outcome.
+- Use next time: rebuild the plugin package before you read an app type error after a contract edit.
+- Learned: watchtower-board's `tests/overview.test.ts` reads this repo's real `watchtower/` files, so an ADR status change or archive edit can fail it.
+- Source: TASK-066 outcome.
+- Use next time: run that test after you change `watchtower/DECISIONS.md` or an archived plan.

@@ -17,11 +17,11 @@
 
 ## Decisions
 
-- A3 ships as two TASKs: the daemon queue (TASK-003) and the app switch (TASK-004). The split keeps each review small.
+- A3 ships as two TASKs: the daemon queue (TASK-027) and the app switch (TASK-028). The split keeps each review small.
 - B3 and B4 each ship as a thin host API plus a plugin. Plugin client code cannot read a text selection, insert at the composer cursor, or load a WebView today.
 - A7 ships as a plugin only. A server plugin can already register MCP tools, send prompts, run timers, and write `plugin-data` files.
 - A2 changes only `cancelAgentRunCommand`. `AgentManager.cancelAgentRun` has about 8 callers, such as reload, replace, rewind, and archive.
-- B3 uses a composer chip with an optional comment and a jump back to the source (Q-007). The jump back is its own host TASK, TASK-010, to keep reviews small.
+- B3 uses a composer chip with an optional comment and a jump back to the source (Q-007). The jump back is its own host TASK, TASK-034, to keep reviews small.
 - HTML reply frames may use the network, with a sandbox of `allow-scripts` only. See [ADR-0002](watchtower/decisions/ADR-0002-networked-html-replies-over-offline-only.md).
 - The owner commits the open cmd+w work in this checkout before the autorun starts. The run needs a clean tree.
 

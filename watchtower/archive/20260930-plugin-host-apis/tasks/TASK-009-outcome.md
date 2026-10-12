@@ -6,26 +6,22 @@ Status: DONE
 
 Changed:
 
-- Root [package.json](package.json) version is `0.10.2-beta.900`. `npm run version:sync-internal` updated 11 workspace `package.json` files.
-- [package-lock.json](package-lock.json): only the 27 workspace version strings changed. `npm install --package-lock-only` was tried first and reverted, because it also dropped unrelated `peer` flags.
-- [public-docs/plugins/reference.md](public-docs/plugins/reference.md): `agent.prompt` and `agent.permission` in Before hooks, a rewritten "Answer a permission request", timeline `source`, shared composer pills, a new "Composer interceptors and text" section, "Sidebar projects and sections", cross-plugin `openSurface` and `openNewWorkspace`, and a new "Agent tools" section.
-- [public-docs/plugins/migration.md](public-docs/plugins/migration.md): rows for the 4 new `add*` methods.
-- [docs/plugins.md](docs/plugins.md): internal constraints for the two awaited hooks, agent tools, shared pills, composer, and sidebar code.
-- [skills/paseo-plugin/SKILL.md](skills/paseo-plugin/SKILL.md): capability table rows.
+- Added `PluginPermissionDecisionRequest` and the `agent.permission` before-hook in [packages/plugin/src/server/lifecycle.ts](packages/plugin/src/server/lifecycle.ts).
+- Added the schema and the "only decision may change" rule in [packages/server/src/server/plugins/lifecycle/index.ts](packages/server/src/server/plugins/lifecycle/index.ts).
+- Added `onStreamPermissionRequestedWithPlugins` in [packages/server/src/server/agent/agent-manager.ts](packages/server/src/server/agent/agent-manager.ts). A decision calls `session.respondToPermission` and skips pending state, attention, push, stream dispatch, and the `agent.permission_requested` plugin event.
 
 Contract:
 
-- The first choice, `0.10.2-hiep.0`, failed the desktop build in TASK-017: `Cannot derive native release version from unsupported version: 0.10.2-hiep.0`. Every reference was replaced with `0.10.2-beta.900` on 2026-10-01.
-
-- `setComposerText` and `openNewWorkspace` are not `add*` methods, so the migration test does not require them.
+- No decision, a hook error, or a timeout keeps today's flow. History replay and internal agents skip the hook.
+- The hook runs inside the per-agent event queue, so a slow plugin delays that agent's later events by up to 30 s.
 
 Verified:
 
-- `node -p "require('./packages/server/package.json').version"` -> `0.10.2-beta.900`.
-- `npx vitest run packages/plugin/src/migration-doc.test.ts --bail=1` -> 1 passed.
-- `npm run typecheck` (all workspaces) -> exit 0.
+- Handler tests -> 8 passed, including decision and rejected request change.
+- Lifecycle e2e -> 9 passed. With a deny decision, no `agent.permission_requested` event fires and no permission stays pending. With a throwing hook, the normal event fires and the plugin answers it.
+- Server typecheck -> exit 0. Lint -> 0 errors.
 
 Anti-goal:
 
-- Final: migration-doc test passes; 2026-10-01T00:10.
-- Result: PASS.
+- Final: the failing-hook e2e test shows the permission reaching the normal flow; 2026-09-30T23:43.
+- Result: PASS against a limit of 0 lost permissions.

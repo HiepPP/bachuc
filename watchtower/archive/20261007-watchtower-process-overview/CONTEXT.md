@@ -20,8 +20,8 @@
 - Branch timeline rules: done bars come from the `RUN.md` log. A running task starts at the end of the latest log row, or at the run start when the log is empty, and ends now. Planned tasks run one at a time in Tracker order, never before their deps end, at the average done duration. The default duration is 20 minutes when nothing is done yet.
 - Draw timeline connectors as orthogonal lines made of Views. Do not add a host SVG API in this plan, because the fork extends through plugins first.
 - Wide layouts show the overview on the full-screen surface. Compact layouts keep the existing board.
-- The pill goes in the composer track of every agent composer on the host, beside Tasks and Subagents. It also shows on the New workspace composer (Q-002).
-- The overview is read-only. Its actions copy text only (Q-001).
+- The pill goes in the composer track of every agent composer on the host, beside Tasks and Subagents. It also shows on the New workspace composer (Q-021).
+- The overview is read-only. Its actions copy text only (Q-020).
 
 ## Open Decisions
 

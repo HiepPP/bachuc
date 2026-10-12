@@ -7,7 +7,7 @@ Scope: `hiep-plugins/plugins/html-reply/**`, `packages/app/src/plugins/react-nat
 
 ## Context
 
-- Plan `20261006-t3code-orchestration-port` adds HTML replies: an agent publishes a self-contained HTML page that renders in its thread (TASK-008, TASK-009).
+- Plan `20261006-t3code-orchestration-port` adds HTML replies: an agent publishes a self-contained HTML page that renders in its thread (TASK-032, TASK-033).
 - The file preview frame in [packages/app/src/file-pane/html-preview.web.tsx](packages/app/src/file-pane/html-preview.web.tsx) uses `sandbox="allow-scripts"` and a CSP that blocks the network.
 - An offline frame cannot load chart libraries from a CDN or call an API, which limits what an agent page can show.
 - The frame sandbox has no `allow-same-origin`, so a page cannot read app cookies, storage, or the daemon session.

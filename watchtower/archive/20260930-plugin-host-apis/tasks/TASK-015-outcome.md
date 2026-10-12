@@ -2,24 +2,27 @@
 
 ## Outcome
 
-Status: BLOCKED
-
-Blocked:
-
-- The bridge cannot be removed. The native Codex and Claude spawn hooks (`server/native-hook-command.ts`) call it over HTTP with `PASEO_ORCH_URL` and `PASEO_ORCH_TOKEN`, and `session_open` requires that binding for interactive Claude and Codex agents.
-- The global hook matcher in `~/.codex/hooks.json`, written by `server/native-install.ts` from another checkout, names `mcp__jev_orchestrator__prepare_native_delegate`. Serving the tool from the daemon renames it to `mcp__paseo__prepare_native_delegate`, which that matcher would not see. This plan must not edit global provider configs.
-- Moving only `delegate_task`, `orchestrator_status`, and `cancel_delegation` keeps the bridge and the stdio MCP process and only renames tools for agents.
-
-Decision needed:
-
-- Option 1: move only the 3 generic tools to `server.registerTool`, keep the bridge and the stdio MCP for the 2 native tools.
-- Option 2: also reinstall the native hooks from this checkout with the new tool name. This edits `~/.codex/hooks.json` and `~/.claude/settings.json`.
-- Option 3: leave jev-orchestrator unchanged.
+Status: DONE
 
 Changed:
 
-- Nothing. No file in [hiep-plugins/plugins/jev-orchestrator](hiep-plugins/plugins/jev-orchestrator) was edited.
+- `openSurface(id, { pluginId?, serverId? })` and `openNewWorkspace({ cwd, projectId?, name?, serverId? })` in [packages/plugin/src/client/contracts.ts](packages/plugin/src/client/contracts.ts).
+- [packages/app/src/plugins/actions.ts](packages/app/src/plugins/actions.ts) opens another plugin's surface through [packages/app/src/plugins/navigation.ts](packages/app/src/plugins/navigation.ts). Its own surface is still checked.
+- [packages/app/src/plugins/client-runtime.ts](packages/app/src/plugins/client-runtime.ts) routes `openNewWorkspace` to `buildNewWorkspaceRoute`. [packages/app/src/plugins/evaluate.ts](packages/app/src/plugins/evaluate.ts) exposes it.
+- Added [packages/app/src/plugins/actions.test.ts](packages/app/src/plugins/actions.test.ts).
+
+Contract:
+
+- The default host is the active host, else the calling plugin's host. Changed during TASK-023, because Board installed on two hosts must open one Board, on the active host.
+- Another plugin's surface is not checked up front. The surface route shows "This plugin surface is unavailable." when it is missing.
 
 Verified:
 
-- Baseline `npm test` -> 89 passed; 2026-10-01T00:52.
+- `cd packages/app && npx vitest run --project unit src/plugins/actions.test.ts src/plugins/host-navigation.test.ts --bail=1` -> 12 passed. After the TASK-023 change, `actions.test.ts` -> 3 passed, including the active host case.
+- `cd packages/app && npx vitest run --project unit src/plugins --bail=1` -> 142 passed.
+- App typecheck -> exit 0. Lint on 5 files -> 0 errors.
+
+Anti-goal:
+
+- Final: host-navigation tests pass without edits; 2026-10-01T00:04.
+- Result: PASS.

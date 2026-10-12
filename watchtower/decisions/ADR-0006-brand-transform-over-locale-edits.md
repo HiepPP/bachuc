@@ -9,7 +9,7 @@ Scope: `packages/app/src/brand.ts`, `packages/app/src/i18n/i18next.ts`, `package
 
 - On 2026-10-07, 38 English UI strings held the word "Paseo", and the 8 other locales held the same Latin word. No locale had a transliteration.
 - Upstream changes the locale files in [packages/app/src/i18n/resources](packages/app/src/i18n/resources) often, so each edited line conflicts at merge time.
-- TASK-002 of plan `20261007-bachuc-rebrand` shipped `withBrandName` in [packages/app/src/brand.ts](packages/app/src/brand.ts). [packages/app/src/i18n/i18next.ts](packages/app/src/i18n/i18next.ts) applies it once at init.
+- TASK-036 of plan `20261007-bachuc-rebrand` shipped `withBrandName` in [packages/app/src/brand.ts](packages/app/src/brand.ts). [packages/app/src/i18n/i18next.ts](packages/app/src/i18n/i18next.ts) applies it once at init.
 
 ## Decision
 

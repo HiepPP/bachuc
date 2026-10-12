@@ -14,7 +14,7 @@ Scope: `packages/desktop/electron-builder.yml`, `scripts/paseo-release.sh`
 ## Decision
 
 - The desktop bundle ID is `io.github.hieppp.bachuc`.
-- The owner chose this on 2026-10-08 (Q-003). TASK-003 shipped it.
+- The owner chose this on 2026-10-08 (Q-014). TASK-037 shipped it.
 
 ## Consequences
 

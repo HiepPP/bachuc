@@ -20,15 +20,15 @@
 
 ## Decisions
 
-- The display name is `Bachuc` by default (Q-001).
-- The macOS executable is renamed to `Bachuc` too (Q-005, answered 2026-10-08). TASK-009 does it.
-- TASK-002 brands UI text with one transform at i18n init in [packages/app/src/i18n/i18next.ts](packages/app/src/i18n/i18next.ts). It does not edit locale files. Reason: 38 English strings hold "Paseo", and the 8 other locales hold the same Latin word. No locale has a transliteration (checked 2026-10-07).
+- The display name is `Bachuc` by default (Q-012).
+- The macOS executable is renamed to `Bachuc` too (Q-016, answered 2026-10-08). TASK-043 does it.
+- TASK-036 brands UI text with one transform at i18n init in [packages/app/src/i18n/i18next.ts](packages/app/src/i18n/i18next.ts). It does not edit locale files. Reason: 38 English strings hold "Paseo", and the 8 other locales hold the same Latin word. No locale has a transliteration (checked 2026-10-07).
 - The attribution line passes "Paseo" as an i18n interpolation value. The transform changes resource strings only, so the line keeps "Paseo".
-- The desktop bundle ID is `io.github.hieppp.bachuc` by default (Q-003).
+- The desktop bundle ID is `io.github.hieppp.bachuc` by default (Q-014).
 - The release app keeps the userData folder `~/Library/Application Support/Paseo`, so the host list and settings stay. A build opened in place gets a new userData folder named after its new product name. That folder held no cloned data.
 - Mobile is out of scope ([ADR-0004](watchtower/decisions/ADR-0004-display-brand-over-full-rename.md)). Leave mobile bundle IDs, fastlane, maestro flows, and mobile e2e files.
 - [packages/website](packages/website) is out of scope. The fork does not deploy it. Never deploy it as Bachuc while `packages/website/public/social-proof/` holds upstream testimonials.
-- A Codex agent made raster logo concepts. The owner picked concept 1, the sugar palm (Q-002). The final mark is hand-written SVG geometry, because no vectorizer is installed.
+- A Codex agent made raster logo concepts. The owner picked concept 1, the sugar palm (Q-013). The final mark is hand-written SVG geometry, because no vectorizer is installed.
 
 ## Open Decisions
 

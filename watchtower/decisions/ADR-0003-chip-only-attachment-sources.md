@@ -7,11 +7,11 @@ Scope: `packages/plugin/src/contracts.ts`, `packages/app/src/plugins/evaluate.ts
 
 ## Context
 
-- TASK-010 adds a chip `onOpen` handler on `addAttachmentSource`. TASK-007 (cite) registers a source with `onOpen` for its quote chips, which `addComposerAttachment` adds from code.
+- TASK-034 adds a chip `onOpen` handler on `addAttachmentSource`. TASK-031 (cite) registers a source with `onOpen` for its quote chips, which `addComposerAttachment` adds from code.
 - `PluginAttachmentSourceContribution` required `pickerTitle`, `searchPlaceholder`, and `search`. Every source showed in the composer attachment menu.
 - A chip is persisted in the draft, so its press handler cannot live on the chip. It must be found again by plugin and `sourceId`, also after a reload and on another client.
 - Thread search: not run in this autonomous iteration.
-- Advisor verdict (TASK-010 reviewer, claude-opus-5-5 xhigh): accept. Keying the handler on plugin and `sourceId` is the only option that survives a reload; a separate opener API repeats the same identity. It suggested letting `onOpen` return `false` to fall back to `item.url`; not adopted in v1.
+- Advisor verdict (TASK-034 reviewer, claude-opus-5-5 xhigh): accept. Keying the handler on plugin and `sourceId` is the only option that survives a reload; a separate opener API repeats the same identity. It suggested letting `onOpen` return `false` to fall back to `item.url`; not adopted in v1.
 
 ## Decision
 

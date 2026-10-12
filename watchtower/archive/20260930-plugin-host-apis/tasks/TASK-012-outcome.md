@@ -6,26 +6,26 @@ Status: DONE
 
 Changed:
 
-- Removed the DOM adapters and their tests: `client/dom.ts`, `client/bubble.ts`, `client/composer.ts`, `client/mode-menu.ts`, `client/agent-mode.ts`, `tests/bubble.test.ts`, `tests/composer.test.ts`, `tests/mode-menu.test.ts`.
-- [hiep-plugins/plugins/prompt-translate/index.client.tsx](hiep-plugins/plugins/prompt-translate/index.client.tsx): a `user_message` transformer that keeps the bubble and adds a `prompt-note` row, its renderer ([hiep-plugins/plugins/prompt-translate/client/note-view.tsx](hiep-plugins/plugins/prompt-translate/client/note-view.tsx), cache in [hiep-plugins/plugins/prompt-translate/client/notes.ts](hiep-plugins/plugins/prompt-translate/client/notes.ts)), a `rewrite-english` composer interceptor, and a shared `Prompt` pill ([hiep-plugins/plugins/prompt-translate/client/prompt-pill.tsx](hiep-plugins/plugins/prompt-translate/client/prompt-pill.tsx)).
-- [hiep-plugins/plugins/prompt-translate/index.server.ts](hiep-plugins/plugins/prompt-translate/index.server.ts): `before("agent.prompt")` appends the Caveman and reply-language context through [hiep-plugins/plugins/prompt-translate/server/turn.ts](hiep-plugins/plugins/prompt-translate/server/turn.ts); session open seeds the new-thread mode.
-- [hiep-plugins/plugins/prompt-translate/server/caveman-hook.cjs](hiep-plugins/plugins/prompt-translate/server/caveman-hook.cjs): the context builder is split into `turnContext`, with a `daemonContext` export. The CLI behavior is unchanged.
-- [hiep-plugins/plugins/prompt-translate/server/modes.ts](hiep-plugins/plugins/prompt-translate/server/modes.ts): `find`, `prefs`, and a merging `update` with a per-agent `rewrite` flag; snapshot and queue methods removed. RPCs `translate.mode.read` and `write` carry `{ mode, rewrite }`.
-- `service.enhance` no longer requires the `enhanceShortcut` setting, which now means the default rewrite choice.
-- Requirements `>=0.10.2-beta.900`, `file:` SDK links, tsconfig `paths` for `zod` and `react`, lint with `--disable-nested-config`, README rewritten.
+- Added `addComposerInterceptor`, `setComposerText`, and the `PluginComposer*` types in [packages/plugin/src/client/contracts.ts](packages/plugin/src/client/contracts.ts), exported from [packages/plugin/src/client/index.ts](packages/plugin/src/client/index.ts).
+- Added [packages/app/src/plugins/composer/index.ts](packages/app/src/plugins/composer/index.ts): mounted composer handles, `setPluginComposerText`, and `runComposerInterceptors`.
+- [packages/app/src/plugins/evaluate.ts](packages/app/src/plugins/evaluate.ts) collects interceptors. [packages/app/src/plugins/client-runtime.ts](packages/app/src/plugins/client-runtime.ts) binds `setComposerText` to the installation host. [packages/app/src/plugins/types.ts](packages/app/src/plugins/types.ts) has an optional `composerInterceptors` field, so existing fixtures did not change.
+- [packages/app/src/composer/index.tsx](packages/app/src/composer/index.tsx) registers its handle and runs the host's interceptors in `handleSubmit` and `handleQueue`, after slash commands. The input shows processing while they run.
 
 Contract:
 
-- Deviation from the spec: the `Prompt` pill holds both choices; there is no separate mode pill. Cmd+Enter is gone.
-- The daemon hook adds context only when `hook-runtime.json` records a Caveman install.
+- Deviation from the spec: no `composerTarget` prop was added. The target `agentId` is the composer `agentId` when the session store knows that agent, else null. This is the same check plugin slash commands use.
+- Only interceptors from plugins installed on the composer's host run. Terminal composers skip them.
+- An interceptor error shows as the send error and keeps the draft.
+- The queue drain path does not run interceptors; text is final when queued.
 
 Verified:
 
-- `npx tsc --noEmit` -> exit 0. `npm run lint` -> 0 errors on 32 files. `npm test` -> 41 passed.
-- DOM check -> no match.
-- Real host check, Paseo Dev 2026-10-01T00:38: with rewrite on, the Vietnamese draft was sent as English, the bubble showed `VI gốc` with the original, the agent answered in Vietnamese, and `last-hook.json` recorded mode `ultra`. A later `daemon restart` exposed a timeout: the Caveman scripts ran through the Electron helper without `ELECTRON_RUN_AS_NODE`. The hook now sets it and catches errors so a turn never fails on Caveman; a `paseo run` turn then passed with mode `ultra`.
+- `cd packages/app && npx vitest run --project unit <26 composer and plugin composer test files> --bail=1` -> 183 passed, including 4 new tests.
+- `cd packages/app && npx vitest run --project unit src/plugins --bail=1` -> 135 passed.
+- App typecheck -> exit 0. Lint on 8 files -> 0 errors.
+- Browser tests were not run: the Playwright Chromium binary is missing on this machine.
 
 Anti-goal:
 
-- Final: `tests/notes.test.ts` shows 1 translate call for 5 renders of one Vietnamese message, and a retry only after a failure; 2026-10-01T00:30.
-- Result: PASS against at most one translate RPC per distinct text.
+- Final: the 22 existing composer unit test files pass without edits; 2026-09-30T23:54.
+- Result: PASS.
