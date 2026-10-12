@@ -43,6 +43,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a plugin group renderer API and a separate turn-timeline plugin for the agent turn step list while the host owns tool call grouping and edit-diffs owns the diff. Reason: [ADR-0016](watchtower/decisions/ADR-0016-host-turn-step-list-over-plugin-group-renderer.md).
 - Avoid treating only the last assistant message group as a turn's answer while providers can split one answer into several messages. Reason: [ADR-0018](watchtower/decisions/ADR-0018-all-trailing-messages-over-last-message-as-answer.md).
 - Avoid a fold, chevron, or Collapse button on the turn step list, and the old Overview badge on desktop, while the owner reads turns without a click per turn. Reason: [ADR-0019](watchtower/decisions/ADR-0019-always-open-step-list-over-folding-group.md).
+- Avoid palette-only label colors and scheme-blind fixed hues in the turn step list while the owner keeps the design's Explore, Edit, and Verify hues. Reason: [ADR-0020](watchtower/decisions/ADR-0020-scheme-label-colors-over-palette-tokens-for-turn-steps.md).
+- Avoid steps made of the tool calls before a note, and a per-provider rule, while agents in use write their note before they act. Reason: [ADR-0021](watchtower/decisions/ADR-0021-note-opens-its-step-over-tools-before-the-note.md).
 - Avoid restarting TASK or Q-IDs at 001 in a new plan, and avoid per-plan or per-kind ID prefixes, while one repo has one `watchtower/` folder. Reason: [ADR-0011](watchtower/decisions/ADR-0011-repo-wide-ids-over-per-plan-ids.md).
 
 ## Learnings
