@@ -84,6 +84,9 @@ export interface StreamRenderInput {
   // The history row under the top of the viewport, for surfaces that mark where the reader
   // is in the transcript. Only the web viewport measures it today.
   onReadingPositionChange?: (rowId: string | null) => void;
+  // A message drawn inside another row, such as a turn step note, has no row of its own.
+  // This returns the message id of that row, so a scroll to the message can find it.
+  resolveMessageHostId?: (messageId: string) => string | undefined;
   onNearHistoryStart: () => boolean | Promise<boolean>;
   isLoadingOlderHistory: boolean;
   hasOlderHistory: boolean;

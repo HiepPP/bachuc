@@ -810,6 +810,8 @@ export interface PluginTimelineStreamItem {
   itemKind: string;
   version: number;
   data: JsonValue;
+  /** Display-only: the tool call this row replaced, so tool call groups can hold the row. */
+  sourceToolCall?: ToolCallItem;
 }
 
 export interface TodoEntry {

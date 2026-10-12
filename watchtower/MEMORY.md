@@ -39,6 +39,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid required picker fields on every attachment source, a separate `addComposerAttachmentOpener` API, and an `onOpen` on `addComposerAttachment` while chip press handlers must survive a reload and work on other clients. Reason: [ADR-0003](watchtower/decisions/ADR-0003-chip-only-attachment-sources.md).
 - Avoid TASK rows, plan grids, a Gantt as Board's main view, a plan line, or a Board Needs you column while the Watchtower page shows plan depth one click away; keep Board on triage and show a thread's TASK as a chip. Reason: [ADR-0014](watchtower/decisions/ADR-0014-task-chips-only-over-plan-state-on-board.md).
 - Avoid plan questions, manual checks, or their counts on Board, and answer targets picked without showing them, while `QUESTIONS.md` does not record the asking thread. Reason: [ADR-0015](watchtower/decisions/ADR-0015-questions-on-the-watchtower-page-over-board.md).
+- Avoid moving a feature into a plugin, or keeping a host change thin, only to save upstream merge cost, while the fork has moved too far from upstream for that cost to matter. Reason: [ADR-0017](watchtower/decisions/ADR-0017-native-host-features-over-thin-host-changes.md).
+- Avoid a plugin group renderer API and a separate turn-timeline plugin for the agent turn step list while the host owns tool call grouping and edit-diffs owns the diff. Reason: [ADR-0016](watchtower/decisions/ADR-0016-host-turn-step-list-over-plugin-group-renderer.md).
 - Avoid restarting TASK or Q-IDs at 001 in a new plan, and avoid per-plan or per-kind ID prefixes, while one repo has one `watchtower/` folder. Reason: [ADR-0011](watchtower/decisions/ADR-0011-repo-wide-ids-over-per-plan-ids.md).
 
 ## Learnings
@@ -126,3 +128,15 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: watchtower-board's `tests/overview.test.ts` reads this repo's real `watchtower/` files, so an ADR status change or archive edit can fail it.
 - Source: `hiep-plugins/plugins/watchtower-board/tests/overview.test.ts`.
 - Use next time: run that test after you change `watchtower/DECISIONS.md` or an archived plan.
+
+### 2026-10-12 - Plan 20261012-turn-step-list
+
+- Learned: app view tests run in jsdom with the real react-native-web: `testID` becomes `data-testid`, `element.click()` fires `onPress`, and Unistyles styles render inline. RN-web 0.21 ignores `accessibilityState`, so use `aria-pressed` or a `dataSet` flag to assert a pressed state.
+- Source: `packages/app/src/tool-calls/detail-level/turn/view.test.tsx`; TASK-073 outcome.
+- Use next time: test a new app view as a plain `*.test.tsx` before you reach for a browser test.
+- Learned: `TranslationResources` derives from `en`, so a new key in `en.ts` must also land in all 8 other locale files under `packages/app/src/i18n/resources/` for typecheck to pass.
+- Source: TASK-073 outcome.
+- Use next time: plan locale edits for every resource file when a TASK adds UI strings.
+- Learned: the root `npm run format:files` and `format:check:files` skip `hiep-plugins/` and exit 2 with "Expected at least one target file" when only plugin files are passed.
+- Source: TASK-074 outcome.
+- Use next time: format plugin files with the plugin's own `npm run format`, and check them with `npx oxfmt --check` from the plugin folder.

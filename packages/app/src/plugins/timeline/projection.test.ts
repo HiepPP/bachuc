@@ -206,4 +206,41 @@ describe("plugin timeline projection", () => {
     expect(projected).toMatchObject([{ kind: "plugin" }, { kind: "user_message" }]);
     expect(projected[1]).toBe(source);
   });
+
+  it("marks a plugin row that replaced a tool call with its source call", () => {
+    const call: StreamItem = {
+      kind: "tool_call",
+      id: "tool-1",
+      timestamp: new Date("2026-01-01T00:00:00.000Z"),
+      payload: {
+        source: "agent",
+        data: {
+          provider: "claude",
+          callId: "call-1",
+          name: "Edit",
+          status: "completed",
+          error: null,
+          detail: { type: "edit", filePath: "/repo/a.ts" },
+        },
+      },
+    };
+    const row = {
+      type: "plugin" as const,
+      id: "row",
+      pluginId: "diffs",
+      kind: "row",
+      version: 1,
+      data: null,
+    };
+    const replaced = projectPluginTimelineItems([call], () => [row]);
+    const kept = projectPluginTimelineItems([call], () =>
+      Object.assign([row], { source: { placement: "last" as const } }),
+    );
+    const fromThought = projectPluginTimelineItems([thought("Plan")], () => [row]);
+
+    expect(replaced).toMatchObject([{ kind: "plugin", id: "diffs/row" }]);
+    expect(replaced[0]).toHaveProperty("sourceToolCall", call);
+    expect(kept[0]).not.toHaveProperty("sourceToolCall");
+    expect(fromThought[0]).not.toHaveProperty("sourceToolCall");
+  });
 });

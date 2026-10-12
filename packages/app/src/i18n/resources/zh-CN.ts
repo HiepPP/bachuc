@@ -1895,6 +1895,25 @@ export const zhCN: TranslationResources = {
       other: "调用了 Paseo {{count}} 次",
     },
     and: "并",
+    turn: {
+      working: "工作中",
+      worked: "已工作 {{duration}}",
+      step: "第 {{count}} 步",
+      steps: {
+        one: "{{count}} 步",
+        other: "{{count}} 步",
+      },
+      files: {
+        one: "{{count}} 个文件",
+        other: "{{count}} 个文件",
+      },
+      now: "现在",
+      labels: {
+        explore: "探索",
+        edit: "编辑",
+        verify: "验证",
+      },
+    },
   },
   renameModal: {
     rename: "重命名",

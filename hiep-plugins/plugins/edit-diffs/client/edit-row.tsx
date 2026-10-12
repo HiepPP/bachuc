@@ -21,6 +21,7 @@ import {
   type Hunk,
   type NumberedRow,
 } from "../shared/diff";
+import { changeBar } from "../shared/change-bar";
 import { displaySettings } from "../shared/settings";
 import { highlightHunks } from "./highlight";
 
@@ -33,6 +34,9 @@ const MONO = Platform.select({
 const NO_WRAP = (Platform.OS === "web" ? { whiteSpace: "pre" } : {}) as TextStyle;
 const ADD_BG = "rgba(46, 160, 67, 0.15)";
 const REMOVE_BG = "rgba(248, 81, 73, 0.1)";
+const BAR_ADD = "#3D9A4E";
+const BAR_REMOVE = "#C94A4A";
+const BAR_SQUARE = 7;
 const MAX_DIFF_HEIGHT = 480;
 const SETTLE_MS = 300;
 
@@ -210,47 +214,64 @@ export function EditDiffRow({ agentId, item, theme }: PluginTimelineItemProps<Ed
   const failed = data.status === "failed";
   const muted = theme.colors.foregroundMuted;
 
+  const bar = useMemo(() => changeBar(added, removed), [added, removed]);
+
+  // The turn step gives this row its spacing, so the row adds no outer margin.
   return (
-    <View style={{ marginHorizontal: -13, marginBottom: 4 }}>
+    <View>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
         accessibilityLabel={`${headerLabel(data)} ${data.filePath}`}
         onPress={() => setToggled(!expanded)}
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 8,
-          paddingHorizontal: 8,
-          paddingVertical: 4,
-          borderRadius: 8,
-        }}
+        style={{ flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start" }}
       >
-        <View style={{ width: 22, alignItems: "center" }}>
-          <Icon name="Pencil" size={14} color={failed ? theme.colors.statusDanger : muted} />
+        <View style={{ width: 14, alignItems: "center" }}>
+          <Icon name={expanded ? "ChevronDown" : "ChevronRight"} size={14} color={muted} />
         </View>
-        <Text style={{ color: failed ? theme.colors.statusDanger : muted, fontSize: 14 }}>
-          {headerLabel(data)}
-        </Text>
         <Text
           numberOfLines={1}
-          style={{ flexShrink: 1, minWidth: 0, color: theme.colors.foreground, fontSize: 14 }}
+          style={{
+            flexShrink: 1,
+            minWidth: 0,
+            color: failed ? theme.colors.statusDanger : theme.colors.foreground,
+            fontFamily: MONO,
+            fontSize: 12.5,
+          }}
         >
           {displayPath(data.filePath, cwd)}
         </Text>
+        {bar.length > 0 ? (
+          <View style={{ flexDirection: "row", gap: 2 }}>
+            {bar.map((kind, index) => (
+              <View
+                key={index}
+                style={{
+                  width: BAR_SQUARE,
+                  height: BAR_SQUARE,
+                  borderRadius: 1.5,
+                  backgroundColor: kind === "add" ? BAR_ADD : BAR_REMOVE,
+                }}
+              />
+            ))}
+          </View>
+        ) : null}
         {added > 0 ? (
           <Text style={{ color: theme.colors.statusSuccess, fontSize: 13 }}>{`+${added}`}</Text>
         ) : null}
         {removed > 0 ? (
           <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{`−${removed}`}</Text>
         ) : null}
-        <Icon name={expanded ? "ChevronDown" : "ChevronRight"} size={14} color={muted} />
+        {data.status === "completed" ? null : (
+          <Text style={{ color: failed ? theme.colors.statusDanger : muted, fontSize: 13 }}>
+            {headerLabel(data)}
+          </Text>
+        )}
       </Pressable>
       {expanded ? (
         <View
           style={{
-            marginTop: 4,
-            marginHorizontal: 8,
+            marginTop: 6,
             borderWidth: 1,
             borderColor: theme.colors.border,
             borderRadius: 8,
