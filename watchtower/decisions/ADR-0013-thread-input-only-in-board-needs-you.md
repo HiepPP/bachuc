@@ -1,6 +1,6 @@
 # ADR-0013 Thread input only in Board's Needs you over plan questions on Board
 
-Status: accepted
+Status: superseded by ADR-0015
 Date: 2026-10-12
 Supersedes: -
 Scope: `hiep-plugins/plugins/board/**`, `hiep-plugins/plugins/watchtower-board/client/**`

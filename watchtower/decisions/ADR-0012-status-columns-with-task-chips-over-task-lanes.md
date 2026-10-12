@@ -1,6 +1,6 @@
 # ADR-0012 Status columns with TASK chips over task lanes on Board
 
-Status: accepted
+Status: superseded by ADR-0014
 Date: 2026-10-12
 Supersedes: ADR-0010
 Scope: `hiep-plugins/plugins/board/**`

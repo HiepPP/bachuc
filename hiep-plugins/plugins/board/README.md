@@ -42,7 +42,7 @@ Requires the Paseo fork `>=0.10.2-beta.900` with host-targeted plugin RPC. Host 
 
 ## Timeline
 
-- Timeline looks back over the last 24 hours; Runs stays the triage view (ADR-0012). Each host answers `board.timeline` with the runs from its store that overlap the window, and the page lays every host on one shared time axis.
+- Timeline looks back over the last 24 hours; Runs stays the triage view (ADR-0014). Each host answers `board.timeline` with the runs from its store that overlap the window, and the page lays every host on one shared time axis.
 - One row per top-level thread, grouped by host, then by project in order of its first thread. A thread's subagents share one thin row under it. Bars are tinted by project when finished, dark while running, amber when the thread needs input, red when failed, and dashed gray when cancelled. A bar press opens the thread; its TASK chip opens Watchtower at that TASK.
 - An idle gap longer than max(2 h, 4 x the average top-level thread) draws as a 48 px break labelled with its length. The rule is copied from watchtower-board; plugins never import each other.
 - The load strip on top counts top-level threads running at once in each clock hour and labels the peak. The footer sums threads, agent time, the peak, and the folded idle time.

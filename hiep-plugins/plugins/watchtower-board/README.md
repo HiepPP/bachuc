@@ -72,7 +72,7 @@ the actions are disabled and the cell reads "Agent busy". If the workspace has n
 "Actions go to <agent>" above its rows; the name is a link that opens that thread, so you see where
 a prompt goes before you press. A row shows 2 lines; pressing its text shows all of it and, for a
 question, its default. One row opens at a time. See
-[ADR-0013](../../../watchtower/decisions/ADR-0013-thread-input-only-in-board-needs-you.md).
+[ADR-0015](../../../watchtower/decisions/ADR-0015-questions-on-the-watchtower-page-over-board.md).
 
 - A question has **Answer**, which opens a text field with **Send** and **Cancel**, and, when the
   question has a default, **Use default**.
