@@ -23,8 +23,14 @@ export const runSchema = z.object({
   status: z.enum(["running", "completed", "failed", "cancelled", "unknown"]),
   startedAt: z.string().nullable(),
   endedAt: z.string().nullable(),
+  // The Watchtower TASK from the agent's `watchtower.task` label, and the agent's workspace.
+  // Read from the host at snapshot time; never persisted.
+  taskId: z.string().optional(),
+  workspaceId: z.string().nullable().optional(),
 });
 export type BoardRun = z.infer<typeof runSchema>;
+// Watchtower autorun labels each agent it creates with its TASK, such as `TASK-069`.
+export const WATCHTOWER_TASK_LABEL = "watchtower.task";
 export const removeRunRpc = defineRpc({
   name: "board.remove-finished",
   input: z.object({ id: z.string(), observingSince: z.string(), endedAt: z.string().nullable() }),

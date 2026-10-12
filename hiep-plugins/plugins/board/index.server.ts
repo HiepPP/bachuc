@@ -127,6 +127,7 @@ export default function contribute(server: PluginServerContext) {
   );
   let pending: Promise<void> | undefined;
   let diffsOff: ReadonlySet<string> = new Set();
+  let agentTasks: ReadonlyMap<string, { taskId?: string; workspaceId: string | null }> = new Map();
   // Provider model catalogs rarely change; a failed read is retried on the next poll.
   const catalogs = new Map<string, Promise<PaseoProviderModelsResult["models"]>>();
   const catalog = (paseo: PaseoApi, provider: string) => {
@@ -184,11 +185,12 @@ export default function contribute(server: PluginServerContext) {
       const revision = store.revision;
       const checkedAt = new Date().toISOString();
       pending = listBoardAgents(paseo, controller.signal)
-        .then(async ({ agents, visibleAgentIds, unreadAgentIds, diffsOffAgentIds }) => {
+        .then(async ({ agents, visibleAgentIds, unreadAgentIds, diffsOffAgentIds, tasks }) => {
           ensureActive();
           store.reconcile(agents, revision, visibleAgentIds);
           store.setUnread(unreadAgentIds, checkedAt);
           diffsOff = diffsOffAgentIds;
+          agentTasks = tasks;
           await Promise.all(
             store.unresolvedProjects().map(async ({ agentId, cwd }) => {
               // Placement enrichment must not hide the board when an agent is unavailable.
@@ -262,6 +264,7 @@ export default function contribute(server: PluginServerContext) {
           effort: effort?.label ?? run.effort,
           projectId: ids.get(run.projectKey),
           diffsOff: diffsOff.has(run.agentId),
+          ...agentTasks.get(run.agentId),
         };
       }),
     };

@@ -41,6 +41,7 @@ import { closeRemovedRuntimes, removeFinishedRun } from "./remove";
 import { reducedMotion } from "./motion";
 import { focusRing, keyboardFocus } from "./focus";
 import { repoDivider, repoLabel, repoMark, repoSurface } from "./repo-color";
+import { TaskChip } from "./task-chip";
 
 const SECOND = 1_000;
 // Shape lock: cards and notices 8; controls and subagent rows 6.
@@ -298,7 +299,10 @@ function RunCard({
   removeCount = 1,
   seen = false,
   orb,
+  onOpenTask,
 }: {
+  /** Opens Watchtower at the run's TASK on its workspace; absent when Watchtower cannot open. */
+  onOpenTask?: (run: BoardRun) => void;
   projectHue?: number;
   /** Finished and opened since its last turn: neutral surface, content dimmed until hover. */
   seen?: boolean;
@@ -821,6 +825,15 @@ function RunCard({
             minHeight: subagent ? 0 : s(23),
           }}
         >
+          {run.taskId ? (
+            <TaskChip
+              id={run.taskId}
+              theme={theme}
+              scale={scale}
+              compact={subagent}
+              onPress={onOpenTask ? () => onOpenTask(run) : undefined}
+            />
+          ) : null}
           <View
             pointerEvents="none"
             style={{ flex: 1, minWidth: 0, flexDirection: "row", overflow: "hidden", opacity: dim }}
@@ -1090,12 +1103,14 @@ const RunColumn = memo(function RunColumn({
   onOpen,
   onToggleDiffs,
   onOpenProject,
+  onOpenTask,
   onStar,
   scale,
 }: {
   orb: OrbSettings | null;
   scale: number;
   projectPalette: Record<string, number>;
+  onOpenTask?: (run: BoardRun) => void;
   title: string;
   trees: RunTree[];
   compact: boolean;
@@ -1174,6 +1189,7 @@ const RunColumn = memo(function RunColumn({
             onOpen={onOpen}
             onToggleDiffs={onToggleDiffs}
             onOpenProject={onOpenProject}
+            onOpenTask={onOpenTask}
             onStar={onStar}
             orb={orb}
           />
@@ -1412,6 +1428,12 @@ function HostBoard({
     navigation?.openAgent({ agentId, serverId: host.id, anchor: "latest-prompt" });
   });
   const openAgent = navigation ? openAgentStable : undefined;
+  // A TASK chip opens the Watchtower page on the thread's own workspace, at that TASK.
+  const openWatchtower = client.openWatchtower;
+  const openTaskStable = useStableCallback((run: BoardRun) => {
+    if (run.workspaceId) openWatchtower?.({ workspaceId: run.workspaceId, task: run.taskId });
+  });
+  const onOpenTask = openWatchtower ? openTaskStable : undefined;
   const toggleDiffsStable = useStableCallback(async (agentId: string, off: boolean) => {
     await client.rpc(editDiffsModeRpc, { agentId, off });
     await board.refetch({ throwOnError: true });
@@ -1615,6 +1637,7 @@ function HostBoard({
               onOpen={openAgent}
               onToggleDiffs={toggleDiffs}
               onOpenProject={onOpenProject}
+              onOpenTask={onOpenTask}
             />
             <RunColumn
               orb={orb}
@@ -1631,6 +1654,7 @@ function HostBoard({
               onOpen={openAgent}
               onToggleDiffs={toggleDiffs}
               onOpenProject={onOpenProject}
+              onOpenTask={onOpenTask}
               onRemove={online ? onRemove : undefined}
             />
           </View>
@@ -1640,7 +1664,9 @@ function HostBoard({
   );
 }
 
-export function BoardPage(props: PluginSurfaceProps & { client: BoardHostClient }) {
+export function BoardPage(
+  props: PluginSurfaceProps & { client: Parameters<typeof createBoardHostClient>[0] },
+) {
   const { theme, layout } = props;
   const hosts = useHosts();
   const clients = useMemo(

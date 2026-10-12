@@ -1,5 +1,5 @@
 import type { PaseoApi } from "@getpaseo/client";
-import { EDIT_DIFFS_MODE_LABEL } from "../shared/board";
+import { EDIT_DIFFS_MODE_LABEL, WATCHTOWER_TASK_LABEL } from "../shared/board";
 import { getParentAgentIdFromLabels } from "./agent-labels";
 import type { ActiveAgent } from "./store";
 
@@ -9,6 +9,8 @@ export async function listBoardAgents(paseo: Pick<PaseoApi, "agents">, signal: A
   // The host flags a thread when a turn finishes or fails and clears it when a client opens it.
   const unreadAgentIds = new Set<string>();
   const diffsOffAgentIds = new Set<string>();
+  // Each agent's TASK chip and the workspace that chip opens Watchtower on.
+  const tasks = new Map<string, { taskId?: string; workspaceId: string | null }>();
   const cursors = new Set<string>();
   let cursor: string | undefined;
   do {
@@ -25,6 +27,10 @@ export async function listBoardAgents(paseo: Pick<PaseoApi, "agents">, signal: A
       )
         unreadAgentIds.add(agent.id);
       if (agent.labels?.[EDIT_DIFFS_MODE_LABEL] === "off") diffsOffAgentIds.add(agent.id);
+      tasks.set(agent.id, {
+        taskId: agent.labels?.[WATCHTOWER_TASK_LABEL]?.match(/\bTASK-\d+\b/)?.[0],
+        workspaceId: agent.workspaceId ?? null,
+      });
       if (agent.status !== "running") continue;
       agents.push({
         ...agent,
@@ -41,5 +47,5 @@ export async function listBoardAgents(paseo: Pick<PaseoApi, "agents">, signal: A
     if (!cursor || cursors.has(cursor)) throw new Error("Agent list changed. Refresh to retry.");
     cursors.add(cursor);
   } while (cursor);
-  return { agents, visibleAgentIds, unreadAgentIds, diffsOffAgentIds };
+  return { agents, visibleAgentIds, unreadAgentIds, diffsOffAgentIds, tasks };
 }

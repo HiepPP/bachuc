@@ -18,6 +18,7 @@ test("fetches every page and detects repeated cursors", async () => {
     visibleAgentIds: new Set(),
     unreadAgentIds: new Set(),
     diffsOffAgentIds: new Set(),
+    tasks: new Map(),
   });
   assert.equal(calls, 3);
   const repeated = {
@@ -140,4 +141,28 @@ test("collects threads whose edit diffs are off, running or not", async () => {
   } as unknown as PaseoApi;
   const { diffsOffAgentIds } = await listBoardAgents(client, new AbortController().signal);
   assert.deepEqual([...diffsOffAgentIds], ["off", "idle-off"]);
+});
+
+test("reads each thread's TASK chip from its watchtower.task label, running or not", async () => {
+  const agents = [
+    { id: "a", status: "running", workspaceId: "w1", labels: { "watchtower.task": "TASK-069" } },
+    { id: "b", status: "idle", workspaceId: "w2", labels: { "watchtower.task": "see TASK-036" } },
+    { id: "c", status: "idle", labels: { "watchtower.task": "not a task" } },
+    { id: "d", status: "idle", workspaceId: "w1", labels: {} },
+  ];
+  const client = {
+    agents: {
+      list: async () => ({
+        entries: agents.map((agent) => ({ agent, project: null })),
+        pageInfo: { hasMore: false },
+      }),
+    },
+  } as unknown as PaseoApi;
+  const { tasks } = await listBoardAgents(client, new AbortController().signal);
+  assert.deepEqual(Object.fromEntries(tasks), {
+    a: { taskId: "TASK-069", workspaceId: "w1" },
+    b: { taskId: "TASK-036", workspaceId: "w2" },
+    c: { taskId: undefined, workspaceId: null },
+    d: { taskId: undefined, workspaceId: "w1" },
+  });
 });
