@@ -7,9 +7,10 @@ import {
   projectToolCallDetailLevel,
   type PreparedToolCallHistory,
   type ToolCallDetailLevel,
+  type ToolCallGroupingOptions,
 } from "@/tool-calls/detail-level/projection";
 
-interface PresentationInput {
+interface PresentationInput extends ToolCallGroupingOptions {
   tail: StreamItem[];
   head: StreamItem[];
   transform: TimelineItemTransform | undefined;
@@ -77,6 +78,8 @@ export function createStreamPresentation() {
   let promotedRows: StreamItem[] = [];
   let preparedTail: StreamItem[] | undefined;
   let preparedLevel: ToolCallDetailLevel | undefined;
+  let preparedNonCompact: boolean | undefined;
+  let preparedTurnActive: boolean | undefined;
   let preparedHistory: PreparedToolCallHistory | null = null;
 
   /**
@@ -166,10 +169,23 @@ export function createStreamPresentation() {
       displayHistory = historyRows;
       promotedRows = nextPromoted;
     }
-    if (preparedTail !== displayTail || preparedLevel !== input.level) {
-      preparedHistory = prepareToolCallHistory(input.level, displayTail);
+    const isNonCompact = input.isNonCompact ?? false;
+    // Only turn mode reads the turn state in history; other modes keep their cache across it.
+    const historyTurnActive = isNonCompact && input.level === "overview" && input.isTurnActive;
+    if (
+      preparedTail !== displayTail ||
+      preparedLevel !== input.level ||
+      preparedNonCompact !== isNonCompact ||
+      preparedTurnActive !== historyTurnActive
+    ) {
+      preparedHistory = prepareToolCallHistory(input.level, displayTail, {
+        isNonCompact,
+        isTurnActive: historyTurnActive,
+      });
       preparedTail = displayTail;
       preparedLevel = input.level;
+      preparedNonCompact = isNonCompact;
+      preparedTurnActive = historyTurnActive;
     }
     return projectToolCallDetailLevel({
       level: input.level,
@@ -177,6 +193,7 @@ export function createStreamPresentation() {
       head,
       preparedHistory,
       isTurnActive: input.isTurnActive,
+      isNonCompact,
     });
   };
 }

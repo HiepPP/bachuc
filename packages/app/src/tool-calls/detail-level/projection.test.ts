@@ -480,3 +480,294 @@ describe("tool call detail-level projection", () => {
     expect(result.groupsByHostId.size).toBe(1);
   });
 });
+
+describe("tool call turn mode projection", () => {
+  const nonCompact = { isNonCompact: true };
+  const user = {
+    kind: "user_message",
+    id: "user",
+    text: "Go",
+    timestamp: new Date(0),
+  } satisfies StreamItem;
+
+  function block(id: string, index: number): AssistantMessageItem {
+    return { ...assistant(`${id}:block:${index}`), blockGroupId: id, blockIndex: index };
+  }
+
+  function pluginRow(id: string, sourceToolCall?: ToolCallItem): StreamItem {
+    return {
+      kind: "plugin",
+      id,
+      timestamp: new Date(1),
+      pluginId: "rows",
+      pluginItemId: id,
+      itemKind: "row",
+      version: 1,
+      data: null,
+      ...(sourceToolCall ? { sourceToolCall } : {}),
+    };
+  }
+
+  function projectTurns(input: {
+    level?: ToolCallDetailLevel;
+    tail?: StreamItem[];
+    head?: StreamItem[];
+    isTurnActive?: boolean;
+    preparedHistory?: PreparedToolCallHistory | null;
+  }) {
+    const level = input.level ?? "overview";
+    const tail = input.tail ?? [];
+    const isTurnActive = input.isTurnActive ?? false;
+    return projectToolCallDetailLevel({
+      level,
+      tail,
+      head: input.head ?? [],
+      preparedHistory:
+        input.preparedHistory ??
+        prepareToolCallHistory(level, tail, { ...nonCompact, isTurnActive }),
+      isTurnActive,
+      isNonCompact: true,
+    });
+  }
+
+  function boundary(kind: "notification" | "todo_list" | "compaction"): StreamItem {
+    const timestamp = new Date(2);
+    if (kind === "notification") {
+      const base = { kind, id: kind, timestamp, sourceType: "notification" as const };
+      return { ...base, level: "info", message: "Done" };
+    }
+    if (kind === "todo_list") {
+      const activity = { type: "created" as const, count: 1 };
+      return { kind, id: kind, timestamp, provider: "claude", items: [], activity };
+    }
+    return { kind, id: kind, timestamp, status: "completed" };
+  }
+
+  it("keeps today's overview runs on a compact screen", () => {
+    const tail = [
+      toolCall("1", { type: "shell", command: "one" }),
+      assistant("note"),
+      toolCall("2", { type: "shell", command: "two" }),
+      toolCall("3", { type: "read", filePath: "/repo/a.ts" }),
+    ];
+    const compact = projectToolCallDetailLevel({
+      level: "overview",
+      tail,
+      head: [],
+      preparedHistory: prepareToolCallHistory("overview", tail, { isNonCompact: false }),
+      isTurnActive: false,
+      isNonCompact: false,
+    });
+
+    expect(compact).toEqual(project({ level: "overview", tail }));
+    expect(compact.groupsByHostId.size).toBe(2);
+    expect(compact.turnGroupsByHostId.size).toBe(0);
+  });
+
+  it("keeps detailed rows ungrouped on a non-compact screen", () => {
+    const tail = [toolCall("1", { type: "shell", command: "one" }), assistant("note")];
+    const result = projectTurns({ level: "detailed", tail });
+
+    expect(prepareToolCallHistory("detailed", tail, nonCompact)).toBeNull();
+    expect(result.tail).toBe(tail);
+    expect(result.groupsByHostId.size).toBe(0);
+    expect(result.turnGroupsByHostId.size).toBe(0);
+  });
+
+  it("ends a turn run at a user message and keeps each answer outside", () => {
+    const first = toolCall("1", { type: "shell", command: "one" });
+    const second = toolCall("2", { type: "shell", command: "two" });
+    const tail = [first, assistant("a1"), user, second, assistant("a2")];
+    const result = projectTurns({ tail });
+
+    expect(result.tail).toEqual(tail);
+    expect(result.turnGroupsByHostId.get("1")?.run.items).toEqual([first]);
+    expect(result.turnGroupsByHostId.get("2")?.run.items).toEqual([second]);
+  });
+
+  it("joins marked plugin rows and ends the run at an unmarked one", () => {
+    const edit = toolCall("2", { type: "edit", filePath: "/repo/a.ts" });
+    const first = [
+      toolCall("1", { type: "read", filePath: "/repo/a.ts" }),
+      pluginRow("diff", edit),
+    ];
+    const unmarked = pluginRow("panel");
+    const second = [toolCall("3", { type: "shell", command: "test" }), assistant("n2")];
+    const tail = [...first, assistant("n1"), unmarked, ...second];
+    const result = projectTurns({ tail, isTurnActive: true });
+
+    expect(result.tail).toEqual([
+      expect.objectContaining({ id: "1" }),
+      unmarked,
+      expect.objectContaining({ id: "3" }),
+    ]);
+    expect(result.turnGroupsByHostId.get("1")?.run).toMatchObject({
+      items: [...first, assistant("n1")],
+      isSealed: true,
+    });
+    expect(result.turnGroupsByHostId.get("3")?.run).toMatchObject({
+      items: second,
+      isSealed: false,
+    });
+  });
+
+  it("keeps the last note inside while the turn runs and outside once it ends", () => {
+    const call = toolCall("1", { type: "shell", command: "one" });
+    const tail = [user, call, assistant("n1")];
+    const prepared = prepareToolCallHistory("overview", tail, nonCompact);
+
+    const running = projectTurns({ tail, isTurnActive: true, preparedHistory: prepared });
+    const ended = projectTurns({ tail, isTurnActive: false, preparedHistory: prepared });
+
+    expect(running.tail).toEqual([user, expect.objectContaining({ id: "1" })]);
+    expect(running.turnGroupsByHostId.get("1")?.run.items).toEqual([call, assistant("n1")]);
+    expect(running.historyGroupUpdatesByHostId.has("1")).toBe(true);
+    expect(ended.tail).toBe(prepared?.grouped.tail);
+    expect(ended.tail).toEqual([user, call, assistant("n1")]);
+    expect(ended.turnGroupsByHostId.get("1")?.run.items).toEqual([call]);
+  });
+
+  it("keeps a note that spans history and live head in step", () => {
+    const call = toolCall("1", { type: "shell", command: "one" });
+    const tail = [user, call, block("m", 0)];
+    const prepared = prepareToolCallHistory("overview", tail, nonCompact);
+
+    const first = projectTurns({
+      tail,
+      head: [block("m", 1)],
+      isTurnActive: true,
+      preparedHistory: prepared,
+    });
+    const grown = projectTurns({
+      tail,
+      head: [{ ...block("m", 1), text: "grown" }],
+      isTurnActive: true,
+      preparedHistory: prepared,
+    });
+    const ended = projectTurns({
+      tail,
+      head: [block("m", 1)],
+      isTurnActive: false,
+      preparedHistory: prepared,
+    });
+
+    expect(first.tail).toEqual([user, expect.objectContaining({ id: "1" })]);
+    expect(first.head).toEqual([]);
+    expect(first.turnGroupsByHostId.get("1")?.run.items).toEqual([
+      call,
+      ...tail.slice(2),
+      block("m", 1),
+    ]);
+    expect(grown.tail).toBe(first.tail);
+    expect(ended.tail).toBe(prepared?.grouped.tail);
+    expect(ended.tail).toEqual([user, call, block("m", 0)]);
+    expect(ended.head).toEqual([block("m", 1)]);
+    expect(ended.turnGroupsByHostId.get("1")?.run).toMatchObject({ items: [call], isSealed: true });
+  });
+
+  it("moves history notes into a run when the live head brings its first tool call", () => {
+    const call = toolCall("1", { type: "shell", command: "one" });
+    const result = projectTurns({
+      tail: [user, assistant("n0")],
+      head: [call, assistant("n1")],
+      isTurnActive: true,
+    });
+
+    expect(result.tail).toEqual([user]);
+    expect(result.head).toEqual([expect.objectContaining({ id: "n0", kind: "tool_call" })]);
+    expect(result.turnGroupsByHostId.get("n0")?.run.items).toEqual([
+      assistant("n0"),
+      call,
+      assistant("n1"),
+    ]);
+  });
+
+  const work = [
+    toolCall("1", { type: "shell", command: "one" }),
+    assistant("n1"),
+    toolCall("2", { type: "shell", command: "two" }),
+  ];
+  const host = expect.objectContaining({ id: "1", kind: "tool_call" });
+
+  it.each([
+    ["an unmarked plugin row", pluginRow("panel")],
+    ["a notification", boundary("notification")],
+  ])("keeps the answer outside a finished turn when %s follows it", (_, after) => {
+    const tail = [user, ...work, assistant("final"), after];
+
+    const ended = projectTurns({ tail });
+    const running = projectTurns({ tail, isTurnActive: true });
+
+    expect(ended.tail).toEqual([user, host, assistant("final"), after]);
+    expect(ended.turnGroupsByHostId.get("1")?.run.items).toEqual(work);
+    expect(running.tail).toEqual([user, host, after]);
+    expect(running.turnGroupsByHostId.get("1")?.run.items).toEqual([...work, assistant("final")]);
+  });
+
+  it("keeps the answer outside when the live head brings it with a plugin row", () => {
+    const tail = [user, ...work];
+    const head = [assistant("final"), pluginRow("panel")];
+    const prepared = prepareToolCallHistory("overview", tail, nonCompact);
+
+    const ended = projectTurns({ tail, head, preparedHistory: prepared });
+    const running = projectTurns({ tail, head, isTurnActive: true, preparedHistory: prepared });
+
+    expect(ended.tail).toEqual([user, host]);
+    expect(ended.head).toEqual(head);
+    expect(ended.turnGroupsByHostId.get("1")?.run.items).toEqual(work);
+    expect(running.head).toEqual([pluginRow("panel")]);
+    expect(running.turnGroupsByHostId.get("1")?.run.items).toEqual([...work, assistant("final")]);
+  });
+
+  it("keeps the answer outside after a user message ends the turn at any later boundary", () => {
+    const next = toolCall("3", { type: "shell", command: "three" });
+    const tail = [user, ...work, assistant("final"), pluginRow("panel"), user, next];
+    const result = projectTurns({ tail, isTurnActive: true });
+
+    expect(result.tail).toEqual([user, host, assistant("final"), pluginRow("panel"), user, next]);
+    expect(result.turnGroupsByHostId.get("1")?.run.items).toEqual(work);
+    expect(result.turnGroupsByHostId.get("3")?.run.isSealed).toBe(false);
+  });
+
+  it.each(["todo_list", "compaction"] as const)(
+    "splits a turn at a %s and keeps the note before it inside",
+    (kind) => {
+      const split = boundary(kind);
+      const after = toolCall("3", { type: "shell", command: "three" });
+      const tail = [user, ...work, assistant("n2"), split, after, assistant("final")];
+      const result = projectTurns({ tail });
+
+      expect(result.tail).toEqual([
+        user,
+        host,
+        split,
+        expect.objectContaining({ id: "3" }),
+        assistant("final"),
+      ]);
+      expect(result.turnGroupsByHostId.get("1")?.run.items).toEqual([...work, assistant("n2")]);
+      expect(result.turnGroupsByHostId.get("3")?.run.items).toEqual([after]);
+    },
+  );
+
+  it.each(["todo_list", "compaction"] as const)(
+    "keeps the answer outside when a %s ends a finished turn",
+    (kind) => {
+      const tail = [user, ...work, assistant("final"), boundary(kind)];
+
+      expect(projectTurns({ tail }).turnGroupsByHostId.get("1")?.run.items).toEqual(work);
+    },
+  );
+
+  it("keeps the answer outside an idle turn whose tool call still shows as running", () => {
+    const stale = toolCall("1", { type: "shell", command: "one" }, { status: "running" });
+    const tail = [user, stale, assistant("final")];
+    const result = projectTurns({ tail });
+
+    expect(result.tail).toEqual([user, host, assistant("final")]);
+    expect(result.head).toEqual([]);
+    expect(result.turnGroupsByHostId.get("1")?.run).toMatchObject({
+      items: [stale],
+      isSealed: false,
+    });
+  });
+});
