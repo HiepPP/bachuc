@@ -379,7 +379,6 @@ function HistoryRow({
   );
 }
 
-// Proposed ADRs come first, because the owner still has to accept or reject them.
 export function DecisionsCell({
   decisions,
   onOpen,
@@ -390,9 +389,7 @@ export function DecisionsCell({
 } & ThemeProps) {
   const { colors } = theme;
   const proposed = (decision: Decision) => decision.status.toLowerCase() === "proposed";
-  const ordered = [...decisions].sort(
-    (a, b) => Number(proposed(b)) - Number(proposed(a)) || b.id.localeCompare(a.id),
-  );
+  const ordered = [...decisions].sort((a, b) => b.id.localeCompare(a.id));
   const { shown, more } = useLimit(ordered);
   return (
     <OverviewCell title="Decisions" theme={theme}>

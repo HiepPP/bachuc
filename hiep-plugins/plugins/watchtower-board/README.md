@@ -51,7 +51,7 @@ one strip below 520 px. It shows:
 - **Needs you**: open and defaulted questions, proposed ADRs, and pending manual checks, each with
   actions (below). A blocking question shows the time to answer by;
 - the pending manual checks;
-- **Decisions**: every ADR, proposed first, then newest ID first. Select one to read its file in a
+- **Decisions**: every ADR, newest ID first. Select one to read its file in a
   dialog. The dialog shows headings, bullets, paragraphs, and code as plain text, with no links or
   HTML. It reads `watchtower/decisions/<ID>.md` or `<ID>-*.md` through `watchtower.decision.read`;
 - **Archived plans**: the 20 newest archive folders.
