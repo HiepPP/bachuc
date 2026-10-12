@@ -15,10 +15,11 @@ export function preselectWorkspace(workspaceId: string) {
 // The page shows one workspace's board only: the one its opener named, or, when no opener named
 // one (the mobile sidebar), the most recently active workspace. A named workspace never falls
 // back to another one, because the overview's actions send prompts to that workspace's agent.
+// Another plugin, such as Board, names it through `params.workspaceId` and may add `params.task`.
 export function WatchtowerPage(props: PluginSurfaceProps) {
   const { host, theme, layout } = props;
   const paseo = usePaseo();
-  const named = lastWorkspaceId;
+  const named = props.params?.workspaceId || lastWorkspaceId;
   const workspaces = useQuery({
     queryKey: ["watchtower-board", host.id, "workspaces"],
     queryFn: async () =>
@@ -70,6 +71,7 @@ export function WatchtowerPage(props: PluginSurfaceProps) {
         key={workspace.id}
         workspaceId={workspace.id}
         projectName={workspace.projectDisplayName}
+        initialTaskId={props.params?.task}
       />
     </View>
   );

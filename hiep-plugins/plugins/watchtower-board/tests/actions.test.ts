@@ -46,9 +46,17 @@ function agent(id: string, patch: Partial<AgentCandidate> = {}): AgentCandidate 
     archivedAt: null,
     updatedAt: "2026-10-09T10:00:00.000Z",
     labels: {},
+    provider: "claude",
     ...patch,
   };
 }
+
+test("answers skip a newer idle mock agent for an older real one, or report none", () => {
+  const real = agent("real", { updatedAt: "2026-10-09T08:00:00.000Z", title: "Real" });
+  const mock = agent("mock", { updatedAt: "2026-10-09T12:00:00.000Z", provider: "mock" });
+  assert.deepEqual(chooseAgent([mock, real], "ws-1"), { state: "ready", id: "real", name: "Real" });
+  assert.deepEqual(chooseAgent([mock], "ws-1"), { state: "none" });
+});
 
 test("the target is the newest idle agent of the workspace", () => {
   const target = chooseAgent(

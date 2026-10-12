@@ -8,6 +8,7 @@ import {
   groupOrder,
   groupTasks,
   questionsFor,
+  taskGroup,
   taskTitle,
   type TaskGroup,
 } from "./dashboard";
@@ -31,6 +32,8 @@ interface TaskListProps {
   theme: PluginTheme;
   // Groups that start collapsed.
   collapsedGroups?: readonly TaskGroup[];
+  // A TASK to show selected on mount, when it exists.
+  initialTaskId?: string;
 }
 
 // Tasks grouped by status. Selecting a task shows its brief, deps, class, blockers, and attachment search.
@@ -42,11 +45,19 @@ export function TaskList({
   dense,
   theme,
   collapsedGroups = [],
+  initialTaskId,
 }: TaskListProps) {
-  const [selection, setSelection] = useState<{ sourceKey: string; taskId: string } | null>(null);
-  const [collapsed, setCollapsed] = useState<Partial<Record<TaskGroup, boolean>>>(() =>
-    Object.fromEntries(collapsedGroups.map((group) => [group, true])),
+  const [selection, setSelection] = useState<{ sourceKey: string; taskId: string } | null>(() =>
+    initialTaskId ? { sourceKey, taskId: initialTaskId } : null,
   );
+  const [collapsed, setCollapsed] = useState<Partial<Record<TaskGroup, boolean>>>(() => {
+    // The opener's TASK must show, so its group starts open even when it is a collapsed group.
+    const initial = tasks.find((task) => task.id === initialTaskId);
+    const open = initial ? taskGroup(initial.status) : null;
+    return Object.fromEntries(
+      collapsedGroups.filter((group) => group !== open).map((group) => [group, true]),
+    );
+  });
   const [notice, setNotice] = useState("");
   const selected =
     selection?.sourceKey === sourceKey ? tasks.find((task) => task.id === selection.taskId) : null;

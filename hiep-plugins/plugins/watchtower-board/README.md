@@ -13,7 +13,10 @@ needs a host built on or after 2026-10-10. The plugin adds no sidebar item and n
 On the new workspace screen, the pill shows the chosen project's tasks in the side panel instead; it
 reads the project root, and it has no run, agent, or attachment search key.
 The Watchtower page shows one workspace only, with no workspace picker. If the opener names a
-workspace, the page shows that one or says "Workspace not found."; it never shows another. If no
+workspace, the page shows that one or says "Workspace not found."; it never shows another.
+Another plugin names it with `openSurface("watchtower", { pluginId: "watchtower-board", params: {
+workspaceId, task } })`; Board does this from TASK chips and Needs you. `task` starts that TASK
+selected in the task list. If no
 opener named one, such as after a plugin reload, it shows the most recently active workspace.
 The header identifies its project. Each workspace keeps its own board and task selection.
 The board reads `watchtower/NEXT.md` in that workspace, not another checkout or its parent repository.
@@ -62,10 +65,14 @@ list, and **Show less** collapses it.
 The Needs you actions edit no file themselves. Each one sends a prompt that starts with
 `Watchtower:` and names the watchtower skill to an agent of the same workspace, and that agent
 changes the files. The target is the most recently updated agent that is not archived, not a
-subagent, and not working: a prompt sent to a working agent interrupts its turn, and the client API
-cannot ask to queue it instead. If every agent is working, the actions are disabled and the cell
-reads "Agent busy". If the workspace has no agent, it reads "No agent in this workspace". A toast
-confirms "Sent to <agent>" or shows the error. The cell shows the target agent above its rows.
+subagent, not a mock-provider test agent, and not working: a prompt sent to a working agent
+interrupts its turn, and the client API cannot ask to queue it instead. If every agent is working,
+the actions are disabled and the cell reads "Agent busy". If the workspace has no agent, it reads
+"No agent in this workspace". A toast confirms "Sent to <agent>" or shows the error. The cell shows
+"Actions go to <agent>" above its rows; the name is a link that opens that thread, so you see where
+a prompt goes before you press. A row shows 2 lines; pressing its text shows all of it and, for a
+question, its default. One row opens at a time. See
+[ADR-0013](../../../watchtower/decisions/ADR-0013-thread-input-only-in-board-needs-you.md).
 
 - A question has **Answer**, which opens a text field with **Send** and **Cancel**, and, when the
   question has a default, **Use default**.

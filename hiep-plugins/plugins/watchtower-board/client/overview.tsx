@@ -1,4 +1,4 @@
-import { type PluginHostProps, useRpc } from "@getpaseo/plugin/client";
+import { type PluginHostProps, type PluginSurfaceProps, useRpc } from "@getpaseo/plugin/client";
 import { Icon, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useMemo, useState } from "react";
@@ -38,6 +38,10 @@ const GAP = 14;
 type WatchtowerOverviewProps = PluginHostProps & {
   workspaceId: string;
   projectName: string | null;
+  // A TASK the opener asked to show selected in the task list.
+  initialTaskId?: string;
+  // The page's navigation; Needs you uses it to open the answer target's thread.
+  navigation?: PluginSurfaceProps["navigation"];
 };
 
 function Row({ children }: { children: ReactNode }) {
@@ -53,6 +57,8 @@ export function WatchtowerOverview({
   projectName,
   host,
   theme,
+  initialTaskId,
+  navigation,
 }: WatchtowerOverviewProps) {
   const { colors } = theme;
   const read = useRpc(readOverviewRpc);
@@ -155,6 +161,11 @@ export function WatchtowerOverview({
       rows={derived.rows}
       target={agent.target}
       send={agent.send}
+      onOpenAgent={
+        navigation
+          ? (agentId: string) => navigation.openAgent({ agentId, serverId: host.id })
+          : undefined
+      }
       onOpenDecision={setDecision}
       theme={theme}
     />
@@ -178,6 +189,7 @@ export function WatchtowerOverview({
       error={board.error}
       workspaceId={workspaceId}
       sourceKey={workspaceId}
+      initialTaskId={initialTaskId}
       theme={theme}
     />
   );

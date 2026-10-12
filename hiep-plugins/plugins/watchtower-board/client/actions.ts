@@ -30,7 +30,7 @@ export function manualChecksPrompt(checks: readonly string[]): string {
 
 export type AgentCandidate = Pick<
   PaseoAgent,
-  "id" | "title" | "status" | "workspaceId" | "archivedAt" | "updatedAt" | "labels"
+  "id" | "title" | "status" | "workspaceId" | "archivedAt" | "updatedAt" | "labels" | "provider"
 >;
 
 export type AgentTarget =
@@ -45,11 +45,15 @@ const WORKING = new Set<AgentCandidate["status"]>(["running", "initializing"]);
 const PARENT_LABEL = "paseo.parent-agent-id";
 
 export function chooseAgent(agents: readonly AgentCandidate[], workspaceId: string): AgentTarget {
-  // A subagent belongs to its parent's turn, so it is not a target.
+  // A subagent belongs to its parent's turn, so it is not a target. A mock-provider agent is a
+  // test fixture and cannot act on an answer (ADR-0013).
   const own = agents
     .filter(
       (agent) =>
-        agent.workspaceId === workspaceId && !agent.archivedAt && !agent.labels?.[PARENT_LABEL],
+        agent.workspaceId === workspaceId &&
+        !agent.archivedAt &&
+        !agent.labels?.[PARENT_LABEL] &&
+        !agent.provider?.startsWith("mock"),
     )
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   if (own.length === 0) return { state: "none" };

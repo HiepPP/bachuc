@@ -84,6 +84,7 @@ export function NeedsYouCell({
   rows,
   target,
   send,
+  onOpenAgent,
   onOpenDecision,
   theme,
 }: {
@@ -91,10 +92,14 @@ export function NeedsYouCell({
   // Null until the first agent lookup succeeds; send looks again and reports any error.
   target: AgentTarget | null;
   send(prompt: string): Promise<boolean>;
+  // Opens the answer target's thread, so the owner sees where a prompt goes (ADR-0013).
+  onOpenAgent?: (agentId: string) => void;
   onOpenDecision(decision: DecisionTarget): void;
 } & ThemeProps) {
   const { colors } = theme;
   const { shown, more } = useLimit(rows);
+  // The one row whose full text and default show; a press on its text toggles it.
+  const [expanded, setExpanded] = useState<string | null>(null);
   // The row whose answer field is open, and what the owner has typed so far.
   const [answering, setAnswering] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -243,7 +248,24 @@ export function NeedsYouCell({
       theme={theme}
     >
       {shown.length === 0 ? <Empty text="Nothing waits on you." theme={theme} /> : null}
-      {note ? (
+      {note && target?.state === "ready" && onOpenAgent ? (
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={`Open ${target.name}, the thread that receives these actions`}
+          onPress={() => onOpenAgent(target.id)}
+          style={({ pressed }) => ({ alignSelf: "flex-start", opacity: pressed ? 0.6 : 1 })}
+        >
+          <Text
+            numberOfLines={1}
+            style={{ fontSize: 11, marginBottom: 2, color: colors.foregroundMuted }}
+          >
+            Actions go to{" "}
+            <Text style={{ color: colors.accent, textDecorationLine: "underline" }}>
+              {target.name}
+            </Text>
+          </Text>
+        </Pressable>
+      ) : note ? (
         <Text
           numberOfLines={1}
           style={{
@@ -257,6 +279,8 @@ export function NeedsYouCell({
       ) : null}
       {shown.map((row, index) => {
         const icon = rowIcon(row, theme);
+        const rowKey = `${row.kind}-${row.id}`;
+        const open = expanded === rowKey;
         return (
           <View
             key={`${row.kind}-${row.id}`}
@@ -273,17 +297,38 @@ export function NeedsYouCell({
               <Icon name={icon.name} size={14} color={icon.color} />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text
-                numberOfLines={2}
-                style={{ fontSize: 12.5, lineHeight: 17, color: colors.foreground }}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded: open }}
+                accessibilityLabel={`${open ? "Collapse" : "Show all of"} ${row.id}: ${row.title}`}
+                onPress={() => setExpanded(open ? null : rowKey)}
               >
-                {row.title}
-              </Text>
+                <Text
+                  numberOfLines={open ? undefined : 2}
+                  style={{ fontSize: 12.5, lineHeight: 17, color: colors.foreground }}
+                >
+                  {row.title}
+                </Text>
+                {open && row.kind === "question" && row.defaultAnswer ? (
+                  <Text
+                    style={{
+                      fontSize: 11.5,
+                      lineHeight: 16,
+                      color: colors.foreground,
+                      marginTop: 3,
+                    }}
+                  >
+                    <Text style={{ fontWeight: "600" }}>Default: </Text>
+                    {row.defaultAnswer}
+                  </Text>
+                ) : null}
+              </Pressable>
               <Text
                 numberOfLines={1}
                 style={{ fontSize: 11, color: colors.foregroundMuted, marginTop: 1 }}
               >
                 {row.meta}
+                {open ? "" : " · press to read all"}
               </Text>
               {answering === row.id ? (
                 answerForm(row)

@@ -129,12 +129,14 @@ export function TasksCard({
   error,
   workspaceId,
   sourceKey,
+  initialTaskId,
   theme,
 }: {
   board: Board | undefined;
   error: Error | null;
   workspaceId: string | null;
   sourceKey: string;
+  initialTaskId?: string;
 } & ThemeProps) {
   const { colors } = theme;
   return (
@@ -157,6 +159,7 @@ export function TasksCard({
           questions={board.questions}
           workspaceId={workspaceId}
           sourceKey={sourceKey}
+          initialTaskId={initialTaskId}
           dense
           theme={theme}
           collapsedGroups={["done"]}
