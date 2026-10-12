@@ -1949,6 +1949,25 @@ export const ptBR: TranslationResources = {
       other: "chamou o Paseo {{count}} vezes",
     },
     and: "e",
+    turn: {
+      working: "Trabalhando",
+      worked: "Trabalhou por {{duration}}",
+      step: "Passo {{count}}",
+      steps: {
+        one: "{{count}} passo",
+        other: "{{count}} passos",
+      },
+      files: {
+        one: "{{count}} arquivo",
+        other: "{{count}} arquivos",
+      },
+      now: "agora",
+      labels: {
+        explore: "Explorar",
+        edit: "Editar",
+        verify: "Verificar",
+      },
+    },
   },
   renameModal: {
     rename: "Renomear",

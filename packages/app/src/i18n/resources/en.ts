@@ -1941,6 +1941,25 @@ export const en = {
       other: "called Paseo {{count}} times",
     },
     and: "and",
+    turn: {
+      working: "Working",
+      worked: "Worked for {{duration}}",
+      step: "Step {{count}}",
+      steps: {
+        one: "{{count}} step",
+        other: "{{count}} steps",
+      },
+      files: {
+        one: "{{count}} file",
+        other: "{{count}} files",
+      },
+      now: "now",
+      labels: {
+        explore: "Explore",
+        edit: "Edit",
+        verify: "Verify",
+      },
+    },
   },
   renameModal: {
     rename: "Rename",

@@ -64,6 +64,8 @@ import { QuestionFormCard } from "@/components/question-form-card";
 import { ToolCallSheetProvider } from "@/components/tool-call-sheet";
 import { createStreamPresentation, getStreamItemMessageId } from "./presentation";
 import { OverviewToolCallGroupView } from "@/tool-calls/detail-level/overview/view";
+import type { TurnStepItem } from "@/tool-calls/detail-level/turn/model";
+import { TurnStepListView } from "@/tool-calls/detail-level/turn/view";
 import { type AgentStreamRenderModel, buildAgentStreamRenderModel } from "./model";
 import { resolveStreamRenderStrategy } from "./strategy-resolver";
 import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strategy";
@@ -546,6 +548,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           transform: transformTimelineItem,
           level: toolCallDetailLevel,
           isTurnActive,
+          isNonCompact: !isMobile,
         }),
       [
         presentStream,
@@ -554,6 +557,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         transformTimelineItem,
         toolCallDetailLevel,
         isTurnActive,
+        isMobile,
       ],
     );
     const {
@@ -728,7 +732,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
 
     const renderAssistantMessageItem = useCallback(
-      (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "assistant_message" }>) => {
+      (
+        layoutItem: Pick<StreamLayoutItem, "assistantSpacing" | "phase">,
+        item: Extract<StreamItem, { kind: "assistant_message" }>,
+      ) => {
         return (
           <AssistantFileLinkResolverProvider
             client={client}
@@ -836,8 +843,40 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const getToolCallGroup = useStableEvent((hostId: string) =>
       presentation.groupsByHostId.get(hostId),
     );
+    const getTurnGroup = useStableEvent((hostId: string) =>
+      presentation.turnGroupsByHostId.get(hostId),
+    );
+    // The step list draws an edit through the plugin renderer, or as a Paseo call when edit
+    // diffs are off. Both callbacks stay stable so unchanged steps do not draw again.
+    const renderTurnStepItem = useCallback(
+      (stepItem: TurnStepItem) =>
+        stepItem.kind === "plugin" ? (
+          <PluginTimelineItemView agentId={agentId} item={stepItem} serverId={resolvedServerId} />
+        ) : (
+          renderSingleToolCallItem(stepItem, false)
+        ),
+      [agentId, renderSingleToolCallItem, resolvedServerId],
+    );
+    const renderTurnStepNote = useCallback(
+      (note: Extract<StreamItem, { kind: "assistant_message" }>, isStreaming: boolean) =>
+        renderAssistantMessageItem(
+          { assistantSpacing: "compactBoth", phase: isStreaming ? "streaming" : "complete" },
+          note,
+        ),
+      [renderAssistantMessageItem],
+    );
     const renderToolCallItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "tool_call" }>) => {
+        const turnGroup = getTurnGroup(item.id);
+        if (turnGroup) {
+          return (
+            <TurnStepListView
+              group={turnGroup}
+              renderItem={renderTurnStepItem}
+              renderNote={renderTurnStepNote}
+            />
+          );
+        }
         const group = getToolCallGroup(item.id);
         if (!group) {
           return renderSingleToolCallItem(item, layoutItem.isLastInToolSequence);
@@ -867,7 +906,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [
         expandedToolCallGroupIds,
         getToolCallGroup,
+        getTurnGroup,
         renderSingleToolCallItem,
+        renderTurnStepItem,
+        renderTurnStepNote,
         setToolCallGroupExpanded,
       ],
     );

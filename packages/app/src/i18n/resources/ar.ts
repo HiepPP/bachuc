@@ -1916,6 +1916,25 @@ export const ar: TranslationResources = {
       other: "استدعى Paseo {{count}} مرات",
     },
     and: "و",
+    turn: {
+      working: "قيد العمل",
+      worked: "عمل لمدة {{duration}}",
+      step: "الخطوة {{count}}",
+      steps: {
+        one: "{{count}} خطوة",
+        other: "{{count}} خطوات",
+      },
+      files: {
+        one: "{{count}} ملف",
+        other: "{{count}} ملفات",
+      },
+      now: "الآن",
+      labels: {
+        explore: "استكشاف",
+        edit: "تعديل",
+        verify: "تحقق",
+      },
+    },
   },
   renameModal: {
     rename: "إعادة تسمية",

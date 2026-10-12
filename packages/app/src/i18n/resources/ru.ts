@@ -1949,6 +1949,25 @@ export const ru: TranslationResources = {
       other: "выполнены вызовы Paseo ({{count}})",
     },
     and: "и",
+    turn: {
+      working: "Работает",
+      worked: "Работал {{duration}}",
+      step: "Шаг {{count}}",
+      steps: {
+        one: "{{count}} шаг",
+        other: "шагов: {{count}}",
+      },
+      files: {
+        one: "{{count}} файл",
+        other: "файлов: {{count}}",
+      },
+      now: "сейчас",
+      labels: {
+        explore: "Поиск",
+        edit: "Правка",
+        verify: "Проверка",
+      },
+    },
   },
   renameModal: {
     rename: "Переименовать",

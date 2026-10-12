@@ -1965,6 +1965,25 @@ export const es: TranslationResources = {
       other: "llamó a Paseo {{count}} veces",
     },
     and: "y",
+    turn: {
+      working: "Trabajando",
+      worked: "Trabajó durante {{duration}}",
+      step: "Paso {{count}}",
+      steps: {
+        one: "{{count}} paso",
+        other: "{{count}} pasos",
+      },
+      files: {
+        one: "{{count}} archivo",
+        other: "{{count}} archivos",
+      },
+      now: "ahora",
+      labels: {
+        explore: "Explorar",
+        edit: "Editar",
+        verify: "Verificar",
+      },
+    },
   },
   renameModal: {
     rename: "Rebautizar",

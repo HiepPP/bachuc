@@ -128,3 +128,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: watchtower-board's `tests/overview.test.ts` reads this repo's real `watchtower/` files, so an ADR status change or archive edit can fail it.
 - Source: `hiep-plugins/plugins/watchtower-board/tests/overview.test.ts`.
 - Use next time: run that test after you change `watchtower/DECISIONS.md` or an archived plan.
+
+### 2026-10-12 - Plan 20261012-turn-step-list
+
+- Learned: app view tests run in jsdom with the real react-native-web: `testID` becomes `data-testid`, `element.click()` fires `onPress`, and Unistyles styles render inline. RN-web 0.21 ignores `accessibilityState`, so use `aria-pressed` or a `dataSet` flag to assert a pressed state.
+- Source: `packages/app/src/tool-calls/detail-level/turn/view.test.tsx`; TASK-073 outcome.
+- Use next time: test a new app view as a plain `*.test.tsx` before you reach for a browser test.
+- Learned: `TranslationResources` derives from `en`, so a new key in `en.ts` must also land in all 8 other locale files under `packages/app/src/i18n/resources/` for typecheck to pass.
+- Source: TASK-073 outcome.
+- Use next time: plan locale edits for every resource file when a TASK adds UI strings.
