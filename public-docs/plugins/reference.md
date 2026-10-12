@@ -808,7 +808,10 @@ and the active host. `presentation: "overlay"` shows the surface over the curren
 dimmed backdrop on wide layouts; a backdrop click, the Close button, or Escape (web) closes it.
 Compact layouts, hosts older than this option, a surface on another host, and a reloaded page
 (nothing is left to show behind it) show a page, as does `presentation: "page"`, which is the
-default. `client.openNewWorkspace({ cwd, projectId, name, serverId })` opens
+default. `params`, a record of strings, reaches the surface as `props.params`, for example the
+workspace a page should show. Params travel in the route and survive a reload, so keep them short
+and never put secrets in them. Older hosts drop them and leave `props.params` undefined.
+`client.openNewWorkspace({ cwd, projectId, name, serverId })` opens
 the new workspace screen for a project directory. `client.openPluginsPage()` opens the Plugins page
 of host settings for the plugin's host.
 
@@ -1522,7 +1525,7 @@ Every callback receives:
 | `context`                 | All                 | Matching discriminator.                                                                                         |
 | `paseo`                   | All                 | Selected host's existing `PaseoApi`.                                                                            |
 | `rpc(contract, input)`    | All                 | Typed call to this installation's daemon-side plugin handler.                                                   |
-| `openSurface(id, opts)`   | All                 | Opens a registered global surface; `opts` sets `pluginId`, `serverId`, or `presentation` (`overlay`).           |
+| `openSurface(id, opts)`   | All                 | Opens a registered global surface; `opts` sets `pluginId`, `serverId`, `presentation` (`overlay`), or `params`. |
 | `workspace`               | Workspace and agent | Synchronous workspace snapshot.                                                                                 |
 | `agent`                   | Agent               | Synchronous matching agent snapshot.                                                                            |
 | `openPanel(id, options?)` | Workspace and agent | Opens a registered panel in the callback's current context. Pass `{ location: "explorer" }` to target Explorer. |

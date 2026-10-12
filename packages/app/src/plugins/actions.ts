@@ -16,7 +16,12 @@ import { getHostRuntimeStore } from "@/runtime/host-runtime";
 
 export interface PluginNavigation {
   openSettings(pluginId: string, screenId: string): void;
-  openSurface(pluginId: string, surfaceId: string, presentation?: PluginSurfacePresentation): void;
+  openSurface(
+    pluginId: string,
+    surfaceId: string,
+    presentation?: PluginSurfacePresentation,
+    params?: Readonly<Record<string, string>>,
+  ): void;
   openWorkspacePanel(pluginId: string, panelId: string, location: PluginPanelLocation): void;
   openAgentPanel(
     pluginId: string,
@@ -68,7 +73,7 @@ export function createPluginCapabilities(
         if (!plugin.surfaces.some((surface) => surface.id === surfaceId)) {
           throw new Error(`Plugin surface is unavailable: ${surfaceId}`);
         }
-        navigation.openSurface(plugin.id, surfaceId, options?.presentation);
+        navigation.openSurface(plugin.id, surfaceId, options?.presentation, options?.params);
         return;
       }
       // Another plugin or host: the surface route reports a missing surface itself.
@@ -76,6 +81,7 @@ export function createPluginCapabilities(
         pluginId,
         surfaceId,
         options?.presentation,
+        options?.params,
       );
     },
   };

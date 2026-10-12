@@ -23,13 +23,14 @@ export function createPluginNavigation(input: {
     openSettings(pluginId, screenId) {
       router.push(buildPluginSettingsRoute(serverId, pluginId, screenId));
     },
-    openSurface(pluginId, surfaceId, presentation) {
+    openSurface(pluginId, surfaceId, presentation, params) {
       router.push(
         buildPluginSurfaceRoute(
           serverId,
           pluginId,
           { kind: "surface", id: surfaceId },
           presentation,
+          params,
         ),
       );
     },

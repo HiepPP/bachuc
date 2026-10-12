@@ -32,6 +32,7 @@ import { useInstalledPlugin, usePluginInstallations } from "./registry";
 import {
   buildPluginSurfaceRoute,
   isPluginOverlayRoute,
+  readPluginSurfaceParams,
   type PluginSurfacePresentation,
 } from "./routes";
 import { rememberPluginContributionHost } from "./contribution-host";
@@ -75,6 +76,7 @@ function SurfaceRenderer({
   plugin,
   layout,
   host,
+  params,
   theme,
 }: {
   Surface: ComponentType<PluginSurfaceProps>;
@@ -82,12 +84,13 @@ function SurfaceRenderer({
   plugin: NonNullable<ReturnType<typeof useInstalledPlugin>>;
   layout: PluginSurfaceProps["layout"];
   host: PluginSurfaceProps["host"];
+  params: Readonly<Record<string, string>>;
   theme: PluginTheme;
 }) {
   const navigation = usePluginHostNavigation(host.id);
   return (
     <PluginRuntimeBoundary plugin={plugin} client={client}>
-      <Surface theme={theme} host={host} layout={layout} navigation={navigation} />
+      <Surface theme={theme} host={host} layout={layout} navigation={navigation} params={params} />
     </PluginRuntimeBoundary>
   );
 }
@@ -238,6 +241,12 @@ export function PluginSurfaceScreen() {
   const pluginId = routeParam(params.pluginId);
   const contributionKind = routeParam(params.contributionKind);
   const contributionId = routeParam(params.contributionId);
+  // A stable key, so the surface gets a new params object only when an opener param changes.
+  const surfaceParamsKey = JSON.stringify(readPluginSurfaceParams(params));
+  const surfaceParams = useMemo<Record<string, string>>(
+    () => JSON.parse(surfaceParamsKey),
+    [surfaceParamsKey],
+  );
   const identity = useMemo<PluginSurfaceContributionIdentity | null>(() => {
     if (contributionKind !== "sidebar" && contributionKind !== "surface") return null;
     return { kind: contributionKind, id: contributionId };
@@ -330,6 +339,7 @@ export function PluginSurfaceScreen() {
               plugin={plugin}
               host={host}
               layout={layout}
+              params={surfaceParams}
               uniProps={pluginThemeMapping}
             />
           </SurfaceErrorBoundary>

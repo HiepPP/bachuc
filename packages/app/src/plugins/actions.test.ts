@@ -11,6 +11,7 @@ vi.mock("expo-router", () => ({ router: { push: (href: string) => push(href) } }
 
 const { createPluginCapabilities } = await import("./actions");
 const { createPluginNavigation } = await import("./navigation");
+import { readPluginSurfaceParams } from "./routes";
 import type { InstalledPlugin } from "./types";
 
 function plugin(): InstalledPlugin {
@@ -82,6 +83,21 @@ describe("plugin surface navigation", () => {
       "/h/host-a/plugin/next/surface/own",
       "/h/host-a/plugin/board/surface/board?presentation=overlay",
     ]);
+  });
+
+  it("carries opener params in the route and reads them back for the surface", () => {
+    const actions = capabilities();
+    actions.openSurface("watchtower", {
+      pluginId: "watchtower-board",
+      presentation: "overlay",
+      params: { workspaceId: "w 1", task: "TASK-064" },
+    });
+    const href = String(push.mock.calls[0][0]);
+    expect(href).toBe(
+      "/h/host-a/plugin/watchtower-board/surface/watchtower?presentation=overlay&p.workspaceId=w%201&p.task=TASK-064",
+    );
+    const search = Object.fromEntries(new URL(href, "http://x").searchParams);
+    expect(readPluginSurfaceParams(search)).toEqual({ workspaceId: "w 1", task: "TASK-064" });
   });
 });
 

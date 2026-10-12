@@ -53,7 +53,10 @@ interface PluginNavigableHostProps extends PluginHostProps {
   };
 }
 
-export interface PluginSurfaceProps extends PluginNavigableHostProps {}
+export interface PluginSurfaceProps extends PluginNavigableHostProps {
+  /** The `params` its opener passed to `openSurface`. Empty when none; undefined on older hosts. */
+  readonly params?: Readonly<Record<string, string>>;
+}
 
 export interface PluginIconProps {
   name: string;
@@ -439,11 +442,17 @@ export interface PluginCommandCapabilities {
   /**
    * Opens a surface. `pluginId` opens another plugin's surface; `serverId` picks its host.
    * `presentation: "overlay"` shows the surface over the current screen with a dimmed backdrop
-   * on wide layouts. Compact layouts and older hosts show a page.
+   * on wide layouts. Compact layouts and older hosts show a page. `params` reach the surface as
+   * `props.params`; they travel in the route, so keep them short and free of secrets.
    */
   openSurface(
     id: string,
-    options?: { pluginId?: string; serverId?: string; presentation?: "page" | "overlay" },
+    options?: {
+      pluginId?: string;
+      serverId?: string;
+      presentation?: "page" | "overlay";
+      params?: Record<string, string>;
+    },
   ): void;
   openSettings(id: string): void;
 }

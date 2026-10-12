@@ -5,16 +5,39 @@ type PluginSurfaceRoute<Kind extends PluginSurfaceContributionIdentity["kind"]> 
 
 export type PluginSurfacePresentation = "page" | "overlay";
 
+// Opener params share the query with the route's own params, so each one carries this prefix.
+const SURFACE_PARAM_PREFIX = "p.";
+
 export function buildPluginSurfaceRoute<Identity extends PluginSurfaceContributionIdentity>(
   serverId: string,
   pluginId: string,
   identity: Identity,
   presentation?: PluginSurfacePresentation,
+  params?: Readonly<Record<string, string>>,
 ): PluginSurfaceRoute<Identity["kind"]> {
-  const query = presentation === "overlay" ? "?presentation=overlay" : "";
-  return `/h/${encodeURIComponent(serverId)}/plugin/${encodeURIComponent(pluginId)}/${identity.kind}/${encodeURIComponent(identity.id)}${query}` as PluginSurfaceRoute<
+  // Built by hand: React Native's URLSearchParams lacks most methods.
+  const query = presentation === "overlay" ? ["presentation=overlay"] : [];
+  for (const [key, value] of Object.entries(params ?? {})) {
+    query.push(
+      `${encodeURIComponent(`${SURFACE_PARAM_PREFIX}${key}`)}=${encodeURIComponent(value)}`,
+    );
+  }
+  const search = query.length > 0 ? `?${query.join("&")}` : "";
+  return `/h/${encodeURIComponent(serverId)}/plugin/${encodeURIComponent(pluginId)}/${identity.kind}/${encodeURIComponent(identity.id)}${search}` as PluginSurfaceRoute<
     Identity["kind"]
   >;
+}
+
+/** The opener params of a surface route, from the screen's search params. */
+export function readPluginSurfaceParams(
+  searchParams: Readonly<Record<string, string | string[] | undefined>>,
+): Record<string, string> {
+  const params: Record<string, string> = {};
+  for (const [key, value] of Object.entries(searchParams)) {
+    if (!key.startsWith(SURFACE_PARAM_PREFIX) || typeof value !== "string") continue;
+    params[key.slice(SURFACE_PARAM_PREFIX.length)] = value;
+  }
+  return params;
 }
 
 export function buildLegacyPluginSurfaceRedirectRoute(
