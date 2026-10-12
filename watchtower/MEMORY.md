@@ -41,6 +41,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid plan questions, manual checks, or their counts on Board, and answer targets picked without showing them, while `QUESTIONS.md` does not record the asking thread. Reason: [ADR-0015](watchtower/decisions/ADR-0015-questions-on-the-watchtower-page-over-board.md).
 - Avoid moving a feature into a plugin, or keeping a host change thin, only to save upstream merge cost, while the fork has moved too far from upstream for that cost to matter. Reason: [ADR-0017](watchtower/decisions/ADR-0017-native-host-features-over-thin-host-changes.md).
 - Avoid a plugin group renderer API and a separate turn-timeline plugin for the agent turn step list while the host owns tool call grouping and edit-diffs owns the diff. Reason: [ADR-0016](watchtower/decisions/ADR-0016-host-turn-step-list-over-plugin-group-renderer.md).
+- Avoid treating only the last assistant message group as a turn's answer while providers can split one answer into several messages. Reason: [ADR-0018](watchtower/decisions/ADR-0018-all-trailing-messages-over-last-message-as-answer.md).
+- Avoid a fold, chevron, or Collapse button on the turn step list, and the old Overview badge on desktop, while the owner reads turns without a click per turn. Reason: [ADR-0019](watchtower/decisions/ADR-0019-always-open-step-list-over-folding-group.md).
 - Avoid restarting TASK or Q-IDs at 001 in a new plan, and avoid per-plan or per-kind ID prefixes, while one repo has one `watchtower/` folder. Reason: [ADR-0011](watchtower/decisions/ADR-0011-repo-wide-ids-over-per-plan-ids.md).
 
 ## Learnings

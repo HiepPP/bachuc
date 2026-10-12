@@ -4,8 +4,8 @@
 
 - Title: Turn step list for agent responses
 - Slug: 20261012-turn-step-list
-- Status: DONE
-- Updated: 2026-10-12
+- Status: ARCHIVED
+- Updated: 2026-10-13
 
 ## Tracker
 
@@ -40,3 +40,4 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 - [watchtower/archive/20261007-bachuc-rebrand](watchtower/archive/20261007-bachuc-rebrand)
 - [watchtower/archive/20261007-watchtower-process-overview](watchtower/archive/20261007-watchtower-process-overview)
 - [watchtower/archive/20261012-repo-wide-ids-and-board-lanes](watchtower/archive/20261012-repo-wide-ids-and-board-lanes)
+- Archived: 2026-10-13 -> watchtower/archive/20261012-turn-step-list/
