@@ -1,6 +1,6 @@
 # ADR-0003 Chip-only attachment sources for chip press handlers
 
-Status: proposed
+Status: accepted
 Date: 2026-10-07
 Supersedes: -
 Scope: `packages/plugin/src/contracts.ts`, `packages/app/src/plugins/evaluate.ts`, `packages/app/src/plugins/attachments/**`

@@ -36,6 +36,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid an offline-only CSP for HTML reply frames while the owner wants agent pages that load CDN libraries and call APIs. Reason: [ADR-0002](watchtower/decisions/ADR-0002-networked-html-replies-over-offline-only.md).
 - Avoid renaming internal identifiers (the `paseo` CLI, `PASEO_*` env vars, the `@getpaseo/*` scope, the plugin API, and `paseo://`), a move of the old `~/.paseo` instead of a clone, and a mobile rebrand while the fork merges upstream and plugins depend on these names. Reason: [ADR-0009](watchtower/decisions/ADR-0009-bachuc-home-over-paseo-home.md).
 - Avoid upstream hosted services (relay, web app, hub, update feed, EAS) and a self-hosted relay while the owner reaches the host over LAN or Tailscale. Reason: [ADR-0005](watchtower/decisions/ADR-0005-upstream-services-off-over-self-hosting.md).
+- Avoid required picker fields on every attachment source, a separate `addComposerAttachmentOpener` API, and an `onOpen` on `addComposerAttachment` while chip press handlers must survive a reload and work on other clients. Reason: [ADR-0003](watchtower/decisions/ADR-0003-chip-only-attachment-sources.md).
 
 ## Learnings
 
