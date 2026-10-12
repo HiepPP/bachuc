@@ -4,7 +4,7 @@
 - Schedule: -
 - Profile: -
 - Started: 2026-10-12 15:49
-- Finished: -
+- Finished: 2026-10-12 23:16. Review PR: #60 (draft, `turn-step-list` to `main`).
 
 ## Log
 
