@@ -8,6 +8,8 @@
 
 ## Log
 
-| Start | End   | TASK     | Result | PR or reason |
-| ----- | ----- | -------- | ------ | ------------ |
-| 15:50 | 16:35 | TASK-072 | DONE   | #55          |
+| Start | End   | TASK     | Result  | PR or reason                      |
+| ----- | ----- | -------- | ------- | --------------------------------- |
+| 15:50 | 16:35 | TASK-072 | DONE    | #55                               |
+| 16:37 | 16:37 | -        | STOPPED | another agent ran in the checkout |
+| 18:09 | 18:22 | TASK-073 | DONE    | PR pending                        |

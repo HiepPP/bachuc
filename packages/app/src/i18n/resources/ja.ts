@@ -1937,6 +1937,25 @@ export const ja: TranslationResources = {
       other: "Paseoを{{count}}回呼び出し",
     },
     and: "および",
+    turn: {
+      working: "作業中",
+      worked: "{{duration}}作業しました",
+      step: "ステップ{{count}}",
+      steps: {
+        one: "{{count}}ステップ",
+        other: "{{count}}ステップ",
+      },
+      files: {
+        one: "{{count}}個のファイル",
+        other: "{{count}}個のファイル",
+      },
+      now: "今",
+      labels: {
+        explore: "調査",
+        edit: "編集",
+        verify: "確認",
+      },
+    },
   },
   renameModal: {
     rename: "名前を変更",

@@ -1926,6 +1926,25 @@ export const ko: TranslationResources = {
       other: "Paseo를 {{count}}회 호출함",
     },
     and: "그리고",
+    turn: {
+      working: "작업 중",
+      worked: "{{duration}} 동안 작업함",
+      step: "{{count}}단계",
+      steps: {
+        one: "{{count}}단계",
+        other: "{{count}}단계",
+      },
+      files: {
+        one: "파일 {{count}}개",
+        other: "파일 {{count}}개",
+      },
+      now: "지금",
+      labels: {
+        explore: "탐색",
+        edit: "편집",
+        verify: "확인",
+      },
+    },
   },
   renameModal: {
     rename: "이름 변경",

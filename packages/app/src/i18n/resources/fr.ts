@@ -1969,6 +1969,25 @@ export const fr: TranslationResources = {
       other: "a appelé Paseo {{count}} fois",
     },
     and: "et",
+    turn: {
+      working: "En cours",
+      worked: "A travaillé pendant {{duration}}",
+      step: "Étape {{count}}",
+      steps: {
+        one: "{{count}} étape",
+        other: "{{count}} étapes",
+      },
+      files: {
+        one: "{{count}} fichier",
+        other: "{{count}} fichiers",
+      },
+      now: "maintenant",
+      labels: {
+        explore: "Explorer",
+        edit: "Modifier",
+        verify: "Vérifier",
+      },
+    },
   },
   renameModal: {
     rename: "Rebaptiser",
