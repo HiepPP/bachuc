@@ -113,6 +113,7 @@ function transformSourceItem(
     };
     if (item.timelineCursor) projected.timelineCursor = item.timelineCursor;
     if (item.turnId) projected.turnId = item.turnId;
+    if (item.kind === "tool_call" && !transformed.source) projected.sourceToolCall = item;
     return projected;
   });
   if (!transformed.source) return projectedItems;
