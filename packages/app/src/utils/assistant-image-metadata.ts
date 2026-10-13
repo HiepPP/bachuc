@@ -1,4 +1,3 @@
-import { MAX_CONTENT_WIDTH } from "@/constants/layout";
 import { resolveAssistantImageSource } from "@/utils/assistant-image-source";
 import { createImageSourceCacheKey } from "@/attachments/utils";
 
@@ -14,8 +13,9 @@ const ASSISTANT_IMAGE_METADATA_CACHE_LIMIT = 500;
 const ASSISTANT_IMAGE_PARSE_CACHE_LIMIT = 500;
 
 const MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*]\((<[^>]+>|[^)\n]+)\)/g;
-const ASSISTANT_IMAGE_ESTIMATE_WIDTH = MAX_CONTENT_WIDTH - 8;
-const ASSISTANT_IMAGE_MIN_HEIGHT = 160;
+// Inline images show as a preview; the lightbox shows the full size.
+const ASSISTANT_IMAGE_MAX_WIDTH = 480;
+const ASSISTANT_IMAGE_MAX_HEIGHT = 360;
 const ASSISTANT_IMAGE_BLOCK_GAP = 24;
 const ASSISTANT_MESSAGE_BASE_HEIGHT = 96;
 const ASSISTANT_MESSAGE_MIN_HEIGHT = 220;
@@ -177,6 +177,14 @@ export function extractAssistantImageSources(markdown: string): string[] {
   return parsed.sources;
 }
 
+export function resolveAssistantImageDisplaySize(aspectRatio: number): {
+  width: number;
+  height: number;
+} {
+  const width = Math.min(ASSISTANT_IMAGE_MAX_WIDTH, ASSISTANT_IMAGE_MAX_HEIGHT * aspectRatio);
+  return { width: Math.round(width), height: Math.round(width / aspectRatio) };
+}
+
 export function estimateAssistantMessageHeightFromCache(markdown: string): number | null {
   const parsed = assistantImageParseCache.get(markdown) ?? parseAssistantImageMarkdown(markdown);
   if (parsed.sources.length === 0) {
@@ -186,12 +194,7 @@ export function estimateAssistantMessageHeightFromCache(markdown: string): numbe
   const knownHeights = parsed.sources
     .map((source) => getAssistantImageMetadata({ source }))
     .filter((metadata): metadata is AssistantImageMetadata => metadata !== null)
-    .map((metadata) =>
-      Math.max(
-        ASSISTANT_IMAGE_MIN_HEIGHT,
-        Math.round(ASSISTANT_IMAGE_ESTIMATE_WIDTH / metadata.aspectRatio),
-      ),
-    );
+    .map((metadata) => resolveAssistantImageDisplaySize(metadata.aspectRatio).height);
 
   if (knownHeights.length === 0) {
     return null;

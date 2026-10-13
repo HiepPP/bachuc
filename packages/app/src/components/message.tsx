@@ -92,6 +92,7 @@ import {
 } from "@/assistant-file-links";
 import { getCompactionMarkerLabel } from "./message-compaction-label";
 import { useAssistantImage } from "@/assistant-image/use-assistant-image";
+import { resolveAssistantImageDisplaySize } from "@/utils/assistant-image-metadata";
 import {
   AttachmentFrame,
   AttachmentLabel,
@@ -779,11 +780,9 @@ export const assistantMessageStylesheet = StyleSheet.create((theme) => ({
   },
   imageFrame: {
     width: "100%",
-    minHeight: 160,
     marginHorizontal: -theme.spacing[1],
   },
   imageSurface: {
-    width: "100%",
     overflow: "hidden",
     position: "relative",
   },
@@ -861,9 +860,11 @@ function AssistantMarkdownImage({
   );
   const imageSizeStyle = useMemo<ViewStyle>(() => {
     if (aspectRatio) {
-      return { aspectRatio };
+      // maxWidth lets a narrow column shrink the width; aspectRatio then keeps the height in step.
+      const { width } = resolveAssistantImageDisplaySize(aspectRatio);
+      return { width, maxWidth: "100%", aspectRatio };
     }
-    return { height: ASSISTANT_IMAGE_MIN_HEIGHT };
+    return { width: "100%", height: ASSISTANT_IMAGE_MIN_HEIGHT };
   }, [aspectRatio]);
   const surfaceStyle = useMemo<StyleProp<ViewStyle>>(
     () => [assistantMessageStylesheet.imageSurface, imageSizeStyle],

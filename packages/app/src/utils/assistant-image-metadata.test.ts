@@ -4,6 +4,7 @@ import {
   estimateAssistantMessageHeightFromCache,
   extractAssistantImageSources,
   getAssistantImageMetadata,
+  resolveAssistantImageDisplaySize,
   setAssistantImageMetadata,
 } from "./assistant-image-metadata";
 
@@ -65,5 +66,23 @@ describe("assistant image metadata", () => {
 
     expect(imageOnlyHeight).toBeGreaterThan(220);
     expect(mixedHeight).toBeGreaterThan(imageOnlyHeight ?? 0);
+  });
+
+  it("fits images inside a 480 by 360 box and keeps their aspect ratio", () => {
+    expect(resolveAssistantImageDisplaySize(1200 / 800)).toEqual({ width: 480, height: 320 });
+    expect(resolveAssistantImageDisplaySize(1050 / 1150)).toEqual({ width: 329, height: 360 });
+    expect(resolveAssistantImageDisplaySize(1)).toEqual({ width: 360, height: 360 });
+    expect(resolveAssistantImageDisplaySize(4)).toEqual({ width: 480, height: 120 });
+  });
+
+  it("estimates a tall screenshot at the capped display height", () => {
+    setAssistantImageMetadata(
+      { source: "https://example.com/tall.png" },
+      { width: 1000, height: 3000 },
+    );
+
+    expect(estimateAssistantMessageHeightFromCache("![Tall](https://example.com/tall.png)")).toBe(
+      40 + 360 + 24,
+    );
   });
 });
