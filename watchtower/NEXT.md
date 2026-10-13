@@ -13,7 +13,7 @@
 | ----- | ----------------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------------------------ | ------------------ | ---------------------------------------------- | ---------------------------------------------------------------------------- |
 | 1     | TASK-079 Wheel step helper and hook | A     | DONE   | [watchtower/tasks/TASK-079-wheel-step-helper-and-hook.md](watchtower/tasks/TASK-079-wheel-step-helper-and-hook.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending. New files only.                                 |
 | 2     | TASK-080 Wire the toolbar pills     | B     | DONE   | [watchtower/tasks/TASK-080-wire-toolbar-pills.md](watchtower/tasks/TASK-080-wire-toolbar-pills.md)                 | TASK-079           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending. Mode, thinking, provider, select feature pills. |
-| 3     | TASK-081 Wire the model pill        | C     | TODO   | [watchtower/tasks/TASK-081-wire-model-pill.md](watchtower/tasks/TASK-081-wire-model-pill.md)                       | TASK-079           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Own group: it writes only the model selector file.                           |
+| 3     | TASK-081 Wire the model pill        | C     | DONE   | [watchtower/tasks/TASK-081-wire-model-pill.md](watchtower/tasks/TASK-081-wire-model-pill.md)                       | TASK-079           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending. Composer toolbar branch only, per Q-033.        |
 | 4     | TASK-082 Document wheel select      | D     | TODO   | [watchtower/tasks/TASK-082-document-wheel-select.md](watchtower/tasks/TASK-082-document-wheel-select.md)           | TASK-080, TASK-081 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Docs only. Runs after the shape is final.                                    |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
@@ -29,7 +29,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: implement TASK-081, then TASK-082. TASK-079 and TASK-080 are merged; wrap the hook ref with a memoized `composeViewRefs`, and feed the wheel the value the label shows. Q-030 to Q-032 are DEFAULTED.
+- Next action: implement TASK-082. TASK-079 to TASK-081 are merged. The model pill wheel runs only on the composer `toolbar` branch (Q-033) and ignores an off-list model. Q-030 to Q-033 are DEFAULTED.
 
 ## Archive
 
