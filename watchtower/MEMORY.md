@@ -161,3 +161,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: two plan specs named the wrong render path. The desktop provider pill is a raw `ComboboxTrigger`, not an `AgentControlTrigger`, and the composer model pill takes the `ComboboxTrigger` branch of `CombinedModelSelector` with a `toolbar` prop, not `renderTrigger`.
 - Source: TASK-080 and TASK-081 outcomes; Q-030, Q-033.
 - Use next time: when a spec wires a shared component, list each caller and the branch it renders before you name the path.
+
+### 2026-10-13 - Plan 20261013-fleet-map
+
+- Learned: the label fallback functions in `workspace-screen.tsx` and `workspace-desktop-tabs-row.tsx` are not exhaustive over `WorkspaceTabTarget`. A new tab kind falls through to the Agent label with no type error.
+- Source: TASK-088 outcome.
+- Use next time: when a spec adds a tab kind, name both label functions in `Files:` and test the label by hand.
+- Learned: in zsh, a variable that holds several paths is not split into words, so `npm run lint -- $FILES` passes one bad path.
+- Source: TASK-086 and TASK-088 outcomes.
+- Use next time: pass each path as its own argument or use an array.
