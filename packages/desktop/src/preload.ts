@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
         };
       },
       setBadgeCount: (count?: number) => ipcRenderer.invoke("paseo:window:setBadgeCount", count),
+      setDockBounce: (active: boolean) => ipcRenderer.invoke("paseo:window:setDockBounce", active),
     }),
   },
   dialog: {

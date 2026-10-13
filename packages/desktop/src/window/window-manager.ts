@@ -193,6 +193,23 @@ export function registerWindowManager(input: { mode: DesktopWindowChromeMode }):
     }
   });
 
+  // A critical bounce repeats until the user activates the app. macOS ignores
+  // the request while the app is already active.
+  let dockBounceId: number | null = null;
+  ipcMain.handle("paseo:window:setDockBounce", (_event, active?: unknown) => {
+    const dock = app.dock;
+    if (process.platform !== "darwin" || !dock) {
+      return;
+    }
+    if (dockBounceId !== null) {
+      dock.cancelBounce(dockBounceId);
+      dockBounceId = null;
+    }
+    if (active === true) {
+      dockBounceId = dock.bounce("critical");
+    }
+  });
+
   ipcMain.handle("paseo:window:updateChrome", (event, update?: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) {

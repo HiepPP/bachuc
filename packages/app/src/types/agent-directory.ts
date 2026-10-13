@@ -20,4 +20,5 @@ export type AgentDirectoryEntry = Pick<
   | "projectPlacement"
 > & {
   pendingPermissionCount?: number;
+  pendingQuestionCount?: number;
 };

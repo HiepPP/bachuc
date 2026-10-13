@@ -71,6 +71,25 @@ describe("buildAgentAttentionNotificationPayload", () => {
     });
   });
 
+  it("titles question requests as a question, not a permission", () => {
+    const payload = buildAgentAttentionNotificationPayload({
+      reason: "permission",
+      serverId: "srv-2",
+      workspaceId: "workspace-2",
+      agentId: "agent-2",
+      permissionRequest: {
+        id: "perm-2",
+        provider: "claude",
+        name: "AskUserQuestion",
+        kind: "question",
+        title: "Which database should we use?",
+      },
+    });
+
+    expect(payload.title).toBe("Agent has a question");
+    expect(payload.body).toBe("Which database should we use?");
+  });
+
   it("uses error-specific defaults when reason is error", () => {
     const payload = buildAgentAttentionNotificationPayload({
       reason: "error",

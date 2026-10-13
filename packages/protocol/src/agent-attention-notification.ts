@@ -169,7 +169,11 @@ export function findLatestPermissionRequest(
   return latest;
 }
 
-function resolveAgentAttentionTitle(reason: AgentAttentionReason): string {
+function resolveAgentAttentionTitle(input: BuildAgentAttentionNotificationPayloadInput): string {
+  const reason = input.reason;
+  if (reason === "permission" && input.permissionRequest?.kind === "question") {
+    return "Agent has a question";
+  }
   if (reason === "permission") return "Agent needs permission";
   if (reason === "error") return "Agent needs attention";
   return "Agent finished";
@@ -196,7 +200,7 @@ function resolveAgentAttentionFallbackBody(reason: AgentAttentionReason): string
 export function buildAgentAttentionNotificationPayload(
   input: BuildAgentAttentionNotificationPayloadInput,
 ): AgentAttentionNotificationPayload {
-  const title = resolveAgentAttentionTitle(input.reason);
+  const title = resolveAgentAttentionTitle(input);
   const preview = resolveAgentAttentionPreview(input);
   const body = preview ?? resolveAgentAttentionFallbackBody(input.reason);
 

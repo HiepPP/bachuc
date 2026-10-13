@@ -3,7 +3,7 @@ import { getIsElectronRuntimeMac } from "@/constants/layout";
 import { useAggregatedAgents } from "./use-aggregated-agents";
 import { getDesktopHost } from "@/desktop/host";
 import { useWorkspaceStatusesForBadges } from "@/stores/session-store-hooks";
-import { deriveMacDockBadgeCountFromWorkspaceStatuses } from "@/utils/desktop-badge-state";
+import { deriveMacDockBadgeCount, resolveDockBounceChange } from "@/utils/desktop-badge-state";
 import { isNative } from "@/constants/platform";
 
 type FaviconStatus = "none" | "running" | "attention";
@@ -93,11 +93,27 @@ async function updateMacDockBadge(count?: number) {
   }
 }
 
+async function setMacDockBounce(active: boolean) {
+  if (isNative || !getIsElectronRuntimeMac()) return;
+
+  const desktopWindow = getDesktopHost()?.window?.getCurrentWindow?.();
+  if (!desktopWindow || typeof desktopWindow.setDockBounce !== "function") {
+    return;
+  }
+
+  try {
+    await desktopWindow.setDockBounce(active);
+  } catch (error) {
+    console.warn("[useFaviconStatus] Failed to update macOS dock bounce", error);
+  }
+}
+
 export function useFaviconStatus() {
   const { agents } = useAggregatedAgents({ demand: !isNative });
   const workspaceStatuses = useWorkspaceStatusesForBadges();
   const [colorScheme, setColorScheme] = useState<ColorScheme>(getSystemColorScheme);
   const lastDockBadgeCountRef = useRef<number | undefined>(undefined);
+  const lastQuestionThreadCountRef = useRef(0);
 
   // Listen for system color scheme changes
   useEffect(() => {
@@ -119,10 +135,22 @@ export function useFaviconStatus() {
     const status = deriveFaviconStatus(agents);
     updateFavicon(status, colorScheme);
 
-    const dockBadgeCount = deriveMacDockBadgeCountFromWorkspaceStatuses(workspaceStatuses);
+    const questionThreadCount = agents.filter(
+      (agent) => (agent.pendingQuestionCount ?? 0) > 0,
+    ).length;
+    const dockBadgeCount = deriveMacDockBadgeCount({ questionThreadCount, workspaceStatuses });
     if (dockBadgeCount !== lastDockBadgeCountRef.current) {
       lastDockBadgeCountRef.current = dockBadgeCount;
       void updateMacDockBadge(dockBadgeCount);
+    }
+
+    const bounceChange = resolveDockBounceChange(
+      lastQuestionThreadCountRef.current,
+      questionThreadCount,
+    );
+    lastQuestionThreadCountRef.current = questionThreadCount;
+    if (bounceChange !== null) {
+      void setMacDockBounce(bounceChange === "bounce");
     }
   }, [agents, colorScheme, workspaceStatuses]);
 }
