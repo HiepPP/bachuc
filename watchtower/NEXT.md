@@ -4,7 +4,7 @@
 
 - Title: Mouse wheel selects a value on composer pills
 - Slug: 20261013-composer-pill-wheel-select
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-13
 
 ## Tracker
@@ -14,7 +14,7 @@
 | 1     | TASK-079 Wheel step helper and hook | A     | DONE   | [watchtower/tasks/TASK-079-wheel-step-helper-and-hook.md](watchtower/tasks/TASK-079-wheel-step-helper-and-hook.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending. New files only.                                 |
 | 2     | TASK-080 Wire the toolbar pills     | B     | DONE   | [watchtower/tasks/TASK-080-wire-toolbar-pills.md](watchtower/tasks/TASK-080-wire-toolbar-pills.md)                 | TASK-079           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending. Mode, thinking, provider, select feature pills. |
 | 3     | TASK-081 Wire the model pill        | C     | DONE   | [watchtower/tasks/TASK-081-wire-model-pill.md](watchtower/tasks/TASK-081-wire-model-pill.md)                       | TASK-079           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending. Composer toolbar branch only, per Q-033.        |
-| 4     | TASK-082 Document wheel select      | D     | TODO   | [watchtower/tasks/TASK-082-document-wheel-select.md](watchtower/tasks/TASK-082-document-wheel-select.md)           | TASK-080, TASK-081 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Docs only. Runs after the shape is final.                                    |
+| 4     | TASK-082 Document wheel select      | D     | DONE   | [watchtower/tasks/TASK-082-document-wheel-select.md](watchtower/tasks/TASK-082-document-wheel-select.md)           | TASK-080, TASK-081 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending. Rule in the menus doc.                          |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
@@ -29,7 +29,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: implement TASK-082. TASK-079 to TASK-081 are merged. The model pill wheel runs only on the composer `toolbar` branch (Q-033) and ignores an off-list model. Q-030 to Q-033 are DEFAULTED.
+- Next action: the owner reviews the draft PR from `composer-pill-wheel-select` to `main`, runs the live mouse check, and answers Q-030 to Q-033. All four TASKs are merged into the integration branch. Plan Verify on 2026-10-13: 82 tests in 9 files pass, lint and typecheck pass; the live host check is UNVERIFIED (autonomous run).
 
 ## Archive
 
