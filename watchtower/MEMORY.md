@@ -44,6 +44,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid treating only the last assistant message group as a turn's answer while providers can split one answer into several messages. Reason: [ADR-0018](watchtower/decisions/ADR-0018-all-trailing-messages-over-last-message-as-answer.md).
 - Avoid a fold, chevron, or Collapse button on the turn step list, and the old Overview badge on desktop, while the owner reads turns without a click per turn. Reason: [ADR-0019](watchtower/decisions/ADR-0019-always-open-step-list-over-folding-group.md).
 - Avoid palette-only label colors and scheme-blind fixed hues in the turn step list while the owner keeps the design's Explore, Edit, and Verify hues. Reason: [ADR-0020](watchtower/decisions/ADR-0020-scheme-label-colors-over-palette-tokens-for-turn-steps.md).
+- Avoid branching on `theme.colorScheme` in a `StyleSheet.create` factory, `withUnistyles` label wrappers, and one fixed tone for both schemes while Unistyles hands the web style factory a theme of CSS variables. Reason: [ADR-0022](watchtower/decisions/ADR-0022-scheme-label-tones-in-the-theme-over-color-scheme-branches.md).
 - Avoid steps made of the tool calls before a note, and a per-provider rule, while agents in use write their note before they act. Reason: [ADR-0021](watchtower/decisions/ADR-0021-note-opens-its-step-over-tools-before-the-note.md).
 - Avoid restarting TASK or Q-IDs at 001 in a new plan, and avoid per-plan or per-kind ID prefixes, while one repo has one `watchtower/` folder. Reason: [ADR-0011](watchtower/decisions/ADR-0011-repo-wide-ids-over-per-plan-ids.md).
 
@@ -144,3 +145,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the root `npm run format:files` and `format:check:files` skip `hiep-plugins/` and exit 2 with "Expected at least one target file" when only plugin files are passed.
 - Source: TASK-074 outcome.
 - Use next time: format plugin files with the plugin's own `npm run format`, and check them with `npx oxfmt --check` from the plugin folder.
+
+### 2026-10-13 - Plan 20261013-turn-step-list-follow-ups
+
+- Learned: green app tests do not prove a theme-dependent style works. The vitest Unistyles stub passes a plain theme, but web passes CSS variables, so a value computed from a theme string crashed live at start.
+- Source: ADR-0022; TASK-078 outcome.
+- Use next time: after a `StyleSheet.create` change that computes from theme values, reload live and read the window before you call the TASK done.

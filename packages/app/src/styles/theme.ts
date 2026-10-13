@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import { darkHighlightColors, lightHighlightColors } from "@getpaseo/highlight";
+import { turnLabelTheme } from "./turn-label-colors";
 
 export const baseColors = {
   // Base colors
@@ -699,6 +700,7 @@ export function buildDarkTheme(semanticColors: ReturnType<typeof buildDarkSemant
       palette: baseColors,
       syntax: darkHighlightColors,
     },
+    turnLabels: turnLabelTheme("dark"),
     shadow: darkShadow,
     ...commonTheme,
   } as const;
@@ -761,6 +763,7 @@ export function buildLightTheme(semanticColors: ReturnType<typeof buildLightSema
       palette: baseColors,
       syntax: lightHighlightColors,
     },
+    turnLabels: turnLabelTheme("light"),
     shadow: lightShadow,
     ...commonTheme,
   } as const;

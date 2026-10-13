@@ -11,6 +11,7 @@ import { AccessibilityInfo, Animated, Pressable, Text, View } from "react-native
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import { isWeb } from "@/constants/platform";
+import { turnLabelColors } from "@/styles/turn-label-colors";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import type { AssistantMessageItem } from "@/types/stream";
 import { buildLineDiff, parseUnifiedDiff, type DiffLine } from "@/utils/tool-call-parsers";
@@ -23,60 +24,6 @@ const PULSE_MS = 700;
 const PULSE_LOW = 0.3;
 const DIMMED_OPACITY = 0.3;
 const MIN_SEGMENT_SHARE = 0.04;
-
-/** The one place that holds the label hues (oklch). */
-const LABEL_HUES: Record<TurnStepLabel, number> = { explore: 155, edit: 55, verify: 300 };
-
-/**
- * oklch to an rgb() string. Native has no oklch parser, so the design formulas
- * run here once and every platform gets plain rgb.
- */
-function oklchToRgb(lightness: number, chroma: number, hue: number): string {
-  const radians = (hue * Math.PI) / 180;
-  const a = chroma * Math.cos(radians);
-  const b = chroma * Math.sin(radians);
-  const l = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3;
-  const m = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3;
-  const s = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3;
-  const linear = [
-    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
-    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
-    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
-  ];
-  const channels = linear.map((value) => {
-    const clamped = Math.min(1, Math.max(0, value));
-    const encoded = clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * clamped ** (1 / 2.4) - 0.055;
-    return Math.round(encoded * 255);
-  });
-  return `rgb(${channels.join(", ")})`;
-}
-
-export interface TurnLabelColors {
-  /** Strip segment. */
-  segment: string;
-  /** Label text and number. */
-  text: string;
-  /** Number border. */
-  border: string;
-}
-
-const LABEL_COLORS: Record<TurnStepLabel, TurnLabelColors> = {
-  explore: buildLabelColors(LABEL_HUES.explore),
-  edit: buildLabelColors(LABEL_HUES.edit),
-  verify: buildLabelColors(LABEL_HUES.verify),
-};
-
-function buildLabelColors(hue: number): TurnLabelColors {
-  return {
-    segment: oklchToRgb(0.74, 0.09, hue),
-    text: oklchToRgb(0.52, 0.11, hue),
-    border: oklchToRgb(0.8, 0.06, hue),
-  };
-}
-
-export function turnLabelColors(label: TurnStepLabel): TurnLabelColors {
-  return LABEL_COLORS[label];
-}
 
 export function formatTurnClock(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -283,7 +230,8 @@ function TurnSegment({
   const { t } = useTranslation();
   const pulse = usePulse(step.isRunning);
   const handlePress = useCallback(() => onPress(step.id), [onPress, step.id]);
-  const color = step.isRunning ? RUNNING_COLOR : LABEL_COLORS[step.label].segment;
+  // The segment color is the same in both schemes.
+  const color = step.isRunning ? RUNNING_COLOR : turnLabelColors(step.label, "light").segment;
   const dataSet = useMemo(
     () => ({ dimmed: String(isDimmed), running: String(step.isRunning) }),
     [isDimmed, step.isRunning],
@@ -434,7 +382,7 @@ function TurnStepRowView({
   const { t } = useTranslation();
   const pulse = usePulse(step.isRunning);
   const countsText = useCountsText(step.counts);
-  const colors = LABEL_COLORS[step.label];
+  const labelText = labelTextStyle(step.label);
   // react-native-web already drops the click that ends a text-selecting drag.
   const handlePress = useCallback(() => onPress(step.id), [onPress, step.id]);
   const setRef = useCallback((node: unknown) => registerRow(step.id, node), [registerRow, step.id]);
@@ -458,27 +406,26 @@ function TurnStepRowView({
         <Animated.View
           style={[
             styles.number,
-            inlineUnistylesStyle(
-              step.isRunning
-                ? { borderColor: RUNNING_COLOR, borderWidth: 1.5, opacity: pulse }
-                : { borderColor: colors.border },
-            ),
+            step.isRunning
+              ? inlineUnistylesStyle({
+                  borderColor: RUNNING_COLOR,
+                  borderWidth: 1.5,
+                  opacity: pulse,
+                })
+              : numberBorderStyle(step.label),
           ]}
         >
           <Text
             style={[
               styles.numberText,
-              inlineUnistylesStyle({ color: step.isRunning ? RUNNING_COLOR : colors.text }),
+              step.isRunning ? inlineUnistylesStyle({ color: RUNNING_COLOR }) : labelText,
             ]}
           >
             {index + 1}
           </Text>
         </Animated.View>
         <View style={styles.meta}>
-          <Text
-            style={[styles.label, inlineUnistylesStyle({ color: colors.text })]}
-            testID={`turn-step-label-${index}`}
-          >
+          <Text style={[styles.label, labelText]} testID={`turn-step-label-${index}`}>
             {t(`toolCallGroup.turn.labels.${step.label}`)}
           </Text>
           {countsText ? (
@@ -492,16 +439,25 @@ function TurnStepRowView({
         </Text>
       </Pressable>
       <View style={styles.body} testID={`turn-step-body-${index}`}>
-        {step.edits.map((item) => (
-          <View key={item.id}>{renderItem(item)}</View>
-        ))}
         {step.note.map((block, blockIndex) => (
           <NoteBlock
             key={block.id}
             block={block}
-            isStreaming={step.isRunning && blockIndex === step.note.length - 1}
+            // The note opens its step, so it streams only until the step's first tool call.
+            isStreaming={
+              step.isRunning && step.items.length === 0 && blockIndex === step.note.length - 1
+            }
             renderNote={renderNote}
           />
+        ))}
+        {step.edits.map((item) => (
+          <View
+            key={item.id}
+            style={item.kind === "plugin" ? styles.pluginEdit : undefined}
+            testID={`turn-step-edit-${item.id}`}
+          >
+            {renderItem(item)}
+          </View>
         ))}
         {step.isRunning ? <TurnLiveBox step={step} /> : null}
       </View>
@@ -523,6 +479,28 @@ function NoteBlock({
   const messageId = block.blockGroupId ?? block.id;
   const dataSet = useMemo(() => ({ messageId }), [messageId]);
   return <View dataSet={dataSet}>{renderNote(block, isStreaming)}</View>;
+}
+
+function labelTextStyle(label: TurnStepLabel) {
+  switch (label) {
+    case "explore":
+      return styles.textExplore;
+    case "edit":
+      return styles.textEdit;
+    case "verify":
+      return styles.textVerify;
+  }
+}
+
+function numberBorderStyle(label: TurnStepLabel) {
+  switch (label) {
+    case "explore":
+      return styles.borderExplore;
+    case "edit":
+      return styles.borderEdit;
+    case "verify":
+      return styles.borderVerify;
+  }
 }
 
 const TurnStepRow = memo(TurnStepRowView, (prev, next) => {
@@ -715,6 +693,12 @@ const styles = StyleSheet.create((theme) => ({
     marginLeft: 34,
     marginRight: 52,
   },
+  // Cancels the stream margins of the edit-diffs row (`marginHorizontal: -13`, `marginBottom: 4`),
+  // so a step keeps the compact row. The match is by item kind, never by plugin ID.
+  pluginEdit: {
+    marginHorizontal: 13,
+    marginBottom: -4,
+  },
   meta: {
     flex: 1,
     minWidth: 0,
@@ -729,6 +713,14 @@ const styles = StyleSheet.create((theme) => ({
     letterSpacing: 0.6,
     textTransform: "uppercase",
   },
+  // One registered style per label, read from the theme so the color follows the scheme. On web
+  // the theme here holds CSS variables, so `theme.colorScheme` is not "light" or "dark".
+  textExplore: { color: theme.turnLabels.explore.text },
+  textEdit: { color: theme.turnLabels.edit.text },
+  textVerify: { color: theme.turnLabels.verify.text },
+  borderExplore: { borderColor: theme.turnLabels.explore.border },
+  borderEdit: { borderColor: theme.turnLabels.edit.border },
+  borderVerify: { borderColor: theme.turnLabels.verify.border },
   counts: {
     fontSize: 12.5,
     color: theme.colors.foregroundMuted,

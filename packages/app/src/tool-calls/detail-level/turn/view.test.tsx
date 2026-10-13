@@ -12,15 +12,19 @@ import type {
   StreamItem,
   ToolCallItem,
 } from "@/types/stream";
+import {
+  darkClaudeTheme,
+  darkGhosttyTheme,
+  darkMidnightTheme,
+  darkPureBlackTheme,
+  darkTheme,
+  darkZincTheme,
+  lightTheme,
+} from "@/styles/theme";
 import { prepareToolCallHistory, projectToolCallDetailLevel } from "../projection";
 import type { TurnStepGroup } from "./model";
-import {
-  areTurnStepsEqual,
-  formatTurnClock,
-  formatTurnDuration,
-  TurnStepListView,
-  turnLabelColors,
-} from "./view";
+import { areTurnStepsEqual, formatTurnClock, formatTurnDuration, TurnStepListView } from "./view";
+import { turnLabelColors } from "@/styles/turn-label-colors";
 
 // The test translator keeps the key and the count, so the test reads what the view asked for.
 vi.mock("react-i18next", () => ({
@@ -239,15 +243,14 @@ describe("TurnStepListView", () => {
     expect(container!.querySelector('[data-testid="turn-clock"]')).toBeNull();
     expect(container!.querySelector('[data-testid="turn-live-box"]')).toBeNull();
     const summary = one('[data-testid="turn-summary"]').textContent;
-    expect(summary).toContain("toolCallGroup.turn.steps.other#5");
+    expect(summary).toContain("toolCallGroup.turn.steps.other#4");
     expect(summary).toContain("toolCallGroup.turn.files.other#2");
     expect(summary).toContain("+4");
     expect(summary).toContain("−2");
     expect(all('[data-testid^="turn-step-time-"]').map((el) => el.textContent)).toEqual([
-      "0:03",
+      "0:02",
+      "0:04",
       "0:05",
-      "0:06",
-      "0:08",
       "0:10",
     ]);
   });
@@ -255,13 +258,13 @@ describe("TurnStepListView", () => {
   it("highlights a step on a segment click, dims the others, and clears on the second click", () => {
     mount(buildGroup(doneTurn));
     const segments = all('[data-testid^="turn-segment-"]');
-    expect(segments).toHaveLength(5);
+    expect(segments).toHaveLength(4);
     expect(all("[data-dimmed='true']")).toHaveLength(0);
 
     click(segments[2]!);
     expect(one('[data-testid="turn-step-row-2"]').getAttribute("aria-pressed")).toBe("true");
     expect(all('[data-testid^="turn-step-row-"][aria-pressed="true"]')).toHaveLength(1);
-    expect(all("[data-testid^='turn-segment-'][data-dimmed='true']")).toHaveLength(4);
+    expect(all("[data-testid^='turn-segment-'][data-dimmed='true']")).toHaveLength(3);
     expect(one('[data-testid="turn-segment-2"]').getAttribute("data-dimmed")).not.toBe("true");
 
     click(one('[data-testid="turn-segment-2"]'));
@@ -275,7 +278,7 @@ describe("TurnStepListView", () => {
     click(one('[data-testid="turn-step-row-3"]'));
     expect(one('[data-testid="turn-step-row-3"]').getAttribute("aria-pressed")).toBe("true");
     expect(one('[data-testid="turn-segment-3"]').getAttribute("data-dimmed")).not.toBe("true");
-    expect(all("[data-testid^='turn-segment-'][data-dimmed='true']")).toHaveLength(4);
+    expect(all("[data-testid^='turn-segment-'][data-dimmed='true']")).toHaveLength(3);
 
     click(one('[data-testid="turn-step-row-3"]'));
     expect(all("[data-dimmed='true']")).toHaveLength(0);
@@ -305,6 +308,32 @@ describe("TurnStepListView", () => {
     // A press in the step body does not toggle the highlight.
     click(one('[data-testid="turn-step-body-0"]'));
     expect(all('[data-testid^="turn-step-row-"][aria-pressed="true"]')).toHaveLength(0);
+  });
+
+  it("draws a step's note above its edit rows and streams it only before the first call", () => {
+    mount(buildGroup(doneTurn));
+    const noteEl = one('[data-testid="note-note3"]');
+    const editEl = one('[data-testid="item-edit-diffs/e1"]');
+    expect(noteEl.compareDocumentPosition(editEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    act(() => root!.unmount());
+    container!.remove();
+
+    mount(buildGroup([user, read("r1", 1), note("note1", 3)], true));
+    expect(one('[data-testid="note-note1"]').getAttribute("data-streaming")).toBe("true");
+  });
+
+  it("cancels the stream margins of a plugin edit row, but not of a Paseo edit row", () => {
+    const paseoEdit = call("e9", 9, { type: "edit", filePath: "/repo/c.ts" });
+    mount(buildGroup([user, editRow("e1", 1, "/repo/a.ts"), paseoEdit, note("final", 12)]));
+
+    const plugin = one('[data-testid="turn-step-edit-edit-diffs/e1"]').style;
+    expect([plugin.marginLeft, plugin.marginRight, plugin.marginBottom]).toEqual([
+      "13px",
+      "13px",
+      "-4px",
+    ]);
+    const paseo = one('[data-testid="turn-step-edit-e9"]').style;
+    expect([paseo.marginLeft, paseo.marginRight, paseo.marginBottom]).toEqual(["", "", ""]);
   });
 
   it("marks each note with its message id for chat find", () => {
@@ -362,7 +391,7 @@ describe("TurnStepListView", () => {
     expect(one('[data-testid="turn-clock"]').textContent).toBe("2:06");
 
     const times = all('[data-testid^="turn-step-time-"]').map((el) => el.textContent);
-    expect(times).toEqual(["0:03", "toolCallGroup.turn.now"]);
+    expect(times).toEqual(["0:01", "toolCallGroup.turn.now"]);
     expect(one('[data-testid="turn-summary"]').textContent).toContain("toolCallGroup.turn.step#2");
     expect(one('[data-testid="turn-segment-1"]').getAttribute("data-running")).toBe("true");
     expect(one('[data-testid="turn-segment-0"]').getAttribute("data-running")).not.toBe("true");
@@ -377,18 +406,65 @@ describe("TurnStepListView", () => {
   });
 });
 
+const LABELS = ["explore", "edit", "verify"] as const;
+
+function channels(color: string): number[] {
+  const rgb = color.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
+  if (rgb) return rgb.slice(1).map(Number);
+  return [1, 3, 5].map((start) => parseInt(color.slice(start, start + 2), 16));
+}
+
+/** WCAG 2 contrast ratio. */
+function contrast(a: string, b: string): number {
+  const luminance = (color: string) => {
+    const [r, g, bl] = channels(color).map((value) => {
+      const c = value / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * bl!;
+  };
+  const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (high! + 0.05) / (low! + 0.05);
+}
+
 describe("turn view helpers", () => {
-  it("keeps one fixed palette per label from a single hue table", () => {
-    const colors = {
-      explore: turnLabelColors("explore"),
-      edit: turnLabelColors("edit"),
-      verify: turnLabelColors("verify"),
-    };
-    expect(new Set(Object.values(colors).map((c) => c.segment)).size).toBe(3);
-    for (const palette of Object.values(colors)) {
-      expect(palette.segment).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
-      expect(palette.text).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
-      expect(palette.border).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
+  it("keeps one palette per label and scheme from a single hue table", () => {
+    for (const scheme of ["light", "dark"] as const) {
+      const colors = LABELS.map((label) => turnLabelColors(label, scheme));
+      expect(new Set(colors.map((c) => c.segment)).size).toBe(3);
+      expect(new Set(colors.map((c) => c.text)).size).toBe(3);
+      for (const palette of colors) {
+        expect(palette.segment).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
+        expect(palette.text).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
+        expect(palette.border).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
+      }
+    }
+    // The strip segment is not text, so it is the same in both schemes.
+    for (const label of LABELS) {
+      expect(turnLabelColors(label, "dark").segment).toBe(turnLabelColors(label, "light").segment);
+    }
+  });
+
+  it("keeps label text at 4.5:1 or more on every surface the step list sits on", () => {
+    const themes = [
+      lightTheme,
+      darkTheme,
+      darkZincTheme,
+      darkMidnightTheme,
+      darkClaudeTheme,
+      darkGhosttyTheme,
+      darkPureBlackTheme,
+    ];
+    for (const theme of themes) {
+      // surface0 is the stream; surface2 is a highlighted step row.
+      for (const surface of [theme.colors.surface0, theme.colors.surface2]) {
+        for (const label of LABELS) {
+          // The view reads the theme's own table; on web the style factory sees CSS variables.
+          const text = theme.turnLabels[label].text;
+          expect(text).toBe(turnLabelColors(label, theme.colorScheme).text);
+          expect(contrast(text, surface), `${label} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
     }
   });
 

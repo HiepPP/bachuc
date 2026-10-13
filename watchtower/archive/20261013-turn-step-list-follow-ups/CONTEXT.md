@@ -16,6 +16,8 @@
 - The edit-diffs row gets back its old outer spacing in the stream; the step list cancels it, so steps keep the compact row. No new plugin API. The pencil and the verb label stay removed everywhere (owner choice, 2026-10-13).
 - Label hues stay as a documented design exception with one text and border color per scheme; the change bar uses `statusSuccess` and `statusDanger`. See [ADR-0020](watchtower/decisions/ADR-0020-scheme-label-colors-over-palette-tokens-for-turn-steps.md).
 
+- The label tones live in the theme as `theme.turnLabels`. See [ADR-0022](watchtower/decisions/ADR-0022-scheme-label-tones-in-the-theme-over-color-scheme-branches.md).
+
 ## Open Decisions
 
 - None.

@@ -12,6 +12,7 @@ the Overview tool call groups, so they show even when the commands around them a
   call groups. The choice is the agent label `edit-diffs.mode` (`off` or `on`), so it lasts and
   every client sees it.
 - The row is one line: chevron, path, a change bar, and `+added −removed`. The bar has 7 squares split by the added and removed share (green and red), so a write is all green and a pure delete is all red. Press the row to hide or show the diff.
+- In the stream, the row has outer margins (`marginHorizontal: -13`, `marginBottom: 4`). The host turn step list cancels them for every plugin edit row, so keep the two values in step.
 - Removed lines show their old line number; added and unchanged lines show the new one.
 - A write shows the whole written file as added lines, numbered from line 1. The provider
   sends no old content, so overwriting an existing file also shows only added lines.
