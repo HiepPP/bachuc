@@ -1,6 +1,6 @@
-# TASK-078 Scheme label colors
+# TASK-085 Scheme label colors
 
-Group: A (writes `turn/view.tsx` and `edit-row.tsx` with TASK-077, and `turn/view.test.tsx` with TASK-076)
+Group: A (writes `turn/view.tsx` and `edit-row.tsx` with TASK-084, and `turn/view.test.tsx` with TASK-083)
 Class: code
 
 ## Brief
