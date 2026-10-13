@@ -518,7 +518,7 @@ describe("ClaudeAgentClient.fetchCatalog", () => {
       const client = new ClaudeAgentClient({
         logger,
         resolveBinary: async () => "/test/claude/bin",
-        resolveVersion: async () => "2.1.219",
+        resolveVersion: async () => "2.1.293",
         runtimeSettings: { env: { CLAUDE_CONFIG_DIR: emptyConfigDir } },
       });
       const { models } = await client.fetchCatalog({
@@ -537,6 +537,17 @@ describe("ClaudeAgentClient.fetchCatalog", () => {
       expect(getThinkingIds("claude-opus-4-8")).toContain("ultracode");
       expect(getThinkingIds("claude-sonnet-5")).toContain("xhigh");
       expect(getThinkingIds("claude-sonnet-5")).toContain("ultracode");
+      expect(getThinkingIds("claude-haiku-5-5")).toEqual([
+        "off",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultracode",
+      ]);
+      expect(getThinkingIds("claude-sonnet-5-5")).toContain("xhigh");
+      expect(getThinkingIds("claude-sonnet-5-5")).not.toContain("off");
       expect(getThinkingIds("claude-opus-4-7[1m]")).toContain("ultracode");
       expect(getThinkingIds("claude-opus-4-7")).toContain("ultracode");
       expect(getThinkingIds("claude-sonnet-4-6")).not.toContain("ultracode");
@@ -1245,6 +1256,7 @@ describe("ClaudeAgentSession features", () => {
 
   test.each([
     ["supported model", "claude-opus-4-8", { type: "disabled" }, undefined],
+    ["Haiku 5.5", "claude-haiku-5-5", { type: "disabled" }, undefined],
     ["unsupported model", "claude-fable-5", { type: "adaptive" }, "high"],
     ["custom model", "openrouter/anthropic/claude-opus-4-8", undefined, undefined],
     ["provider default", null, undefined, undefined],
@@ -1286,6 +1298,26 @@ describe("ClaudeAgentSession features", () => {
 
     await expect(session.setThinkingOption?.("off")).rejects.toThrow(
       "Thinking option 'off' is not available for model 'claude-fable-5'",
+    );
+
+    await session.close();
+  });
+
+  test("rejects disabled thinking on Sonnet 5.5, which only runs with adaptive thinking", async () => {
+    const { queryFactory } = createQueryMock();
+    const client = new ClaudeAgentClient({
+      logger,
+      queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: process.cwd(),
+      model: "claude-sonnet-5-5",
+    });
+
+    await expect(session.setThinkingOption?.("off")).rejects.toThrow(
+      "Thinking option 'off' is not available for model 'claude-sonnet-5-5'",
     );
 
     await session.close();
