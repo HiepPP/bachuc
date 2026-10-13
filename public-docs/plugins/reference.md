@@ -1764,14 +1764,26 @@ These contracts are exported from `@getpaseo/plugin/client`.
 | `color`    | No       | Composer pills only. Hex color for the pill's icon, label, and border.              |
 | `visible`  | No       | Defaults to `true`. False removes the trigger and its layout space.                 |
 | `disabled` | No       | Defaults to `false`. Keeps the button visible and prevents interaction.             |
-| `behavior` | Yes      | One of the three shapes below.                                                      |
+| `behavior` | Yes      | One of the four shapes below.                                                       |
 
 ```tsx
 type PluginButtonBehavior =
   | { kind: "action"; onPress(): void | Promise<void>; newWorkspacePanel?: string }
   | { kind: "menu"; items: readonly PluginButtonMenuEntry[] }
-  | { kind: "popover"; Content: React.ComponentType<PluginButtonContentProps>; flush?: boolean };
+  | { kind: "popover"; Content: React.ComponentType<PluginButtonContentProps>; flush?: boolean }
+  | { kind: "select"; useSelection(props: PluginButtonLabelProps): PluginButtonSelection };
+
+interface PluginButtonSelection {
+  options: readonly { id: string; label: string; description?: string }[];
+  value: string | null; // null while the value loads; the pill stays disabled until it is set
+  select(id: string): void;
+}
 ```
+
+A select is for a composer pill's own single choice. It cannot sit in a menu item or a header
+button. Paseo calls `useSelection` as a hook in each pill, with that pill's context, so it can use
+plugin hooks. Keep the same function across `update()` calls. Paseo draws the list like its own
+agent controls. On web, a hover over the pill opens the list, and the mouse wheel steps the value.
 
 An action runs on the client. On a draft composer pill, `newWorkspacePanel` names one of the
 plugin's [new workspace panels](#new-workspace-panel); on a wide layout a press shows it instead of

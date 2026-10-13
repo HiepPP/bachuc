@@ -11,7 +11,12 @@ import { ModelBrowser, ModelProviderGlyph, useModelBrowser } from "@/components/
 import { resolveModelBrowserScrolling } from "@/components/model-browser-view";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative, isWeb } from "@/constants/platform";
-import { composeViewRefs, useWheelSelect } from "@/composer/agent-controls/use-wheel-select";
+import {
+  composeViewRefs,
+  useWheelSelect,
+  type WheelSelect,
+} from "@/composer/agent-controls/use-wheel-select";
+import { useWheelListener } from "@/hooks/use-wheel-listener";
 import {
   getProviderModelRows,
   type ProviderSelectionModelRow,
@@ -68,7 +73,6 @@ export function resolveCurrentProviderModelKey(input: {
  */
 export function isModelWheelEnabled(input: {
   isComposerToolbar: boolean;
-  isOpen: boolean;
   disabled: boolean;
   isLoading: boolean;
   count: number;
@@ -76,7 +80,6 @@ export function isModelWheelEnabled(input: {
 }): boolean {
   return (
     input.isComposerToolbar &&
-    !input.isOpen &&
     !input.disabled &&
     !input.isLoading &&
     input.count >= 2 &&
@@ -91,20 +94,22 @@ export function splitModelRowKey(key: string): { provider: string; modelId: stri
 }
 
 /**
- * The trigger ref for the ComboboxTrigger branch. Wheel stepping is composer-only:
- * only the composer passes `toolbar` (Q-033), so every other caller keeps the plain anchor ref.
+ * The wheel handler and trigger ref for the ComboboxTrigger branch. Wheel stepping is
+ * composer-only: only the composer passes `toolbar` (Q-033), so every other caller keeps the
+ * plain anchor ref and gets a null handler.
  */
-function useModelWheelAnchorRef(input: {
+function useModelWheel(input: {
   anchorRef: RefObject<View | null>;
   isComposerToolbar: boolean;
   isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
   disabled: boolean;
   isLoading: boolean;
   providers: ProviderSelectorProvider[];
   selectedProvider: string;
   selectedModel: string;
   onSelect: (provider: AgentProvider, modelId: string) => void;
-}): Ref<View> {
+}): { triggerRef: Ref<View>; wheel: WheelSelect } {
   const { anchorRef, isComposerToolbar, providers, selectedProvider, selectedModel, onSelect } =
     input;
   const optionIds = useMemo(
@@ -122,10 +127,9 @@ function useModelWheelAnchorRef(input: {
     },
     [onSelect],
   );
-  const wheelRef = useWheelSelect({
+  const wheel = useWheelSelect({
     enabled: isModelWheelEnabled({
       isComposerToolbar,
-      isOpen: input.isOpen,
       disabled: input.disabled,
       isLoading: input.isLoading,
       count: optionIds.length,
@@ -134,9 +138,12 @@ function useModelWheelAnchorRef(input: {
     optionIds,
     valueId,
     onSelect: handleWheelSelect,
+    open: input.isOpen,
+    onOpen: () => input.onOpenChange(true),
   });
+  const wheelRef = useWheelListener(wheel.handler, wheel.onHover);
   const composedRef = useMemo(() => composeViewRefs(anchorRef, wheelRef), [anchorRef, wheelRef]);
-  return isComposerToolbar ? composedRef : anchorRef;
+  return { triggerRef: isComposerToolbar ? composedRef : anchorRef, wheel };
 }
 
 interface CombinedModelSelectorProps {
@@ -219,17 +226,6 @@ export function CombinedModelSelector({
     serverId,
   });
   const { prepareToOpen, reset } = browser;
-  const comboboxTriggerRef = useModelWheelAnchorRef({
-    anchorRef,
-    isComposerToolbar: toolbar !== undefined,
-    isOpen,
-    disabled,
-    isLoading,
-    providers,
-    selectedProvider,
-    selectedModel,
-    onSelect,
-  });
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -244,6 +240,18 @@ export function CombinedModelSelector({
     },
     [onClose, onOpen, prepareToOpen, reset],
   );
+  const { triggerRef: comboboxTriggerRef, wheel } = useModelWheel({
+    anchorRef,
+    isComposerToolbar: toolbar !== undefined,
+    isOpen,
+    onOpenChange: handleOpenChange,
+    disabled,
+    isLoading,
+    providers,
+    selectedProvider,
+    selectedModel,
+    onSelect,
+  });
 
   const handleSelect = useCallback(
     (provider: string, modelId: string) => {
@@ -405,6 +413,8 @@ export function CombinedModelSelector({
         anchorRef={anchorRef}
         desktopPlacement={desktopPlacement}
         desktopMinWidth={desktopMinWidth}
+        onBackdropWheel={wheel.handler}
+        closeOnPointerLeave={wheel.openedByPointer}
         desktopLockWidth
         desktopFixedHeight={browser.desktopFixedHeight}
         desktopChildrenScrollEnabled={false}

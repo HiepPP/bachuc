@@ -1,80 +1,54 @@
 import { describe, expect, it } from "vitest";
 import {
   INITIAL_WHEEL_STEP_STATE,
-  WHEEL_IDLE_RESET_MS,
+  WHEEL_GESTURE_GAP_MS,
   WHEEL_STEP_THRESHOLD_PX,
   resolveWheelOptionIndex,
   resolveWheelSteps,
 } from "./wheel-select";
 
-const BASE = { threshold: WHEEL_STEP_THRESHOLD_PX, idleMs: WHEEL_IDLE_RESET_MS };
+function startGesture(deltaY: number) {
+  return resolveWheelSteps({ state: INITIAL_WHEEL_STEP_STATE, deltaY, now: 1000 });
+}
 
 describe("resolveWheelSteps", () => {
-  it("uses 48 pixels and a 300 ms idle window", () => {
-    expect(WHEEL_STEP_THRESHOLD_PX).toBe(48);
-    expect(WHEEL_IDLE_RESET_MS).toBe(300);
+  it("uses 40 pixels per step and a 150 ms gap between gestures", () => {
+    expect(WHEEL_STEP_THRESHOLD_PX).toBe(40);
+    expect(WHEEL_GESTURE_GAP_MS).toBe(150);
   });
 
-  it("gives no step for a 40 pixel delta", () => {
-    const result = resolveWheelSteps({
-      ...BASE,
-      state: INITIAL_WHEEL_STEP_STATE,
-      deltaY: 40,
-      now: 1000,
-    });
-    expect(result.steps).toBe(0);
-    expect(result.state).toEqual({ accumulated: 40, lastEventAt: 1000 });
+  it("steps once on the first event of a gesture, however small", () => {
+    expect(startGesture(4).steps).toBe(1);
+    expect(startGesture(-4).steps).toBe(-1);
+    expect(startGesture(300).steps).toBe(1);
+    expect(startGesture(4).state.accumulated).toBe(0);
   });
 
-  it("gives one step for two 40 pixel deltas inside the idle window and keeps the remainder", () => {
-    const first = resolveWheelSteps({
-      ...BASE,
-      state: INITIAL_WHEEL_STEP_STATE,
-      deltaY: 40,
-      now: 1000,
-    });
-    const second = resolveWheelSteps({ ...BASE, state: first.state, deltaY: 40, now: 1100 });
-    expect(second.steps).toBe(1);
-    expect(second.state).toEqual({ accumulated: 32, lastEventAt: 1100 });
-  });
-
-  it("gives two steps for a 100 pixel delta", () => {
-    const result = resolveWheelSteps({
-      ...BASE,
-      state: INITIAL_WHEEL_STEP_STATE,
-      deltaY: 100,
-      now: 1000,
-    });
-    expect(result.steps).toBe(2);
-    expect(result.state.accumulated).toBe(4);
-  });
-
-  it("resets the accumulator after an idle gap", () => {
-    const first = resolveWheelSteps({
-      ...BASE,
-      state: INITIAL_WHEEL_STEP_STATE,
-      deltaY: 40,
-      now: 1000,
-    });
-    const second = resolveWheelSteps({
-      ...BASE,
-      state: first.state,
-      deltaY: 40,
-      now: 1000 + WHEEL_IDLE_RESET_MS,
-    });
+  it("steps once per 40 pixels inside a gesture and keeps the rest", () => {
+    const first = startGesture(4);
+    const second = resolveWheelSteps({ state: first.state, deltaY: 30, now: 1020 });
     expect(second.steps).toBe(0);
-    expect(second.state.accumulated).toBe(40);
+    const third = resolveWheelSteps({ state: second.state, deltaY: 20, now: 1040 });
+    expect(third.steps).toBe(1);
+    expect(third.state).toEqual({ accumulated: 10, lastEventAt: 1040 });
   });
 
-  it("gives negative steps for a negative delta", () => {
-    const result = resolveWheelSteps({
-      ...BASE,
-      state: INITIAL_WHEEL_STEP_STATE,
-      deltaY: -100,
-      now: 1000,
+  it("gives several steps for one large delta inside a gesture", () => {
+    const first = startGesture(10);
+    const fast = resolveWheelSteps({ state: first.state, deltaY: 130, now: 1030 });
+    expect(fast.steps).toBe(3);
+    const back = resolveWheelSteps({ state: fast.state, deltaY: -130, now: 1060 });
+    expect(back.steps).toBe(-3);
+  });
+
+  it("starts a new gesture after the gap", () => {
+    const first = startGesture(4);
+    const next = resolveWheelSteps({
+      state: first.state,
+      deltaY: 4,
+      now: 1000 + WHEEL_GESTURE_GAP_MS,
     });
-    expect(result.steps).toBe(-2);
-    expect(result.state.accumulated).toBe(-4);
+    expect(next.steps).toBe(1);
   });
 });
 

@@ -1,5 +1,6 @@
-export const WHEEL_STEP_THRESHOLD_PX = 48;
-export const WHEEL_IDLE_RESET_MS = 300;
+export const WHEEL_STEP_THRESHOLD_PX = 40;
+// A gap this long ends a wheel gesture. The next event starts a new one.
+export const WHEEL_GESTURE_GAP_MS = 150;
 
 export interface WheelStepState {
   accumulated: number;
@@ -11,26 +12,29 @@ export const INITIAL_WHEEL_STEP_STATE: WheelStepState = {
   lastEventAt: Number.NEGATIVE_INFINITY,
 };
 
+/**
+ * The first event of a gesture steps once at any size, so one slow notch is one step on any
+ * mouse. Later events step once per `threshold` pixels, several at a time on a fast spin.
+ */
 export function resolveWheelSteps({
   state,
   deltaY,
   now,
   threshold = WHEEL_STEP_THRESHOLD_PX,
-  idleMs = WHEEL_IDLE_RESET_MS,
+  gapMs = WHEEL_GESTURE_GAP_MS,
 }: {
   state: WheelStepState;
   deltaY: number;
   now: number;
   threshold?: number;
-  idleMs?: number;
+  gapMs?: number;
 }): { steps: number; state: WheelStepState } {
-  const base = now - state.lastEventAt >= idleMs ? 0 : state.accumulated;
-  const total = base + deltaY;
+  if (now - state.lastEventAt >= gapMs) {
+    return { steps: Math.sign(deltaY), state: { accumulated: 0, lastEventAt: now } };
+  }
+  const total = state.accumulated + deltaY;
   const steps = Math.trunc(total / threshold);
-  return {
-    steps,
-    state: { accumulated: total - steps * threshold, lastEventAt: now },
-  };
+  return { steps, state: { accumulated: total - steps * threshold, lastEventAt: now } };
 }
 
 export function resolveWheelOptionIndex({

@@ -122,14 +122,13 @@ describe("resolveCurrentProviderModelKey", () => {
 describe("isModelWheelEnabled", () => {
   const ready = {
     isComposerToolbar: true,
-    isOpen: false,
     disabled: false,
     isLoading: false,
     count: 3,
     valueId: "codex:o3",
   };
 
-  it("is on for a closed, ready composer pill on a listed model", () => {
+  it("is on for a ready composer pill on a listed model", () => {
     expect(isModelWheelEnabled(ready)).toBe(true);
   });
 
@@ -137,8 +136,7 @@ describe("isModelWheelEnabled", () => {
     expect(isModelWheelEnabled({ ...ready, isComposerToolbar: false })).toBe(false);
   });
 
-  it("is off while the popover is open, disabled, or loading", () => {
-    expect(isModelWheelEnabled({ ...ready, isOpen: true })).toBe(false);
+  it("is off while disabled or loading", () => {
     expect(isModelWheelEnabled({ ...ready, disabled: true })).toBe(false);
     expect(isModelWheelEnabled({ ...ready, isLoading: true })).toBe(false);
   });

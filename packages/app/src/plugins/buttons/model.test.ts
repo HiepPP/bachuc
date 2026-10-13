@@ -330,4 +330,43 @@ describe("plugin buttons", () => {
       }),
     ).toThrow("Plugin button label must be text or a component");
   });
+
+  it("accepts a select behavior on a composer pill only", () => {
+    const buttons = store();
+    const plugin = installation();
+    const select = {
+      kind: "select" as const,
+      useSelection: () => ({ options: [], value: null, select: () => {} }),
+    };
+    buttons.addComposerPill(plugin, { id: "mode", button: { title: "Mode", behavior: select } });
+    expect(buttons.getSnapshot()[0].button.behavior.kind).toBe("select");
+    expect(() =>
+      buttons.addHeaderButton(plugin, {
+        id: "mode",
+        workspaceId: "workspace",
+        button: { ...button(), behavior: select },
+      }),
+    ).toThrow("Plugin button select must be a composer pill's own behavior");
+    expect(() =>
+      buttons.addComposerPill(plugin, {
+        id: "nested",
+        button: {
+          title: "Nested",
+          behavior: {
+            kind: "menu",
+            items: [{ kind: "item", id: "mode", title: "Mode", behavior: select }],
+          },
+        },
+      }),
+    ).toThrow("Plugin button select must be a composer pill's own behavior");
+    expect(() =>
+      buttons.addComposerPill(plugin, {
+        id: "broken",
+        button: {
+          title: "Broken",
+          behavior: { kind: "select" } as unknown as typeof select,
+        },
+      }),
+    ).toThrow("Plugin button select needs useSelection");
+  });
 });

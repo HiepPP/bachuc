@@ -2,8 +2,8 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { Pressable, Text, View } from "react-native";
 
-// React Native's types omit `hovered`, which the web renderer supplies.
-type RowState = { pressed: boolean; hovered?: boolean };
+// React Native's types omit `hovered` and `focused`, which the web renderer supplies.
+type RowState = { pressed: boolean; hovered?: boolean; focused?: boolean };
 
 interface MenuRowProps {
   theme: PluginTheme;
@@ -26,11 +26,13 @@ export function MenuRow(props: MenuRowProps) {
   const { theme, compact, label, description, warn, selected, muted, disabled, onPress } = props;
   return (
     <Pressable
+      // The host menu's row marker: arrow keys and the pill's mouse wheel move focus across it.
+      {...{ dataSet: { menuItem: "true", menuDisabled: disabled ? "true" : "false" } }}
       accessibilityRole="menuitem"
       accessibilityState={{ checked: selected, disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed, hovered }: RowState) => ({
+      style={({ pressed, hovered, focused }: RowState) => ({
         flexDirection: "row",
         alignItems: "center",
         gap: 8,
@@ -40,7 +42,8 @@ export function MenuRow(props: MenuRowProps) {
         paddingVertical: 5,
         borderRadius: 6,
         opacity: disabled ? 0.5 : 1,
-        backgroundColor: !disabled && (pressed || hovered) ? theme.colors.surface2 : "transparent",
+        backgroundColor:
+          !disabled && (pressed || hovered || focused) ? theme.colors.surface2 : "transparent",
       })}
     >
       <View style={{ flex: 1, minWidth: 0 }}>

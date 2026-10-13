@@ -52,6 +52,8 @@ import {
 } from "./combobox-options";
 import type { ComboboxOptionModel } from "./combobox-options";
 import { isWeb } from "@/constants/platform";
+import { useWheelListener, type WheelHandler } from "@/hooks/use-wheel-listener";
+import { usePointerLeaveClose } from "@/hooks/use-pointer-leave-close";
 import {
   IsolatedBottomSheetModal,
   useIsolatedBottomSheetVisibility,
@@ -135,6 +137,13 @@ export interface ComboboxProps {
   footer?: ReactNode;
   /** When true, selecting an option does not close the picker (multi-select mode). */
   keepOpenOnSelect?: boolean;
+  /**
+   * Web desktop only. Receives wheel events over the backdrop while the popover is open. The
+   * backdrop covers the trigger, so a pill that steps its value on wheel keeps stepping here.
+   */
+  onBackdropWheel?: WheelHandler | null;
+  /** Web desktop only. While true, a pointer move outside the trigger and popover closes it. */
+  closeOnPointerLeave?: boolean;
   anchorRef: React.RefObject<View | null>;
   children?: ReactNode;
 }
@@ -1072,6 +1081,9 @@ interface DesktopBodyProps {
   renderOption: RenderOptionFn | undefined;
   hasChildren: boolean;
   childrenScrollEnabled: boolean;
+  onBackdropWheel: WheelHandler | null | undefined;
+  closeOnPointerLeave: boolean | undefined;
+  anchorRef: React.RefObject<View | null>;
   children: ReactNode;
 }
 
@@ -1194,6 +1206,16 @@ function DesktopComboboxBody(props: DesktopBodyProps): ReactElement {
     [props.refs, setWebOverlayScope],
   );
 
+  const backdropRef = useWheelListener(props.onBackdropWheel);
+  const closeOnPointerLeave = props.closeOnPointerLeave === true;
+  usePointerLeaveClose({
+    enabled: props.isOpen && closeOnPointerLeave,
+    refs: [props.anchorRef, props.refs.floating],
+    onClose: props.handleClose,
+  });
+  // Leaving already closes it, so a press on the backdrop lands on the trigger or the gap.
+  const handleBackdropPress = closeOnPointerLeave ? undefined : props.handleClose;
+
   const overlay = (
     <OverlayLayerProvider layer={props.overlayLayer}>
       <View
@@ -1205,7 +1227,7 @@ function DesktopComboboxBody(props: DesktopBodyProps): ReactElement {
           isWeb ? { zIndex: props.overlayLayer } : null,
         ]}
       >
-        <Pressable style={styles.desktopBackdrop} onPress={props.handleClose} />
+        <Pressable ref={backdropRef} style={styles.desktopBackdrop} onPress={handleBackdropPress} />
         <FloatingSurface
           testID="combobox-desktop-container"
           entering={props.shouldUseDesktopFade ? FadeIn.duration(100) : undefined}
@@ -1304,6 +1326,8 @@ export function Combobox({
   stickyHeader,
   footer,
   keepOpenOnSelect = false,
+  onBackdropWheel,
+  closeOnPointerLeave,
   anchorRef,
   children,
 }: ComboboxProps): ReactElement | null {
@@ -1642,6 +1666,9 @@ export function Combobox({
       renderOption={renderOption}
       hasChildren={hasChildren}
       childrenScrollEnabled={desktopChildrenScrollEnabled}
+      onBackdropWheel={onBackdropWheel}
+      closeOnPointerLeave={closeOnPointerLeave}
+      anchorRef={anchorRef}
     >
       {children}
     </DesktopComboboxBody>
