@@ -47,6 +47,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid branching on `theme.colorScheme` in a `StyleSheet.create` factory, `withUnistyles` label wrappers, and one fixed tone for both schemes while Unistyles hands the web style factory a theme of CSS variables. Reason: [ADR-0022](watchtower/decisions/ADR-0022-scheme-label-tones-in-the-theme-over-color-scheme-branches.md).
 - Avoid steps made of the tool calls before a note, and a per-provider rule, while agents in use write their note before they act. Reason: [ADR-0021](watchtower/decisions/ADR-0021-note-opens-its-step-over-tools-before-the-note.md).
 - Avoid restarting TASK or Q-IDs at 001 in a new plan, and avoid per-plan or per-kind ID prefixes, while one repo has one `watchtower/` folder. Reason: [ADR-0011](watchtower/decisions/ADR-0011-repo-wide-ids-over-per-plan-ids.md).
+- Avoid a wheel that opens a pill's list, previews a value, wraps at the ends, or changes the provider from the model pill, and avoid wheel handling on the sheet surface, while the owner wants one hover tick to pick the next value. Reason: [ADR-0024](watchtower/decisions/ADR-0024-current-provider-wheel-order-over-every-provider.md).
 
 ## Learnings
 
