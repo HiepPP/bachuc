@@ -43,6 +43,7 @@ import {
   resolveAssistantImageLoadDimensions,
 } from "./load-dimensions";
 import { runAssistantImageOperationWithRetry } from "./retry";
+import { watchImageLoadDimensions } from "./watch-image-load";
 
 interface AssistantImageRenderBinding {
   uri: string;
@@ -457,6 +458,17 @@ export function useAssistantImage({
       aspectRatio: cachedMetadata?.aspectRatio ?? null,
     });
   }, [cachedMetadata, dispatch, uri]);
+
+  useEffect(() => {
+    if (!uri) {
+      return;
+    }
+    return watchImageLoadDimensions(uri, (dimensions) => {
+      const metadata = setAssistantImageMetadata({ source, workspaceRoot, serverId }, dimensions);
+      const aspectRatio = metadata?.aspectRatio ?? dimensions.width / dimensions.height;
+      dispatch({ type: "image_loaded", uri, aspectRatio });
+    });
+  }, [dispatch, serverId, source, uri, workspaceRoot]);
 
   const handleImageError = useCallback(() => {
     if (uri) {
