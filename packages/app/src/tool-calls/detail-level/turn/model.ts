@@ -20,7 +20,7 @@ export type TurnStepItem = ToolCallItem | PluginTimelineStreamItem;
 export interface TurnStep {
   id: string;
   label: TurnStepLabel;
-  /** Markdown blocks of the assistant note that ends the step; empty when it has none. */
+  /** Markdown blocks of the assistant note that opens the step; empty when it has none. */
   note: readonly AssistantMessageItem[];
   items: readonly TurnStepItem[];
   /** The edit and write rows of `items`, in order. */
@@ -52,7 +52,7 @@ interface StepDraft {
   note: AssistantMessageItem[];
   items: TurnStepItem[];
   edits: TurnStepItem[];
-  /** The step ends at its last item; a note always comes last. */
+  /** The step ends at its last item. */
   lastAt: Date;
 }
 
@@ -66,8 +66,10 @@ function messageId(item: AssistantMessageItem): string {
 }
 
 /**
- * A step is one note plus the tool calls before it. Edits without a note end at the next
- * other tool call, so they form their own Edit step. Thoughts stay hidden.
+ * A step is one note plus the tool calls after it, up to the next note, because agents write
+ * the note before they act. Tool calls before the first note form a step with no note. Edits
+ * in a step with no note end at the next other tool call, so they form their own Edit step.
+ * Thoughts stay hidden.
  */
 function draftFor(input: {
   drafts: StepDraft[];
@@ -88,9 +90,13 @@ function splitSteps(run: TurnRun): StepDraft[] {
   for (const item of run.items) {
     const current = drafts.at(-1);
     if (item.kind === "assistant_message") {
+      // Only the Markdown blocks of the same note join a step without work yet.
       const previous = current?.note.at(-1);
-      const isOtherNote = previous !== undefined && messageId(previous) !== messageId(item);
-      draftFor({ drafts, item, startsStep: !current || isOtherNote }).note.push(item);
+      const isSameNote =
+        previous !== undefined &&
+        current?.items.length === 0 &&
+        messageId(previous) === messageId(item);
+      draftFor({ drafts, item, startsStep: !isSameNote }).note.push(item);
       continue;
     }
     if (item.kind !== "tool_call" && item.kind !== "plugin") {
@@ -101,9 +107,9 @@ function splitSteps(run: TurnRun): StepDraft[] {
       continue;
     }
     const isEdit = editedFilePath(call) !== null;
-    const hasNote = current !== undefined && current.note.length > 0;
-    const endsEditOnlyStep = !isEdit && current !== undefined && current.edits.length > 0;
-    const draft = draftFor({ drafts, item, startsStep: !current || hasNote || endsEditOnlyStep });
+    const endsEditOnlyStep =
+      !isEdit && current !== undefined && current.note.length === 0 && current.edits.length > 0;
+    const draft = draftFor({ drafts, item, startsStep: !current || endsEditOnlyStep });
     draft.items.push(item);
     if (isEdit) {
       draft.edits.push(item);
@@ -136,9 +142,11 @@ export function buildTurnGroup(run: TurnRun): TurnStepGroup {
   const drafts = splitSteps(run);
   const firstEdit = drafts.findIndex((draft) => draft.edits.length > 0);
   const lastEdit = drafts.findLastIndex((draft) => draft.edits.length > 0);
-  let startedAt = run.startedAt;
+  let previousEnd = run.startedAt;
 
   const steps = drafts.map((draft, index): TurnStep => {
+    // A step starts at its note; a step with no note starts where the step before it ended.
+    const startedAt = draft.note[0]?.timestamp ?? previousEnd;
     const isRunning = !run.isSealed && index === drafts.length - 1;
     const endedAt = isRunning ? null : draft.lastAt;
     const step: TurnStep = {
@@ -153,7 +161,7 @@ export function buildTurnGroup(run: TurnRun): TurnStepGroup {
       durationMs: endedAt ? Math.max(0, endedAt.getTime() - startedAt.getTime()) : null,
       isRunning,
     };
-    startedAt = endedAt ?? startedAt;
+    previousEnd = endedAt ?? startedAt;
     return step;
   });
 

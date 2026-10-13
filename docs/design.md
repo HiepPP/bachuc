@@ -241,6 +241,8 @@ Status dots — the small filled circles next to a host or agent name — are `b
 
 Identity badges — the project icon, the sidebar host badge, and the PR-panel participant avatar — do not use the theme palette. They draw from the fixed ten-color identity table in `packages/app/src/styles/identity-colors.ts`, whose hexes are held to one contrast band so a color identifies rather than ranks. Project icons and PR avatars use it as a fill with a white letter — that is `identityColor`, one theme-independent hex per identity. Host badges use it as a _foreground_ on both the glyph and the label, which is a different contrast problem that the fill table cannot solve: no single hex clears 4.5:1 against both a near-white and a dark sidebar. Foregrounds therefore come from `identityForeground(name, colorScheme)`, one set per scheme, hue unchanged. That set is generated on the **status family's** lightness and chroma fraction, because a meta row puts a host badge beside a CI check and a diff stat, and two families at different lightness make the brighter one shout. Change the status band and this one changes with it. A host with no color assigned falls back to `foregroundMuted`. The table is theme-independent by design; do not fork it per theme, and do not add hexes to it without recomputing the band.
 
+Turn step labels are the second exception. The turn step list colors its Explore, Edit, and Verify steps with fixed oklch hues 155, 55, and 300, held in one table, `LABEL_HUES` in `packages/app/src/styles/turn-label-colors.ts`. The label text and the step number take their tone from `theme.turnLabels`, one set per scheme with the hue unchanged, and clear 4.5:1 on `surface0` and `surface2` of every built-in theme; the view test checks it. The tones live in the theme because on web a style factory sees CSS variables, not `light` or `dark` ([ADR-0022](../watchtower/decisions/ADR-0022-scheme-label-tones-in-the-theme-over-color-scheme-branches.md)). The strip segment is not text and is the same in both schemes. The same limits as the identity table apply: no other hues, no new tokens, and a hue change checks contrast in both schemes. The edit-diffs change bar uses `statusSuccess` and `statusDanger`. See [ADR-0020](../watchtower/decisions/ADR-0020-scheme-label-colors-over-palette-tokens-for-turn-steps.md).
+
 New status pills use `<StatusBadge>`. Identity, shortcut, and interactive link badges remain separate because color does not encode status there.
 
 ---
@@ -253,7 +255,7 @@ New status pills use `<StatusBadge>`. Identity, shortcut, and interactive link b
 - A muted paragraph between a section header and its card. Section-level explanation is the header's `info` tooltip (§7).
 - A "Settings" CTA on a detail page. Detail pages are settings; settings is reached from the sidebar, the host entry, or a row's kebab menu.
 - The word "checkout" in UI strings or identifiers. The term is "workspace".
-- New color tokens or hardcoded hex outside the palette. The identity color table is the documented exception (§13), not a license.
+- New color tokens or hardcoded hex outside the palette. The identity color table and the turn step label hues are the documented exceptions (§13), not a license.
 - Placeholder text dimmed beyond `foregroundMuted`. No extra opacity, no italics, no ghost-text.
 - `onPointerEnter` and `onPointerLeave`. They do not fire on native iOS. Hover uses Pressable's `onHoverIn`/`onHoverOut` gated with `isHovered || isCompact || isNative`.
 - Raw DOM APIs without an `isWeb` guard.

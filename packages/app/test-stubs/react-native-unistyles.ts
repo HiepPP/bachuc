@@ -1,7 +1,9 @@
 import { lightHighlightColors } from "@getpaseo/highlight";
+import { turnLabelTheme } from "../src/styles/turn-label-colors";
 
 const testTheme = {
   colorScheme: "light",
+  turnLabels: turnLabelTheme("light"),
   colors: {
     syntax: lightHighlightColors,
     foreground: "#111111",

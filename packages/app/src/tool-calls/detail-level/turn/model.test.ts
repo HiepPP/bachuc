@@ -116,7 +116,7 @@ describe("turn step model", () => {
     final,
   ];
 
-  it("groups a whole turn into one run of 5 steps with the answer outside it", () => {
+  it("groups a whole turn into one run of 4 steps with the answer outside it", () => {
     const { result, groups } = projectTurn(turn);
     const group = groups[0]!;
 
@@ -128,19 +128,64 @@ describe("turn step model", () => {
       ["r1", "s1"],
       ["r2"],
       [],
-      ["edit-diffs/e1", "edit-diffs/e2"],
-      ["test", "lint"],
+      ["edit-diffs/e1", "edit-diffs/e2", "test", "lint"],
     ]);
     expect(group.steps.map((step) => ids(step.note))).toEqual([
+      [],
       ["note1"],
       ["note2"],
       ["note3"],
-      [],
-      [],
     ]);
     expect(group.steps[3]?.edits).toEqual([turn[7], turn[8]]);
     expect(group.steps[0]?.counts).toMatchObject({ readFileCount: 1, commandCount: 1 });
     expect(group.steps[3]?.counts).toMatchObject({ editedFileCount: 2 });
+  });
+
+  it("opens each step with its note, so the note sits above the work it announced", () => {
+    // The live sample: Claude writes each note before it acts.
+    const group = onlyGroup([
+      user,
+      note("Step 1: reading calc.py", 1),
+      read("r1", 2),
+      shell("run1", 3),
+      note("Step 2: reading the tests", 4),
+      read("r2", 5),
+      shell("test1", 6),
+      note("Step 4: fixing add()", 7),
+      editRow("e1", 8, "/repo/calc.py"),
+      note("Step 5: fixing sub()", 9),
+      editRow("e2", 10, "/repo/calc.py"),
+      note("Step 6: running calc.py again", 11),
+      shell("run2", 12),
+      final,
+    ]);
+
+    expect(group.steps.map((step) => [ids(step.note), ids(step.items)])).toEqual([
+      [["Step 1: reading calc.py"], ["r1", "run1"]],
+      [["Step 2: reading the tests"], ["r2", "test1"]],
+      [["Step 4: fixing add()"], ["edit-diffs/e1"]],
+      [["Step 5: fixing sub()"], ["edit-diffs/e2"]],
+      [["Step 6: running calc.py again"], ["run2"]],
+    ]);
+    expect(group.steps.map((step) => step.label)).toEqual([
+      "explore",
+      "explore",
+      "edit",
+      "edit",
+      "verify",
+    ]);
+    expect(group.steps.map((step) => step.startedAt)).toEqual([at(1), at(4), at(7), at(9), at(11)]);
+    expect(group.steps.map((step) => step.endedAt)).toEqual([at(3), at(6), at(8), at(10), at(12)]);
+  });
+
+  it("gives a turn that starts with a tool call a first step with no note", () => {
+    const group = onlyGroup([user, read("r1", 1), note("n1", 2), shell("s1", 3), final]);
+
+    expect(group.steps.map((step) => [ids(step.note), ids(step.items)])).toEqual([
+      [[], ["r1"]],
+      [["n1"], ["s1"]],
+    ]);
+    expect(group.steps[0]).toMatchObject({ startedAt: at(0), endedAt: at(1) });
   });
 
   it("labels steps Explore before the first edit, Edit for edits, and Verify after", () => {
@@ -149,7 +194,6 @@ describe("turn step model", () => {
       "explore",
       "explore",
       "edit",
-      "verify",
     ]);
     const noEdit = onlyGroup([user, read("r1", 1), note("n1", 2), shell("s1", 3), final]);
     expect(noEdit.steps.map((step) => step.label)).toEqual(["explore", "explore"]);
@@ -167,8 +211,8 @@ describe("turn step model", () => {
   it("gives each step an end time and a duration from item timestamps", () => {
     const group = onlyGroup(turn);
 
-    expect(group.steps.map((step) => step.endedAt)).toEqual([at(3), at(5), at(6), at(8), at(10)]);
-    expect(group.steps.map((step) => step.durationMs)).toEqual([3000, 2000, 1000, 2000, 2000]);
+    expect(group.steps.map((step) => step.endedAt)).toEqual([at(2), at(4), at(5), at(10)]);
+    expect(group.steps.map((step) => step.durationMs)).toEqual([2000, 1000, 0, 4000]);
     expect(group.steps[0]?.startedAt).toEqual(at(0));
     expect(group.runningStep).toBeNull();
     expect(group.isLoading).toBe(false);
@@ -198,7 +242,7 @@ describe("turn step model", () => {
     const window = onlyGroup([read("r1", 2), note("n1", 3), final]);
 
     expect(groups.map((group) => group.run.startedAt)).toEqual([at(0), at(5)]);
-    expect(groups.map((group) => group.steps[0]?.durationMs)).toEqual([3000, 3000]);
+    expect(groups.map((group) => group.steps[0]?.durationMs)).toEqual([2000, 2000]);
     expect(window.run.startedAt).toEqual(at(2));
   });
 
@@ -231,7 +275,7 @@ describe("turn step model", () => {
     const again = editRow("e3", 11, "/repo/a.ts");
     const group = onlyGroup([...turn.slice(0, -1), again, final]);
 
-    expect(group.summary).toEqual({ stepCount: 5, changedFiles: ["/repo/a.ts", "/repo/b.ts"] });
+    expect(group.summary).toEqual({ stepCount: 4, changedFiles: ["/repo/a.ts", "/repo/b.ts"] });
   });
 
   it("hides thoughts and joins the Markdown blocks of one note", () => {
@@ -263,7 +307,8 @@ describe("turn step model", () => {
     expect(result.tail).toEqual([user, expect.objectContaining({ id: "thought" }), ...answer]);
     expect(group.run.items[0]).toBe(thought);
     expect(group.steps).toHaveLength(2);
-    expect(group.steps[0]).toMatchObject({ note: blocks, items: [{ id: "r1" }], startedAt: at(0) });
+    expect(group.steps[0]).toMatchObject({ note: [], items: [{ id: "r1" }], startedAt: at(0) });
+    expect(group.steps[1]).toMatchObject({ note: blocks, items: [{ id: "s1" }], startedAt: at(3) });
   });
 
   it("maps each step note message to the host row of its turn", () => {
@@ -287,11 +332,11 @@ describe("turn step model", () => {
     const group = groups[0]!;
 
     expect(result.tail).toEqual([user, expect.objectContaining({ id: "r1" }), ...answer]);
-    expect(group.steps.at(-1)?.note).toEqual([]);
+    expect(ids(group.steps.at(-1)!.note)).toEqual(["note3"]);
     expect(group.run.items).toEqual(turn.slice(1, -1));
   });
 
-  it("builds the 5-step turn through the live head and moves the answer out once it ends", () => {
+  it("builds the 4-step turn through the live head and moves the answer out once it ends", () => {
     const present = createStreamPresentation();
     const tail = turn.slice(0, -1);
     const input = { tail, head: [final], transform: undefined, level: "overview" as const };
@@ -311,18 +356,18 @@ describe("turn step model", () => {
 
     expect(running.head).toEqual([]);
     expect(notes(runningGroup)).toEqual([
+      null,
       "note1:block:0",
       "note2:block:0",
       "note3:block:0",
-      null,
       "final:block:0",
     ]);
     expect(runningGroup?.runningStep).toBe(runningGroup?.steps[4]);
     expect(ids(ended.head)).toEqual(["final:block:0"]);
-    expect(notes(ended.turnGroupsByHostId.get("r1"))?.at(-1)).toBeNull();
+    expect(notes(ended.turnGroupsByHostId.get("r1"))?.at(-1)).toBe("note3:block:0");
     expect(ended.turnGroupsByHostId.get("r1")?.runningStep).toBeNull();
     expect(ids(flushed.tail).slice(-2)).toEqual(["r1", "final:block:0"]);
-    expect(flushed.turnGroupsByHostId.get("r1")?.steps).toHaveLength(5);
+    expect(flushed.turnGroupsByHostId.get("r1")?.steps).toHaveLength(4);
   });
 
   it("regroups history when the turn ends, only in turn mode", () => {

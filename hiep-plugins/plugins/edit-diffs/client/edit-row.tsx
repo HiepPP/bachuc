@@ -34,8 +34,6 @@ const MONO = Platform.select({
 const NO_WRAP = (Platform.OS === "web" ? { whiteSpace: "pre" } : {}) as TextStyle;
 const ADD_BG = "rgba(46, 160, 67, 0.15)";
 const REMOVE_BG = "rgba(248, 81, 73, 0.1)";
-const BAR_ADD = "#3D9A4E";
-const BAR_REMOVE = "#C94A4A";
 const BAR_SQUARE = 7;
 const MAX_DIFF_HEIGHT = 480;
 const SETTLE_MS = 300;
@@ -216,9 +214,9 @@ export function EditDiffRow({ agentId, item, theme }: PluginTimelineItemProps<Ed
 
   const bar = useMemo(() => changeBar(added, removed), [added, removed]);
 
-  // The turn step gives this row its spacing, so the row adds no outer margin.
+  // The stream spacing. The host turn step list cancels these margins for its edit rows.
   return (
-    <View>
+    <View style={{ marginHorizontal: -13, marginBottom: 4 }}>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
@@ -250,7 +248,8 @@ export function EditDiffRow({ agentId, item, theme }: PluginTimelineItemProps<Ed
                   width: BAR_SQUARE,
                   height: BAR_SQUARE,
                   borderRadius: 1.5,
-                  backgroundColor: kind === "add" ? BAR_ADD : BAR_REMOVE,
+                  backgroundColor:
+                    kind === "add" ? theme.colors.statusSuccess : theme.colors.statusDanger,
                 }}
               />
             ))}
