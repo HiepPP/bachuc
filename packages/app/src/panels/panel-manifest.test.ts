@@ -13,6 +13,12 @@ describe("panel manifest", () => {
     expect(panelSupportsHost("setup", "explorer")).toBe(false);
   });
 
+  it("hosts the fleet map as a singleton in main and Explorer", () => {
+    expect(panelSupportsHost("fleet_map", "main")).toBe(true);
+    expect(panelSupportsHost("fleet_map", "explorer")).toBe(true);
+    expect(panelResourceKey({ kind: "fleet_map" })).toBe("fleet_map:fleet_map");
+  });
+
   it("keeps durable resource identity separate from transient target input", () => {
     expect(
       panelResourceKey({ kind: "working_diff", focusPath: "src/a.ts", focusRequestId: 1 }),

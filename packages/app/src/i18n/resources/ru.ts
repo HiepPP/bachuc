@@ -1903,6 +1903,12 @@ export const ru: TranslationResources = {
       emptyTitle: "PR пока нет",
       emptyDescription: "Создайте PR для этой рабочей копии, чтобы увидеть здесь сведения о нём.",
     },
+    fleetMap: {
+      label: "Карта флота",
+      subtitle: "Агенты этого хоста на карте",
+      empty: "На этом хосте пока нет агентов",
+      webglUnavailable: "Карте флота нужен WebGL, а этот вид его не поддерживает.",
+    },
     diff: {
       changesLabel: "Изменения",
       diffLabel: "Дифф",

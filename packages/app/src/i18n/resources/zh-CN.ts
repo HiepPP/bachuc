@@ -1849,6 +1849,12 @@ export const zhCN: TranslationResources = {
       emptyTitle: "尚无拉取请求",
       emptyDescription: "为此检出创建拉取请求后，可在此处查看其详情。",
     },
+    fleetMap: {
+      label: "集群地图",
+      subtitle: "以地图显示此主机上的代理",
+      empty: "此主机上还没有代理",
+      webglUnavailable: "集群地图需要 WebGL，但此视图不支持。",
+    },
     diff: {
       changesLabel: "更改",
       diffLabel: "Diff",

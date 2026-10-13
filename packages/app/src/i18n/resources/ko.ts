@@ -1880,6 +1880,12 @@ export const ko: TranslationResources = {
       emptyTitle: "아직 풀 리퀘스트가 없습니다",
       emptyDescription: "이 체크아웃에 풀 리퀘스트를 만들면 세부 정보가 여기에 표시됩니다.",
     },
+    fleetMap: {
+      label: "플릿 맵",
+      subtitle: "이 호스트의 에이전트를 지도로 표시",
+      empty: "이 호스트에 아직 에이전트가 없습니다",
+      webglUnavailable: "플릿 맵에는 WebGL이 필요하지만 이 화면에서는 지원되지 않습니다.",
+    },
     diff: {
       changesLabel: "변경 사항",
       diffLabel: "Diff",
