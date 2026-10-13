@@ -11,7 +11,7 @@
 
 | Order | TASK                                | Group | Status | Spec                                                                                                               | Deps               | Context                                        | Notes                                               |
 | ----- | ----------------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------------------------ | ------------------ | ---------------------------------------------- | --------------------------------------------------- |
-| 1     | TASK-079 Wheel step helper and hook | A     | TODO   | [watchtower/tasks/TASK-079-wheel-step-helper-and-hook.md](watchtower/tasks/TASK-079-wheel-step-helper-and-hook.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | New files only. No pill is wired yet.               |
+| 1     | TASK-079 Wheel step helper and hook | A     | DONE   | [watchtower/tasks/TASK-079-wheel-step-helper-and-hook.md](watchtower/tasks/TASK-079-wheel-step-helper-and-hook.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | auto: manual checks pending. New files only.        |
 | 2     | TASK-080 Wire the toolbar pills     | B     | TODO   | [watchtower/tasks/TASK-080-wire-toolbar-pills.md](watchtower/tasks/TASK-080-wire-toolbar-pills.md)                 | TASK-079           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Mode, thinking, provider, and select feature pills. |
 | 3     | TASK-081 Wire the model pill        | C     | TODO   | [watchtower/tasks/TASK-081-wire-model-pill.md](watchtower/tasks/TASK-081-wire-model-pill.md)                       | TASK-079           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Own group: it writes only the model selector file.  |
 | 4     | TASK-082 Document wheel select      | D     | TODO   | [watchtower/tasks/TASK-082-document-wheel-select.md](watchtower/tasks/TASK-082-document-wheel-select.md)           | TASK-080, TASK-081 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Docs only. Runs after the shape is final.           |
@@ -29,7 +29,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: implement TASK-079, then TASK-080 and TASK-081, then TASK-082.
+- Next action: implement TASK-080 and TASK-081, then TASK-082. TASK-079 is merged; wrap the hook ref with a memoized `composeViewRefs`.
 
 ## Archive
 
