@@ -152,3 +152,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: green app tests do not prove a theme-dependent style works. The vitest Unistyles stub passes a plain theme, but web passes CSS variables, so a value computed from a theme string crashed live at start.
 - Source: ADR-0022; TASK-078 outcome.
 - Use next time: after a `StyleSheet.create` change that computes from theme values, reload live and read the window before you call the TASK done.
+
+### 2026-10-13 - Plan 20261013-composer-pill-wheel-select
+
+- Learned: a composer pill ref is shared by the popover anchor, `TooltipTrigger`, and now the wheel hook. `composeViewRefs` returns a new callback per call, and `TooltipTrigger` passes a new callback ref each render, so an unmemoized composed ref detaches and reattaches on every commit.
+- Source: TASK-079 and TASK-080 outcomes; TASK-080 review.
+- Use next time: wrap `composeViewRefs` in `useMemo`, and keep the hook's node in state so the extra commit stays a no-op render.

@@ -80,6 +80,7 @@ import {
 import { ComposerControlLayoutProvider } from "@/composer/agent-controls/layout-context";
 import { ComposerToolbarGlyph } from "@/composer/agent-controls/glyph";
 import { AgentControlTrigger } from "@/composer/agent-controls/control";
+import { composeViewRefs, useWheelSelect } from "@/composer/agent-controls/use-wheel-select";
 import { CompactModelSheet } from "@/composer/agent-controls/model-sheet";
 import {
   useAgentProfileEditor,
@@ -951,12 +952,36 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
     [t],
   );
   const handleOpenFeatures = useCallback(() => handleOpenSheet("features"), [handleOpenSheet]);
+  const thinkingWheelSelect = useMemo(
+    () => ({
+      optionIds: comboboxThinkingOptions.map((option) => option.id),
+      // Match the label, which falls back to the first option while the value is unset.
+      valueId: selectedThinkingOptionId ?? comboboxThinkingOptions[0]?.id ?? null,
+      onSelect: handleThinkingSelect,
+    }),
+    [comboboxThinkingOptions, handleThinkingSelect, selectedThinkingOptionId],
+  );
+  // The provider pill is a plain ComboboxTrigger, so it calls the wheel hook itself.
+  const providerOptionIds = useMemo(
+    () => comboboxProviderOptions.map((option) => option.id),
+    [comboboxProviderOptions],
+  );
+  const providerWheelRef = useWheelSelect({
+    enabled: !disabled && canSelectProvider && openSelector !== "provider",
+    optionIds: providerOptionIds,
+    valueId: selectedProviderId ?? null,
+    onSelect: handleProviderSelect,
+  });
+  const providerTriggerRef = useMemo(
+    () => composeViewRefs(providerAnchorRef, providerWheelRef),
+    [providerAnchorRef, providerWheelRef],
+  );
   return (
     <>
       {providerOptions && providerOptions.length > 0 ? (
         <>
           <ComboboxTrigger
-            ref={providerAnchorRef}
+            ref={providerTriggerRef}
             collapsable={false}
             disabled={disabled || !canSelectProvider}
             onPress={handleProviderPress}
@@ -1032,6 +1057,7 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
                   value: displayThinking,
                 })}
                 testID="agent-thinking-selector"
+                wheelSelect={thinkingWheelSelect}
               />
             </TooltipTrigger>
             <TooltipContent side="top" align="center" offset={8}>
@@ -1324,6 +1350,14 @@ function DesktopFeatureItem({
         : [],
     [feature],
   );
+  const wheelSelect = useMemo(
+    () => ({
+      optionIds: comboboxOptions.map((option) => option.id),
+      valueId: String(feature.value),
+      onSelect: handleSelectOption,
+    }),
+    [comboboxOptions, feature.value, handleSelectOption],
+  );
 
   if (feature.type === "toggle") {
     const FeatureIcon = getAgentFeatureIcon(feature.icon);
@@ -1372,6 +1406,7 @@ function DesktopFeatureItem({
               onPress={handleSelectPress}
               accessibilityLabel={getFeatureTooltip(feature)}
               testID={`agent-feature-${feature.id}`}
+              wheelSelect={wheelSelect}
             />
           </TooltipTrigger>
           <TooltipContent side="top" align="center" offset={8}>
