@@ -222,7 +222,14 @@ export function EditDiffRow({ agentId, item, theme }: PluginTimelineItemProps<Ed
         accessibilityState={{ expanded }}
         accessibilityLabel={`${headerLabel(data)} ${data.filePath}`}
         onPress={() => setToggled(!expanded)}
-        style={{ flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start" }}
+        // A content-sized header grows to its nowrap path on web; the cap lets the path ellipsize.
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          alignSelf: "flex-start",
+          maxWidth: "100%",
+        }}
       >
         <View style={{ width: 14, alignItems: "center" }}>
           <Icon name={expanded ? "ChevronDown" : "ChevronRight"} size={14} color={muted} />
