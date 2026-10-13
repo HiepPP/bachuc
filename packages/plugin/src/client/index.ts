@@ -61,6 +61,8 @@ export type {
   PluginButtonLabelProps,
   PluginButtonMenuEntry,
   PluginButtonRegistration,
+  PluginButtonSelection,
+  PluginButtonSelectOption,
   PluginComposerPillButton,
   PluginComposerPillContribution,
   PluginHeaderButtonContribution,

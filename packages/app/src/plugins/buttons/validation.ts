@@ -57,6 +57,10 @@ function validateBehavior(
     case "popover":
       if (!isComponent(behavior.Content)) throw new Error("Plugin button popover needs Content");
       return { ...behavior };
+    case "select":
+      if (typeof behavior.useSelection !== "function")
+        throw new Error("Plugin button select needs useSelection");
+      return { ...behavior };
     case "menu": {
       const ids = new Set<string>();
       return {
@@ -68,6 +72,8 @@ function validateBehavior(
           if (item.kind === "separator") return { ...item };
           if (item.kind !== "item") throw new Error("Invalid plugin button menu entry");
           if (item.icon !== undefined) validateIcon(item.icon, validation);
+          if (item.behavior.kind === "select")
+            throw new Error("Plugin button select must be a composer pill's own behavior");
           return {
             ...item,
             title: requireText(item.title, "menu item title"),
@@ -110,6 +116,9 @@ export function validateButton(
 ): ResolvedPluginButton {
   if (button.icon !== undefined) validateIcon(button.icon, validation);
   else if (requireIcon) throw new Error("Plugin button needs icon");
+  // `requireIcon` marks a header button. It can collapse into an overflow menu, which has no list.
+  if (requireIcon && button.behavior.kind === "select")
+    throw new Error("Plugin button select must be a composer pill's own behavior");
   return {
     ...button,
     title: requireText(button.title, "title"),

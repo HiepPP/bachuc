@@ -26,6 +26,27 @@ when you have actually looked at it on a phone.
 `ContextMenu` is the exception: it defaults to `compactMode="sheet"` and enables native long press.
 Disable mobile triggering explicitly on draggable rows, where long press belongs to drag instead.
 
+A composer pill also takes the mouse on web. A mouse resting 150 ms on the pill opens its list,
+and a wheel step opens it too and applies the next option at once. The first event of a wheel
+gesture steps once at any size; inside the gesture, every 40 px is one more step, clamped at both
+ends. A list opened this way closes when the pointer leaves the pill, the list, and the gap in the
+pill's own column, so the next pill's hover takes over; a click on the pill keeps it open. A list
+opened from the keyboard ignores the pointer. Four things break it:
+
+- The open popover's backdrop covers the trigger, so pass the `useWheelSelect` handler to both the
+  trigger and `onBackdropWheel`, or every tick after the first is lost. `Combobox` and
+  `MenuSurface` both take `onBackdropWheel` and `closeOnPointerLeave`.
+- The listener must be non-passive, or `preventDefault()` does nothing and the page scrolls too.
+- Hover must check `pointerType === "mouse"`, or a tap on a touch screen opens the list twice.
+- The `sheet` surface is excluded, because a sheet scrolls.
+
+A plugin pill with the `select` behavior gets a host `Combobox`, so it steps like the effort pill.
+On a plugin menu or popover pill, each wheel step moves focus one row, and a click or Enter picks
+the row. A plugin row joins that focus walk only when it carries `dataSet={{ menuItem:
+"true" }}`, like `MenuItem`. The model pill steps only the current provider's models. The decision
+is in
+[ADR-0025](../watchtower/decisions/ADR-0025-wheel-opens-the-list-and-steps-over-closed-pill-step.md).
+
 ## When the items differ per form factor
 
 A menu whose contents depend on what else is on screen gets one component per surface, not one

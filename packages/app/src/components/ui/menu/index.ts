@@ -16,6 +16,7 @@ export {
   type MenuSurfaceProps,
 } from "./menu-surface";
 export { MenuSubTrigger } from "./menu-sub";
+export { stepMenuItemFocus } from "./menu-overlay";
 export {
   MenuHint,
   MenuItem,

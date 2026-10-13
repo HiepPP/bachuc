@@ -3,6 +3,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type ReactElement,
   type RefObject,
@@ -23,6 +24,8 @@ import { Keyframe, runOnJS } from "react-native-reanimated";
 import { StyleSheet } from "react-native-unistyles";
 import { FloatingScrollView, FloatingSurface } from "@/components/ui/floating";
 import { isWeb } from "@/constants/platform";
+import { usePointerLeaveClose } from "@/hooks/use-pointer-leave-close";
+import { useWheelListener, type WheelHandler } from "@/hooks/use-wheel-listener";
 import type { KeyboardFocusScope } from "@/keyboard/actions";
 import {
   getOverlayRoot,
@@ -52,6 +55,23 @@ const contentExiting = new Keyframe({
   0: { opacity: 1, transform: [{ scale: 1 }] },
   100: { opacity: 0, transform: [{ scale: 0.97 }] },
 }).duration(100);
+
+const MENU_ITEM_SELECTOR = '[data-menu-item="true"]:not([data-menu-disabled="true"])';
+
+/**
+ * Web only. Moves focus by `steps` rows inside the menu surface that holds focus, clamped at
+ * both ends. An open surface focuses its first row, so this works right after it opens.
+ */
+export function stepMenuItemFocus(steps: number): void {
+  if (!isWeb || typeof document === "undefined") return;
+  const active = document.activeElement;
+  const surface = active?.closest<HTMLElement>('[data-menu-surface="true"]');
+  if (!surface) return;
+  const items = Array.from(surface.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR));
+  if (items.length === 0) return;
+  const current = items.findIndex((item) => item === active);
+  items[Math.min(Math.max(current + steps, 0), items.length - 1)]?.focus();
+}
 
 function releaseFixedMenuHeight(surfaceNativeID: string): void {
   if (!isWeb) return;
@@ -238,9 +258,33 @@ export interface AnchoredSurfaceProps {
    */
   onPointerEnter?: () => void;
   onPointerLeave?: () => void;
+  /** Web only. Receives wheel events over the backdrop, which covers the trigger. */
+  onBackdropWheel?: WheelHandler | null;
+  /** Web only. While true, a pointer move outside the anchor and this surface closes it. */
+  closeOnPointerLeave?: boolean;
   testID?: string;
   keyboardFocusScope?: KeyboardFocusScope;
   children: ReactElement;
+}
+
+function useSurfacePointer(input: {
+  open: boolean;
+  anchorRef: RefObject<View | null>;
+  onClose: () => void;
+  onBackdropWheel: WheelHandler | null | undefined;
+  closeOnPointerLeave: boolean | undefined;
+}) {
+  const surfaceRef = useRef<View>(null);
+  const backdropRef = useWheelListener(input.onBackdropWheel);
+  const closeOnPointerLeave = input.closeOnPointerLeave === true;
+  usePointerLeaveClose({
+    enabled: input.open && closeOnPointerLeave,
+    refs: [input.anchorRef, surfaceRef],
+    onClose: input.onClose,
+  });
+  // Leaving already closes it, so a press on the backdrop lands on the trigger or the gap.
+  const onBackdropPress = closeOnPointerLeave ? undefined : input.onClose;
+  return { surfaceRef, backdropRef, onBackdropPress };
 }
 
 /**
@@ -267,12 +311,21 @@ export function AnchoredSurface({
   backdrop = true,
   onPointerEnter,
   onPointerLeave,
+  onBackdropWheel,
+  closeOnPointerLeave,
   testID,
   keyboardFocusScope,
   children,
 }: AnchoredSurfaceProps): ReactElement | null {
   const { t } = useTranslation();
   const surfaceNativeID = useId();
+  const { surfaceRef, backdropRef, onBackdropPress } = useSurfacePointer({
+    open,
+    anchorRef,
+    onClose,
+    onBackdropWheel,
+    closeOnPointerLeave,
+  });
   const { position, actualPlacement, contentSize, visibleContentSize, onContentLayout } =
     useAnchoredPosition({
       open,
@@ -370,16 +423,18 @@ export function AnchoredSurface({
     <>
       {backdrop ? (
         <Pressable
+          ref={backdropRef}
           {...{ onContextMenu: onClose }}
           accessibilityRole="button"
           accessibilityLabel={t("menu.backdrop")}
           style={styles.backdrop}
-          onPress={onClose}
+          onPress={onBackdropPress}
           testID={testID ? `${testID}-backdrop` : undefined}
         />
       ) : null}
       <FloatingSurface
         key={placed ? "placed" : "measuring"}
+        ref={surfaceRef}
         collapsable={false}
         tabIndex={-1}
         nativeID={surfaceNativeID}
@@ -446,11 +501,7 @@ export function MenuOverlay({
       const target = event.target instanceof Element ? event.target : null;
       const surface = target?.closest<HTMLElement>('[data-menu-surface="true"]');
       if (!surface) return false;
-      const items = Array.from(
-        surface.querySelectorAll<HTMLElement>(
-          '[data-menu-item="true"]:not([data-menu-disabled="true"])',
-        ),
-      );
+      const items = Array.from(surface.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR));
       if (items.length === 0) return false;
       const currentIndex = items.findIndex((item) => item === document.activeElement);
       let nextIndex: number | null = null;

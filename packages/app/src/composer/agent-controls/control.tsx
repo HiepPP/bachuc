@@ -1,9 +1,11 @@
-import { forwardRef, useCallback, type ComponentProps } from "react";
+import { forwardRef, useCallback, useMemo, type ComponentProps, type ForwardedRef } from "react";
 import { Text, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { useComposerControlLayout } from "@/composer/agent-controls/layout-context";
 import { ComposerToolbarGlyph } from "@/composer/agent-controls/glyph";
+import { composeViewRefs, type WheelSelect } from "@/composer/agent-controls/use-wheel-select";
+import { useWheelListener } from "@/hooks/use-wheel-listener";
 import type { AgentControlIcon } from "@/agent-controls/icons";
 
 type AgentControlTriggerProps = Omit<
@@ -20,7 +22,26 @@ type AgentControlTriggerProps = Omit<
   open?: boolean;
   onPress: () => void;
   accessibilityLabel: string;
+  /** From `useWheelSelect`. Pass its handler to the Combobox `onBackdropWheel` too. */
+  wheel?: WheelSelect;
 };
+
+function useTriggerWheelRef({
+  ref,
+  wheel,
+  disabled,
+  isSheet,
+}: {
+  ref: ForwardedRef<View>;
+  wheel: WheelSelect | undefined;
+  disabled: boolean | null;
+  isSheet: boolean;
+}): (node: View | null) => void {
+  // The sheet scrolls, so a wheel listener there would block its scroll.
+  const active = wheel !== undefined && !disabled && !isSheet;
+  const wheelRef = useWheelListener(active ? wheel.handler : null, active ? wheel.onHover : null);
+  return useMemo(() => composeViewRefs(ref, wheelRef), [ref, wheelRef]);
+}
 
 export const AgentControlTrigger = forwardRef<View, AgentControlTriggerProps>(
   function AgentControlTrigger(
@@ -37,12 +58,14 @@ export const AgentControlTrigger = forwardRef<View, AgentControlTriggerProps>(
       onPress,
       accessibilityLabel,
       testID,
+      wheel,
       ...triggerProps
     },
     ref,
   ) {
     const { glyphSize } = useComposerControlLayout();
     const isSheet = surface === "sheet";
+    const triggerRef = useTriggerWheelRef({ ref, wheel, disabled, isSheet });
     const resolvedGlyphSize = isSheet ? 16 : glyphSize;
     const resolvedIconColor = iconColor ?? styles.iconColor.color;
     const showValue = isSheet || showToolbarLabel;
@@ -60,7 +83,7 @@ export const AgentControlTrigger = forwardRef<View, AgentControlTriggerProps>(
     return (
       <ComboboxTrigger
         {...triggerProps}
-        ref={ref}
+        ref={triggerRef}
         collapsable={false}
         disabled={disabled}
         onPress={onPress}

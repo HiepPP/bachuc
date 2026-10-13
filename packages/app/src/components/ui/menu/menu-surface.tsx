@@ -29,6 +29,7 @@ import { AnchoredSurface, MenuOverlay } from "./menu-overlay";
 import { getMenuSheetBottomPadding } from "./menu-sheet-layout";
 import type { Alignment, Placement } from "./menu-anchor";
 import type { KeyboardFocusScope } from "@/keyboard/actions";
+import type { WheelHandler } from "@/hooks/use-wheel-listener";
 
 const ThemedChevronLeft = withUnistyles(ChevronLeft);
 const mutedIconMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -118,6 +119,10 @@ export interface MenuSurfaceProps {
   testID?: string;
   /** Limits ordinary app shortcuts to the time this menu owns keyboard focus. */
   keyboardFocusScope?: KeyboardFocusScope;
+  /** Web popover only. Receives wheel events over the backdrop, which covers the trigger. */
+  onBackdropWheel?: WheelHandler | null;
+  /** Web popover only. While true, a pointer move outside the trigger and root surface closes it. */
+  closeOnPointerLeave?: boolean;
 }
 
 /**
@@ -206,6 +211,8 @@ function MenuPopoverSurface({
   scrollable = false,
   testID,
   keyboardFocusScope,
+  onBackdropWheel,
+  closeOnPointerLeave,
 }: MenuSurfaceProps): ReactElement | null {
   const menu = useMenuContext("MenuSurface");
   const { value: surfaceValue, getAnchor } = useSubAnchors();
@@ -262,6 +269,8 @@ function MenuPopoverSurface({
             scrollable={scrollable}
             testID={testID}
             keyboardFocusScope={keyboardFocusScope}
+            onBackdropWheel={onBackdropWheel}
+            closeOnPointerLeave={closeOnPointerLeave}
           >
             <MenuPage depth={0}>{children}</MenuPage>
           </AnchoredSurface>

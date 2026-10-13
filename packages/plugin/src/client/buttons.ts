@@ -40,7 +40,30 @@ export type PluginButtonBehavior =
       Content: ComponentType<PluginButtonContentProps>;
       /** Drops the host padding so Content can draw its own edge-to-edge rows, like a menu. */
       flush?: boolean;
+    }
+  | {
+      /**
+       * Composer pills only. The host draws the list like its own agent controls, and on web the
+       * mouse wheel over the pill steps the value.
+       */
+      kind: "select";
+      /** A hook the host calls in each pill, with that pill's context. Keep it across updates. */
+      useSelection(props: PluginButtonLabelProps): PluginButtonSelection;
     };
+
+export interface PluginButtonSelectOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+/** One composer's single choice. */
+export interface PluginButtonSelection {
+  options: readonly PluginButtonSelectOption[];
+  /** Null while the value loads. The host disables the pill until it is set. */
+  value: string | null;
+  select(id: string): void;
+}
 
 export type PluginButtonMenuEntry =
   | { kind: "separator"; id: string }

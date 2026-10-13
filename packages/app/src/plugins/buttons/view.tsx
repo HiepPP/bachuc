@@ -7,7 +7,7 @@ import type {
   PluginHostProps,
 } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { useCallback, useId, useMemo, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useId, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { AlertCircle, ChevronDown, MoreHorizontal } from "lucide-react-native";
@@ -19,6 +19,7 @@ import {
   MenuItem,
   MenuSeparator,
   MenuSubTrigger,
+  stepMenuItemFocus,
   useMenuContext,
   type MenuPageDefinition,
 } from "@/components/ui/menu";
@@ -29,7 +30,19 @@ import {
   iconButtonChromeStyle,
   type IconButtonChromeState,
 } from "@/components/ui/icon-button-chrome";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { useComposerPillStyles } from "@/composer/pill-styles";
+import {
+  INITIAL_WHEEL_STEP_STATE,
+  resolveWheelSteps,
+} from "@/composer/agent-controls/wheel-select";
+import {
+  composeViewRefs,
+  usePointerOpen,
+  useWheelSelect,
+  type WheelSelect,
+} from "@/composer/agent-controls/use-wheel-select";
+import { useWheelListener, type WheelEventLike } from "@/hooks/use-wheel-listener";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { ToastApiProvider, useToast } from "@/contexts/toast-context";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
@@ -311,19 +324,49 @@ function resolveLabelStyle(composer: boolean, toolbar: boolean) {
   return composer ? styles.composerLabel : styles.label;
 }
 
-function ButtonControl({ view }: { view: ButtonView }) {
-  const { entry, props } = view;
-  const { button } = entry;
-  const composer = entry.placement === "composer";
-  const toolbar = buttonInToolbar(entry, props.layout.compact);
-  const corner = buttonSlot(entry, props.layout.compact) === "corner";
-  const color = pillColor(view);
-  const disabled = button.disabled || entry.pending;
-  const expanded = button.behavior.kind !== "action";
-  const chevron = (toolbar || !composer) && !props.layout.compact && expanded;
-  const label = resolveLabel(view, composer);
-  const press = useCallback(() => pressButton(view, []), [view]);
-  const composerPillStyles = useComposerPillStyles();
+/**
+ * A hover or a wheel step over a closed menu or popover pill opens it. While it is open, each
+ * step moves focus by its row count, and a click or Enter picks the row. The plugin owns the
+ * rows, so the host cannot step a value here; a single choice uses the `select` behavior instead.
+ */
+function useMenuWheel({
+  enabled,
+  open,
+  setOpen,
+}: {
+  enabled: boolean;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}): WheelSelect {
+  const stepStateRef = useRef(INITIAL_WHEEL_STEP_STATE);
+  const openRef = useRef(open);
+  openRef.current = open;
+  const openMenu = useCallback(() => setOpen(true), [setOpen]);
+  const { openedByPointer, openByPointer, onHover } = usePointerOpen(open, openMenu);
+  const handleWheel = useCallback(
+    (event: WheelEventLike) => {
+      event.preventDefault();
+      const result = resolveWheelSteps({
+        state: stepStateRef.current,
+        deltaY: event.deltaY,
+        now: event.timeStamp,
+      });
+      stepStateRef.current = result.state;
+      if (result.steps === 0) return;
+      if (openRef.current) stepMenuItemFocus(result.steps);
+      else openByPointer();
+    },
+    [openByPointer],
+  );
+  return {
+    handler: enabled ? handleWheel : null,
+    onHover: enabled ? onHover : null,
+    openedByPointer,
+  };
+}
+
+function useButtonOpen(view: ButtonView): { open: boolean; setOpen: (open: boolean) => void } {
+  const { entry } = view;
   let contextKey: string | undefined;
   if (entry.context.context === "agent") contextKey = entry.context.agentId;
   if (entry.context.context === "draft") contextKey = entry.context.draft.id;
@@ -335,6 +378,22 @@ function ButtonControl({ view }: { view: ButtonView }) {
     (next: boolean) => pluginButtonStore.setOpen(entry.key, next, contextKey, owner),
     [contextKey, entry.key, owner],
   );
+  return { open, setOpen };
+}
+
+/** The trigger look shared by every button behavior. */
+function useButtonChrome(view: ButtonView, open: boolean) {
+  const { entry, props } = view;
+  const { button } = entry;
+  const composer = entry.placement === "composer";
+  const toolbar = buttonInToolbar(entry, props.layout.compact);
+  const corner = buttonSlot(entry, props.layout.compact) === "corner";
+  const color = pillColor(view);
+  const disabled = button.disabled || entry.pending;
+  const expanded = button.behavior.kind !== "action";
+  const chevron = (toolbar || !composer) && !props.layout.compact && expanded;
+  const label = resolveLabel(view, composer);
+  const composerPillStyles = useComposerPillStyles();
   const buttonStyle = useCallback(
     ({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) =>
       composer
@@ -378,26 +437,42 @@ function ButtonControl({ view }: { view: ButtonView }) {
     () => ({ busy: entry.pending, disabled }),
     [entry.pending, disabled],
   );
+  return { composer, expanded, disabled, buttonStyle, contents, accessibilityState };
+}
+
+function ButtonControl({ view }: { view: ButtonView }) {
+  const { button } = view.entry;
+  const { open, setOpen } = useButtonOpen(view);
+  const chrome = useButtonChrome(view, open);
+  const { composer, expanded, disabled } = chrome;
+  const press = useCallback(() => pressButton(view, []), [view]);
+  const wheel = useMenuWheel({
+    enabled: composer && expanded && !disabled && !view.props.layout.compact,
+    open,
+    setOpen,
+  });
+  const wheelRef = useWheelListener(wheel.handler, wheel.onHover);
   const trigger = expanded ? (
     <MenuTrigger
+      ref={wheelRef}
       accessibilityRole="button"
       accessibilityLabel={button.title}
-      accessibilityState={accessibilityState}
+      accessibilityState={chrome.accessibilityState}
       disabled={disabled}
-      style={buttonStyle}
+      style={chrome.buttonStyle}
     >
-      {contents}
+      {chrome.contents}
     </MenuTrigger>
   ) : (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={button.title}
-      accessibilityState={accessibilityState}
+      accessibilityState={chrome.accessibilityState}
       disabled={disabled}
       onPress={press}
-      style={buttonStyle}
+      style={chrome.buttonStyle}
     >
-      {contents}
+      {chrome.contents}
     </Pressable>
   );
   const pages = useMemo(() => buttonPages(view, button.behavior), [view, button.behavior]);
@@ -420,12 +495,87 @@ function ButtonControl({ view }: { view: ButtonView }) {
           maxHeight={440}
           scrollable
           pages={pages}
+          onBackdropWheel={wheel.handler}
+          closeOnPointerLeave={wheel.openedByPointer}
         >
           <ButtonSurfaceBody view={view} behavior={button.behavior} path={ROOT_PATH} />
         </MenuSurface>
       ) : null}
     </MenuRoot>
   );
+}
+
+type SelectBehavior = Extract<PluginButtonBehavior, { kind: "select" }>;
+
+/** A single-choice pill. The host draws the list like its agent controls, so the wheel steps it. */
+function SelectButtonControl({ view, behavior }: { view: ButtonView; behavior: SelectBehavior }) {
+  const { button } = view.entry;
+  const selection = behavior.useSelection(view.props);
+  const { open, setOpen } = useButtonOpen(view);
+  const chrome = useButtonChrome(view, open);
+  const loading = selection.value === null;
+  const options = useMemo<ComboboxOption[]>(
+    () => selection.options.map(({ id, label, description }) => ({ id, label, description })),
+    [selection.options],
+  );
+  const optionIds = useMemo(
+    () => selection.options.map((option) => option.id),
+    [selection.options],
+  );
+  const wheel = useWheelSelect({
+    enabled: !chrome.disabled && !loading && !view.props.layout.compact,
+    optionIds,
+    valueId: selection.value,
+    onSelect: selection.select,
+    open,
+    onOpen: () => setOpen(true),
+  });
+  const anchorRef = useRef<View>(null);
+  const wheelRef = useWheelListener(wheel.handler, wheel.onHover);
+  const triggerRef = useMemo(() => composeViewRefs(anchorRef, wheelRef), [wheelRef]);
+  const press = useCallback(() => setOpen(!open), [open, setOpen]);
+  return (
+    <>
+      <Tooltip enabledOnMobile={false}>
+        <TooltipTrigger asChild>
+          <Pressable
+            ref={triggerRef}
+            accessibilityRole="button"
+            accessibilityLabel={button.title}
+            accessibilityState={chrome.accessibilityState}
+            disabled={chrome.disabled || loading}
+            onPress={press}
+            style={chrome.buttonStyle}
+          >
+            {chrome.contents}
+          </Pressable>
+        </TooltipTrigger>
+        <TooltipContent>
+          <Text style={styles.tooltipLabel}>{button.title}</Text>
+        </TooltipContent>
+      </Tooltip>
+      <Combobox
+        options={options}
+        value={selection.value ?? ""}
+        onSelect={selection.select}
+        searchable={false}
+        title={button.title}
+        open={open}
+        onOpenChange={setOpen}
+        anchorRef={anchorRef}
+        desktopPlacement="top-start"
+        desktopMinWidth={200}
+        onBackdropWheel={wheel.handler}
+        closeOnPointerLeave={wheel.openedByPointer}
+      />
+    </>
+  );
+}
+
+function ButtonControlForBehavior({ view }: { view: ButtonView }) {
+  const { behavior } = view.entry.button;
+  if (behavior.kind === "select") return <SelectButtonControl view={view} behavior={behavior} />;
+  return <ButtonControl view={view} />;
 }
 
 function BrokenButton({
@@ -513,7 +663,7 @@ function PluginButtonHost({
       renderError={renderError}
     >
       <ButtonEnvironment view={view}>
-        <ButtonControl view={view} />
+        <ButtonControlForBehavior view={view} />
       </ButtonEnvironment>
     </SurfaceErrorBoundary>
   );

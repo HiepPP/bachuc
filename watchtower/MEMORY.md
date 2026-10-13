@@ -47,6 +47,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid branching on `theme.colorScheme` in a `StyleSheet.create` factory, `withUnistyles` label wrappers, and one fixed tone for both schemes while Unistyles hands the web style factory a theme of CSS variables. Reason: [ADR-0022](watchtower/decisions/ADR-0022-scheme-label-tones-in-the-theme-over-color-scheme-branches.md).
 - Avoid steps made of the tool calls before a note, and a per-provider rule, while agents in use write their note before they act. Reason: [ADR-0021](watchtower/decisions/ADR-0021-note-opens-its-step-over-tools-before-the-note.md).
 - Avoid restarting TASK or Q-IDs at 001 in a new plan, and avoid per-plan or per-kind ID prefixes, while one repo has one `watchtower/` folder. Reason: [ADR-0011](watchtower/decisions/ADR-0011-repo-wide-ids-over-per-plan-ids.md).
+- Avoid a pill wheel with a step cooldown, a wheel that steps a pill with its list closed, wraps at the ends, or changes the provider from the model pill, and avoid wheel handling on the sheet surface, while the owner wants hover to open a pill's list, one notch per step, and the list closed when the pointer leaves the pill. Reason: [ADR-0025](watchtower/decisions/ADR-0025-wheel-opens-the-list-and-steps-over-closed-pill-step.md).
 
 ## Learnings
 
@@ -151,3 +152,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: green app tests do not prove a theme-dependent style works. The vitest Unistyles stub passes a plain theme, but web passes CSS variables, so a value computed from a theme string crashed live at start.
 - Source: ADR-0022; TASK-078 outcome.
 - Use next time: after a `StyleSheet.create` change that computes from theme values, reload live and read the window before you call the TASK done.
+
+### 2026-10-13 - Plan 20261013-composer-pill-wheel-select
+
+- Learned: a composer pill ref is shared by the popover anchor, `TooltipTrigger`, and now the wheel hook. `composeViewRefs` returns a new callback per call, and `TooltipTrigger` passes a new callback ref each render, so an unmemoized composed ref detaches and reattaches on every commit.
+- Source: TASK-079 and TASK-080 outcomes; TASK-080 review.
+- Use next time: wrap `composeViewRefs` in `useMemo`, and keep the hook's node in state so the extra commit stays a no-op render.
+- Learned: two plan specs named the wrong render path. The desktop provider pill is a raw `ComboboxTrigger`, not an `AgentControlTrigger`, and the composer model pill takes the `ComboboxTrigger` branch of `CombinedModelSelector` with a `toolbar` prop, not `renderTrigger`.
+- Source: TASK-080 and TASK-081 outcomes; Q-030, Q-033.
+- Use next time: when a spec wires a shared component, list each caller and the branch it renders before you name the path.

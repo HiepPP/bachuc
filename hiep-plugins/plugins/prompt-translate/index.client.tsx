@@ -5,7 +5,7 @@ import { rewritesOnSendKey, translateSettings } from "./shared/settings";
 import { hasVietnamese } from "./shared/vietnamese";
 import { createNoteCache } from "./client/notes";
 import { createNoteView, noteSchema } from "./client/note-view";
-import { CavemanModeMenu, PromptPillLabel } from "./client/prompt-pill";
+import { PromptPillLabel, useCavemanSelection } from "./client/prompt-pill";
 import { TranslateSettingsScreen } from "./client/settings";
 import { current } from "./client/state";
 
@@ -58,7 +58,7 @@ export default function contribute(client: PluginClientContext) {
     button: {
       title: "Caveman mode",
       label: PromptPillLabel,
-      behavior: { kind: "popover", Content: CavemanModeMenu, flush: true },
+      behavior: { kind: "select", useSelection: useCavemanSelection },
     },
   });
   const settings = client.addSettingsScreen({

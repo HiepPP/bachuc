@@ -80,6 +80,8 @@ import {
 import { ComposerControlLayoutProvider } from "@/composer/agent-controls/layout-context";
 import { ComposerToolbarGlyph } from "@/composer/agent-controls/glyph";
 import { AgentControlTrigger } from "@/composer/agent-controls/control";
+import { composeViewRefs, useWheelSelect } from "@/composer/agent-controls/use-wheel-select";
+import { useWheelListener } from "@/hooks/use-wheel-listener";
 import { CompactModelSheet } from "@/composer/agent-controls/model-sheet";
 import {
   useAgentProfileEditor,
@@ -888,6 +890,56 @@ interface DesktopAgentControlsContentProps {
 
 const DESKTOP_SEARCH_THRESHOLD = 6;
 
+function useDesktopControlWheels(input: {
+  disabled: boolean;
+  canSelectProvider: boolean;
+  canSelectThinking: boolean;
+  openSelector: AgentControlSelector | null;
+  handleProviderOpenChange: (open: boolean) => void;
+  handleThinkingOpenChange: (open: boolean) => void;
+  providerAnchorRef: RefObject<View | null>;
+  comboboxProviderOptions: ComboboxOption[];
+  selectedProviderId: string | null | undefined;
+  handleProviderSelect: (id: string) => void;
+  comboboxThinkingOptions: ComboboxOption[];
+  selectedThinkingOptionId: string | null | undefined;
+  handleThinkingSelect: (id: string) => void;
+}) {
+  const { comboboxProviderOptions, comboboxThinkingOptions, providerAnchorRef } = input;
+  const providerOptionIds = useMemo(
+    () => comboboxProviderOptions.map((option) => option.id),
+    [comboboxProviderOptions],
+  );
+  const thinkingOptionIds = useMemo(
+    () => comboboxThinkingOptions.map((option) => option.id),
+    [comboboxThinkingOptions],
+  );
+  const providerWheel = useWheelSelect({
+    enabled: !input.disabled && input.canSelectProvider,
+    optionIds: providerOptionIds,
+    valueId: input.selectedProviderId,
+    onSelect: input.handleProviderSelect,
+    open: input.openSelector === "provider",
+    onOpen: () => input.handleProviderOpenChange(true),
+  });
+  const thinkingWheel = useWheelSelect({
+    enabled: !input.disabled && input.canSelectThinking,
+    optionIds: thinkingOptionIds,
+    // Match the label, which falls back to the first option while the value is unset.
+    valueId: input.selectedThinkingOptionId ?? thinkingOptionIds[0],
+    onSelect: input.handleThinkingSelect,
+    open: input.openSelector === "thinking",
+    onOpen: () => input.handleThinkingOpenChange(true),
+  });
+  // The provider pill is a plain ComboboxTrigger, so it attaches the wheel listener itself.
+  const providerWheelRef = useWheelListener(providerWheel.handler, providerWheel.onHover);
+  const providerTriggerRef = useMemo(
+    () => composeViewRefs(providerAnchorRef, providerWheelRef),
+    [providerAnchorRef, providerWheelRef],
+  );
+  return { providerWheel, thinkingWheel, providerTriggerRef };
+}
+
 function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -951,12 +1003,27 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
     [t],
   );
   const handleOpenFeatures = useCallback(() => handleOpenSheet("features"), [handleOpenSheet]);
+  const { thinkingWheel, providerWheel, providerTriggerRef } = useDesktopControlWheels({
+    disabled,
+    canSelectProvider,
+    canSelectThinking,
+    openSelector,
+    handleProviderOpenChange,
+    handleThinkingOpenChange,
+    providerAnchorRef,
+    comboboxProviderOptions,
+    selectedProviderId,
+    handleProviderSelect,
+    comboboxThinkingOptions,
+    selectedThinkingOptionId,
+    handleThinkingSelect,
+  });
   return (
     <>
       {providerOptions && providerOptions.length > 0 ? (
         <>
           <ComboboxTrigger
-            ref={providerAnchorRef}
+            ref={providerTriggerRef}
             collapsable={false}
             disabled={disabled || !canSelectProvider}
             onPress={handleProviderPress}
@@ -976,6 +1043,8 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
             onOpenChange={handleProviderOpenChange}
             anchorRef={providerAnchorRef}
             desktopPlacement="top-start"
+            onBackdropWheel={providerWheel.handler}
+            closeOnPointerLeave={providerWheel.openedByPointer}
           />
         </>
       ) : null}
@@ -1032,6 +1101,7 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
                   value: displayThinking,
                 })}
                 testID="agent-thinking-selector"
+                wheel={thinkingWheel}
               />
             </TooltipTrigger>
             <TooltipContent side="top" align="center" offset={8}>
@@ -1049,6 +1119,8 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
             desktopPlacement="top-start"
             desktopMinWidth={200}
             renderOption={renderThinkingOption}
+            onBackdropWheel={thinkingWheel.handler}
+            closeOnPointerLeave={thinkingWheel.openedByPointer}
           />
         </>
       ) : null}
@@ -1324,6 +1396,16 @@ function DesktopFeatureItem({
         : [],
     [feature],
   );
+  const optionIds = useMemo(() => comboboxOptions.map((option) => option.id), [comboboxOptions]);
+  // A toggle feature has no options, so the hook returns null for it.
+  const wheel = useWheelSelect({
+    enabled: !disabled,
+    optionIds,
+    valueId: String(feature.value),
+    onSelect: handleSelectOption,
+    open: openSelector === featureSelector,
+    onOpen: () => handleFeatureOpenChange(true),
+  });
 
   if (feature.type === "toggle") {
     const FeatureIcon = getAgentFeatureIcon(feature.icon);
@@ -1372,6 +1454,7 @@ function DesktopFeatureItem({
               onPress={handleSelectPress}
               accessibilityLabel={getFeatureTooltip(feature)}
               testID={`agent-feature-${feature.id}`}
+              wheel={wheel}
             />
           </TooltipTrigger>
           <TooltipContent side="top" align="center" offset={8}>
@@ -1386,6 +1469,8 @@ function DesktopFeatureItem({
           onOpenChange={handleFeatureOpenChange}
           anchorRef={featureAnchorRef}
           desktopPlacement="top-start"
+          onBackdropWheel={wheel.handler}
+          closeOnPointerLeave={wheel.openedByPointer}
         />
       </>
     );

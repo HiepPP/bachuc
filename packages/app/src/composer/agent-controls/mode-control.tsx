@@ -17,6 +17,7 @@ import { resolveNextAgentModeId } from "@/composer/agent-controls/mode";
 import { useComposerKeyboardScope } from "@/composer/keyboard-scope";
 import { useComposerControlLayout } from "@/composer/agent-controls/layout-context";
 import { AgentControlTrigger } from "@/composer/agent-controls/control";
+import { useWheelSelect } from "@/composer/agent-controls/use-wheel-select";
 import { useSessionStore } from "@/stores/session-store";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { mergeProviderPreferences, useFormPreferences } from "@/hooks/use-form-preferences";
@@ -109,6 +110,7 @@ export function AgentModeControl({
     () => modeOptions.map((m) => ({ id: m.id, label: formatAgentModeLabel(m) })),
     [modeOptions],
   );
+  const modeIds = useMemo(() => modeOptions.map((m) => m.id), [modeOptions]);
   const options = useMemo<ComboboxOption[]>(() => {
     const q = normalizeSearchQuery(searchQuery);
     if (!q) return allOptions;
@@ -129,6 +131,14 @@ export function AgentModeControl({
   );
 
   const handlePress = useCallback(() => handleOpenChange(!open), [handleOpenChange, open]);
+  const wheel = useWheelSelect({
+    enabled: surface === "toolbar" && !disabled,
+    optionIds: modeIds,
+    valueId: selectedMode?.id ?? null,
+    onSelect: onSelectMode,
+    open,
+    onOpen: () => handleOpenChange(true),
+  });
   const handleSelect = useCallback(
     (id: string) => {
       onSelectMode(id);
@@ -211,6 +221,7 @@ export function AgentModeControl({
               value: selectedModeLabel,
             })}
             testID="mode-control"
+            wheel={wheel}
           />
         </TooltipTrigger>
         <TooltipContent side="top" align="center" offset={8}>
@@ -231,6 +242,8 @@ export function AgentModeControl({
         desktopMinWidth={260}
         header={sheetHeader}
         renderOption={renderOption}
+        onBackdropWheel={wheel.handler}
+        closeOnPointerLeave={wheel.openedByPointer}
       />
     </>
   );

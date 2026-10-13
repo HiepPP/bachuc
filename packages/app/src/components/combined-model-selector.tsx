@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Ref, type RefObject } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -11,7 +11,17 @@ import { ModelBrowser, ModelProviderGlyph, useModelBrowser } from "@/components/
 import { resolveModelBrowserScrolling } from "@/components/model-browser-view";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative, isWeb } from "@/constants/platform";
-import type { ProviderSelectorProvider } from "@/provider-selection/provider-selection";
+import {
+  composeViewRefs,
+  useWheelSelect,
+  type WheelSelect,
+} from "@/composer/agent-controls/use-wheel-select";
+import { useWheelListener } from "@/hooks/use-wheel-listener";
+import {
+  getProviderModelRows,
+  type ProviderSelectionModelRow,
+  type ProviderSelectorProvider,
+} from "@/provider-selection/provider-selection";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 
 const EMPTY_COMBOBOX_OPTIONS: ComboboxOption[] = [];
@@ -22,6 +32,119 @@ const foregroundMutedMapping = (theme: Theme) => ({
 });
 
 function noop() {}
+
+function getCurrentProviderRows(
+  providers: ProviderSelectorProvider[],
+  selectedProvider: string,
+): ProviderSelectionModelRow[] {
+  const providerId = selectedProvider.trim();
+  const provider = providers.find((entry) => entry.id === providerId);
+  return provider ? getProviderModelRows(provider) : [];
+}
+
+/** Wheel options for the model pill: the current provider's row keys, in row order (Q-028). */
+export function resolveCurrentProviderModelKeys(
+  providers: ProviderSelectorProvider[],
+  selectedProvider: string,
+): string[] {
+  return getCurrentProviderRows(providers, selectedProvider).map((row) => row.favoriteKey);
+}
+
+/**
+ * The row key of the model the pill label shows. Mirrors the fallback of
+ * resolveSelectedModelLabel: an unset model resolves to the default row, then the first row.
+ * A model id that is not in the list returns null, as the label shows the raw id.
+ */
+export function resolveCurrentProviderModelKey(input: {
+  providers: ProviderSelectorProvider[];
+  selectedProvider: string;
+  selectedModel: string;
+}): string | null {
+  const rows = getCurrentProviderRows(input.providers, input.selectedProvider);
+  const match = rows.find((row) => row.modelId === input.selectedModel);
+  if (match) return match.favoriteKey;
+  if (input.selectedModel.trim()) return null;
+  return (rows.find((row) => row.isDefault) ?? rows[0])?.favoriteKey ?? null;
+}
+
+/**
+ * A null valueId is an off-list model id (for example a model no longer in the catalog).
+ * The wheel ignores it, so one stray tick cannot replace it; only the popover leaves it.
+ */
+export function isModelWheelEnabled(input: {
+  isComposerToolbar: boolean;
+  disabled: boolean;
+  isLoading: boolean;
+  count: number;
+  valueId: string | null;
+}): boolean {
+  return (
+    input.isComposerToolbar &&
+    !input.disabled &&
+    !input.isLoading &&
+    input.count >= 2 &&
+    input.valueId !== null
+  );
+}
+
+export function splitModelRowKey(key: string): { provider: string; modelId: string } | null {
+  const separator = key.indexOf(":");
+  if (separator <= 0) return null;
+  return { provider: key.slice(0, separator), modelId: key.slice(separator + 1) };
+}
+
+/**
+ * The wheel handler and trigger ref for the ComboboxTrigger branch. Wheel stepping is
+ * composer-only: only the composer passes `toolbar` (Q-033), so every other caller keeps the
+ * plain anchor ref and gets a null handler.
+ */
+function useModelWheel(input: {
+  anchorRef: RefObject<View | null>;
+  isComposerToolbar: boolean;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  disabled: boolean;
+  isLoading: boolean;
+  providers: ProviderSelectorProvider[];
+  selectedProvider: string;
+  selectedModel: string;
+  onSelect: (provider: AgentProvider, modelId: string) => void;
+}): { triggerRef: Ref<View>; wheel: WheelSelect } {
+  const { anchorRef, isComposerToolbar, providers, selectedProvider, selectedModel, onSelect } =
+    input;
+  const optionIds = useMemo(
+    () => resolveCurrentProviderModelKeys(providers, selectedProvider),
+    [providers, selectedProvider],
+  );
+  const valueId = useMemo(
+    () => resolveCurrentProviderModelKey({ providers, selectedProvider, selectedModel }),
+    [providers, selectedModel, selectedProvider],
+  );
+  const handleWheelSelect = useCallback(
+    (key: string) => {
+      const parsed = splitModelRowKey(key);
+      if (parsed) onSelect(parsed.provider, parsed.modelId);
+    },
+    [onSelect],
+  );
+  const wheel = useWheelSelect({
+    enabled: isModelWheelEnabled({
+      isComposerToolbar,
+      disabled: input.disabled,
+      isLoading: input.isLoading,
+      count: optionIds.length,
+      valueId,
+    }),
+    optionIds,
+    valueId,
+    onSelect: handleWheelSelect,
+    open: input.isOpen,
+    onOpen: () => input.onOpenChange(true),
+  });
+  const wheelRef = useWheelListener(wheel.handler, wheel.onHover);
+  const composedRef = useMemo(() => composeViewRefs(anchorRef, wheelRef), [anchorRef, wheelRef]);
+  return { triggerRef: isComposerToolbar ? composedRef : anchorRef, wheel };
+}
 
 interface CombinedModelSelectorProps {
   providers: ProviderSelectorProvider[];
@@ -117,6 +240,18 @@ export function CombinedModelSelector({
     },
     [onClose, onOpen, prepareToOpen, reset],
   );
+  const { triggerRef: comboboxTriggerRef, wheel } = useModelWheel({
+    anchorRef,
+    isComposerToolbar: toolbar !== undefined,
+    isOpen,
+    onOpenChange: handleOpenChange,
+    disabled,
+    isLoading,
+    providers,
+    selectedProvider,
+    selectedModel,
+    onSelect,
+  });
 
   const handleSelect = useCallback(
     (provider: string, modelId: string) => {
@@ -239,7 +374,7 @@ export function CombinedModelSelector({
         </Pressable>
       ) : (
         <ComboboxTrigger
-          ref={anchorRef}
+          ref={comboboxTriggerRef}
           collapsable={false}
           disabled={disabled}
           onPress={handleTriggerPress}
@@ -278,6 +413,8 @@ export function CombinedModelSelector({
         anchorRef={anchorRef}
         desktopPlacement={desktopPlacement}
         desktopMinWidth={desktopMinWidth}
+        onBackdropWheel={wheel.handler}
+        closeOnPointerLeave={wheel.openedByPointer}
         desktopLockWidth
         desktopFixedHeight={browser.desktopFixedHeight}
         desktopChildrenScrollEnabled={false}
