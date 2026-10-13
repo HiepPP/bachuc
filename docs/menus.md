@@ -26,6 +26,18 @@ when you have actually looked at it on a phone.
 `ContextMenu` is the exception: it defaults to `compactMode="sheet"` and enables native long press.
 Disable mobile triggering explicitly on draggable rows, where long press belongs to drag instead.
 
+A composer pill (`AgentControlTrigger`, `wheelSelect`) also takes the mouse wheel on web. Over a
+closed pill, one wheel tick steps the value by one option, applies at once, and clamps at both
+ends. Three things break it:
+
+- The listener must be non-passive, or `preventDefault()` does nothing and the page scrolls too.
+- The `sheet` surface is excluded, because a sheet scrolls. A disabled or open pill ignores the wheel.
+- The wheel needs no hover state, because the event only fires over the node.
+
+The model pill steps only the current provider's models and never changes the provider. The
+decision and the rejected options are in
+[ADR-0024](../watchtower/decisions/ADR-0024-current-provider-wheel-order-over-every-provider.md).
+
 ## When the items differ per form factor
 
 A menu whose contents depend on what else is on screen gets one component per surface, not one
