@@ -109,6 +109,14 @@ export function AgentModeControl({
     () => modeOptions.map((m) => ({ id: m.id, label: formatAgentModeLabel(m) })),
     [modeOptions],
   );
+  const wheelSelect = useMemo(
+    () => ({
+      optionIds: modeOptions.map((m) => m.id),
+      valueId: selectedMode?.id ?? null,
+      onSelect: onSelectMode,
+    }),
+    [modeOptions, onSelectMode, selectedMode?.id],
+  );
   const options = useMemo<ComboboxOption[]>(() => {
     const q = normalizeSearchQuery(searchQuery);
     if (!q) return allOptions;
@@ -211,6 +219,7 @@ export function AgentModeControl({
               value: selectedModeLabel,
             })}
             testID="mode-control"
+            wheelSelect={wheelSelect}
           />
         </TooltipTrigger>
         <TooltipContent side="top" align="center" offset={8}>
