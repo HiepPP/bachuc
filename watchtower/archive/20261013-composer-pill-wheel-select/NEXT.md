@@ -4,7 +4,7 @@
 
 - Title: Mouse wheel selects a value on composer pills
 - Slug: 20261013-composer-pill-wheel-select
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-13
 
 ## Tracker
@@ -33,4 +33,4 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Archive
 
-- None.
+- Archived: 2026-10-13 -> watchtower/archive/20261013-composer-pill-wheel-select/
