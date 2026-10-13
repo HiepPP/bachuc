@@ -158,3 +158,6 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: a composer pill ref is shared by the popover anchor, `TooltipTrigger`, and now the wheel hook. `composeViewRefs` returns a new callback per call, and `TooltipTrigger` passes a new callback ref each render, so an unmemoized composed ref detaches and reattaches on every commit.
 - Source: TASK-079 and TASK-080 outcomes; TASK-080 review.
 - Use next time: wrap `composeViewRefs` in `useMemo`, and keep the hook's node in state so the extra commit stays a no-op render.
+- Learned: two plan specs named the wrong render path. The desktop provider pill is a raw `ComboboxTrigger`, not an `AgentControlTrigger`, and the composer model pill takes the `ComboboxTrigger` branch of `CombinedModelSelector` with a `toolbar` prop, not `renderTrigger`.
+- Source: TASK-080 and TASK-081 outcomes; Q-030, Q-033.
+- Use next time: when a spec wires a shared component, list each caller and the branch it renders before you name the path.
