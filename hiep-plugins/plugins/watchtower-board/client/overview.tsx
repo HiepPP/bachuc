@@ -6,6 +6,7 @@ import { Pressable, Text, View } from "react-native";
 import { readBoardRpc } from "../shared/board";
 import { readOverviewRpc } from "../shared/overview";
 import { useAgentSender } from "./agent-target";
+import { matchBuilders } from "./builders";
 import { dashboardSummary } from "./dashboard";
 import { type DecisionTarget, DecisionModal } from "./decision-modal";
 import { lifecyclePhases, needsYou } from "./lifecycle";
@@ -15,18 +16,21 @@ import {
   DecisionsCell,
   LifecycleStepper,
   ManualChecksCell,
+  MONO,
   OverviewCell,
+  type ThemeProps,
 } from "./overview-cells";
 import { AutorunLogCard, ProgressCard, TasksCard, WaitingCard } from "./board-rail";
-import { AutorunStrip, RunningNowCell, UpNextCell } from "./run-cells";
+import { buildPlanTree, type PlanTree as PlanTreeModel } from "./plan-tree";
+import { commitShas, PlanTree } from "./plan-tree-view";
+import { AutorunStrip, clockAt } from "./run-cells";
+import { useRunAgents } from "./run-agents";
 import { buildTimeline } from "./timeline";
-import { clockAt } from "./timeline-geometry";
-import { BranchTimeline, TimelineStrip } from "./timeline-view";
 
 // From STACK up, the page has a fixed left rail with the former Explorer board (progress, Waiting on
-// the owner, tasks, and the Autorun log) and the timeline-first view on the right. Below STACK
-// everything stacks in one scroll. The right side lays itself out by its own width: three columns
-// from WIDE_GRID, and below NARROW the Gantt becomes one strip.
+// the owner, tasks, and the Autorun log) and the plan tree on the right. Below STACK everything
+// stacks in one scroll. The right side lays itself out by its own width: two columns under the tree
+// from WIDE_GRID, and below NARROW the tree drops its spine.
 const STACK = 720;
 const RAIL_WIDTH = 360;
 const WIDE_GRID = 900;
@@ -50,6 +54,43 @@ function Row({ children }: { children: ReactNode }) {
 
 function Column({ flex = 1, children }: { flex?: number; children: ReactNode }) {
   return <View style={{ flex, minWidth: 0 }}>{children}</View>;
+}
+
+// Four numbers of mock D v2. A number with no data is left out, and with none the line is gone.
+function PaceLine({
+  pace,
+  hasAverage,
+  theme,
+}: { pace: PlanTreeModel["pace"]; hasAverage: boolean } & ThemeProps) {
+  const { colors } = theme;
+  const items = [
+    hasAverage ? { value: `${pace.averageMinutes}m`, label: "average task" } : null,
+    pace.finishClock ? { value: `~${pace.finishClock}`, label: "estimated finish" } : null,
+    pace.maxParallel > 0 ? { value: String(pace.maxParallel), label: "builders at once" } : null,
+    pace.slowest
+      ? { value: `${pace.slowest.id} +${pace.slowest.minutes}m`, label: "slowest over average" }
+      : null,
+  ].filter((item) => item !== null);
+  if (!items.length) return null;
+  return (
+    <View
+      accessibilityRole="summary"
+      style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 24, rowGap: 8, marginBottom: 12 }}
+    >
+      {items.map((item) => (
+        <View key={item.label}>
+          <Text
+            style={{ fontFamily: MONO, fontSize: 15, fontWeight: "600", color: colors.foreground }}
+          >
+            {item.value}
+          </Text>
+          <Text style={{ fontSize: 11, marginTop: 1, color: colors.foregroundMuted }}>
+            {item.label}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
 }
 
 export function WatchtowerOverview({
@@ -94,9 +135,23 @@ export function WatchtowerOverview({
       return clock ? { ...row, meta: `${row.meta}, answer by ${clock}` } : row;
     });
     const { counts } = dashboardSummary(data.tasks);
+    const built = buildPlanTree(data, started);
+    // Without RUN.md there are no logged times, so any time text would be a guess from minute 0.
+    const tree: PlanTreeModel = data.run
+      ? built
+      : {
+          ...built,
+          waves: built.waves.map((wave) => ({
+            ...wave,
+            rows: wave.rows.map((row) => ({ ...row, time: null, over: false })),
+          })),
+        };
     return {
       timeline,
       started,
+      tree,
+      classes: Object.fromEntries(data.tasks.map((task) => [task.id, task.taskClass])),
+      commits: commitShas(data.run?.log ?? []),
       rows,
       phases: lifecyclePhases(data),
       counts: {
@@ -110,6 +165,15 @@ export function WatchtowerOverview({
   // The ADR the owner is reading, if any.
   const [decision, setDecision] = useState<DecisionTarget | null>(null);
   const agent = useAgentSender(host.id, workspaceId, (derived?.rows.length ?? 0) > 0);
+  const runAgents = useRunAgents(host.id, workspaceId);
+  const builders = useMemo(() => matchBuilders(runAgents, data?.tasks ?? []), [runAgents, data]);
+  // A TASK picked in the tree. The task list selects on mount only, so a new pick remounts it
+  // with that TASK as its opener TASK; `count` lets the same TASK be picked again.
+  const [picked, setPicked] = useState<{ id: string; count: number } | null>(null);
+  const selectTask = (id: string) => setPicked((prev) => ({ id, count: (prev?.count ?? 0) + 1 }));
+  const openAgent = navigation
+    ? (agentId: string) => navigation.openAgent({ agentId, serverId: host.id })
+    : undefined;
 
   const muted = { fontSize: 12, color: colors.foregroundMuted };
   const header = (
@@ -161,11 +225,7 @@ export function WatchtowerOverview({
       rows={derived.rows}
       target={agent.target}
       send={agent.send}
-      onOpenAgent={
-        navigation
-          ? (agentId: string) => navigation.openAgent({ agentId, serverId: host.id })
-          : undefined
-      }
+      onOpenAgent={openAgent}
       onOpenDecision={setDecision}
       theme={theme}
     />
@@ -185,11 +245,12 @@ export function WatchtowerOverview({
   ) : null;
   const tasks = (
     <TasksCard
+      key={picked ? `${picked.id}:${picked.count}` : "opener"}
       board={board.data}
       error={board.error}
       workspaceId={workspaceId}
       sourceKey={workspaceId}
-      initialTaskId={initialTaskId}
+      initialTaskId={picked?.id ?? initialTaskId}
       theme={theme}
     />
   );
@@ -262,7 +323,7 @@ export function WatchtowerOverview({
       <View accessibilityLabel="Loading Watchtower overview" style={{ gap: GAP }}>
         {placeholder("stepper", 58)}
         <Row>
-          {placeholder("timeline", 240)}
+          {placeholder("tree", 240)}
           {placeholder("needs", 240)}
         </Row>
         <Row>
@@ -308,53 +369,46 @@ export function WatchtowerOverview({
       </View>
     );
   } else {
-    const { timeline, started } = derived;
-    const finish = timeline.finishMinute === null ? null : clockAt(started, timeline.finishMinute);
+    const { timeline, started, tree } = derived;
     const stoppedAt = data.run?.stopped ? clockAt(started, data.run.nowMinute ?? 0) : null;
-    const timelineCell = (
-      <OverviewCell
-        title="Branch timeline"
-        aside={
-          stoppedAt
-            ? `Run stopped at ${stoppedAt}`
-            : finish
-              ? `Finish about ${finish}`
-              : data.run?.finished
-                ? "Run finished"
-                : clockAt(started, 0)
-                  ? `Autorun since ${clockAt(started, 0)}`
-                  : undefined
-        }
-        theme={theme}
-      >
-        {/* Without RUN.md there are no logged times, so the bars would be guesses from minute 0. */}
-        {data.run === null ? (
-          <Text style={{ ...muted, fontSize: 12.5 }}>No autorun yet</Text>
-        ) : narrow ? (
-          <TimelineStrip
-            model={timeline}
-            nowMinute={data.run?.nowMinute ?? null}
-            started={started}
-            stopped={data.run?.stopped ?? false}
+    const since = clockAt(started, 0);
+    // The run state from the autorun log; the lead row shows it when no lead agent is found.
+    const runState =
+      data.run === null
+        ? "No autorun yet"
+        : stoppedAt
+          ? `Run stopped at ${stoppedAt}`
+          : data.run.finished
+            ? "Run finished"
+            : since
+              ? `Autorun since ${since}`
+              : "Autorun running";
+    const treeCell = (
+      <OverviewCell title="Plan" aside={runState} theme={theme}>
+        {data.run ? (
+          <PaceLine
+            // A stopped run has no real "now", so its finish estimate would be in the past.
+            pace={data.run.stopped ? { ...tree.pace, finishClock: null } : tree.pace}
+            hasAverage={timeline.bars.some((bar) => bar.kind === "done")}
             theme={theme}
           />
-        ) : (
-          <BranchTimeline
-            model={timeline}
-            nowMinute={data.run?.nowMinute ?? null}
-            started={started}
-            theme={theme}
-          />
-        )}
+        ) : null}
+        <PlanTree
+          tree={tree}
+          builders={builders.byTask}
+          lead={builders.lead}
+          narrow={narrow}
+          theme={theme}
+          onSelectTask={selectTask}
+          onOpenAgent={openAgent}
+          planTitle={data.plan.title}
+          runState={runState}
+          classes={derived.classes}
+          commits={derived.commits}
+        />
       </OverviewCell>
     );
     const checks = <ManualChecksCell checks={data.manualChecks} theme={theme} />;
-    const runningNow = (
-      <RunningNowCell timeline={timeline} tasks={data.tasks} started={started} theme={theme} />
-    );
-    const upNext = (
-      <UpNextCell timeline={timeline} tasks={data.tasks} started={started} theme={theme} />
-    );
     body = (
       <View style={{ gap: GAP }}>
         <LifecycleStepper
@@ -371,14 +425,8 @@ export function WatchtowerOverview({
         <AutorunStrip run={data.run} theme={theme} />
         {mainWidth >= WIDE_GRID ? (
           <>
-            {timelineCell}
+            {treeCell}
             <Row>
-              <Column>
-                <View style={{ gap: GAP }}>
-                  {runningNow}
-                  {upNext}
-                </View>
-              </Column>
               <Column>{needs}</Column>
               <Column>
                 <View style={{ gap: GAP }}>
@@ -391,27 +439,23 @@ export function WatchtowerOverview({
           </>
         ) : narrow ? (
           <>
-            {runningNow}
-            {timelineCell}
+            {treeCell}
             {needs}
-            {upNext}
             {checks}
             {decisions}
             {archived}
           </>
         ) : (
           <>
-            {timelineCell}
-            {runningNow}
+            {treeCell}
             <Row>
               <Column>{needs}</Column>
-              <Column>{upNext}</Column>
+              <Column>{checks}</Column>
             </Row>
             <Row>
-              <Column>{checks}</Column>
               <Column>{decisions}</Column>
+              <Column>{archived}</Column>
             </Row>
-            {archived}
           </>
         )}
       </View>
