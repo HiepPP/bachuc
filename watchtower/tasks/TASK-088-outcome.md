@@ -41,7 +41,7 @@ DONE
 - `npm run typecheck` -> exit 0
 - `npm run lint -- <all changed files> packages/app/src/workspace-tabs` -> exit 0, 0 warnings, 0 errors
 - `npm run format:check:files -- <all changed files>` -> all files use the correct format
-- Live: New Tab shows Fleet map, placeholder opens in main and Explorer -> UNVERIFIED (unattended)
+- Live (Electron from `npm run dev:desktop`, daemon 6768, 2026-10-14T02:50Z): New Tab lists Fleet map, and choosing it opens a `Fleet map` tab in the main pane -> PASS. The tab then showed the real map from TASK-090, not the placeholder. The Explorer host was not opened by hand -> UNVERIFIED.
 
 ## Anti-goal
 

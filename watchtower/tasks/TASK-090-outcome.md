@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE (2026-10-13T11:15Z). Live checks are UNVERIFIED (unattended).
+DONE (2026-10-13T11:15Z). Live checks ran by hand on 2026-10-14; see the last Verified lines. The Explorer host and the two-tab shared context stay UNVERIFIED.
 
 ## Changed
 
@@ -33,8 +33,14 @@ DONE (2026-10-13T11:15Z). Live checks are UNVERIFIED (unattended).
 - `rg -n "useUnistyles" packages/app/src/fleet-map` -> no match.
 - `rg -n 'import\("\./(scene|shared-renderer)"\)' packages/app/src/fleet-map/view.web.tsx` -> lines 135 and 136, both present.
 - Static `three` imports in `packages/app/src` (non-test): only `shared-renderer.ts:1` (value) and `scene.ts:1` (type only). `view.web.tsx` has none.
-- Browser, live, three or more agents plus one subagent: colored nodes, link, hover label, click opens the agent, blurred window stops the pulse -> UNVERIFIED (unattended).
-- Chrome performance panel shows no repeated frames after the pulse stops -> UNVERIFIED (unattended). The scheduler test and the blur/hidden/reduced-motion driver tests show 0 frames, but not in a real browser.
+- Live check, 2026-10-14T02:45Z to 02:55Z. Setup: live daemon 6768 (already running), `npm run dev:desktop`, four mock agents in `/tmp/fleet-live` (three running, one a subagent through label `paseo.parent-agent-id`), plus the existing idle agents. Driven in the live Electron window with `cua_repl`, and in a headless Chromium (`agent-browser`) connected to `127.0.0.1:6768`.
+  - Colors -> PASS. Running nodes are blue and finished-unread nodes are green, as the sidebar dots are (`getStatusDotColor`). Done nodes are grey. Needs-input and failed colors were not exercised.
+  - Link -> PASS. The subagent node has one edge to its parent.
+  - Click -> PASS (Electron). Clicking a running node opened `Fleet B running` in workspace `fleet-live`.
+  - Hover label -> PASS (headless Chromium, real mouse move). The label showed `Fleet A subagent` and `fleet-live`, and the node grew. The `cua_repl` API cannot move the pointer without a click, so Electron hover was not checked by hand.
+  - Pulse -> PASS. With three running agents, focused, 2 s of `CanvasRenderingContext2D.drawImage` (the blit) counted 46 calls, about 23 per second, under the 30 per second cap. After a synthetic `blur` event: 0. After a synthetic `focus` event: 49. This is a synthetic blur, not a real window blur.
+  - No running agent, focused: 0 blits in 3 s (agents stopped with `paseo stop`). Nodes changed color live when the agents stopped.
+- First open in the Electron dev build showed the spinner for about 6 s while Metro built `three` on demand. This is a dev-server cost; the production export has `three` in the shared chunk.
 - Two tabs share one WebGL context -> UNVERIFIED (unattended). The pool test (TASK-089) shows one renderer for two acquires. Each view acquires once.
 
 ## Lazy chunk (Q-034 answer)

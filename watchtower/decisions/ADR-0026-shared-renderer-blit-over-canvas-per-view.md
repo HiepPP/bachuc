@@ -1,6 +1,6 @@
 # ADR-0026 Shared renderer with per-view blit over one canvas per view
 
-Status: proposed
+Status: accepted
 Date: 2026-10-13
 Supersedes: -
 Scope: `packages/app/src/fleet-map/**`
