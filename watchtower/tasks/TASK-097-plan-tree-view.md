@@ -13,7 +13,7 @@ Design: mock D v2, see Shared Context in [watchtower/CONTEXT.md](watchtower/CONT
 
 Boundaries:
 
-- Lead row: a small square icon, "Lead agent, implement", one line "<model>, running for 14m, waiting on 2 builders", and Open thread. With no lead, follow [Q-036](watchtower/QUESTIONS.md).
+- Lead row: a small square icon, "Lead agent, implement", one line "<model>, running for 14m, waiting on 2 builders", and Open thread. With no lead, show the plan title and the run state from the autorun log, with no Open thread button ([Q-036](watchtower/QUESTIONS.md), answered 2026-10-14).
 - Wave: a header ("Wave 1" plus its text from TASK-095) and rows hanging off one vertical spine. A done wave collapses to its header with a "Show" toggle.
 - Row: a state icon (done check, running spinner, waiting hand, planned dashed circle), the TASK ID in monospace, the title, one secondary line, and the time text on the right in monospace.
 - Secondary line: done "Builder A committed <sha>" when the log names a commit, else "Group A, code"; running "Builder C on <model>, active 30s ago"; waiting "Builder D asks permission"; planned "Group E, code".

@@ -405,8 +405,7 @@ export function PlanTree({
   commits,
 }: PlanTreeProps) {
   const { colors } = theme;
-  // A wave the owner toggled; a wave not listed follows its default (done waves collapsed).
-  const [toggled, setToggled] = useState<Record<number, boolean>>({});
+  // Every wave stays open, done waves too: the owner reads the whole plan without a click.
   const active = new Set(
     Object.values(builders)
       .filter((builder) => builder.state === "running" || builder.state === "waiting")
@@ -423,7 +422,6 @@ export function PlanTree({
         theme={theme}
       />
       {tree.waves.map((wave) => {
-        const open = toggled[wave.number] ?? !wave.done;
         return (
           <View key={wave.number} style={{ marginBottom: 10 }}>
             <View
@@ -444,48 +442,33 @@ export function PlanTree({
               >
                 {wave.header}
               </Text>
-              {wave.done ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: open }}
-                  accessibilityLabel={`${open ? "Hide" : "Show"} wave ${wave.number}`}
-                  onPress={() => setToggled((prev) => ({ ...prev, [wave.number]: !open }))}
-                  style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-                >
-                  <Text style={{ fontSize: 11.5, fontWeight: "500", color: colors.accent }}>
-                    {open ? "Hide" : "Show"}
-                  </Text>
-                </Pressable>
-              ) : null}
             </View>
-            {open ? (
-              <View
-                style={
-                  narrow
-                    ? undefined
-                    : {
-                        marginLeft: SPINE_INSET,
-                        paddingLeft: SPINE_GAP,
-                        borderLeftWidth: SPINE_WIDTH,
-                        borderLeftColor: colors.border,
-                      }
-                }
-              >
-                {wave.rows.map((row) => (
-                  <TaskRow
-                    key={row.id}
-                    row={row}
-                    builder={builders[row.id]}
-                    taskClass={classes?.[row.id]}
-                    sha={commits?.[row.id]}
-                    narrow={narrow}
-                    theme={theme}
-                    onSelectTask={onSelectTask}
-                    onOpenAgent={onOpenAgent}
-                  />
-                ))}
-              </View>
-            ) : null}
+            <View
+              style={
+                narrow
+                  ? undefined
+                  : {
+                      marginLeft: SPINE_INSET,
+                      paddingLeft: SPINE_GAP,
+                      borderLeftWidth: SPINE_WIDTH,
+                      borderLeftColor: colors.border,
+                    }
+              }
+            >
+              {wave.rows.map((row) => (
+                <TaskRow
+                  key={row.id}
+                  row={row}
+                  builder={builders[row.id]}
+                  taskClass={classes?.[row.id]}
+                  sha={commits?.[row.id]}
+                  narrow={narrow}
+                  theme={theme}
+                  onSelectTask={onSelectTask}
+                  onOpenAgent={onOpenAgent}
+                />
+              ))}
+            </View>
           </View>
         );
       })}

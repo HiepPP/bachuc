@@ -12,8 +12,8 @@ Change: Without `RUN.md` the overview has `run: null` and the page says "No auto
 Boundaries:
 
 - Only when `RUN.md` is absent. A present `RUN.md` keeps its current parse.
-- Read `git log --format=%H%x09%cI%x09%s` in the workspace directory with `execFile` (no shell), a 5 s timeout, and at most 500 commits. Any git error leaves `run: null` and adds one warning.
-- A commit counts when its subject names a TASK ID of the Tracker, such as `(TASK-095)`. The newest commit per TASK is its end.
+- Read `git log --format=%H%x09%cI%x09%s` in the workspace directory with `execFile` (no shell), a 5 s timeout, and at most 500 commits. Any git error leaves `run: null` and adds one warning, except "not a git repository" and "no commits yet", which stay silent ([Q-039](watchtower/QUESTIONS.md), answered 2026-10-14) so plain fixtures stay warning-free.
+- A commit counts when a parenthesised group in its subject names a TASK ID of the Tracker, such as `(TASK-095)` or `(TASK-101, TASK-102)`. A bare ID, as in "add TASK-100..103 to the plan", does not count, so a plan commit does not finish its TASKs ([Q-040](watchtower/QUESTIONS.md), answered 2026-10-14). The newest commit per TASK is its end.
 - Start of a TASK: the time of the commit just before its first counted commit on the branch. `Started:` of the run: the time of the oldest commit that touches `watchtower/NEXT.md` with the plan slug in its subject or body, or else the oldest counted commit's parent.
 - Each log row: `task`, `result` `DONE`, `detail` `commit <short sha>`, start and end clock times, and start and end minutes from `Started:`. TASK-097 already reads a SHA from `detail`.
 - `runner` is `implement (git)`. `finished` is the newest counted commit time when every Tracker row is `DONE`, else null.

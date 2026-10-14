@@ -16,7 +16,7 @@ Boundaries:
 - From 2026-10-14 the skill labels each builder with the first TASK ID of its group ([Q-037](watchtower/QUESTIONS.md)). Such a builder works on every TASK of that group, so map a TASK ID label to all TASKs that share its Group. Keep Group tag matching for older runs.
 - When two agents match one TASK, keep the newest by `updatedAt`.
 - Builder state: `running`; `waiting` when `requiresAttention` is true and `attentionReason` is `permission`; `failed` when status is `error`; else `idle`. Add `activeAgo` from `lastActivityAt` or `updatedAt`.
-- Lead: the agent that most matched builders name as `parentAgentId`. If none, follow the default of [Q-036](watchtower/QUESTIONS.md): no lead agent.
+- Lead: the agent that most matched builders name as `parentAgentId`. If none, there is no lead agent ([Q-036](watchtower/QUESTIONS.md), answered 2026-10-14: the owner kept the default).
 - Skip mock-provider agents, as `chooseAgent` in [client/actions.ts](hiep-plugins/plugins/watchtower-board/client/actions.ts) does.
 - No new RPC and no host change.
 

@@ -48,7 +48,7 @@ columns from 900 px, in pairs below that, and stacked below 520 px. It shows:
 - **Plan**: the pace line and the plan tree. The pace line has four numbers: average task, estimated
   finish, builders at once, and the slowest task over the average. It hides a number with no data,
   and a stopped run hides the finish. The tree groups tasks into waves by their deps, each with a
-  header such as `starts when TASK-X finishes`. A done wave starts collapsed. A row shows the
+  header such as `starts when TASK-X finishes`. Every wave stays open, done waves too. A row shows the
   task's state, ID, title, and time; pressing it selects the task in the left rail. A running task
   whose builder waits on you turns amber and has **Open thread**. The lead row opens the lead
   agent's thread, and without a lead agent it shows the run state. See
