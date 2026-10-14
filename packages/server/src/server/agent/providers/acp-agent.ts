@@ -1859,6 +1859,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     const turnId = randomUUID();
     const messageId = options?.clientMessageId ?? randomUUID();
     this.activeForegroundTurnId = turnId;
+    this.currentTurnUsage = undefined;
     this.fallbackAssistantMessageId = null;
     this.submittedUserMessageTurnId = null;
     this.emitBootstrapThreadEvent();
@@ -3132,6 +3133,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
 
   private handlePromptResponse(response: PromptResponse, turnId: string): void {
     this.currentTurnUsage = mapACPUsage(response.usage) ?? this.currentTurnUsage;
+    const turnOutputTokens = response.usage?.outputTokens ?? undefined;
 
     switch (response.stopReason) {
       case "cancelled":
@@ -3153,6 +3155,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
           provider: this.provider,
           usage: this.currentTurnUsage,
           turnId,
+          ...(turnOutputTokens !== undefined ? { turnOutputTokens } : {}),
         });
         break;
     }

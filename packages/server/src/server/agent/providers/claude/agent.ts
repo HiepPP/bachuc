@@ -4521,7 +4521,12 @@ class ClaudeAgentSession implements AgentSession {
           },
         });
       }
-      events.push({ type: "turn_completed", provider: "claude", usage });
+      events.push({
+        type: "turn_completed",
+        provider: "claude",
+        usage,
+        ...(typeof outputTokens === "number" ? { turnOutputTokens: outputTokens } : {}),
+      });
       return;
     }
     const errorMessage =

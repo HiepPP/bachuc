@@ -2,6 +2,24 @@ import { describe, expect, it } from "vitest";
 import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
 
 describe("InMemoryAgentTimelineStore", () => {
+  it("keeps turn metrics per turn and clears them on delete and initialize", () => {
+    const store = new InMemoryAgentTimelineStore();
+    store.initialize("agent-1");
+    store.setTurnMetrics("agent-1", "turn-1", { ttftMs: 250, outputTokens: 40 });
+    store.setTurnMetrics("agent-1", "turn-2", { ttftMs: 90 });
+
+    expect(store.getTurnMetrics("agent-1", "turn-1")).toEqual({ ttftMs: 250, outputTokens: 40 });
+    expect(store.getTurnMetrics("agent-1", "turn-2")).toEqual({ ttftMs: 90 });
+    expect(store.getTurnMetrics("agent-1", "turn-3")).toBeUndefined();
+
+    store.initialize("agent-1");
+    expect(store.getTurnMetrics("agent-1", "turn-1")).toBeUndefined();
+
+    store.setTurnMetrics("agent-1", "turn-1", { ttftMs: 10 });
+    store.delete("agent-1");
+    expect(store.getTurnMetrics("agent-1", "turn-1")).toBeUndefined();
+  });
+
   it("clamps an overshooting before cursor into the bounded tail window", () => {
     const store = new InMemoryAgentTimelineStore();
     store.initialize("agent-1", {

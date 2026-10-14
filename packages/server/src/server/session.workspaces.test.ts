@@ -376,6 +376,7 @@ function makeManagedAgent(input: {
     activeForegroundTurnId: input.lifecycle === "running" ? "turn-1" : null,
     activeTurnId: input.activeTurn?.turnId ?? null,
     activeTurnStartedAt: input.activeTurn ? new Date(input.activeTurn.startedAt) : null,
+    activeTurnFirstOutputAt: null,
   } as ManagedAgent;
 }
 

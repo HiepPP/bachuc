@@ -2941,6 +2941,52 @@ describe("ACPAgentSession", () => {
     expect(asInternals<ACPSessionInternals>(session).activeForegroundTurnId).toBeNull();
   });
 
+  test("reports turn output tokens per prompt response and resets usage each turn", async () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    let resolvePrompt!: (value: PromptResponse) => void;
+    const prompt = vi.fn(
+      () =>
+        new Promise<PromptResponse>((resolve) => {
+          resolvePrompt = resolve;
+        }),
+    );
+    asInternals<ACPSessionInternals>(session).sessionId = "session-1";
+    asInternals<ACPSessionInternals>(session).connection = { prompt };
+    session.subscribe((event) => {
+      events.push(event);
+    });
+
+    const first = await session.startTurn("hello");
+    resolvePrompt({
+      stopReason: "end_turn",
+      usage: { inputTokens: 10, outputTokens: 42, totalTokens: 52 },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const second = await session.startTurn("again");
+    resolvePrompt({ stopReason: "end_turn" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const completions = events.filter((event) => event.type === "turn_completed");
+    expect(completions).toEqual([
+      {
+        type: "turn_completed",
+        provider: "claude-acp",
+        turnId: first.turnId,
+        usage: { inputTokens: 10, outputTokens: 42, cachedInputTokens: undefined },
+        turnOutputTokens: 42,
+      },
+      {
+        type: "turn_completed",
+        provider: "claude-acp",
+        turnId: second.turnId,
+        usage: undefined,
+      },
+    ]);
+  });
+
   test("startTurn emits the submitted user message even when ACP does not echo it", async () => {
     const session = createSession();
     const events: AgentStreamEvent[] = [];

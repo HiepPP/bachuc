@@ -999,6 +999,12 @@ export function toAgentUsage(tokenUsage: unknown): AgentUsage | undefined {
   };
 }
 
+function readTotalOutputTokens(tokenUsage: unknown): number | undefined {
+  const total = toObjectRecord(toObjectRecord(tokenUsage)?.total);
+  const value = total?.outputTokens ?? total?.output_tokens;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
 function extractUserText(content: unknown): string | null {
   if (!Array.isArray(content)) return null;
   const parts: string[] = [];
@@ -3413,6 +3419,9 @@ export class CodexAppServerAgentSession implements AgentSession {
   private warnedInvalidNotificationPayloads = new Set<string>();
   private warnedIncompleteEditToolCallIds = new Set<string>();
   private latestUsage: AgentUsage | undefined;
+  // Thread-wide cumulative output tokens; a turn's output is the difference across the turn.
+  private latestTotalOutputTokens: number | undefined;
+  private turnStartTotalOutputTokens: number | undefined;
   private latestPlanResult: { callId: string; text: string; turnId: string | null } | null = null;
   private readonly userMessageTurnIndexes = new Map<string, number>();
   private readonly userMessageTurnIds: string[] = [];
@@ -5178,6 +5187,8 @@ export class CodexAppServerAgentSession implements AgentSession {
       this.cachedRuntimeInfo = null;
     }
     this.currentThreadId = threadId;
+    // A new thread starts at zero, so its first turn has a known output baseline.
+    this.latestTotalOutputTokens = 0;
   }
 
   private buildThreadStartRequest(model: string): {
@@ -5994,6 +6005,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       this.pendingForegroundTurnIdentification = null;
     }
     this.resetTurnTrackingState();
+    this.turnStartTotalOutputTokens = this.latestTotalOutputTokens;
     this.emitEvent({ type: "turn_started", provider: CODEX_PROVIDER });
   }
 
@@ -6025,12 +6037,20 @@ export class CodexAppServerAgentSession implements AgentSession {
       if (this.planModeEnabled && this.latestPlanResult?.text) {
         this.emitSyntheticPlanApprovalRequest(this.latestPlanResult.text);
       }
+      const turnOutputTokens =
+        this.turnStartTotalOutputTokens !== undefined &&
+        this.latestTotalOutputTokens !== undefined &&
+        this.latestTotalOutputTokens >= this.turnStartTotalOutputTokens
+          ? this.latestTotalOutputTokens - this.turnStartTotalOutputTokens
+          : undefined;
       this.emitEvent({
         type: "turn_completed",
         provider: CODEX_PROVIDER,
         usage: this.latestUsage,
+        ...(turnOutputTokens !== undefined ? { turnOutputTokens } : {}),
       });
     }
+    this.turnStartTotalOutputTokens = undefined;
     this.activeForegroundTurnId = null;
     this.activeClientMessageId = null;
     this.currentTurnId = null;
@@ -6091,6 +6111,12 @@ export class CodexAppServerAgentSession implements AgentSession {
     parsed: Extract<ParsedCodexNotification, { kind: "token_usage_updated" }>,
   ): void {
     this.latestUsage = toAgentUsage(parsed.tokenUsage);
+    if (!parsed.threadId || !this.getSubAgentCallIdForThread(parsed.threadId)) {
+      const totalOutputTokens = readTotalOutputTokens(parsed.tokenUsage);
+      if (totalOutputTokens !== undefined) {
+        this.latestTotalOutputTokens = totalOutputTokens;
+      }
+    }
     if (this.latestUsage) {
       this.notifySubscribers({
         type: "usage_updated",

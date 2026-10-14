@@ -13,6 +13,7 @@ import {
   SessionInboundMessageSchema,
   SessionOutboundMessageSchema,
   type SessionOutboundMessage,
+  type TurnMetrics,
 } from "@getpaseo/protocol/messages";
 import { Session, type SessionOptions } from "./session.js";
 import { OWNER_PERMISSIONS } from "./authorization/index.js";
@@ -62,12 +63,15 @@ interface SessionInternals {
 class InMemoryAgentManager {
   private readonly timeline = new InMemoryAgentTimelineStore();
 
-  constructor(rows: AgentTimelineRow[]) {
+  constructor(rows: AgentTimelineRow[], turnMetrics: Record<string, TurnMetrics> = {}) {
     this.timeline.initialize("agent-1", {
       epoch: "epoch-1",
       rows,
       nextSeq: (rows.at(-1)?.seq ?? 0) + 1,
     });
+    for (const [turnId, metrics] of Object.entries(turnMetrics)) {
+      this.timeline.setTurnMetrics("agent-1", turnId, metrics);
+    }
   }
 
   getAgent() {
@@ -116,6 +120,10 @@ class InMemoryAgentManager {
 
   fetchTimeline(_agentId: string, options?: AgentTimelineFetchOptions) {
     return this.timeline.fetch("agent-1", options);
+  }
+
+  getTurnMetrics(_agentId: string, turnId: string) {
+    return this.timeline.getTurnMetrics("agent-1", turnId);
   }
 
   listAgents() {
@@ -193,6 +201,7 @@ function createSessionForWireCompatTest(options?: {
   messages?: SessionOutboundMessage[];
   onMessageToSource?: SessionOptions["onMessageToSource"];
   rows?: AgentTimelineRow[];
+  turnMetrics?: Record<string, TurnMetrics>;
 }): Session {
   const messages = options?.messages ?? [];
   const rows: AgentTimelineRow[] = [
@@ -227,6 +236,7 @@ function createSessionForWireCompatTest(options?: {
     paseoHome: "/tmp/paseo-home",
     agentManager: new InMemoryAgentManager(
       options?.rows ?? rows,
+      options?.turnMetrics,
     ) as unknown as SessionOptions["agentManager"],
     agentStorage: new EmptyAgentStorage() as unknown as SessionOptions["agentStorage"],
     projectRegistry: new EmptyProjectRegistry() as unknown as SessionOptions["projectRegistry"],
@@ -293,6 +303,7 @@ function createSessionForWireCompatTest(options?: {
 async function emitTimelineResponse(options?: {
   clientCapabilities?: Record<string, unknown> | null;
   rows?: AgentTimelineRow[];
+  turnMetrics?: Record<string, TurnMetrics>;
   request?: Partial<
     Extract<z.infer<typeof SessionInboundMessageSchema>, { type: "fetch_agent_timeline_request" }>
   >;
@@ -301,6 +312,7 @@ async function emitTimelineResponse(options?: {
   const session = createSessionForWireCompatTest({
     clientCapabilities: options?.clientCapabilities,
     rows: options?.rows,
+    turnMetrics: options?.turnMetrics,
     messages,
   });
   const internals = session as unknown as SessionInternals;
@@ -461,6 +473,40 @@ describe("wire compatibility", () => {
     expect(LegacyFetchAgentTimelineResponseMessageSchema.parse(response).payload.entries).toEqual(
       expect.arrayContaining([expect.not.objectContaining({ turnId: expect.anything() })]),
     );
+  });
+
+  test("puts turn metrics on the last assistant entry of each turn in a fetched page", async () => {
+    const metrics = { ttftMs: 300, outputTokens: 80, outputTokensPerSecond: 40 };
+    const assistantRow = (seq: number, text: string): AgentTimelineRow => ({
+      seq,
+      timestamp: `2026-05-02T00:00:0${seq}.000Z`,
+      turnId: "turn-1",
+      item: { type: "assistant_message", text, messageId: `message-${seq}` },
+    });
+    const response = await emitTimelineResponse({
+      rows: [
+        assistantRow(1, "first"),
+        {
+          seq: 2,
+          timestamp: "2026-05-02T00:00:02.000Z",
+          turnId: "turn-1",
+          item: { type: "reasoning", text: "checking" },
+        },
+        assistantRow(3, "last"),
+      ],
+      turnMetrics: { "turn-1": metrics },
+    });
+
+    expect(
+      FetchAgentTimelineResponseMessageSchema.parse(response).payload.entries.map((entry) => ({
+        type: entry.item.type,
+        turnMetrics: entry.turnMetrics,
+      })),
+    ).toEqual([
+      { type: "assistant_message", turnMetrics: undefined },
+      { type: "reasoning", turnMetrics: undefined },
+      { type: "assistant_message", turnMetrics: metrics },
+    ]);
   });
 
   test("legacy worktree request shape normalizes to the same internal input as the new shape", async () => {

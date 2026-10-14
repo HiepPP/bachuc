@@ -113,6 +113,7 @@ function makeManagedAgent(args: {
     activeForegroundTurnId: null,
     activeTurnId: null,
     activeTurnStartedAt: null,
+    activeTurnFirstOutputAt: null,
   } satisfies ManagedAgent;
 }
 

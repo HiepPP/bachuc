@@ -389,6 +389,14 @@ const AgentUsageSchema: z.ZodType<AgentUsage> = z.object({
   contextWindowUsedTokens: z.number().optional(),
 });
 
+export const TurnMetricsSchema = z.object({
+  ttftMs: z.number().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  outputTokensPerSecond: z.number().nonnegative().optional(),
+});
+
+export type TurnMetrics = z.infer<typeof TurnMetricsSchema>;
+
 const McpStdioServerConfigSchema = z.object({
   type: z.literal("stdio"),
   command: z.string(),
@@ -730,6 +738,7 @@ export const AgentStreamEventPayloadSchema = z.discriminatedUnion("type", [
     provider: AgentProviderSchema,
     turnId: z.string().optional(),
     usage: AgentUsageSchema.optional(),
+    metrics: TurnMetricsSchema.optional(),
   }),
   z.object({
     type: z.literal("turn_failed"),
@@ -4665,6 +4674,7 @@ export const AgentTimelineEntryPayloadSchema = z.object({
   seqEnd: z.number().int().nonnegative(),
   sourceSeqRanges: z.array(AgentTimelineSeqRangeSchema),
   collapsed: z.array(z.enum(["assistant_merge", "reasoning_merge", "tool_lifecycle", "identity"])),
+  turnMetrics: TurnMetricsSchema.optional(),
 });
 
 export const FetchAgentTimelineResponseMessageSchema = z.object({

@@ -6989,6 +6989,182 @@ test("applies live autonomous events and preserves usage omitted from completion
   expect(lifecycleUpdates).toContain("idle");
 });
 
+test("attaches TTFT and output rate metrics to foreground turn completion", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-turn-metrics-"));
+  let capturedSession: TestAgentSession | null = null;
+
+  class ManualTurnSession extends TestAgentSession {
+    override async startTurn(): Promise<{ turnId: string }> {
+      return { turnId: `turn-${++this.turnIdCounter}` };
+    }
+  }
+
+  class ManualTurnClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      capturedSession = new ManualTurnSession(config);
+      return capturedSession;
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new ManualTurnClient() },
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000126",
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    const completions: AgentStreamEvent[] = [];
+    manager.subscribe(
+      (event) => {
+        if (event.type === "agent_stream" && event.event.type === "turn_completed") {
+          completions.push(event.event);
+        }
+      },
+      { agentId: snapshot.id, replayState: false },
+    );
+
+    // Each event is pushed at its own clock time and settles before the clock moves on.
+    let turnStartAt = 0;
+    async function runTurn(turnId: string, steps: Array<{ at: number; event: AgentStreamEvent }>) {
+      turnStartAt += 1_000_000;
+      vi.setSystemTime(turnStartAt);
+      const drain = drainAsyncGenerator(manager.streamAgent(snapshot.id, `prompt ${turnId}`));
+      await manager.waitForAgentRunStart(snapshot.id);
+      for (const step of steps) {
+        vi.setSystemTime(turnStartAt + step.at);
+        capturedSession!.pushEvent(step.event);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      await drain;
+    }
+
+    await runTurn("turn-1", [
+      {
+        at: 400,
+        event: {
+          type: "timeline",
+          provider: "codex",
+          item: { type: "reasoning", text: "Thinking" },
+          turnId: "turn-1",
+        },
+      },
+      {
+        at: 900,
+        event: {
+          type: "timeline",
+          provider: "codex",
+          item: { type: "assistant_message", text: "Done" },
+          turnId: "turn-1",
+        },
+      },
+      {
+        at: 2_400,
+        event: {
+          type: "turn_completed",
+          provider: "codex",
+          turnId: "turn-1",
+          turnOutputTokens: 100,
+        },
+      },
+    ]);
+
+    await runTurn("turn-2", [
+      {
+        at: 250,
+        event: {
+          type: "timeline",
+          provider: "codex",
+          item: { type: "assistant_message", text: "No usage" },
+          turnId: "turn-2",
+        },
+      },
+      {
+        at: 1_000,
+        event: { type: "turn_completed", provider: "codex", turnId: "turn-2" },
+      },
+    ]);
+
+    await runTurn("turn-3", [
+      {
+        at: 500,
+        event: { type: "turn_completed", provider: "codex", turnId: "turn-3", turnOutputTokens: 5 },
+      },
+    ]);
+
+    // A tool call is the model's first output when it acts before writing text.
+    await runTurn("turn-4", [
+      {
+        at: 300,
+        event: {
+          type: "timeline",
+          provider: "codex",
+          item: {
+            type: "tool_call",
+            callId: "call-1",
+            name: "Read",
+            detail: { type: "unknown", input: null, output: null },
+            status: "running",
+            error: null,
+          },
+          turnId: "turn-4",
+        },
+      },
+      {
+        at: 1_200,
+        event: {
+          type: "timeline",
+          provider: "codex",
+          item: { type: "assistant_message", text: "Read it" },
+          turnId: "turn-4",
+        },
+      },
+      {
+        at: 2_300,
+        event: {
+          type: "turn_completed",
+          provider: "codex",
+          turnId: "turn-4",
+          turnOutputTokens: 200,
+        },
+      },
+    ]);
+
+    expect(completions).toEqual([
+      {
+        type: "turn_completed",
+        provider: "codex",
+        turnId: "turn-1",
+        metrics: { ttftMs: 400, outputTokens: 100, outputTokensPerSecond: 50 },
+      },
+      {
+        type: "turn_completed",
+        provider: "codex",
+        turnId: "turn-2",
+        metrics: { ttftMs: 250 },
+      },
+      { type: "turn_completed", provider: "codex", turnId: "turn-3" },
+      {
+        type: "turn_completed",
+        provider: "codex",
+        turnId: "turn-4",
+        metrics: { ttftMs: 300, outputTokens: 200, outputTokensPerSecond: 100 },
+      },
+    ]);
+    expect(manager.getTurnMetrics(snapshot.id, "turn-1")).toEqual({
+      ttftMs: 400,
+      outputTokens: 100,
+      outputTokensPerSecond: 50,
+    });
+    expect(manager.getTurnMetrics(snapshot.id, "turn-3")).toBeUndefined();
+  } finally {
+    vi.useRealTimers();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("ignores stale autonomous terminals without lowering the active turn lifecycle", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-stale-autonomous-terminal-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);

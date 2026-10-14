@@ -157,6 +157,67 @@ describe("plugin timeline rows", () => {
   });
 });
 
+describe("turn metrics", () => {
+  const metrics = { ttftMs: 320, outputTokens: 90, outputTokensPerSecond: 45 };
+  const assistantEvent = (turnId: string, text: string): AgentStreamEventPayload => ({
+    type: "timeline",
+    provider: "claude",
+    turnId,
+    item: { type: "assistant_message", text, messageId: `message-${turnId}` },
+  });
+
+  it("attaches live turn_completed metrics to the last assistant message of that turn", () => {
+    let tail: StreamItem[] = [];
+    let head: StreamItem[] = [];
+    const events: AgentStreamEventPayload[] = [
+      assistantEvent("turn-1", "First turn"),
+      { type: "turn_completed", provider: "claude", turnId: "turn-1" },
+      assistantEvent("turn-2", "Second "),
+      assistantEvent("turn-2", "turn"),
+      { type: "turn_completed", provider: "claude", turnId: "turn-2", metrics },
+    ];
+    for (const event of events) {
+      ({ tail, head } = applyStreamEvent({
+        tail,
+        head,
+        event,
+        timestamp: new Date("2026-10-14T00:00:00Z"),
+      }));
+    }
+
+    expect(head).toEqual([]);
+    expect(
+      tail.map((item) =>
+        item.kind === "assistant_message"
+          ? { text: item.text, turnId: item.turnId, turnMetrics: item.turnMetrics }
+          : item.kind,
+      ),
+    ).toEqual([
+      { text: "First turn", turnId: "turn-1", turnMetrics: undefined },
+      { text: "Second turn", turnId: "turn-2", turnMetrics: metrics },
+    ]);
+  });
+
+  it("hydrates metrics carried by a completed turn event", () => {
+    const timestamp = new Date("2026-10-14T00:00:00Z");
+    const hydrated = hydrateStreamState([
+      { event: assistantEvent("turn-1", "Done"), timestamp },
+      {
+        event: { type: "turn_completed", provider: "claude", turnId: "turn-1", metrics },
+        timestamp,
+      },
+    ]);
+
+    expect(hydrated).toEqual([
+      expect.objectContaining({
+        kind: "assistant_message",
+        turnId: "turn-1",
+        turnMetrics: metrics,
+      }),
+    ]);
+  });
+});
+
 describe("user message identity", () => {
   it("replaces provisional optimistic turn membership with canonical membership", () => {
     const optimistic = createUserMessage({

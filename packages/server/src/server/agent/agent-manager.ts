@@ -18,6 +18,7 @@ import {
 } from "@getpaseo/protocol/agent-labels";
 import type { Logger } from "pino";
 import type { ProviderOptions, ToolPolicy } from "@getpaseo/protocol/agent-types";
+import type { TurnMetrics } from "@getpaseo/protocol/messages";
 import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-config";
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
@@ -435,6 +436,7 @@ interface ManagedAgentBase {
   lastUserMessageAt: Date | null;
   activeTurnId: string | null;
   activeTurnStartedAt: Date | null;
+  activeTurnFirstOutputAt: Date | null;
   lastUsage?: AgentUsage;
   lastError?: string;
   attention: AttentionState;
@@ -1204,6 +1206,10 @@ export class AgentManager {
     return this.timelineStore.fetch(id, options);
   }
 
+  getTurnMetrics(id: string, turnId: string): TurnMetrics | undefined {
+    return this.timelineStore.getTurnMetrics(id, turnId);
+  }
+
   listProviderSubagents(parentAgentId: string): ProviderSubagentDescriptor[] {
     this.requirePublicAgent(parentAgentId);
     return this.providerSubagents.list(parentAgentId);
@@ -1908,6 +1914,7 @@ export class AgentManager {
         activeForegroundTurnId: null,
         activeTurnId: null,
         activeTurnStartedAt: null,
+        activeTurnFirstOutputAt: null,
         foregroundTurnWaiters: new Set(),
         finalizedForegroundTurnIds: new Set(),
         unsubscribeSession: null,
@@ -2667,6 +2674,7 @@ export class AgentManager {
   private openActiveTurn(agent: ActiveManagedAgent, turnId: string, startedAt: Date): void {
     agent.activeTurnId = turnId;
     agent.activeTurnStartedAt = startedAt;
+    agent.activeTurnFirstOutputAt = null;
   }
 
   private applyActiveTurnTerminal(
@@ -2679,6 +2687,7 @@ export class AgentManager {
     if (turnId && agent.activeTurnId !== turnId) return "stale";
     agent.activeTurnId = null;
     agent.activeTurnStartedAt = null;
+    agent.activeTurnFirstOutputAt = null;
     return "closed_current";
   }
 
@@ -3728,6 +3737,7 @@ export class AgentManager {
       activeForegroundTurnId: null,
       activeTurnId: null,
       activeTurnStartedAt: null,
+      activeTurnFirstOutputAt: null,
       foregroundTurnWaiters: new Set<ForegroundTurnWaiter>(),
       finalizedForegroundTurnIds: new Set<string>(),
       unsubscribeSession: null,
@@ -3783,6 +3793,7 @@ export class AgentManager {
       activeForegroundTurnId: null,
       activeTurnId: null,
       activeTurnStartedAt: null,
+      activeTurnFirstOutputAt: null,
       pendingPermissions: new Map(),
       bufferedPermissionResolutions: new Map(),
       inFlightPermissionResponses: new Set(),
@@ -4271,11 +4282,21 @@ export class AgentManager {
     // Only update timestamp for live events, not history replay
     if (!options?.fromHistory) {
       this.touchUpdatedAt(agent);
+      // Before the coalescer, so a buffered first chunk still counts at its arrival time.
+      this.markActiveTurnFirstOutput(agent, event, eventTurnId);
       if (this.agentStreamCoalescer.handle(agent.id, event)) {
         this.traceCoalescerBuffered(agent, event, eventTurnId);
         return false;
       }
       this.agentStreamCoalescer.flushFor(agent.id);
+    }
+
+    if (event.type === "turn_completed") {
+      event = this.applyTurnMetrics({
+        agent,
+        event,
+        turnId: options?.fromHistory || !isForegroundEvent ? undefined : eventTurnId,
+      });
     }
 
     let terminalDisposition: ActiveTurnTerminalDisposition = "untracked";
@@ -4802,6 +4823,64 @@ export class AgentManager {
     }
 
     return event;
+  }
+
+  private markActiveTurnFirstOutput(
+    agent: ActiveManagedAgent,
+    event: AgentStreamEvent,
+    turnId: string | undefined,
+  ): void {
+    if (event.type !== "timeline") return;
+    const { item } = event;
+    // A tool call counts: models often act before they write, and hidden thinking
+    // (e.g. Claude) emits no text, so the first visible text can come seconds later.
+    const isModelOutput =
+      item.type === "tool_call" ||
+      ((item.type === "assistant_message" || item.type === "reasoning") && item.text !== "");
+    if (!isModelOutput) return;
+    if (agent.activeTurnFirstOutputAt || !agent.activeTurnStartedAt) return;
+    if (!turnId || agent.activeTurnId !== turnId) return;
+    agent.activeTurnFirstOutputAt = new Date();
+  }
+
+  // Strips the provider-only turnOutputTokens and attaches metrics for the live foreground turn.
+  // turnId is undefined for history replay and background turns, which get no metrics.
+  private applyTurnMetrics(params: {
+    agent: ActiveManagedAgent;
+    event: Extract<AgentStreamEvent, { type: "turn_completed" }>;
+    turnId: string | undefined;
+  }): AgentStreamEvent {
+    const { agent, event, turnId } = params;
+    const { turnOutputTokens: _turnOutputTokens, ...completed } = event;
+    const metrics = turnId ? this.buildActiveTurnMetrics(agent, event, turnId) : undefined;
+    if (!turnId || !metrics) return completed;
+    if (this.timelineStore.has(agent.id)) {
+      this.timelineStore.setTurnMetrics(agent.id, turnId, metrics);
+    }
+    return { ...completed, metrics };
+  }
+
+  // Reads the active turn timestamps, so it must run before applyActiveTurnTerminal clears them.
+  private buildActiveTurnMetrics(
+    agent: ActiveManagedAgent,
+    event: Extract<AgentStreamEvent, { type: "turn_completed" }>,
+    turnId: string,
+  ): TurnMetrics | undefined {
+    const startedAt = agent.activeTurnStartedAt;
+    const firstOutputAt = agent.activeTurnFirstOutputAt;
+    if (agent.activeTurnId !== turnId || !startedAt || !firstOutputAt) return undefined;
+    const metrics: TurnMetrics = {
+      ttftMs: Math.max(0, firstOutputAt.getTime() - startedAt.getTime()),
+    };
+    const outputTokens = event.turnOutputTokens;
+    if (outputTokens !== undefined && Number.isInteger(outputTokens) && outputTokens >= 0) {
+      metrics.outputTokens = outputTokens;
+      const outputSeconds = (Date.now() - firstOutputAt.getTime()) / 1000;
+      if (outputSeconds > 0) {
+        metrics.outputTokensPerSecond = outputTokens / outputSeconds;
+      }
+    }
+    return metrics;
   }
 
   private recordSubmittedPrompt(

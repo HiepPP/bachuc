@@ -385,6 +385,37 @@ describe("processTimelineResponse", () => {
     expect(result.sideEffects).toEqual([{ type: "flush_pending_updates" }]);
   });
 
+  it("hydrates turn metrics from fetched timeline entries", () => {
+    const metrics = { ttftMs: 640, outputTokens: 120, outputTokensPerSecond: 30 };
+    const result = processTimelineResponse({
+      ...baseTimelineInput,
+      payload: {
+        ...baseTimelineInput.payload,
+        direction: "tail",
+        reset: true,
+        window: { minSeq: 1, maxSeq: 4, nextSeq: 5 },
+        startCursor: { seq: 1 },
+        endCursor: { seq: 4 },
+        entries: [
+          { ...makeTimelineEntry(1, "first", "user_message"), turnId: "turn-1" },
+          { ...makeTimelineEntry(2, "no metrics"), turnId: "turn-1" },
+          { ...makeTimelineEntry(3, "second", "user_message"), turnId: "turn-2" },
+          { ...makeTimelineEntry(4, "done"), turnId: "turn-2", turnMetrics: metrics },
+        ],
+      },
+    });
+
+    expect(result.commit).toBe("apply");
+    expect(
+      result.tail.flatMap((item) =>
+        item.kind === "assistant_message" ? [{ text: item.text, metrics: item.turnMetrics }] : [],
+      ),
+    ).toEqual([
+      { text: "no metrics", metrics: undefined },
+      { text: "done", metrics },
+    ]);
+  });
+
   it("atomically replaces history when a resume tail leaves a middle gap", () => {
     const result = processTimelineResponse({
       ...baseTimelineInput,

@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { MAX_CONTENT_WIDTH } from "@/constants/layout";
 import { SPACING, type Theme } from "@/styles/theme";
-import type { TurnTiming } from "@/timeline/turn-time";
+import { buildTurnMetricParts, type TurnTiming } from "@/timeline/turn-time";
 import type { StreamItem } from "@/types/stream";
 import {
   collectAssistantResponseContentForStreamRenderStrategy,
@@ -181,6 +181,7 @@ function CompletedTurnFooter({
       }),
     [strategy, items, startIndex],
   );
+  const metricParts = useMemo(() => buildTurnMetricParts(timing?.metrics), [timing?.metrics]);
   const boundary = resolveAssistantTurnForkBoundary({
     items,
     startIndex,
@@ -201,6 +202,7 @@ function CompletedTurnFooter({
         getContent={getContent}
         completedAt={timing?.completedAt}
         durationMs={timing?.durationMs}
+        metricParts={metricParts}
         onFork={boundary && onForkAssistantTurn ? handleFork : undefined}
       />
     </View>

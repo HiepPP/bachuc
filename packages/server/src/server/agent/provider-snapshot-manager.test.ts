@@ -50,6 +50,7 @@ const CLOSED_PARENT: ManagedAgent = {
   lastUserMessageAt: null,
   activeTurnId: null,
   activeTurnStartedAt: null,
+  activeTurnFirstOutputAt: null,
   attention: { requiresAttention: false },
   foregroundTurnWaiters: new Set(),
   finalizedForegroundTurnIds: new Set(),

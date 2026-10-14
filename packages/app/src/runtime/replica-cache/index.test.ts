@@ -319,6 +319,26 @@ describe("ReplicaCache", () => {
     expect(restoredTimeline).toEqual(timeline());
   });
 
+  it("keeps turn metrics on cached assistant messages", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const value = {
+      ...timeline(),
+      items: [
+        {
+          ...timelineItem(),
+          turnMetrics: { ttftMs: 1_200, outputTokens: 400, outputTokensPerSecond: 95 },
+        },
+      ],
+    };
+    writer.commitTimeline(SERVER_ID, "agent-1", value);
+    await writer.flush();
+
+    const restored = await createCache(storage).readTimeline(SERVER_ID, "agent-1");
+
+    expect(restored).toEqual(value);
+  });
+
   it("preserves pending timeline updates across directory baseline replacement", async () => {
     const storage = new MemoryStorage();
     const writer = createCache(storage);

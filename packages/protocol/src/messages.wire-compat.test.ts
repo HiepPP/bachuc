@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
   AgentSnapshotPayloadSchema,
+  AgentStreamEventPayloadSchema,
   AgentTimelineItemPayloadSchema,
   ServerInfoStatusPayloadSchema,
   SessionInboundMessageSchema,
@@ -431,6 +432,34 @@ test("plugin rows and identity merges require a capable receiver", () => {
   expect(AgentTimelineEntryPayloadSchema.parse(entry)).toEqual(entry);
   const legacyCollapsed = z.array(z.enum(["assistant_merge", "reasoning_merge", "tool_lifecycle"]));
   expect(legacyCollapsed.safeParse(entry.collapsed).success).toBe(false);
+});
+
+test("turn metrics stay optional on turn_completed and timeline entries", () => {
+  const legacyCompleted = { type: "turn_completed", provider: "claude", turnId: "turn-1" };
+  expect(AgentStreamEventPayloadSchema.parse(legacyCompleted)).toEqual(legacyCompleted);
+  const completed = {
+    ...legacyCompleted,
+    metrics: { ttftMs: 420, outputTokens: 120, outputTokensPerSecond: 60 },
+  };
+  expect(AgentStreamEventPayloadSchema.parse(completed)).toEqual(completed);
+
+  const legacyEntry = {
+    provider: "claude",
+    item: { type: "assistant_message", text: "Done" },
+    turnId: "turn-1",
+    timestamp: "2026-10-14T00:00:00.000Z",
+    seqStart: 3,
+    seqEnd: 3,
+    sourceSeqRanges: [{ startSeq: 3, endSeq: 3 }],
+    collapsed: [],
+  };
+  expect(AgentTimelineEntryPayloadSchema.parse(legacyEntry)).toEqual(legacyEntry);
+  const entry = { ...legacyEntry, turnMetrics: { ttftMs: 420 } };
+  expect(AgentTimelineEntryPayloadSchema.parse(entry)).toEqual(entry);
+  expect(
+    AgentStreamEventPayloadSchema.safeParse({ ...legacyCompleted, metrics: { ttftMs: -1 } })
+      .success,
+  ).toBe(false);
 });
 
 test("blocked setup preserves the legacy failed shape and optional provenance", () => {

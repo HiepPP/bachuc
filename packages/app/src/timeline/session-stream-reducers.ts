@@ -1,10 +1,11 @@
 import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
-import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
+import type { AgentStreamEventPayload, TurnMetrics } from "@getpaseo/protocol/messages";
 import { selectAgentTimelineState, useSessionStore } from "@/stores/session-store";
 import type { AssistantMessageItem, StreamItem, TodoEntry } from "@/types/stream";
 import type { TurnLivenessTransition } from "@/timeline/turn-liveness";
 import {
   applyStreamEvent,
+  attachTurnMetrics,
   flushHeadToTail,
   hydrateStreamState,
   isAgentToolCallItem,
@@ -133,6 +134,7 @@ interface TimelineResponseEntry {
   turnId?: string;
   item: AgentTimelineItem;
   timestamp: string;
+  turnMetrics?: TurnMetrics;
 }
 
 export interface ProcessTimelineResponseInput {
@@ -180,6 +182,40 @@ interface TimelineUnit {
   sourceSeqRanges: TimelineSeqRange[];
   event: AgentStreamEventPayload;
   timestamp: Date;
+  turnMetrics?: TurnMetrics;
+}
+
+// A unit carrying turn metrics replays as its timeline event plus the turn completion that
+// attaches the metrics, so every hydration path matches the live reducer.
+function toUnitHydratedEvents(
+  unit: TimelineUnit,
+  epoch: string,
+): Array<{
+  event: AgentStreamEventPayload;
+  timestamp: Date;
+  timelineCursor: { epoch: string; seq: number };
+}> {
+  const timelineCursor = { epoch, seq: unit.seqEnd };
+  const events = [{ event: unit.event, timestamp: unit.timestamp, timelineCursor }];
+  if (unit.turnMetrics && unit.event.type === "timeline" && unit.event.turnId) {
+    events.push({
+      event: {
+        type: "turn_completed",
+        provider: unit.event.provider,
+        turnId: unit.event.turnId,
+        metrics: unit.turnMetrics,
+      },
+      timestamp: unit.timestamp,
+      timelineCursor,
+    });
+  }
+  return events;
+}
+
+function attachUnitTurnMetrics(items: StreamItem[], unit: TimelineUnit): StreamItem[] {
+  return unit.event.type === "timeline"
+    ? attachTurnMetrics(items, unit.event.turnId, unit.turnMetrics)
+    : items;
 }
 
 interface TimelinePathResult {
@@ -818,10 +854,12 @@ function reconcileOverlappingProjectedAssistant(params: {
   }
 
   const messageId = projectedMessageId ?? match.current.messageId;
+  const turnMetrics = unit.turnMetrics ?? match.current.turnMetrics;
   const replacement: AssistantMessageItem = {
     kind: "assistant_message",
     id: match.current.id,
     ...(messageId !== undefined ? { messageId } : {}),
+    ...(turnMetrics ? { turnMetrics } : {}),
     text: projectedText,
     timestamp: unit.timestamp,
     timelineCursor: { epoch: params.epoch, seq: unit.seqEnd },
@@ -1026,8 +1064,8 @@ function applyAcceptedForwardTimelineUnits(params: {
       unit,
       epoch: params.epoch,
     });
-    tail = applied.tail;
-    head = applied.head;
+    tail = attachUnitTurnMetrics(applied.tail, unit);
+    head = attachUnitTurnMetrics(applied.head, unit);
   }
 
   return {
@@ -1129,11 +1167,7 @@ function applyAcceptedTimelinePage(input: {
     });
   }
   const olderTail = hydrateStreamState(
-    acceptedUnits.map(({ event, timestamp, seqEnd }) => ({
-      event,
-      timestamp,
-      timelineCursor: { epoch: payload.epoch, seq: seqEnd },
-    })),
+    acceptedUnits.flatMap((unit) => toUnitHydratedEvents(unit, payload.epoch)),
     {
       source: "canonical",
       reservedItemIds: new Set(currentTail.map((item) => item.id)),
@@ -1267,6 +1301,7 @@ export function processTimelineResponse(
       ...(entry.turnId ? { turnId: entry.turnId } : {}),
     } as AgentStreamEventPayload,
     timestamp: new Date(entry.timestamp),
+    turnMetrics: entry.turnMetrics,
   }));
 
   const toHydratedEvents = (
@@ -1275,12 +1310,7 @@ export function processTimelineResponse(
     event: AgentStreamEventPayload;
     timestamp: Date;
     timelineCursor: { epoch: string; seq: number };
-  }> =>
-    units.map(({ event, timestamp, seqEnd }) => ({
-      event,
-      timestamp,
-      timelineCursor: { epoch: payload.epoch, seq: seqEnd },
-    }));
+  }> => units.flatMap((unit) => toUnitHydratedEvents(unit, payload.epoch));
 
   // ------------------------------------------------------------------
   // Derive bootstrap policy (replace vs incremental)

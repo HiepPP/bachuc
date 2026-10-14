@@ -4,6 +4,7 @@ import {
   selectProjectedTimelinePage,
   type ProjectedTimelineRow,
 } from "./timeline-projection.js";
+import type { TurnMetrics } from "@getpaseo/protocol/messages";
 import type { AgentTimelineItem } from "./agent-sdk-types.js";
 import type {
   AgentTimelineFetchOptions,
@@ -24,6 +25,8 @@ interface AgentTimelineState {
   projection: TimelineProjection;
   minSeq: number;
   nextSeq: number;
+  // In memory only: metrics are lost on daemon restart or timeline re-initialization.
+  turnMetrics: Map<string, TurnMetrics>;
 }
 const DEFAULT_TIMELINE_FETCH_LIMIT = 200;
 function cloneRow<T extends AgentTimelineRow>(row: T): T {
@@ -50,6 +53,7 @@ export class InMemoryAgentTimelineStore {
       projection,
       minSeq: projection.getRows()[0]?.seqStart ?? 0,
       nextSeq,
+      turnMetrics: new Map(),
     });
   }
 
@@ -151,6 +155,15 @@ export class InMemoryAgentTimelineStore {
   getLastItem(agentId: string): AgentTimelineItem | null {
     const state = this.requireState(agentId);
     return state.projection.getRows().find((row) => row.seqEnd === state.nextSeq - 1)?.item ?? null;
+  }
+
+  setTurnMetrics(agentId: string, turnId: string, metrics: TurnMetrics): void {
+    this.requireState(agentId).turnMetrics.set(turnId, { ...metrics });
+  }
+
+  getTurnMetrics(agentId: string, turnId: string): TurnMetrics | undefined {
+    const metrics = this.states.get(agentId)?.turnMetrics.get(turnId);
+    return metrics ? { ...metrics } : undefined;
   }
 
   getLastAssistantMessage(agentId: string): string | null {

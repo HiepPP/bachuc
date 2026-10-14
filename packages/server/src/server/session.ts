@@ -7701,6 +7701,13 @@ export class Session {
       const entries = selectedTimeline.entries.filter((entry) =>
         this.supportsTimelineItem(entry.item, source),
       );
+      // Turn metrics ride on the last assistant message of each turn in the page.
+      const lastAssistantIndexByTurn = new Map<string, number>();
+      entries.forEach((entry, index) => {
+        if (entry.turnId && entry.item.type === "assistant_message") {
+          lastAssistantIndexByTurn.set(entry.turnId, index);
+        }
+      });
 
       this.emitForSource(
         {
@@ -7721,7 +7728,11 @@ export class Session {
             hasOlder: selectedTimeline.hasOlder,
             hasNewer: selectedTimeline.hasNewer,
             ...(msg.mergeWindow === true ? { mergeWindow: true } : {}),
-            entries: entries.map((entry) => {
+            entries: entries.map((entry, index) => {
+              const turnMetrics =
+                entry.turnId && lastAssistantIndexByTurn.get(entry.turnId) === index
+                  ? this.agentManager.getTurnMetrics(msg.agentId, entry.turnId)
+                  : undefined;
               const payloadEntry = {
                 provider: snapshot.provider,
                 item: entry.item,
@@ -7737,6 +7748,7 @@ export class Session {
                 )
                   ? entry.collapsed
                   : entry.collapsed.filter((value) => value !== "reasoning_merge"),
+                turnMetrics,
               };
               payloadEntry.turnId = entry.turnId;
               return payloadEntry;

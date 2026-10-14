@@ -203,6 +203,24 @@ describe("stream presentation through installed plugins", () => {
     expect(completed.head).toEqual([]);
   });
 
+  it("carries turn metrics to the last block when the turn completes", () => {
+    const harness = streamHarness();
+    harness.send({
+      type: "timeline",
+      provider: "claude",
+      item: { type: "assistant_message", messageId: "message-1", text: "Intro\n\nBody" },
+      turnId: "turn-1",
+    });
+    const metrics = { ttftMs: 1_200, outputTokens: 40, outputTokensPerSecond: 20 };
+    const completed = harness.send({
+      type: "turn_completed",
+      provider: "claude",
+      turnId: "turn-1",
+      metrics,
+    });
+    expect(rows(completed).at(-1)).toMatchObject({ text: "Body", turnMetrics: metrics });
+  });
+
   it("keeps blank lines inside an open native code fence", () => {
     const harness = streamHarness();
     harness.send(assistant("Intro\n\n```ts\nconst a = 1;"));

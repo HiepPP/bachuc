@@ -3,6 +3,7 @@ import { WorkspaceDiffStatPill } from "@/composer/diff-stat-pill";
 import { useWorkspaceHasDiffStat } from "@/composer/workspace-diff-stat";
 import { AgentTaskList } from "@/composer/task-list";
 import { ComposerTrackStrip } from "@/composer/tracks";
+import { ComposerTurnMetricsPill, useHasComposerTurnMetrics } from "@/composer/turn-metrics-pill";
 import { supportsDesktopPaneSplits, useIsCompactFormFactor } from "@/constants/layout";
 import { usePaneContext } from "@/panels/pane-context";
 import { useSettings } from "@/hooks/use-settings";
@@ -111,19 +112,24 @@ export const AgentTracks = memo(function AgentTracks({
       preferences: openInSidePane,
     });
   }, [cwd, isCompact, openInSidePane, serverId, workspaceKey]);
-  const diffStatPill = useMemo(
+  const hasTurnMetrics = useHasComposerTurnMetrics(serverId, agentId);
+  const trailingPills = useMemo(
     () => (
-      <WorkspaceDiffStatPill
-        serverId={serverId}
-        workspaceId={workspaceId}
-        onPress={handleOpenChanges}
-      />
+      <>
+        <ComposerTurnMetricsPill serverId={serverId} agentId={agentId} />
+        <WorkspaceDiffStatPill
+          serverId={serverId}
+          workspaceId={workspaceId}
+          onPress={handleOpenChanges}
+        />
+      </>
     ),
-    [handleOpenChanges, serverId, workspaceId],
+    [agentId, handleOpenChanges, serverId, workspaceId],
   );
 
   if (
     !hasWorkspaceDiffStat &&
+    !hasTurnMetrics &&
     !hasAgentTracks({
       subagentRows,
       tasks,
@@ -135,7 +141,7 @@ export const AgentTracks = memo(function AgentTracks({
   }
 
   return (
-    <ComposerTrackStrip trailing={diffStatPill}>
+    <ComposerTrackStrip trailing={trailingPills}>
       <AgentTaskList tasks={tasks} />
       <SubagentsTrack
         serverId={serverId}

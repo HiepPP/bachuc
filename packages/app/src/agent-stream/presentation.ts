@@ -45,7 +45,9 @@ function isReusableBlock(block: AssistantMessageItem, source: AssistantMessageIt
     block.turnId === source.turnId &&
     block.timestamp.getTime() === source.timestamp.getTime() &&
     block.timelineCursor?.epoch === source.timelineCursor?.epoch &&
-    block.timelineCursor?.seq === source.timelineCursor?.seq
+    block.timelineCursor?.seq === source.timelineCursor?.seq &&
+    // Turn completion attaches metrics without changing the text.
+    block.turnMetrics === source.turnMetrics
   );
 }
 

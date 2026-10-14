@@ -5,7 +5,11 @@ import type {
   ToolCallDetail,
 } from "@getpaseo/protocol/agent-types";
 import { timelineItemIdentity } from "@getpaseo/protocol/timeline-identity";
-import type { AgentAttachment, AgentStreamEventPayload } from "@getpaseo/protocol/messages";
+import type {
+  AgentAttachment,
+  AgentStreamEventPayload,
+  TurnMetrics,
+} from "@getpaseo/protocol/messages";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { extractTaskEntriesFromToolCall } from "../utils/tool-call-parsers";
 
@@ -710,6 +714,8 @@ export interface AssistantMessageItem {
   timelineCursor?: TimelinePosition;
   text: string;
   timestamp: Date;
+  /** Set on the last assistant message of a completed turn. */
+  turnMetrics?: TurnMetrics;
   /** Display-only fields, assigned after source-item plugin transforms. */
   blockGroupId?: string;
   blockIndex?: number;
@@ -1611,9 +1617,10 @@ export function reduceStreamUpdate(
         ),
         event,
       );
+    case "turn_completed":
+      return finalizeActiveThoughts(attachTurnMetrics(state, event.turnId, event.metrics));
     case "thread_started":
     case "turn_started":
-    case "turn_completed":
     case "turn_failed":
     case "turn_canceled":
     case "permission_requested":
@@ -1623,6 +1630,20 @@ export function reduceStreamUpdate(
     default:
       return state;
   }
+}
+
+export function attachTurnMetrics(
+  items: StreamItem[],
+  turnId: string | undefined,
+  metrics: TurnMetrics | undefined,
+): StreamItem[] {
+  if (!turnId || !metrics) return items;
+  const index = items.findLastIndex(
+    (item) => item.kind === "assistant_message" && item.turnId === turnId,
+  );
+  const target = items[index];
+  if (!target || target.kind !== "assistant_message") return items;
+  return [...items.slice(0, index), { ...target, turnMetrics: metrics }, ...items.slice(index + 1)];
 }
 
 function applyTimelineTurnId(

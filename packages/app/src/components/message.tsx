@@ -105,6 +105,8 @@ import type { AgentCapabilityFlags } from "@getpaseo/protocol/agent-types";
 import { RewindMenu, type RewindMode } from "@/components/rewind/rewind-menu";
 import { useRewindAgentMutation } from "@/components/rewind/use-rewind-agent-mutation";
 import { AssistantForkMenu, type AssistantForkTarget } from "@/components/assistant-fork-menu";
+import { TurnMetricsText } from "@/components/turn-metrics-text";
+import type { TurnMetricPart } from "@/timeline/turn-time";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import {
   markdownCopyDataSet,
@@ -582,6 +584,8 @@ interface AssistantTurnFooterProps {
   getContent: () => string;
   completedAt?: Date;
   durationMs?: number | null;
+  /** Per-turn TTFT and output rate, e.g. "TTFT 1.2s · 45 tok/s". */
+  metricParts?: TurnMetricPart[];
   onFork?: (target: AssistantForkTarget) => Promise<void> | void;
 }
 
@@ -613,6 +617,10 @@ const assistantTurnFooterStylesheet = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: STREAM_METADATA_FONT_SIZE,
   },
+  metricsLabel: {
+    color: theme.colors.foregroundMuted,
+    fontSize: STREAM_METADATA_FONT_SIZE,
+  },
 }));
 
 const TIMESTAMP_REVEAL_MS = 3000;
@@ -626,6 +634,7 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
   getContent,
   completedAt,
   durationMs,
+  metricParts,
   onFork,
 }: AssistantTurnFooterProps) {
   const [hovered, setHovered] = useState(false);
@@ -704,6 +713,13 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
             </Text>
           </View>
         </Pressable>
+      ) : null}
+      {metricParts ? (
+        <TurnMetricsText
+          parts={metricParts}
+          style={assistantTurnFooterStylesheet.metricsLabel}
+          testID="turn-metrics-label"
+        />
       ) : null}
     </View>
   );

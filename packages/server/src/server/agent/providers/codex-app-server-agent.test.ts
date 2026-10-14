@@ -5734,6 +5734,63 @@ describe("Codex app-server provider", () => {
     });
   });
 
+  test("reports turn output tokens as the thread total difference across the turn", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    const usageWithTotal = (outputTokens: number) => ({
+      tokenUsage: {
+        total: { totalTokens: outputTokens * 10, outputTokens },
+        last: { totalTokens: 900, outputTokens: 40 },
+      },
+    });
+
+    asInternals(session).handleNotification("thread/tokenUsage/updated", usageWithTotal(100));
+    asInternals(session).handleNotification("turn/started", {
+      threadId: "test-thread",
+      turn: { id: "turn-1" },
+    });
+    asInternals(session).handleNotification("thread/tokenUsage/updated", usageWithTotal(130));
+    asInternals(session).handleNotification("thread/tokenUsage/updated", usageWithTotal(160));
+    asInternals(session).handleNotification("turn/completed", {
+      turn: { status: "completed", error: null },
+    });
+
+    expect(events.at(-1)).toMatchObject({ type: "turn_completed", turnOutputTokens: 60 });
+
+    asInternals(session).handleNotification("turn/started", {
+      threadId: "test-thread",
+      turn: { id: "turn-2" },
+    });
+    asInternals(session).handleNotification("thread/tokenUsage/updated", usageWithTotal(175));
+    asInternals(session).handleNotification("turn/completed", {
+      turn: { status: "completed", error: null },
+    });
+
+    expect(events.at(-1)).toMatchObject({ type: "turn_completed", turnOutputTokens: 15 });
+  });
+
+  test("omits turn output tokens when the turn start baseline is unknown", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("turn/started", {
+      threadId: "test-thread",
+      turn: { id: "turn-1" },
+    });
+    asInternals(session).handleNotification("thread/tokenUsage/updated", {
+      tokenUsage: { total: { outputTokens: 500 } },
+    });
+    asInternals(session).handleNotification("turn/completed", {
+      turn: { status: "completed", error: null },
+    });
+
+    const completed = events.at(-1);
+    expect(completed?.type).toBe("turn_completed");
+    expect(completed).not.toHaveProperty("turnOutputTokens");
+  });
+
   test("streams Codex assistant message deltas and does not replay completed text", () => {
     const session = createSession();
     const events: AgentStreamEvent[] = [];
