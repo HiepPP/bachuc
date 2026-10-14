@@ -208,6 +208,13 @@ export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
     },
   },
   {
+    id: "glm",
+    label: "GLM",
+    description: "Z.AI GLM models through the Claude Code client, with their own Claude config",
+    defaultModeId: "auto",
+    modes: CLAUDE_MODES,
+  },
+  {
     id: "codex",
     label: "Codex",
     description: "OpenAI's Codex workspace agent with sandbox controls and optional network access",
