@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
 import type { InstalledPlugin } from "./types";
 import { createPaseoApi, type PaseoApi } from "@getpaseo/client";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
@@ -19,26 +19,39 @@ export function createPluginSurfaceRuntime(
   };
 }
 
-/** A mounted surface owns its API; creating a React element creates no server demand. */
+const mountedRuntimeCounts = new WeakMap<PluginSurfaceRuntime, number>();
+
+/**
+ * A mounted surface owns its API; creating a React element creates no server demand. The runtime
+ * exists from the first render, so plugin content commits with its host row instead of a frame
+ * later, which a virtualized timeline would measure as an empty row. An API from a render React
+ * discards holds no server demand until used and is released with the plugin lifetime.
+ */
 export function usePluginSurfaceRuntime(
   client: DaemonClient | null,
   plugin: InstalledPlugin | null | undefined,
 ): PluginSurfaceRuntime | null {
-  const [mounted, setMounted] = useState<{
-    client: DaemonClient;
-    plugin: InstalledPlugin;
-    runtime: PluginSurfaceRuntime;
-  } | null>(null);
+  const runtime = useMemo(
+    () => (client && plugin ? createPluginSurfaceRuntime(client, plugin) : null),
+    [client, plugin],
+  );
+  const pluginId = plugin?.id;
   useEffect(() => {
-    if (!client || !plugin) return;
-    const runtime = createPluginSurfaceRuntime(client, plugin);
     if (!runtime) return;
-    setMounted({ client, plugin, runtime });
+    mountedRuntimeCounts.set(runtime, (mountedRuntimeCounts.get(runtime) ?? 0) + 1);
     return () => {
-      void runtime.paseo
-        .dispose()
-        .catch((error) => console.warn(`[Plugins] Surface cleanup failed for ${plugin.id}`, error));
+      mountedRuntimeCounts.set(runtime, (mountedRuntimeCounts.get(runtime) ?? 1) - 1);
+      // StrictMode replays effects within the same task, so dispose only once no effect took the
+      // runtime back.
+      queueMicrotask(() => {
+        if ((mountedRuntimeCounts.get(runtime) ?? 0) > 0) return;
+        void runtime.paseo
+          .dispose()
+          .catch((error) =>
+            console.warn(`[Plugins] Surface cleanup failed for ${pluginId}`, error),
+          );
+      });
     };
-  }, [client, plugin]);
-  return mounted?.client === client && mounted.plugin === plugin ? mounted.runtime : null;
+  }, [pluginId, runtime]);
+  return runtime;
 }

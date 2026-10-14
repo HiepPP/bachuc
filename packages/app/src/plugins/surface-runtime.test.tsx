@@ -1,11 +1,20 @@
+/**
+ * @vitest-environment jsdom
+ */
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { PaseoApi } from "@getpaseo/client";
 import { PaseoApiProvider } from "@getpaseo/plugin/client/host";
 import { usePaseo } from "@getpaseo/plugin/client";
-import React from "react";
+import React, { act, StrictMode } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { createPluginSurfaceRuntime } from "./surface-runtime";
+import {
+  createPluginSurfaceRuntime,
+  type PluginSurfaceRuntime,
+  usePluginSurfaceRuntime,
+} from "./surface-runtime";
+import type { InstalledPlugin } from "./types";
 
 function clientWithWorkspace(id: string) {
   const createWorkspace = vi.fn(async () => ({
@@ -99,6 +108,50 @@ describe("plugin surface host runtime", () => {
     expect(hostA.invokePluginRpc).toHaveBeenCalledWith("same-plugin", "host", {});
     expect(hostA.createWorkspace).not.toHaveBeenCalled();
     expect(hostB.createWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it("serves the first render and survives the StrictMode effect replay until unmount", async () => {
+    Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+      value: true,
+      configurable: true,
+    });
+    const release = vi.fn(async () => {});
+    const client = {
+      observeEvents: vi.fn(() => ({ release, subscribe: vi.fn() })),
+    } as unknown as DaemonClient;
+    const plugin = {
+      id: "timeline-plugin",
+      lifetime: new AbortController(),
+    } as unknown as InstalledPlugin;
+    const renders: Array<PluginSurfaceRuntime | null> = [];
+    function Surface() {
+      renders.push(usePluginSurfaceRuntime(client, plugin));
+      return null;
+    }
+    const root = createRoot(document.createElement("div"));
+
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <Surface />
+        </StrictMode>,
+      );
+    });
+
+    // Plugin content must commit with its row; a null first render leaves the row empty for a frame.
+    expect(renders[0]).not.toBeNull();
+    expect(new Set(renders).size).toBe(1);
+    const runtime = renders[0];
+    if (!runtime) throw new Error("Expected a runtime on the first render");
+    runtime.paseo.observeEvents(["project.update"]);
+    await act(async () => {});
+    expect(release).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.unmount();
+    });
+
+    expect(release).toHaveBeenCalledOnce();
   });
 
   it("keeps an offline selected host unavailable instead of borrowing another host", () => {
