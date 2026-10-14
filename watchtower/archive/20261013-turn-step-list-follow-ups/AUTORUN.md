@@ -22,7 +22,7 @@ paseo_profile: Opus
 - Open every PR on `HiepPP/bachuc` with `--repo HiepPP/bachuc`. Never open or touch a PR on `getpaseo/paseo`.
 - Never restart or stop the release daemon on port 6767. Never run `scripts/paseo-release.sh` or `npm run build:desktop`.
 - Do not start, stop, or restart the live daemon or the live Electron app (owner answer, 2026-10-12). If live is down, write each live check as `UNVERIFIED (autonomous run)`.
-- Never install, reload, or remove a plugin on release. TASK-084 may run `npm run cli -- plugin reload edit-diffs` on live only when live already runs.
+- Never install, reload, or remove a plugin on release. TASK-093 may run `npm run cli -- plugin reload edit-diffs` on live only when live already runs.
 - Run only the test files a TASK changes, with `--bail=1` for vitest. Run app vitest files from `packages/app`. Never pass `--dir` to vitest.
 - Run GitNexus `impact` before you edit a symbol. Run `detect_changes` before each commit, per the root `CLAUDE.md`.
 - The gate has no `formatter` line: oxfmt rejects `--check` together with `--stdin-filepath`. Format with `npm run format:files -- <changed files>` before you stage. This includes `watchtower/` markdown, because the lefthook pre-commit hook checks the format of every staged `*.md` file. Put path globs in code spans first; the formatter reads a bare `**` as emphasis. Format `hiep-plugins/` files with the plugin's own `npm run format`.

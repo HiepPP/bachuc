@@ -1,6 +1,6 @@
-# TASK-083 Note opens its step
+# TASK-092 Note opens its step
 
-Group: A (shares `turn/view.test.tsx` with TASK-085; TASK-084 and TASK-085 share `turn/view.tsx`)
+Group: A (shares `turn/view.test.tsx` with TASK-094; TASK-093 and TASK-094 share `turn/view.tsx`)
 Class: risky
 
 ## Brief
