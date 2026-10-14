@@ -26,8 +26,9 @@ function rowIcon(row: NeedsYouRow, theme: PluginTheme): { name: string; color: s
   };
 }
 
-type ButtonTone = "primary" | "danger";
+type ButtonTone = "primary" | "danger" | "quiet";
 
+// A text link of mock D v2: accent text with no border. Cancel is quiet, Reject is danger.
 function ActionButton({
   label,
   subject,
@@ -47,9 +48,9 @@ function ActionButton({
   const color =
     tone === "danger"
       ? colors.statusDanger
-      : tone === "primary"
-        ? colors.accent
-        : colors.foreground;
+      : tone === "quiet"
+        ? colors.foregroundMuted
+        : colors.accent;
   return (
     <Pressable
       accessibilityRole="button"
@@ -58,15 +59,13 @@ function ActionButton({
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => ({
-        paddingHorizontal: 9,
-        paddingVertical: 4,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderColor: tone === "danger" ? colors.statusDanger : colors.border,
+        paddingVertical: 2,
         opacity: disabled ? 0.4 : pressed ? 0.6 : 1,
       })}
     >
-      <Text style={{ fontSize: 11.5, fontWeight: "500", color }}>{label}</Text>
+      <Text style={{ fontSize: 12, fontWeight: tone === "primary" ? "600" : "500", color }}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -153,14 +152,14 @@ export function NeedsYouCell({
             color: colors.foreground,
           }}
         />
-        <View style={{ flexDirection: "row", gap: 6 }}>
+        <View style={{ flexDirection: "row", gap: 14 }}>
           <ActionButton
             {...button(row, "Send", "primary")}
             disabled={noAgent || sending || !draft.trim()}
             onPress={() => void submit()}
           />
           <ActionButton
-            {...button(row, "Cancel")}
+            {...button(row, "Cancel", "quiet")}
             disabled={sending}
             onPress={() => {
               setAnswering(null);
@@ -224,7 +223,7 @@ export function NeedsYouCell({
           />
           {confirming ? (
             <ActionButton
-              {...button(row, "Cancel")}
+              {...button(row, "Cancel", "quiet")}
               disabled={sending}
               onPress={() => setRejecting(null)}
             />
@@ -333,7 +332,15 @@ export function NeedsYouCell({
               {answering === row.id ? (
                 answerForm(row)
               ) : (
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    flexWrap: "wrap",
+                    columnGap: 14,
+                    rowGap: 4,
+                    marginTop: 4,
+                  }}
+                >
                   {buttons(row)}
                 </View>
               )}

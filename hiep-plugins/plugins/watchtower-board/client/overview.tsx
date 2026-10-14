@@ -1,8 +1,8 @@
 import { type PluginHostProps, type PluginSurfaceProps, useRpc } from "@getpaseo/plugin/client";
 import { Icon, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useMemo, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
+import { Pressable, type ScrollView as NativeScrollView, Text, View } from "react-native";
 import { readBoardRpc } from "../shared/board";
 import { readOverviewRpc } from "../shared/overview";
 import { useAgentSender } from "./agent-target";
@@ -167,10 +167,19 @@ export function WatchtowerOverview({
   const agent = useAgentSender(host.id, workspaceId, (derived?.rows.length ?? 0) > 0);
   const runAgents = useRunAgents(host.id, workspaceId);
   const builders = useMemo(() => matchBuilders(runAgents, data?.tasks ?? []), [runAgents, data]);
-  // A TASK picked in the tree. The task list selects on mount only, so a new pick remounts it
-  // with that TASK as its opener TASK; `count` lets the same TASK be picked again.
-  const [picked, setPicked] = useState<{ id: string; count: number } | null>(null);
-  const selectTask = (id: string) => setPicked((prev) => ({ id, count: (prev?.count ?? 0) + 1 }));
+  // The TASK selected in the task list. The opener starts it, a row of the tree or the list sets it.
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialTaskId ?? null);
+  // Only the stacked page scrolls as one; the rail of the wide page has its own scroll view.
+  const stackScroll = useRef<NativeScrollView>(null);
+  const revealTask = useCallback((row: View) => {
+    const scroll = stackScroll.current;
+    if (!scroll) return;
+    row.measureLayout(
+      scroll.getInnerViewNode(),
+      (_x, y) => scroll.scrollTo({ y: Math.max(0, y - 12), animated: true }),
+      () => undefined,
+    );
+  }, []);
   const openAgent = navigation
     ? (agentId: string) => navigation.openAgent({ agentId, serverId: host.id })
     : undefined;
@@ -245,12 +254,13 @@ export function WatchtowerOverview({
   ) : null;
   const tasks = (
     <TasksCard
-      key={picked ? `${picked.id}:${picked.count}` : "opener"}
       board={board.data}
       error={board.error}
       workspaceId={workspaceId}
       sourceKey={workspaceId}
-      initialTaskId={picked?.id ?? initialTaskId}
+      selectedTaskId={selectedTaskId}
+      onSelectTask={setSelectedTaskId}
+      onRevealSelected={stacked ? revealTask : undefined}
       theme={theme}
     />
   );
@@ -399,7 +409,7 @@ export function WatchtowerOverview({
           lead={builders.lead}
           narrow={narrow}
           theme={theme}
-          onSelectTask={selectTask}
+          onSelectTask={setSelectedTaskId}
           onOpenAgent={openAgent}
           planTitle={data.plan.title}
           runState={runState}
@@ -470,7 +480,11 @@ export function WatchtowerOverview({
       onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
     >
       {stacked ? (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad, gap: GAP }}>
+        <ScrollView
+          ref={stackScroll}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: pad, gap: GAP }}
+        >
           {header}
           {progress}
           {waiting}

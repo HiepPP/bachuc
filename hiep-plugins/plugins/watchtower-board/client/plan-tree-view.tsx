@@ -9,8 +9,9 @@ import type { PlanTree as PlanTreeModel, PlanTreeRow } from "./plan-tree";
 // The plan tree of mock D v2: a lead row, then waves of TASK rows hanging off one spine.
 
 const ICON_BOX = 18;
+const SPINE_WIDTH = 2;
 // Left edge of the spine: the center of the state icon column of the wave header.
-const SPINE_INSET = ICON_BOX / 2 - 1;
+const SPINE_INSET = ICON_BOX / 2 - SPINE_WIDTH / 2;
 const SPINE_GAP = 14;
 const COMMIT = /\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/;
 
@@ -142,7 +143,7 @@ function secondaryLine(
   const group = row.group ? `Group ${row.group}` : null;
   const letter = row.group ? `Builder ${row.group}` : "Builder";
   const plain = [group, taskClass].filter(Boolean).join(", ");
-  if (state === "done") return sha ? `${letter} committed ${sha}` : plain;
+  if (state === "done") return sha ? `committed ${sha}` : plain;
   if (state === "waiting") return `${letter} asks permission`;
   if (state === "running" && builder) {
     const last = ago(builder.activeAgo);
@@ -182,10 +183,11 @@ function TaskRow({
           pointerEvents="none"
           style={{
             position: "absolute",
-            left: -SPINE_GAP - 1,
+            left: -SPINE_GAP - SPINE_WIDTH,
             top: "50%",
-            width: SPINE_GAP,
-            height: 1,
+            marginTop: -SPINE_WIDTH / 2,
+            width: SPINE_GAP + SPINE_WIDTH,
+            height: SPINE_WIDTH,
             backgroundColor: colors.border,
           }}
         />
@@ -464,7 +466,7 @@ export function PlanTree({
                     : {
                         marginLeft: SPINE_INSET,
                         paddingLeft: SPINE_GAP,
-                        borderLeftWidth: 1,
+                        borderLeftWidth: SPINE_WIDTH,
                         borderLeftColor: colors.border,
                       }
                 }
