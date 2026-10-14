@@ -30,7 +30,7 @@ overlay with a dimmed backdrop; a compact layout shows a page. The pill reads `W
 adds `, 1 question` while an open question blocks a task, and reads `Watchtower` on New workspace,
 which has no workspace yet; there a press shows the chosen project's board in the side panel.
 From 720 px wide the page has a fixed 360 px left rail, the former Explorer board, and the
-timeline-first view on its right; each side scrolls on its own. Below 720 px, such as on a phone,
+plan-tree view on its right; each side scrolls on its own. Below 720 px, such as on a phone,
 everything stacks in one scroll. The rail reads the board RPC, and the right side reads
 `watchtower.overview.read`. The rail shows:
 
@@ -39,18 +39,20 @@ everything stacks in one scroll. The rail reads the board RPC, and the right sid
 - **Tasks**: the status groups, Done collapsed; select a task for its brief and attachment search;
 - **Autorun**: runner, profile, schedule, start and finish, and every log row, newest first.
 
-The right side lays itself out by its own width: three columns from 900 px, and the timeline is
-one strip below 520 px. It shows:
+The right side lays itself out by its own width: the plan on top, then the other cells in two
+columns from 900 px, in pairs below that, and stacked below 520 px. It shows:
 
 - the lifecycle: Plan, Implement, Verify, Review, and Archive, with the current step marked;
 - the Autorun strip: run state (running, stopped, or finished), runner, start, iterations, and last
   activity;
-- the branch timeline: done, running, and planned tasks on lanes, linked to their deps, with a now
-  line, hour ticks, the estimated finish, and four pace stats. An idle gap longer than
-  max(2 h, 4 x the average task) collapses to a 48 px break labeled with its length, such as
-  `2d 23h`, and each period after a break shows its day. Below 520 px the timeline is one strip;
-- **Running now**: each running task with its minutes against the average, and **Up next**: planned
-  and blocked tasks in order with their expected start;
+- **Plan**: the pace line and the plan tree. The pace line has four numbers: average task, estimated
+  finish, builders at once, and the slowest task over the average. It hides a number with no data,
+  and a stopped run hides the finish. The tree groups tasks into waves by their deps, each with a
+  header such as `starts when TASK-X finishes`. A done wave starts collapsed. A row shows the
+  task's state, ID, title, and time; pressing it selects the task in the left rail. A running task
+  whose builder waits on you turns amber and has **Open thread**. The lead row opens the lead
+  agent's thread, and without a lead agent it shows the run state. See
+  [ADR-0029](../../../watchtower/decisions/ADR-0029-plan-tree-over-branch-timeline.md);
 - **Needs you**: open and defaulted questions, proposed ADRs, and pending manual checks, each with
   actions (below). A blocking question shows the time to answer by;
 - the pending manual checks;

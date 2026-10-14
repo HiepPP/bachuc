@@ -49,6 +49,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid restarting TASK or Q-IDs at 001 in a new plan, and avoid per-plan or per-kind ID prefixes, while one repo has one `watchtower/` folder. Reason: [ADR-0011](watchtower/decisions/ADR-0011-repo-wide-ids-over-per-plan-ids.md).
 - Avoid a pill wheel with a step cooldown, a wheel that steps a pill with its list closed, wraps at the ends, or changes the provider from the model pill, and avoid wheel handling on the sheet surface, while the owner wants hover to open a pill's list, one notch per step, and the list closed when the pointer leaves the pill. Reason: [ADR-0025](watchtower/decisions/ADR-0025-wheel-opens-the-list-and-steps-over-closed-pill-step.md).
 - Avoid a three.js Fleet map tab in the app, and a hidden tab that keeps `three` in the bundle, while `three` loads at app start and the agent tree lives as 2D UI on the Watchtower page. Reason: [ADR-0028](watchtower/decisions/ADR-0028-no-fleet-map-tab-over-three-js-fleet-map.md).
+- Avoid a branch timeline, Running now, or Up next on the Watchtower page, and a second tab or a side-by-side timeline for the plan tree, while the owner chose the tree after comparing mockups. Reason: [ADR-0029](watchtower/decisions/ADR-0029-plan-tree-over-branch-timeline.md).
 
 ## Learnings
 
