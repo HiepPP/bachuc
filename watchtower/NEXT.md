@@ -34,7 +34,14 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 ## Handoff
 
 - Implement result: typecheck passed in the pre-commit hook of each code commit, and `npm run lint` passed on the branch. The live lines of Plan Verify are UNVERIFIED (unattended), because the run may not restart live.
-- Next action: restart the live daemon on `feat/native-glm-provider`, then run the live lines of Plan Verify.
+- Live verify, 2026-10-14, after `npm run cli -- daemon restart` on `feat/native-glm-provider`:
+  - `provider ls` -> `glm` / `GLM` / `available`; `provider models glm` -> 4 models.
+  - The probe agent read "BANANA 7429" and the red square. The transcript under `.dev/paseo-home/providers/glm/claude-config/projects` has 3 `thinking` blocks, one subagent file, and 8 assistant messages, all `glm-5.3-flash`.
+  - The tool list has `WebFetch` and no `WebSearch`.
+  - `~/.claude/projects` and `~/.claude.json` have no `glm-native-probe` entry, before and after the probe.
+  - Daemon API: `listProviderUsage` has a `glm` entry (`GLM`, `available`, plan `GLM Coding Max`) and no `zai` entry. The provider snapshot has `glm` as `ready`.
+  - Not checked: the GLM icon on screen. Unit tests in TASK-106 cover the icon mapping.
+- Next action: look at the GLM icon in the live app, then merge `feat/native-glm-provider` to `main`.
 
 ## Archive
 
