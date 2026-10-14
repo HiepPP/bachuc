@@ -4,8 +4,8 @@
 
 - Title: Fleet map with three.js
 - Slug: 20261013-fleet-map
-- Status: DONE
-- Updated: 2026-10-13
+- Status: ARCHIVED
+- Updated: 2026-10-14
 
 ## Tracker
 
@@ -42,3 +42,4 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 - [watchtower/archive/20261013-composer-pill-wheel-select/](watchtower/archive/20261013-composer-pill-wheel-select/)
 - [watchtower/archive/20261012-turn-step-list/](watchtower/archive/20261012-turn-step-list/)
 - [watchtower/archive/20261012-repo-wide-ids-and-board-lanes/](watchtower/archive/20261012-repo-wide-ids-and-board-lanes/)
+- Archived: 2026-10-14 -> watchtower/archive/20261013-fleet-map/

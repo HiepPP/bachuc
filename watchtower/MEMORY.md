@@ -171,3 +171,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: in zsh, a variable that holds several paths is not split into words, so `npm run lint -- $FILES` passes one bad path.
 - Source: TASK-086 and TASK-088 outcomes.
 - Use next time: pass each path as its own argument or use an array.
+- Learned: `cua_repl` cannot move the pointer without a click, so it cannot test hover. A headless browser (`agent-browser`) connected to the live daemon at `127.0.0.1:6768` can, with real mouse moves. Counting `CanvasRenderingContext2D.drawImage` calls probes the frame work of a canvas view.
+- Source: TASK-090 outcome; [watchtower/archive/20261013-fleet-map/LEARN.md](watchtower/archive/20261013-fleet-map/LEARN.md).
+- Use next time: set the host to port 6768 in the connect form, because its default is 6767 (release).
+- Learned: Metro puts a module shared by two async chunks into `__common`, which `index.html` loads at page start. An `import()` split does not make the library lazy at start.
+- Source: TASK-090 outcome (`expo export`, 2026-10-13).
+- Use next time: read the built output before a plan promises lazy loading.
