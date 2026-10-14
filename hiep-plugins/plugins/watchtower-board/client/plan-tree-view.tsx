@@ -79,8 +79,7 @@ type RowState = "done" | "running" | "waiting" | "planned" | "blocked";
 function StateIcon({ state, theme }: { state: RowState } & ThemeProps) {
   const { colors } = theme;
   let glyph;
-  if (state === "done")
-    glyph = <Icon name="CircleCheck" size={16} color={colors.foregroundMuted} />;
+  if (state === "done") glyph = <Icon name="CircleCheck" size={16} color={colors.statusSuccess} />;
   else if (state === "running") glyph = <Spinner color={colors.accent} />;
   else if (state === "waiting") glyph = <Icon name="Hand" size={16} color={colors.statusWarning} />;
   else if (state === "blocked")
