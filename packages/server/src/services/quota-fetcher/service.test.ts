@@ -836,7 +836,13 @@ describe("real provider usage fetchers", () => {
     );
   });
 
-  it("fetches Z.ai usage from ZAI_API_KEY", async () => {
+  it("reports glm usage as unavailable without a key", async () => {
+    const usage = await service().listUsage();
+
+    expect(findProvider(usage, "glm")).toMatchObject({ status: "unavailable" });
+  });
+
+  it("fetches GLM usage from ZAI_API_KEY", async () => {
     process.env["ZAI_API_KEY"] = "zai_test_token";
     fetchApi = mockFetch(
       new Map([
@@ -857,9 +863,11 @@ describe("real provider usage fetchers", () => {
       ]),
     );
 
-    const zai = findProvider(await service().listUsage(), "zai");
+    const usage = await service().listUsage();
+    const glm = findProvider(usage, "glm");
 
-    expect(zai).toMatchObject({
+    expect(glm).toMatchObject({
+      displayName: "GLM",
       status: "available",
       planLabel: "GLM Coding Max",
       details: expect.arrayContaining([{ id: "status", label: "Status", value: "VALID" }]),
