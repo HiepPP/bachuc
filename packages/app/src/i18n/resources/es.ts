@@ -1919,12 +1919,6 @@ export const es: TranslationResources = {
       emptyTitle: "Aún no hay ninguna solicitud de extracción",
       emptyDescription: "Crea una solicitud para este checkout y consulta aquí sus detalles.",
     },
-    fleetMap: {
-      label: "Mapa de la flota",
-      subtitle: "Agentes de este host en un mapa",
-      empty: "Aún no hay agentes en este host",
-      webglUnavailable: "El mapa de la flota necesita WebGL, que esta vista no admite.",
-    },
     diff: {
       changesLabel: "Cambios",
       diffLabel: "Diferencia",

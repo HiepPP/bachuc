@@ -1891,12 +1891,6 @@ export const ja: TranslationResources = {
       emptyDescription:
         "このチェックアウトのプルリクエストを作成すると、ここに詳細が表示されます。",
     },
-    fleetMap: {
-      label: "フリートマップ",
-      subtitle: "このホストのエージェントをマップで表示",
-      empty: "このホストにはまだエージェントがいません",
-      webglUnavailable: "フリートマップには WebGL が必要ですが、この画面では利用できません。",
-    },
     diff: {
       changesLabel: "変更",
       diffLabel: "差分",

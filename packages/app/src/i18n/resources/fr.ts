@@ -1923,13 +1923,6 @@ export const fr: TranslationResources = {
       emptyDescription:
         "Créez une demande de fusion pour cette copie de travail afin d’afficher ses détails ici.",
     },
-    fleetMap: {
-      label: "Carte de la flotte",
-      subtitle: "Les agents de cet hôte sur une carte",
-      empty: "Aucun agent sur cet hôte pour le moment",
-      webglUnavailable:
-        "La carte de la flotte nécessite WebGL, que cette vue ne prend pas en charge.",
-    },
     diff: {
       changesLabel: "Modifications",
       diffLabel: "Diff",

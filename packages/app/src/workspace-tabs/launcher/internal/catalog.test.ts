@@ -11,7 +11,6 @@ describe("getBuiltInLaunchOrder", () => {
       "files",
       "browser",
       "pullRequest",
-      "fleetMap",
     ]);
   });
 
@@ -24,7 +23,6 @@ describe("getBuiltInLaunchOrder", () => {
       "agent",
       "browser",
       "pullRequest",
-      "fleetMap",
     ]);
   });
 });

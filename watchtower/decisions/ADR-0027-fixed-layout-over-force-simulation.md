@@ -1,6 +1,6 @@
 # ADR-0027 Fixed layout over a force simulation
 
-Status: accepted
+Status: superseded by ADR-0028
 Date: 2026-10-14
 Supersedes: -
 Scope: `packages/app/src/fleet-map/layout.ts`, `packages/app/src/fleet-map/layout.test.ts`, `packages/app/src/fleet-map/view.web.tsx`

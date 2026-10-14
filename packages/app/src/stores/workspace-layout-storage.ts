@@ -27,7 +27,6 @@ const WorkspaceTabTargetStorageSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("changes_tree") }),
   z.strictObject({ kind: z.literal("files") }),
   z.strictObject({ kind: z.literal("pull_request") }),
-  z.strictObject({ kind: z.literal("fleet_map") }),
   z.strictObject({
     kind: z.literal("file"),
     path: z.string(),
@@ -67,17 +66,51 @@ const WorkspaceTabStorageSchema = z.strictObject({
   createdAt: z.number(),
   state: z.json().optional(),
 });
+// COMPAT(fleetMapTab): builds from 2026-10-14 saved a `fleet_map` tab, a kind that no longer
+// exists. The schema is strict, so one unknown tab would discard the whole saved layout; accept
+// the tab here and drop it. Remove after 2027-04-14.
+const RetiredTabStorageSchema = z.strictObject({
+  tabId: z.string(),
+  target: z.strictObject({ kind: z.literal("fleet_map") }),
+  createdAt: z.number(),
+  state: z.json().optional(),
+});
+type WorkspaceTabStorage = z.infer<typeof WorkspaceTabStorageSchema>;
+type RetiredTabStorage = z.infer<typeof RetiredTabStorageSchema>;
+
+function isCurrentTab(tab: WorkspaceTabStorage | RetiredTabStorage): tab is WorkspaceTabStorage {
+  return tab.target.kind !== "fleet_map";
+}
+
+const PaneStorageSchema = z
+  .strictObject({
+    id: z.string(),
+    tabIds: z.array(z.string()),
+    focusedTabId: z.string().nullable(),
+    tabs: z.array(z.union([WorkspaceTabStorageSchema, RetiredTabStorageSchema])).optional(),
+    hidden: z.boolean().optional(),
+  })
+  .transform(({ tabs, ...pane }) => {
+    if (!tabs) {
+      return pane;
+    }
+    const kept = tabs.filter(isCurrentTab);
+    if (kept.length === tabs.length) {
+      return { ...pane, tabs: kept };
+    }
+    const retired = new Set(tabs.filter((tab) => !isCurrentTab(tab)).map((tab) => tab.tabId));
+    const tabIds = pane.tabIds.filter((tabId) => !retired.has(tabId));
+    const focusedTabId =
+      pane.focusedTabId !== null && retired.has(pane.focusedTabId)
+        ? (tabIds[0] ?? null)
+        : pane.focusedTabId;
+    return { ...pane, tabIds, focusedTabId, tabs: kept };
+  });
 const SplitNodeStorageSchema: z.ZodType<SplitNode> = z.lazy(() =>
   z.discriminatedUnion("kind", [
     z.strictObject({
       kind: z.literal("pane"),
-      pane: z.strictObject({
-        id: z.string(),
-        tabIds: z.array(z.string()),
-        focusedTabId: z.string().nullable(),
-        tabs: z.array(WorkspaceTabStorageSchema).optional(),
-        hidden: z.boolean().optional(),
-      }),
+      pane: PaneStorageSchema,
     }),
     z.strictObject({
       kind: z.literal("group"),

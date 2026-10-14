@@ -1870,12 +1870,6 @@ export const ar: TranslationResources = {
       emptyTitle: "لا يوجد طلب سحب بعد",
       emptyDescription: "أنشئ طلب سحب لنسخة العمل هذه لعرض تفاصيله هنا.",
     },
-    fleetMap: {
-      label: "خريطة الأسطول",
-      subtitle: "وكلاء هذا المضيف على شكل خريطة",
-      empty: "لا يوجد وكلاء على هذا المضيف بعد",
-      webglUnavailable: "تحتاج خريطة الأسطول إلى WebGL، وهذا العرض لا يدعمه.",
-    },
     diff: {
       changesLabel: "التغييرات",
       diffLabel: "الفرق",

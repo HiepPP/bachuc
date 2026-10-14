@@ -1895,12 +1895,6 @@ export const en = {
       emptyTitle: "No pull request yet",
       emptyDescription: "Create a pull request for this checkout to see its details here.",
     },
-    fleetMap: {
-      label: "Fleet map",
-      subtitle: "Agents on this host as a map",
-      empty: "No agents on this host yet",
-      webglUnavailable: "The fleet map needs WebGL, which this view does not support.",
-    },
     diff: {
       changesLabel: "Changes",
       diffLabel: "Diff",

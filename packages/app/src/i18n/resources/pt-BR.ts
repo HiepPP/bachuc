@@ -1903,12 +1903,6 @@ export const ptBR: TranslationResources = {
       emptyTitle: "Ainda não há pull request",
       emptyDescription: "Crie um pull request para este checkout para ver os detalhes aqui.",
     },
-    fleetMap: {
-      label: "Mapa da frota",
-      subtitle: "Agentes deste host em um mapa",
-      empty: "Ainda não há agentes neste host",
-      webglUnavailable: "O mapa da frota precisa de WebGL, que esta visualização não suporta.",
-    },
     diff: {
       changesLabel: "Alterações",
       diffLabel: "Diff",
