@@ -49,6 +49,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid restarting TASK or Q-IDs at 001 in a new plan, and avoid per-plan or per-kind ID prefixes, while one repo has one `watchtower/` folder. Reason: [ADR-0011](watchtower/decisions/ADR-0011-repo-wide-ids-over-per-plan-ids.md).
 - Avoid a pill wheel with a step cooldown, a wheel that steps a pill with its list closed, wraps at the ends, or changes the provider from the model pill, and avoid wheel handling on the sheet surface, while the owner wants hover to open a pill's list, one notch per step, and the list closed when the pointer leaves the pill. Reason: [ADR-0025](watchtower/decisions/ADR-0025-wheel-opens-the-list-and-steps-over-closed-pill-step.md).
 - Avoid one WebGL canvas per Fleet map view, and one canvas moved between views, while the app shares one WebGL context with the terminal and a Fleet map can be open in the main pane and in Explorer at once. Reason: [ADR-0026](watchtower/decisions/ADR-0026-shared-renderer-blit-over-canvas-per-view.md).
+- Avoid a force simulation, a per-frame layout tick, or a cached simulation run for the Fleet map layout while the map renders only on demand and an agent keeps its position when others change. Reason: [ADR-0027](watchtower/decisions/ADR-0027-fixed-layout-over-force-simulation.md).
 
 ## Learnings
 
