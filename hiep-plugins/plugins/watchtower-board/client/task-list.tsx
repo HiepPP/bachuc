@@ -1,6 +1,6 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { copyText } from "@getpaseo/plugin/client/react-native";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { attachmentKey, type Question, type Task } from "../shared/board";
 import {
@@ -34,6 +34,12 @@ interface TaskListProps {
   collapsedGroups?: readonly TaskGroup[];
   // A TASK to show selected on mount, when it exists.
   initialTaskId?: string;
+  // Controls the selection: the list shows this TASK (null for none) and reports each pick
+  // through `onSelectTask`. Leave it undefined and the list keeps its own selection.
+  selectedTaskId?: string | null;
+  onSelectTask?(taskId: string | null): void;
+  // Called with the selected row once it is on screen, so a stacked page can scroll to it.
+  onRevealSelected?(row: View): void;
 }
 
 // Tasks grouped by status. Selecting a task shows its brief, deps, class, blockers, and attachment search.
@@ -46,21 +52,49 @@ export function TaskList({
   theme,
   collapsedGroups = [],
   initialTaskId,
+  selectedTaskId,
+  onSelectTask,
+  onRevealSelected,
 }: TaskListProps) {
+  const controlled = selectedTaskId !== undefined;
+  const startId = selectedTaskId ?? initialTaskId;
   const [selection, setSelection] = useState<{ sourceKey: string; taskId: string } | null>(() =>
-    initialTaskId ? { sourceKey, taskId: initialTaskId } : null,
+    startId ? { sourceKey, taskId: startId } : null,
   );
   const [collapsed, setCollapsed] = useState<Partial<Record<TaskGroup, boolean>>>(() => {
     // The opener's TASK must show, so its group starts open even when it is a collapsed group.
-    const initial = tasks.find((task) => task.id === initialTaskId);
+    const initial = tasks.find((task) => task.id === startId);
     const open = initial ? taskGroup(initial.status) : null;
     return Object.fromEntries(
       collapsedGroups.filter((group) => group !== open).map((group) => [group, true]),
     );
   });
   const [notice, setNotice] = useState("");
-  const selected =
-    selection?.sourceKey === sourceKey ? tasks.find((task) => task.id === selection.taskId) : null;
+  const selected = controlled
+    ? tasks.find((task) => task.id === selectedTaskId)
+    : selection?.sourceKey === sourceKey
+      ? tasks.find((task) => task.id === selection.taskId)
+      : null;
+  const selectedRow = useRef<View>(null);
+  const selectedId = selected?.id ?? null;
+  const selectedGroup = selected ? taskGroup(selected.status) : null;
+  // A pick from outside the list may sit in a collapsed group. Open only that group, and only
+  // when the pick changes, so the owner can still collapse it afterwards.
+  useEffect(() => {
+    if (!selectedGroup) return;
+    setCollapsed((current) =>
+      current[selectedGroup] ? { ...current, [selectedGroup]: false } : current,
+    );
+  }, [selectedId, selectedGroup]);
+  const revealable = selectedGroup !== null && collapsed[selectedGroup] !== true;
+  useEffect(() => {
+    if (selectedId && revealable && selectedRow.current) onRevealSelected?.(selectedRow.current);
+  }, [selectedId, revealable, onRevealSelected]);
+  function select(taskId: string | null) {
+    if (!controlled) setSelection(taskId ? { sourceKey, taskId } : null);
+    onSelectTask?.(taskId);
+    setNotice("");
+  }
   const summary = useMemo(() => dashboardSummary(tasks), [tasks]);
   const groups = useMemo(() => groupTasks(tasks), [tasks]);
   const visibleGroups = groupOrder.filter(
@@ -195,6 +229,7 @@ export function TaskList({
                   return (
                     <View
                       key={task.id}
+                      ref={isSelected ? selectedRow : undefined}
                       style={[styles.task, isSelected ? styles.selectedTask : null]}
                     >
                       <Pressable
@@ -203,10 +238,7 @@ export function TaskList({
                         accessibilityHint="Shows task details and attachment search"
                         accessibilityState={{ selected: isSelected, expanded: isSelected }}
                         style={styles.taskRow}
-                        onPress={() => {
-                          setSelection(isSelected ? null : { sourceKey, taskId: task.id });
-                          setNotice("");
-                        }}
+                        onPress={() => select(isSelected ? null : task.id)}
                       >
                         <Text style={styles.taskId}>{task.id}</Text>
                         {task.taskClass ? (

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { test, type TestContext } from "node:test";
 import {
   mkdtemp,
@@ -21,6 +22,7 @@ import {
   parseOverviewRun,
   readDecision,
   readOverview,
+  runFromGitLog,
 } from "../server/overview";
 import {
   decisionDetailSchema,
@@ -495,4 +497,205 @@ test("the real t3code plan parses without warnings and stays small", async (t) =
   const size = Buffer.byteLength(JSON.stringify(overview));
   t.diagnostic(`overview JSON bytes: ${size}`);
   assert.ok(size <= 32 * 1024, `overview JSON is ${size} bytes`);
+});
+
+// Git log lines are `sha<TAB>iso time<TAB>subject`, newest first. Times are built in local time,
+// because the run log shows local clock times.
+const iso = (hour: number, minute: number, day = 14) =>
+  new Date(2026, 9, day, hour, minute).toISOString();
+const commit = (sha: string, time: string, subject: string) => `${sha}\t${time}\t${subject}`;
+const done = (...ids: string[]) => ids.map((id) => ({ id, status: "DONE" }));
+const gitLines = [
+  commit("e4e4e4e4e4e4", iso(11, 0), "docs(watchtower): record wave 2"),
+  commit("c3c3c3c3c3c3", iso(10, 30), "feat(board): second part (TASK-002)"),
+  commit("c2c2c2c2c2c2", iso(10, 0), "fix(board): tweak the first part (TASK-001)"),
+  commit("c1c1c1c1c1c1", iso(9, 20), "feat(board): first part (TASK-001)"),
+  commit("c0c0c0c0c0c0", iso(9, 0), "docs(watchtower): plan it"),
+  commit("a0a0a0a0a0a0", iso(8, 0), "chore: older work"),
+];
+
+test("the git log gives each counted TASK a row from the commit before its first commit", () => {
+  const run = runFromGitLog(gitLines, done("TASK-001", "TASK-002"), "20261014-plan");
+  assert.ok(run);
+  assert.equal(run.runner, "implement (git)");
+  assert.equal(run.started, "2026-10-14 09:00");
+  assert.equal(run.finished, "2026-10-14 10:30");
+  assert.deepEqual(run.log, [
+    {
+      task: "TASK-001",
+      result: "DONE",
+      detail: "commit c2c2c2c",
+      start: "09:00",
+      end: "10:00",
+      startMinute: 0,
+      endMinute: 60,
+    },
+    {
+      task: "TASK-002",
+      result: "DONE",
+      detail: "commit c3c3c3c",
+      start: "10:00",
+      end: "10:30",
+      startMinute: 60,
+      endMinute: 90,
+    },
+  ]);
+  assert.equal(run.nowMinute, 90);
+  assert.equal(run.stopped, false);
+});
+
+test("the plan's own NEXT.md commit sets Started, and the plan slug picks it", () => {
+  // Each record is `sha<TAB>iso time<TAB>subject<TAB>body`, newest first.
+  const plan = [
+    commit("b2b2b2b2b2b2", iso(9, 10), "docs(watchtower): tick TASK-001"),
+    commit("b1b1b1b1b1b1", iso(8, 30), "docs(watchtower): start the plan\tSlug: 20261014-plan"),
+    commit("b0b0b0b0b0b0", iso(7, 0), "docs(watchtower): older plan\tSlug: 20261001-other"),
+  ];
+  const run = runFromGitLog(gitLines, done("TASK-001", "TASK-002"), "20261014-plan", plan);
+  assert.equal(run?.started, "2026-10-14 08:30");
+  assert.deepEqual(
+    run?.log.map((row) => [row.task, row.startMinute, row.endMinute]),
+    [
+      ["TASK-001", 30, 90],
+      ["TASK-002", 90, 120],
+    ],
+  );
+  // A plan commit that does not name the slug does not count.
+  const none = runFromGitLog(gitLines, done("TASK-001"), "20261014-plan", [plan[2]]);
+  assert.equal(none?.started, "2026-10-14 09:00");
+});
+
+test("only a TASK ID of the Tracker in parentheses counts", () => {
+  const lines = [
+    commit("d3d3d3d3d3d3", iso(12, 0), "docs(watchtower): add TASK-001..002 to the plan"),
+    commit("d2d2d2d2d2d2", iso(11, 0), "feat(board): not in this plan (TASK-099)"),
+    commit("d1d1d1d1d1d1", iso(10, 0), "feat(board): both parts (TASK-001, TASK-002)"),
+    commit("d0d0d0d0d0d0", iso(9, 0), "docs(watchtower): plan it"),
+  ];
+  const run = runFromGitLog(lines, done("TASK-001", "TASK-002"), null);
+  assert.deepEqual(
+    run?.log.map((row) => [row.task, row.detail, row.startMinute, row.endMinute]),
+    [
+      ["TASK-001", "commit d1d1d1d", 0, 60],
+      ["TASK-002", "commit d1d1d1d", 0, 60],
+    ],
+  );
+  assert.equal(runFromGitLog(lines, done("TASK-050"), null), null);
+  assert.equal(runFromGitLog([], done("TASK-001"), null), null);
+  assert.equal(runFromGitLog(["not a log line", ""], done("TASK-001"), null), null);
+});
+
+test("a Tracker row that is not DONE keeps the run open until it stops", () => {
+  const tasks = [...done("TASK-001"), { id: "TASK-002", status: "IN PROGRESS" }];
+  // Last activity is minute 90, at 10:30.
+  const running = runFromGitLog(gitLines, tasks, null, [], new Date(2026, 9, 14, 12, 0));
+  assert.equal(running?.finished, null);
+  assert.equal(running?.nowMinute, 180);
+  assert.equal(running?.stopped, false);
+  const stopped = runFromGitLog(gitLines, tasks, null, [], new Date(2026, 9, 14, 12, 31));
+  assert.equal(stopped?.stopped, true);
+  assert.equal(stopped?.nowMinute, 90);
+});
+
+test("a TASK commit after midnight shows a dated time", () => {
+  const lines = [
+    commit("f1f1f1f1f1f1", iso(0, 20, 15), "feat(board): late part (TASK-001)"),
+    commit("f0f0f0f0f0f0", iso(23, 30, 14), "docs(watchtower): plan it"),
+  ];
+  const run = runFromGitLog(lines, done("TASK-001"), null);
+  assert.equal(run?.started, "2026-10-14 23:30");
+  assert.equal(run?.finished, "2026-10-15 00:20");
+  assert.deepEqual(run?.log[0], {
+    task: "TASK-001",
+    result: "DONE",
+    detail: "commit f1f1f1f",
+    start: "23:30",
+    end: "2026-10-15 00:20",
+    startMinute: 0,
+    endMinute: 50,
+  });
+  // The oldest counted commit has no parent in the log, so its own time is the start.
+  const first = runFromGitLog(lines.slice(0, 1), done("TASK-001"), null);
+  assert.deepEqual(
+    first?.log.map((row) => [row.startMinute, row.endMinute]),
+    [[0, 0]],
+  );
+});
+
+test("the overview builds the run from the git log only when RUN.md is absent", async (t) => {
+  let calls = 0;
+  const reader = async () => {
+    calls += 1;
+    return { lines: gitLines.map((line) => line.replace("TASK-002", "TASK-007")), planLines: [] };
+  };
+  const root = await fixture(t, { "NEXT.md": manifest, ...specs });
+  const overview = overviewSchema.parse(
+    await readOverview(root, new Date(2026, 9, 14, 12, 0), reader),
+  );
+  assert.deepEqual(overview.warnings, []);
+  assert.equal(overview.run?.runner, "implement (git)");
+  assert.deepEqual(
+    overview.run?.log.map((row) => row.task),
+    ["TASK-007"],
+  );
+  assert.equal(overview.run?.finished, null);
+  assert.equal(calls, 1);
+
+  const withRun = await fixture(t, { "NEXT.md": manifest, ...specs, "RUN.md": runLog });
+  const logged = await readOverview(withRun, new Date(2026, 9, 7, 1, 12), reader);
+  assert.equal(logged.run?.runner, "loop");
+  assert.equal(calls, 1);
+  // An unreadable RUN.md is not an absent one.
+  const broken = await fixture(t, { "NEXT.md": manifest, ...specs, "RUN.md/keep": "x" });
+  const unreadable = await readOverview(broken, new Date(), reader);
+  assert.equal(unreadable.run, null);
+  assert.deepEqual(unreadable.warnings, ["RUN.md: Expected a regular Markdown file."]);
+  assert.equal(calls, 1);
+});
+
+test("no counted commit keeps run null, and a git failure adds one warning", async (t) => {
+  const root = await fixture(t, { "NEXT.md": manifest, ...specs });
+  const empty = await readOverview(root, new Date(), async () => ({ lines: [], planLines: [] }));
+  assert.equal(empty.run, null);
+  assert.deepEqual(empty.warnings, []);
+  const failed = overviewSchema.parse(
+    await readOverview(root, new Date(), async () => {
+      throw new Error("git log timed out after 5 s.");
+    }),
+  );
+  assert.equal(failed.run, null);
+  assert.deepEqual(failed.warnings, ["git log: git log timed out after 5 s."]);
+  assert.equal(failed.tasks.length, 3);
+});
+
+test("the git reader reads a real repository, and a folder outside one gives no run", async (t) => {
+  const root = await fixture(t, { "NEXT.md": manifest, ...specs });
+  const git = (time: string, ...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "commit.gpgsign=false",
+        ...args,
+      ],
+      { cwd: root, env: { ...process.env, GIT_COMMITTER_DATE: time, GIT_AUTHOR_DATE: time } },
+    );
+  const outside = await readOverview(root);
+  assert.equal(outside.run, null);
+  assert.deepEqual(outside.warnings, []);
+  git(iso(9, 0), "init", "-q");
+  git(iso(9, 0), "commit", "-q", "--allow-empty", "-m", "docs: plan it");
+  git(iso(9, 40), "commit", "-q", "--allow-empty", "-m", "feat(board): host (TASK-006)");
+  const overview = overviewSchema.parse(await readOverview(root, new Date(2026, 9, 14, 10, 0)));
+  assert.deepEqual(overview.warnings, []);
+  assert.equal(overview.run?.started, "2026-10-14 09:00");
+  assert.deepEqual(
+    overview.run?.log.map((row) => [row.task, row.start, row.end]),
+    [["TASK-006", "09:00", "09:40"]],
+  );
+  assert.match(overview.run?.log[0].detail ?? "", /^commit [0-9a-f]{7}$/);
 });

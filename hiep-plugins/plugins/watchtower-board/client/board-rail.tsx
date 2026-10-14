@@ -2,9 +2,9 @@ import { useMemo } from "react";
 import { Text, View } from "react-native";
 import type { Board, Question, Run, Task } from "../shared/board";
 import type { OverviewRunEntry } from "../shared/overview";
-import { dashboardSummary, groupOrder, plural } from "./dashboard";
+import { dashboardSummary, plural, type TaskGroup, taskGroup } from "./dashboard";
 import { Empty, MONO, OverviewCell, ShowMore, type ThemeProps, useLimit } from "./overview-cells";
-import { groupLabels, TaskList } from "./task-list";
+import { TaskList } from "./task-list";
 
 // The parts of the former Explorer board. The Watchtower page shows them in its left rail, and
 // the new workspace side panel shows them alone. They take data through props and never fetch.
@@ -12,7 +12,23 @@ import { groupLabels, TaskList } from "./task-list";
 export function ProgressCard({ tasks, theme }: { tasks: readonly Task[] } & ThemeProps) {
   const { colors } = theme;
   const summary = useMemo(() => dashboardSummary(tasks), [tasks]);
-  const groups = groupOrder.filter((group) => group !== "unknown" || summary.counts.unknown > 0);
+  // Running work takes the accent, work that waits on the owner the warning color (mock D v2).
+  const segmentColor: Record<TaskGroup, string> = {
+    done: colors.statusSuccess,
+    active: colors.accent,
+    blocked: colors.statusWarning,
+    todo: colors.surface2,
+    unknown: colors.surface2,
+  };
+  const { counts } = summary;
+  const countLine = [
+    `${counts.done} done`,
+    counts.active > 0 ? `${counts.active} running` : null,
+    counts.blocked > 0 ? `${counts.blocked} waiting` : null,
+    `${counts.todo + counts.unknown} not started`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <View
       accessible
@@ -34,66 +50,22 @@ export function ProgressCard({ tasks, theme }: { tasks: readonly Task[] } & Them
           {summary.counts.done} of {summary.total} done
         </Text>
       </View>
-      <View
-        style={{
-          height: 6,
-          borderRadius: 3,
-          overflow: "hidden",
-          flexDirection: "row",
-          backgroundColor: colors.surface2,
-        }}
-      >
-        {(
-          [
-            ["done", colors.statusSuccess],
-            ["active", colors.statusWarning],
-            ["blocked", colors.statusDanger],
-          ] as const
-        ).map(([group, color]) => (
+      <View style={{ height: 6, flexDirection: "row", gap: 2 }}>
+        {tasks.map((task) => (
           <View
-            key={group}
+            key={task.id}
             style={{
-              width: `${summary.total ? (summary.counts[group] / summary.total) * 100 : 0}%`,
-              backgroundColor: color,
+              flex: 1,
+              minWidth: 1,
+              borderRadius: 2,
+              backgroundColor: segmentColor[taskGroup(task.status)],
             }}
           />
         ))}
       </View>
-      <View style={{ flexDirection: "row", gap: 6 }}>
-        {groups.map((group) => (
-          <View
-            key={group}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              paddingVertical: 6,
-              alignItems: "center",
-              borderWidth: 1,
-              borderColor: colors.border,
-              borderRadius: 8,
-            }}
-          >
-            <Text
-              style={{
-                fontSize: 15,
-                fontWeight: "700",
-                color:
-                  group === "blocked" && summary.counts.blocked > 0
-                    ? colors.statusDanger
-                    : colors.foreground,
-              }}
-            >
-              {summary.counts[group]}
-            </Text>
-            <Text
-              numberOfLines={1}
-              style={{ fontSize: 10, textTransform: "uppercase", color: colors.foregroundMuted }}
-            >
-              {groupLabels[group]}
-            </Text>
-          </View>
-        ))}
-      </View>
+      <Text style={{ fontFamily: MONO, fontSize: 11, color: colors.foregroundMuted }}>
+        {countLine}
+      </Text>
     </View>
   );
 }
@@ -130,6 +102,9 @@ export function TasksCard({
   workspaceId,
   sourceKey,
   initialTaskId,
+  selectedTaskId,
+  onSelectTask,
+  onRevealSelected,
   theme,
 }: {
   board: Board | undefined;
@@ -137,6 +112,10 @@ export function TasksCard({
   workspaceId: string | null;
   sourceKey: string;
   initialTaskId?: string;
+  // Pass these to control the selection; see `TaskList`.
+  selectedTaskId?: string | null;
+  onSelectTask?(taskId: string | null): void;
+  onRevealSelected?(row: View): void;
 } & ThemeProps) {
   const { colors } = theme;
   return (
@@ -160,6 +139,9 @@ export function TasksCard({
           workspaceId={workspaceId}
           sourceKey={sourceKey}
           initialTaskId={initialTaskId}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={onSelectTask}
+          onRevealSelected={onRevealSelected}
           dense
           theme={theme}
           collapsedGroups={["done"]}
