@@ -58,6 +58,11 @@ const manifests = {
     supportedHosts: ["main", "explorer"],
     resourceKey: () => "pull_request",
   },
+  fleet_map: {
+    kind: "fleet_map",
+    supportedHosts: ["main", "explorer"],
+    resourceKey: () => "fleet_map",
+  },
   file: {
     kind: "file",
     supportedHosts: ["main", "explorer"],

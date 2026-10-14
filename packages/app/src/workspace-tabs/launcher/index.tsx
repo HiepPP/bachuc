@@ -85,6 +85,7 @@ const BUILT_IN_SELECTIONS = {
   files: { kind: "target", target: { kind: "files" } },
   browser: { kind: "browser" },
   pullRequest: { kind: "target", target: { kind: "pull_request" } },
+  fleetMap: { kind: "target", target: { kind: "fleet_map" } },
 } satisfies Record<BuiltInLaunchItemId, NewTabSelection>;
 
 function getLaunchPresentation(kind: WorkspaceTabTarget["kind"]): PanelPresentation {
@@ -122,6 +123,7 @@ export function useWorkspaceTabLaunchCatalog(input: {
     const diffPresentation = getLaunchPresentation("working_diff");
     const filesPresentation = getLaunchPresentation("files");
     const pullRequestPresentation = getLaunchPresentation("pull_request");
+    const fleetMapPresentation = getLaunchPresentation("fleet_map");
     const builtIns: Record<BuiltInLaunchItemId, WorkspaceTabLaunchItem & { hidden?: boolean }> = {
       agent: {
         id: "agent",
@@ -194,6 +196,15 @@ export function useWorkspaceTabLaunchCatalog(input: {
         toggleTarget: null,
         hidden: !launcher.showPullRequest,
         launch: launchSelection(BUILT_IN_SELECTIONS.pullRequest),
+      },
+      fleetMap: {
+        id: "fleet-map",
+        label: fleetMapPresentation.label(t),
+        Icon: fleetMapPresentation.icon,
+        disabled: false,
+        panelKind: "fleet_map",
+        toggleTarget: null,
+        launch: launchSelection(BUILT_IN_SELECTIONS.fleetMap),
       },
     };
     const tabItems = getBuiltInLaunchOrder(purpose).flatMap((id) => {

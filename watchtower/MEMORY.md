@@ -48,6 +48,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid steps made of the tool calls before a note, and a per-provider rule, while agents in use write their note before they act. Reason: [ADR-0021](watchtower/decisions/ADR-0021-note-opens-its-step-over-tools-before-the-note.md).
 - Avoid restarting TASK or Q-IDs at 001 in a new plan, and avoid per-plan or per-kind ID prefixes, while one repo has one `watchtower/` folder. Reason: [ADR-0011](watchtower/decisions/ADR-0011-repo-wide-ids-over-per-plan-ids.md).
 - Avoid a pill wheel with a step cooldown, a wheel that steps a pill with its list closed, wraps at the ends, or changes the provider from the model pill, and avoid wheel handling on the sheet surface, while the owner wants hover to open a pill's list, one notch per step, and the list closed when the pointer leaves the pill. Reason: [ADR-0025](watchtower/decisions/ADR-0025-wheel-opens-the-list-and-steps-over-closed-pill-step.md).
+- Avoid one WebGL canvas per Fleet map view, and one canvas moved between views, while the app shares one WebGL context with the terminal and a Fleet map can be open in the main pane and in Explorer at once. Reason: [ADR-0026](watchtower/decisions/ADR-0026-shared-renderer-blit-over-canvas-per-view.md).
 
 ## Learnings
 
@@ -150,7 +151,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 ### 2026-10-13 - Plan 20261013-turn-step-list-follow-ups
 
 - Learned: green app tests do not prove a theme-dependent style works. The vitest Unistyles stub passes a plain theme, but web passes CSS variables, so a value computed from a theme string crashed live at start.
-- Source: ADR-0022; TASK-078 outcome.
+- Source: ADR-0022; TASK-085 outcome.
 - Use next time: after a `StyleSheet.create` change that computes from theme values, reload live and read the window before you call the TASK done.
 
 ### 2026-10-13 - Plan 20261013-composer-pill-wheel-select
@@ -161,3 +162,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: two plan specs named the wrong render path. The desktop provider pill is a raw `ComboboxTrigger`, not an `AgentControlTrigger`, and the composer model pill takes the `ComboboxTrigger` branch of `CombinedModelSelector` with a `toolbar` prop, not `renderTrigger`.
 - Source: TASK-080 and TASK-081 outcomes; Q-030, Q-033.
 - Use next time: when a spec wires a shared component, list each caller and the branch it renders before you name the path.
+
+### 2026-10-13 - Plan 20261013-fleet-map
+
+- Learned: the label fallback functions in `workspace-screen.tsx` and `workspace-desktop-tabs-row.tsx` are not exhaustive over `WorkspaceTabTarget`. A new tab kind falls through to the Agent label with no type error.
+- Source: TASK-088 outcome.
+- Use next time: when a spec adds a tab kind, name both label functions in `Files:` and test the label by hand.
+- Learned: in zsh, a variable that holds several paths is not split into words, so `npm run lint -- $FILES` passes one bad path.
+- Source: TASK-086 and TASK-088 outcomes.
+- Use next time: pass each path as its own argument or use an array.
