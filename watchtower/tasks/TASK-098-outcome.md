@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE (the visual live check is UNVERIFIED, unattended; the live reload passed)
+DONE. The live check ran by hand on 2026-10-14 and found two text bugs, now fixed (see Live check). Running and waiting builder rows and the pace line stay UNVERIFIED.
 
 ## Changed
 
@@ -43,8 +43,25 @@ Tripwire: the four test files pass with the same or more cases.
 
 Source: `npx tsx --test tests/<file>.test.ts`, the `ℹ pass` line. `tests/timeline-geometry.test.ts` had 14 pass before. The spec removes it. Not crossed: final PASS.
 
+## Live check
+
+Run on 2026-10-14 from 05:25Z to 05:50Z. Live daemon 6768, `npm run dev:desktop` with CDP on port 9223, plugin reloaded with `npm run cli -- plugin reload watchtower-board`. Page: the Watchtower page (Cmd+G) of the `feat/watchtower-plan-tree` workspace, plan 20261014-watchtower-plan-tree (5 of 5 done). Test agents: two Claude Haiku agents in that workspace, a lead and a builder labelled `watchtower.task=TASK-098` with `paseo.parent-agent-id` set to the lead. Screenshots through Playwright over CDP.
+
+- Plan cell -> PASS. It replaces the branch timeline; Running now and Up next are gone.
+- Waves -> PASS after fix. Four waves (095 and 096, 097, 098, 099). Done waves start collapsed and open with Show.
+- Lead row -> PASS. "Lead agent, implement", then "WT lead (test), idle, active 17s ago, no builder running", and Open thread. Mock-provider agents are skipped by design, so the first try with mock agents showed the Q-036 default row.
+- Row press -> PASS. Pressing TASK-098 selected it in the rail: the Done group opened and its brief showed.
+- Narrow layout (500 px) -> PASS. The stepper and cells stack, and the tree has no spine.
+- Pace line -> UNVERIFIED. It shows only with `watchtower/RUN.md`, and `implement` writes no RUN.md, so this plan shows "No autorun yet".
+- Running builder row and amber waiting row -> UNVERIFIED. Every TASK of this plan is done, and the test agents were idle.
+- Bug 1, fixed: a later done wave said "ready to start". Now a wave whose rows are all done says "done". Test: "a finished wave says done instead of a start condition".
+- Bug 2, fixed: a row showed the ID twice ("TASK-095 TASK-095 Plan tree model"), because the Tracker title starts with the ID. The model now uses `taskTitle` from `client/dashboard.ts`, like the task list. Test: "a row title drops the leading TASK ID, as the task list does".
+- After the fixes: `npx tsx --test tests/plan-tree.test.ts` 17 pass; `npm test` 92 pass, 0 fail; `npm run typecheck` exit 0; `rtk proxy npm run lint` 0 warnings, 0 errors. The fixes are in `client/plan-tree.ts` and `tests/plan-tree.test.ts`, not committed.
+- Console: no error from the plugin. Seen and not from this change: a refused `ws://localhost:6770/ws` (a stale host entry) and React unknown-prop warnings.
+
 ## Lessons
 
+- `paseo run` without `--workspace` creates a new workspace for each run, so test agents land outside the page's workspace. Pass `--workspace <id>`.
 - `clockAt` lived in the file that the spec deletes, and kept files still used it. Look for live helpers before you delete a module. Here it moved to `run-cells.tsx`, which is in Files.
 - The task list has no outside select handler. A keyed remount through `initialTaskId` gives a rail selection without a change outside Files. A remount also resets the rail's collapsed groups. A controlled `selectedTaskId` on `TaskList` and `TasksCard` would avoid that, but it changes files outside this spec.
 - In the stacked layout (below 720 px), the task list sits below the tree, so a pick selects a TASK that is off screen.

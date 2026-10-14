@@ -1,4 +1,5 @@
 import type { Overview, OverviewTask } from "../shared/overview";
+import { taskTitle } from "./dashboard";
 import { buildTimeline, startedAt, type BarKind, type TimelineBar } from "./timeline";
 
 export interface PlanTreeRow {
@@ -89,7 +90,14 @@ function rowFor(
         : item.status === "BLOCKED"
           ? "blocked"
           : "planned";
-  const base = { id: item.id, title: item.title, group: item.group, kind, time: null, over: false };
+  const base = {
+    id: item.id,
+    title: taskTitle(item),
+    group: item.group,
+    kind,
+    time: null,
+    over: false,
+  };
   if (!bar) return base;
   if (kind === "done") return { ...base, time: `${bar.end - bar.start}m` };
   if (kind === "running") {
@@ -110,6 +118,8 @@ function headerFor(
   inPlan: ReadonlySet<string>,
 ): string {
   if (cyclic) return "waits on a dependency cycle";
+  // A finished wave is history: its deps are done too, so "ready to start" would read as pending.
+  if (rows.length > 0 && rows.every((item) => item.kind === "done")) return "done";
   if (number === 1) {
     // A TASK with no group is a builder group of its own.
     const groups = new Set(rows.map((item) => item.group ?? `\0${item.id}`)).size;

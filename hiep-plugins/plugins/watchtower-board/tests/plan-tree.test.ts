@@ -127,6 +127,25 @@ test("a later wave names only the deps that are not done", () => {
   assert.equal(ready.waves[1].header, "ready to start");
 });
 
+test("a row title drops the leading TASK ID, as the task list does", () => {
+  const item = { ...task("TASK-095", "DONE"), title: "TASK-095 Plan tree model" };
+  const { waves } = buildPlanTree({ tasks: [item], run: null, questions: [] }, STARTED);
+  assert.equal(waves[0].rows[0].title, "Plan tree model");
+});
+
+test("a finished wave says done instead of a start condition", () => {
+  const { waves } = buildPlanTree(
+    {
+      tasks: [task("TASK-001", "DONE"), task("TASK-002", "DONE", ["TASK-001"])],
+      run: null,
+      questions: [],
+    },
+    STARTED,
+  );
+  assert.equal(waves[0].header, "done");
+  assert.equal(waves[1].header, "done");
+});
+
 test("a dep outside the plan does not count", () => {
   const tasks = [
     task("TASK-010", "TODO", ["TASK-999"]),
