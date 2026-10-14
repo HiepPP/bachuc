@@ -177,4 +177,13 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Use next time: set the host to port 6768 in the connect form, because its default is 6767 (release).
 - Learned: Metro puts a module shared by two async chunks into `__common`, which `index.html` loads at page start. An `import()` split does not make the library lazy at start.
 - Source: TASK-090 outcome (`expo export`, 2026-10-13).
+
+### 2026-10-14 - Plan 20261014-watchtower-plan-tree
+
+- Learned: in agent shells, `npm run lint` in a plugin folder can exit 2 with "ESLint output (JSON parse failed)", because an rtk ESLint wrapper intercepts it. The oxlint run itself is clean.
+- Source: TASK-096, TASK-097, and TASK-098 outcomes; lead re-check.
+- Use next time: run `rtk proxy npm run lint` and trust its exit code.
+- Learned: the plugin agent snapshot has no `parentAgentId` or `lastActivityAt`; the parent comes from the label `paseo.parent-agent-id`, and activity from `updatedAt`. An agent that waits for a permission still reports `running`.
+- Source: TASK-096 outcome.
+- Use next time: read `attentionReason` before `status` when you show who waits for the owner.
 - Use next time: read the built output before a plan promises lazy loading.
