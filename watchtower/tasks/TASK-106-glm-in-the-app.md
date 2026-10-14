@@ -32,7 +32,7 @@ Expected result:
 
 - The provider picker and settings show GLM with the GLM icon.
 - A glm `TodoWrite` call builds a todo list, like a Claude call does.
-- A codex `TodoWrite`-named call still does not build a todo list.
+- An unparseable `TodoWrite` call is hidden for claude and glm, and stays a visible tool call for codex. (Fixed at implement: the old line said codex `TodoWrite` builds no todo list, but the generic parser builds one for every provider.)
 
 Anti-goal: failing tests in [packages/app/src/types/stream.test.ts](packages/app/src/types/stream.test.ts) stay at 0; tripwire; read before changes, after the helper change, and at completion.
 
