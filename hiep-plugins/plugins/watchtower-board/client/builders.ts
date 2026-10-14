@@ -11,7 +11,7 @@ export type BuilderCandidate = Pick<
   PaseoAgent,
   "id" | "title" | "status" | "workspaceId" | "archivedAt" | "updatedAt" | "labels" | "provider"
 > &
-  Partial<Pick<PaseoAgent, "requiresAttention" | "attentionReason">> & {
+  Partial<Pick<PaseoAgent, "requiresAttention" | "attentionReason" | "pendingPermissions">> & {
     parentAgentId?: string | null;
     lastActivityAt?: string | null;
   };
@@ -36,7 +36,9 @@ export interface BuilderMatch {
 }
 
 function stateOf(agent: BuilderCandidate): BuilderState {
-  // A permission wait comes first: the agent still reports `running` while it waits.
+  // A permission wait comes first: the agent still reports `running` while it waits. An open
+  // request shows in `pendingPermissions`; `requiresAttention` is not set for it (TASK-103).
+  if ((agent.pendingPermissions?.length ?? 0) > 0) return "waiting";
   if (agent.requiresAttention && agent.attentionReason === "permission") return "waiting";
   if (agent.status === "error") return "failed";
   if (agent.status === "running") return "running";

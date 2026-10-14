@@ -120,15 +120,17 @@ function headerFor(
   if (cyclic) return "waits on a dependency cycle";
   // A finished wave is history: its deps are done too, so "ready to start" would read as pending.
   if (rows.length > 0 && rows.every((item) => item.kind === "done")) return "done";
+  const running = rows.some((item) => item.kind === "running");
   if (number === 1) {
     // A TASK with no group is a builder group of its own.
     const groups = new Set(rows.map((item) => item.group ?? `\0${item.id}`)).size;
-    return `${groups} ${groups === 1 ? "group" : "groups"} in parallel`;
+    const parallel = `${groups} ${groups === 1 ? "group" : "groups"} in parallel`;
+    return running ? `running, ${parallel}` : parallel;
   }
   const pending = new Set<string>();
   for (const item of waveTasks)
     for (const dep of item.depIds) if (inPlan.has(dep) && !doneIds.has(dep)) pending.add(dep);
-  if (!pending.size) return "ready to start";
+  if (!pending.size) return running ? "running" : "ready to start";
   return `starts when ${names([...pending], "and")} ${pending.size === 1 ? "finishes" : "finish"}`;
 }
 

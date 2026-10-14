@@ -88,6 +88,17 @@ test("builder state: running, waiting, failed, else idle", () => {
     states({ status: "idle", requiresAttention: true, attentionReason: "permission" }),
     "waiting",
   );
+  assert.equal(
+    states({
+      status: "running",
+      pendingPermissions: [{}] as unknown as BuilderCandidate["pendingPermissions"],
+    }),
+    "waiting",
+  );
+  assert.equal(
+    states({ status: "running", pendingPermissions: [] as BuilderCandidate["pendingPermissions"] }),
+    "running",
+  );
   assert.equal(states({ status: "error" }), "failed");
   assert.equal(
     states({ status: "idle", requiresAttention: true, attentionReason: "finished" }),

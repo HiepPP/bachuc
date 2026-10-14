@@ -133,6 +133,23 @@ test("a row title drops the leading TASK ID, as the task list does", () => {
   assert.equal(waves[0].rows[0].title, "Plan tree model");
 });
 
+test("a wave with a running TASK says running", () => {
+  const { waves } = buildPlanTree(
+    {
+      tasks: [
+        task("TASK-001", "IN PROGRESS"),
+        task("TASK-002", "DONE"),
+        task("TASK-003", "IN PROGRESS", ["TASK-002"]),
+      ],
+      run: null,
+      questions: [],
+    },
+    STARTED,
+  );
+  assert.match(waves[0].header, /^running, \d+ groups? in parallel$/);
+  assert.equal(waves[1].header, "running");
+});
+
 test("a finished wave says done instead of a start condition", () => {
   const { waves } = buildPlanTree(
     {
