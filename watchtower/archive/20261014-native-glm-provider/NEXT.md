@@ -4,7 +4,7 @@
 
 - Title: Native GLM provider on the Claude client
 - Slug: 20261014-native-glm-provider
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-14
 
 ## Tracker
@@ -45,4 +45,4 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Archive
 
-- None.
+- Archived: 2026-10-14 -> watchtower/archive/20261014-native-glm-provider/
