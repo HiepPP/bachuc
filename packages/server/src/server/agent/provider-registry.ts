@@ -47,6 +47,8 @@ import { OmpAgentClient } from "./providers/omp/agent.js";
 import type { OmpRuntime } from "./providers/omp/runtime.js";
 import { PiRpcAgentClient } from "./providers/pi/agent.js";
 import { TraeACPAgentClient } from "./providers/trae-acp-agent.js";
+import { formatProviderDiagnostic } from "./providers/diagnostic-utils.js";
+import { GLM_MISSING_KEY_REASON, GLM_MODELS, resolveGlmRuntime } from "./providers/glm/runtime.js";
 import { MockLoadTestAgentClient } from "./providers/mock-load-test-agent.js";
 import { MockSlowProviderClient } from "./providers/mock-slow-provider.js";
 import { ClaudeProviderOptionsSchema } from "./providers/claude/options.js";
@@ -155,8 +157,14 @@ interface ProviderContract {
 
 const EmptyProviderOptionsSchema: z.ZodType<ProviderOptions> = z.object({}).strict();
 
+const CLAUDE_PROVIDER_CONTRACT: ProviderContract = {
+  optionsSchema: ClaudeProviderOptionsSchema,
+  supportsExactMcpPreapproval: true,
+};
+
 const PROVIDER_CONTRACTS: Record<string, ProviderContract> = {
-  claude: { optionsSchema: ClaudeProviderOptionsSchema, supportsExactMcpPreapproval: true },
+  claude: CLAUDE_PROVIDER_CONTRACT,
+  glm: CLAUDE_PROVIDER_CONTRACT,
   codex: { optionsSchema: CodexProviderOptionsSchema, supportsExactMcpPreapproval: true },
   opencode: { optionsSchema: OpenCodeProviderOptionsSchema, supportsExactMcpPreapproval: true },
 };
@@ -193,12 +201,55 @@ const HUB_E2E_PROVIDER_CONTRACT: ProviderContract = {
   },
 };
 
+// GLM runs the Claude client against Z.AI. It keeps provider id "claude" internally, and
+// createResolvedProviderClient maps it to "glm" through wrapClientProvider.
+class GlmAgentClient extends ClaudeAgentClient {
+  private readonly hasApiKey: boolean;
+
+  constructor(options: {
+    logger: Logger;
+    runtimeSettings?: ProviderRuntimeSettings;
+    hasApiKey: boolean;
+  }) {
+    super({ logger: options.logger, runtimeSettings: options.runtimeSettings });
+    this.hasApiKey = options.hasApiKey;
+  }
+
+  override async isAvailable(): Promise<boolean> {
+    return this.hasApiKey && (await super.isAvailable());
+  }
+
+  override async getDiagnostic(): Promise<{ diagnostic: string }> {
+    if (!this.hasApiKey) {
+      return {
+        diagnostic: formatProviderDiagnostic("GLM", [
+          { label: "Auth", value: GLM_MISSING_KEY_REASON },
+        ]),
+      };
+    }
+    return await super.getDiagnostic();
+  }
+}
+
+// Static model lists for built-ins whose runtime catalog does not describe their models.
+const BUILTIN_PROFILE_MODELS: Record<string, ProviderProfileModel[]> = {
+  glm: GLM_MODELS,
+};
+
 const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
   claude: (logger, runtimeSettings) =>
     new ClaudeAgentClient({
       logger,
       runtimeSettings,
     }),
+  glm: (logger, runtimeSettings) => {
+    const glm = resolveGlmRuntime({ providerEnv: runtimeSettings?.env });
+    return new GlmAgentClient({
+      logger,
+      runtimeSettings: mergeRuntimeSettings(glm.runtimeSettings, runtimeSettings),
+      hasApiKey: glm.apiKey !== null,
+    });
+  },
   codex: (logger, runtimeSettings, options) =>
     new CodexAppServerAgentClient(logger, runtimeSettings, {
       workspaceGitService: options?.workspaceGitService,
@@ -732,7 +783,7 @@ function buildResolvedBuiltinProviders(
     resolvedProviders.set(definition.id, {
       definition: applyOverrideToDefinition(definition, override),
       runtimeSettings: mergedRuntimeSettings,
-      profileModels: override?.models ?? [],
+      profileModels: override?.models ?? BUILTIN_PROFILE_MODELS[definition.id] ?? [],
       additionalModels: override?.additionalModels ?? [],
       profileModelsAreAdditive: false,
       enabled: override?.enabled ?? definition.enabledByDefault ?? true,

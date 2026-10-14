@@ -80,55 +80,52 @@ See [Codex with a custom OpenAI-compatible endpoint](#codex-with-a-custom-openai
 
 ## Z.AI (Zhipu) coding plan
 
-[Z.AI](https://z.ai) is a Chinese AI company (Zhipu AI) that offers an Anthropic-compatible API endpoint. Their GLM Coding Plan provides flat-rate access to GLM models through Claude Code's Anthropic API protocol. These are **not** Anthropic Claude models — they are Zhipu's own GLM models exposed through an Anthropic-compatible API.
+[Z.AI](https://z.ai) (Zhipu AI) offers an Anthropic-compatible endpoint for its GLM Coding Plan. These are **not** Anthropic Claude models. GLM is a built-in provider (id `glm`), so it needs no config entry.
 
 ### Setup
 
-1. Register at [z.ai](https://z.ai) and subscribe to a coding plan
-2. Create an API key from the Z.AI dashboard
-3. Add a provider entry in config.json:
+1. Subscribe to a coding plan at [z.ai](https://z.ai) and create an API key.
+2. Set `ZAI_API_KEY` in the daemon environment, then restart the daemon.
+3. Pick the provider GLM when you create an agent.
+
+The provider reads the key in this order: `ANTHROPIC_AUTH_TOKEN` in the `agents.providers.glm` env, then `ZAI_API_KEY`, then `GLM_API_KEY`. Blank values count as missing. Without a key the provider shows as unavailable, and its diagnostic names `ZAI_API_KEY`.
+
+The usage card reads only the daemon env (`ZAI_API_KEY`, then `GLM_API_KEY`). A key set in the provider config does not reach it.
+
+### Behavior
+
+- GLM runs on the Claude client against `https://api.z.ai/api/anthropic`.
+- It uses its own Claude config dir, `$PASEO_HOME/providers/glm/claude-config`. Your `~/.claude` hooks, plugins, and history do not apply.
+- `WebSearch` is always blocked, because the endpoint does not support Anthropic's server-side tools.
+
+### Models
+
+| Model           | Note    |
+| --------------- | ------- |
+| `glm-5.3-flash` | Default |
+| `glm-5.3`       |         |
+| `glm-5-turbo`   |         |
+| `glm-4.7`       |         |
+
+The subagent model aliases use the default model, so subagents run on `glm-5.3-flash` even when the main model differs.
+
+### Overrides
+
+`agents.providers.glm` needs no `extends` or `label`. User values win over the built-in ones, and `disallowedTools` is added to `WebSearch`.
 
 ```json
 {
   "agents": {
     "providers": {
-      "zai": {
-        "extends": "claude",
-        "label": "ZAI",
-        "env": {
-          "ANTHROPIC_AUTH_TOKEN": "<your-zai-api-key>",
-          "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-          "API_TIMEOUT_MS": "3000000"
-        },
-        "disallowedTools": ["WebSearch"],
-        "models": [
-          { "id": "glm-4.5-air", "label": "GLM 4.5 Air" },
-          { "id": "glm-5-turbo", "label": "GLM 5 Turbo", "isDefault": true },
-          { "id": "glm-5.1", "label": "GLM 5.1" }
-        ]
+      "glm": {
+        "env": { "API_TIMEOUT_MS": "6000000" }
       }
     }
   }
 }
 ```
 
-### Available models
-
-| Model         | Tier                |
-| ------------- | ------------------- |
-| `glm-5.1`     | Advanced (flagship) |
-| `glm-5-turbo` | Advanced            |
-| `glm-4.7`     | Standard            |
-| `glm-4.5-air` | Lightweight         |
-
-### Notes
-
-- `ANTHROPIC_AUTH_TOKEN` is used instead of `ANTHROPIC_API_KEY` — this is the z.ai API key
-- The `API_TIMEOUT_MS` env var extends the request timeout (z.ai can be slower than direct Anthropic)
-- If you get auth errors, run `/logout` inside Claude Code before switching to the z.ai provider
-- Web search (`WebSearch` tool) is an Anthropic-only server-side feature — third-party endpoints don't support it. Add `"disallowedTools": ["WebSearch"]` to avoid errors.
-- Automated setup is also available: `npx @z_ai/coding-helper`
-- Official docs: [docs.z.ai/devpack/tool/claude](https://docs.z.ai/devpack/tool/claude)
+Official docs: [docs.z.ai/devpack/tool/claude](https://docs.z.ai/devpack/tool/claude)
 
 ---
 
@@ -757,22 +754,6 @@ A config.json with multiple custom providers:
   "agents": {
     "providers": {
       "copilot": { "enabled": false },
-
-      "zai": {
-        "extends": "claude",
-        "label": "ZAI",
-        "env": {
-          "ANTHROPIC_AUTH_TOKEN": "<zai-api-key>",
-          "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-          "API_TIMEOUT_MS": "3000000"
-        },
-        "disallowedTools": ["WebSearch"],
-        "models": [
-          { "id": "glm-4.5-air", "label": "GLM 4.5 Air" },
-          { "id": "glm-5-turbo", "label": "GLM 5 Turbo", "isDefault": true },
-          { "id": "glm-5.1", "label": "GLM 5.1" }
-        ]
-      },
 
       "qwen": {
         "extends": "claude",

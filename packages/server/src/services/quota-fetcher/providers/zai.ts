@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 import { z } from "zod";
+import { resolveGlmApiKey } from "../../../server/agent/providers/glm/runtime.js";
 import type { ProviderUsage, ProviderUsageDetail } from "../../../server/messages.js";
 import type { ProviderApiFetch, ProviderUsageFetcher } from "../provider.js";
 import { ApiOptionalStringSchema, fetchProviderApi, unavailableUsage } from "../usage.js";
@@ -23,8 +24,8 @@ interface ZaiQuotaProviderOptions {
 }
 
 export class ZaiQuotaProvider implements ProviderUsageFetcher {
-  readonly providerId = "zai";
-  readonly displayName = "Z.ai";
+  readonly providerId = "glm";
+  readonly displayName = "GLM";
 
   private readonly logger: Logger;
   private readonly fetchApi: ProviderApiFetch;
@@ -35,7 +36,7 @@ export class ZaiQuotaProvider implements ProviderUsageFetcher {
   }
 
   async fetchUsage(): Promise<ProviderUsage> {
-    const token = process.env["ZAI_API_KEY"] || process.env["GLM_API_KEY"];
+    const token = resolveGlmApiKey();
     if (!token) return unavailableUsage(this);
 
     const res = await fetchProviderApi(

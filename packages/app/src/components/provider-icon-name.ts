@@ -10,7 +10,8 @@ export type ProviderIconName =
   | { kind: "svg"; svg: string }
   | { kind: "bot" };
 
-const BUILTIN_PROVIDER_IDS = new Set(BUILTIN_PROVIDER_ICON_NAMES);
+// `glm` is a built-in provider with a bundled icon; the protocol icon list does not name it.
+const BUILTIN_PROVIDER_IDS = new Set([...BUILTIN_PROVIDER_ICON_NAMES, "glm"]);
 const KNOWN_PROVIDER_IDS = new Set(KNOWN_PROVIDER_ICON_NAMES);
 const providerSnapshotIconSvgsByServer = new Map<string, ReadonlyMap<string, string>>();
 

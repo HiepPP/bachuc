@@ -1440,6 +1440,78 @@ describe("stream reducer canonical tool calls", () => {
     assert.strictEqual(todos.items[0]?.text, "Task 1");
   });
 
+  it("renders GLM TodoWrite as todo_list and suppresses tool call badge", () => {
+    const state = hydrateStreamState([
+      {
+        event: canonicalToolTimeline({
+          provider: "glm",
+          callId: "glm-todo-write",
+          name: "TodoWrite",
+          status: "running",
+          input: {
+            todos: [
+              { content: "Task 1", status: "pending" },
+              { content: "Task 2", status: "completed" },
+            ],
+          },
+        }),
+        timestamp: new Date("2025-01-01T11:00:00Z"),
+      },
+    ]);
+
+    const todos = state.find(
+      (item): item is Extract<StreamItem, { kind: "todo_list" }> => item.kind === "todo_list",
+    );
+
+    expect(state.filter(isAgentToolCallItem)).toEqual([]);
+    expect(todos?.items.map((item) => item.text)).toEqual(["Task 1", "Task 2"]);
+  });
+
+  it.each([
+    { provider: "claude", visibleToolCalls: 0 },
+    { provider: "glm", visibleToolCalls: 0 },
+    { provider: "codex", visibleToolCalls: 1 },
+  ] as const)(
+    "keeps $visibleToolCalls tool call for an unparseable $provider TodoWrite",
+    ({ provider, visibleToolCalls }) => {
+      const state = hydrateStreamState([
+        {
+          event: canonicalToolTimeline({
+            provider,
+            callId: "todo-write-unparseable",
+            name: "TodoWrite",
+            status: "running",
+            input: {},
+          }),
+          timestamp: new Date("2025-01-01T11:00:00Z"),
+        },
+      ]);
+
+      expect(state.some((item) => item.kind === "todo_list")).toBe(false);
+      expect(state.filter(isAgentToolCallItem)).toHaveLength(visibleToolCalls);
+    },
+  );
+
+  it.each(["claude", "glm"] as const)(
+    "suppresses %s TaskCreate bookkeeping tool calls",
+    (provider) => {
+      const state = hydrateStreamState([
+        {
+          event: canonicalToolTimeline({
+            provider,
+            callId: "task-create",
+            name: "TaskCreate",
+            status: "completed",
+            input: { subject: "Ship fix" },
+          }),
+          timestamp: new Date("2025-01-01T11:00:00Z"),
+        },
+      ]);
+
+      expect(state.filter(isAgentToolCallItem)).toEqual([]);
+    },
+  );
+
   it.each(["TaskCreate", "TaskUpdate", "TaskList"])(
     "suppresses Claude %s bookkeeping tool calls",
     (name) => {

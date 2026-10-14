@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { ToolPolicy } from "@getpaseo/protocol/agent-types";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
@@ -547,6 +549,7 @@ import {
   createAllClients,
 } from "./provider-registry.js";
 import { FakeOmp } from "./providers/omp/test-utils/fake-omp.js";
+import { GLM_BASE_URL, resolveGlmApiKey } from "./providers/glm/runtime.js";
 
 const logger = createTestLogger();
 
@@ -1097,9 +1100,13 @@ test("extension inherits base override — override claude command, zai extends 
     },
   });
 
-  expect(mockState.constructorArgs.claude).toHaveLength(2);
+  // The built-in glm provider also runs a Claude client, under its own settings.
+  const claudeClientArgs = mockState.constructorArgs.claude.filter(
+    (entry) => readRuntimeEnv(entry.runtimeSettings)?.ANTHROPIC_BASE_URL === undefined,
+  );
+  expect(claudeClientArgs).toHaveLength(2);
   expect(
-    mockState.constructorArgs.claude.every((entry) => {
+    claudeClientArgs.every((entry) => {
       const command: { argv?: string[] } | undefined =
         typeof entry.runtimeSettings === "object" && entry.runtimeSettings !== null
           ? Reflect.get(entry.runtimeSettings, "command")
@@ -1107,6 +1114,166 @@ test("extension inherits base override — override claude command, zai extends 
       return command?.argv?.[0] === "/opt/custom-claude";
     }),
   ).toBe(true);
+});
+
+function readRuntimeEnv(runtimeSettings: unknown): Record<string, string> | undefined {
+  return typeof runtimeSettings === "object" && runtimeSettings !== null
+    ? Reflect.get(runtimeSettings, "env")
+    : undefined;
+}
+
+function readDisallowedTools(runtimeSettings: unknown): string[] | undefined {
+  return typeof runtimeSettings === "object" && runtimeSettings !== null
+    ? Reflect.get(runtimeSettings, "disallowedTools")
+    : undefined;
+}
+
+function findGlmClientArgs(): { runtimeSettings?: unknown } {
+  const entry = mockState.constructorArgs.claude.find(
+    (args) => readRuntimeEnv(args.runtimeSettings)?.ANTHROPIC_BASE_URL === GLM_BASE_URL,
+  );
+  if (!entry) {
+    throw new Error("glm did not construct a Claude client");
+  }
+  return entry;
+}
+
+describe("built-in glm provider", () => {
+  const paseoHome = path.join(os.tmpdir(), "paseo-glm-registry-test");
+
+  beforeEach(() => {
+    vi.stubEnv("PASEO_HOME", paseoHome);
+    vi.stubEnv("ZAI_API_KEY", "");
+    vi.stubEnv("GLM_API_KEY", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  test("is available with 4 models and glm-5.3-flash as default when ZAI_API_KEY is set", async () => {
+    vi.stubEnv("ZAI_API_KEY", "zai-test-key");
+    const registry = buildProviderRegistry(logger);
+
+    expect(registry.glm).toMatchObject({
+      id: "glm",
+      label: "GLM",
+      defaultModeId: "auto",
+      enabled: true,
+      derivedFromProviderId: null,
+      supportsExactMcpPreapproval: true,
+    });
+    expect(registry.glm.voice).toBeUndefined();
+    expect(registry.glm.modes.map((mode) => mode.id)).toEqual(
+      registry.claude.modes.map((mode) => mode.id),
+    );
+
+    const client = registry.glm.createClient(logger);
+    expect(client.provider).toBe("glm");
+    await expect(client.isAvailable()).resolves.toBe(true);
+
+    const catalog = await registry.glm.fetchCatalog({ scope: "global", force: false });
+    expect(catalog.models.map((model) => model.id)).toEqual([
+      "glm-5.3-flash",
+      "glm-5.3",
+      "glm-5-turbo",
+      "glm-4.7",
+    ]);
+    expect(catalog.models.filter((model) => model.isDefault).map((model) => model.id)).toEqual([
+      "glm-5.3-flash",
+    ]);
+    for (const model of catalog.models) {
+      expect(model).toMatchObject({ provider: "glm", ...CLAUDE_CUSTOM_THINKING_FIELDS });
+    }
+  });
+
+  test("is unavailable with a reason that names ZAI_API_KEY when no key resolves", async () => {
+    const registry = buildProviderRegistry(logger);
+    const client = registry.glm.createClient(logger);
+
+    await expect(client.isAvailable()).resolves.toBe(false);
+    const diagnostic = await client.getDiagnostic?.();
+    expect(diagnostic?.diagnostic).toContain("ZAI_API_KEY");
+    expect(readRuntimeEnv(findGlmClientArgs().runtimeSettings)?.ANTHROPIC_AUTH_TOKEN).toBe(
+      undefined,
+    );
+  });
+
+  test("session env uses a config dir under PASEO_HOME, the Z.AI base URL, and the key", () => {
+    vi.stubEnv("ZAI_API_KEY", "zai-test-key");
+    buildProviderRegistry(logger);
+
+    expect(readRuntimeEnv(findGlmClientArgs().runtimeSettings)).toEqual({
+      CLAUDE_CONFIG_DIR: path.join(paseoHome, "providers", "glm", "claude-config"),
+      ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "zai-test-key",
+      API_TIMEOUT_MS: "3000000",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5.3-flash",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.3-flash",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.3-flash",
+      ANTHROPIC_SMALL_FAST_MODEL: "glm-5.3-flash",
+    });
+  });
+
+  test("resolves the key from provider env, then ZAI_API_KEY, then GLM_API_KEY", () => {
+    const env = { ZAI_API_KEY: "zai-key", GLM_API_KEY: "glm-key" };
+    expect(resolveGlmApiKey({ providerEnv: { ANTHROPIC_AUTH_TOKEN: "provider-key" }, env })).toBe(
+      "provider-key",
+    );
+    expect(resolveGlmApiKey({ env })).toBe("zai-key");
+    expect(resolveGlmApiKey({ env: { GLM_API_KEY: "glm-key" } })).toBe("glm-key");
+    expect(resolveGlmApiKey({ env: { ZAI_API_KEY: " ", GLM_API_KEY: "" } })).toBeNull();
+  });
+
+  test("provider config ANTHROPIC_AUTH_TOKEN wins over ZAI_API_KEY", async () => {
+    vi.stubEnv("ZAI_API_KEY", "zai-test-key");
+    const registry = buildProviderRegistry(logger, {
+      providerOverrides: { glm: { env: { ANTHROPIC_AUTH_TOKEN: "config-key" } } },
+    });
+
+    expect(readRuntimeEnv(findGlmClientArgs().runtimeSettings)?.ANTHROPIC_AUTH_TOKEN).toBe(
+      "config-key",
+    );
+    vi.stubEnv("ZAI_API_KEY", "");
+    await expect(registry.glm.createClient(logger).isAvailable()).resolves.toBe(true);
+  });
+
+  test("always disallows WebSearch, also when the user override adds tools", () => {
+    buildProviderRegistry(logger, {
+      providerOverrides: { glm: { disallowedTools: ["WebFetch"] } },
+    });
+
+    expect(readDisallowedTools(findGlmClientArgs().runtimeSettings)).toEqual([
+      "WebSearch",
+      "WebFetch",
+    ]);
+  });
+
+  test("user override still sets label, models, and enabled", async () => {
+    vi.stubEnv("ZAI_API_KEY", "zai-test-key");
+    const registry = buildProviderRegistry(logger, {
+      providerOverrides: {
+        glm: {
+          label: "Zhipu",
+          enabled: false,
+          models: [{ id: "glm-4.6", label: "GLM-4.6", isDefault: true }],
+        },
+      },
+    });
+
+    expect(registry.glm).toMatchObject({ label: "Zhipu", enabled: false });
+    const catalog = await registry.glm.fetchCatalog({ scope: "global", force: false });
+    expect(catalog.models.map((model) => model.id)).toEqual(["glm-4.6"]);
+  });
+
+  test("leaves the claude provider runtime settings unchanged", () => {
+    vi.stubEnv("ZAI_API_KEY", "zai-test-key");
+    const registry = buildProviderRegistry(logger);
+
+    expect(registry.claude.configuration?.runtimeSettings).toBeUndefined();
+    expect(mockState.constructorArgs.claude[0]).toEqual({ runtimeSettings: undefined });
+    expect(registry.claude.createClient(logger).provider).toBe("claude");
+  });
 });
 
 describe("model merging", () => {

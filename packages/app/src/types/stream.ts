@@ -1387,6 +1387,11 @@ function deriveTaskActivities(
   return activities;
 }
 
+// The glm provider runs the Claude Code client, so it emits the same tool names.
+function isClaudeCodeProvider(provider: AgentProvider): boolean {
+  return provider === "claude" || provider === "glm";
+}
+
 function reduceTimelineToolCall(
   state: StreamItem[],
   event: Extract<AgentStreamEventPayload, { type: "timeline" }>,
@@ -1402,7 +1407,7 @@ function reduceTimelineToolCall(
     .replace(/[.\s-]+/g, "_")
     .toLowerCase();
   if (
-    event.provider === "claude" &&
+    isClaudeCodeProvider(event.provider) &&
     (normalizedToolName === "todowrite" || normalizedToolName === "todo_write")
   ) {
     const tasks = extractTaskEntriesFromToolCall(item.name, inputFromUnknownDetail(item.detail));
@@ -1419,7 +1424,7 @@ function reduceTimelineToolCall(
   }
 
   if (
-    event.provider === "claude" &&
+    isClaudeCodeProvider(event.provider) &&
     (normalizedToolName === "taskcreate" ||
       normalizedToolName === "taskupdate" ||
       normalizedToolName === "tasklist")

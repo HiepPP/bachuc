@@ -50,6 +50,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a pill wheel with a step cooldown, a wheel that steps a pill with its list closed, wraps at the ends, or changes the provider from the model pill, and avoid wheel handling on the sheet surface, while the owner wants hover to open a pill's list, one notch per step, and the list closed when the pointer leaves the pill. Reason: [ADR-0025](watchtower/decisions/ADR-0025-wheel-opens-the-list-and-steps-over-closed-pill-step.md).
 - Avoid a three.js Fleet map tab in the app, and a hidden tab that keeps `three` in the bundle, while `three` loads at app start and the agent tree lives as 2D UI on the Watchtower page. Reason: [ADR-0028](watchtower/decisions/ADR-0028-no-fleet-map-tab-over-three-js-fleet-map.md).
 - Avoid a branch timeline, Running now, or Up next on the Watchtower page, and a second tab or a side-by-side timeline for the plan tree, while the owner chose the tree after comparing mockups. Reason: [ADR-0029](watchtower/decisions/ADR-0029-plan-tree-over-branch-timeline.md).
+- Avoid `glm-acp-agent` as the main GLM path, a config-entry-only GLM setup, and a GLM provider that shares `~/.claude`, while the Claude path passed the live probe and the owner's hooks and plugins live in `~/.claude`. Reason: [ADR-0030](watchtower/decisions/ADR-0030-built-in-glm-on-claude-client-over-acp-and-config.md).
 
 ## Learnings
 
@@ -152,7 +153,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 ### 2026-10-13 - Plan 20261013-turn-step-list-follow-ups
 
 - Learned: green app tests do not prove a theme-dependent style works. The vitest Unistyles stub passes a plain theme, but web passes CSS variables, so a value computed from a theme string crashed live at start.
-- Source: ADR-0022; TASK-085 outcome.
+- Source: ADR-0022; TASK-094 outcome.
 - Use next time: after a `StyleSheet.create` change that computes from theme values, reload live and read the window before you call the TASK done.
 
 ### 2026-10-13 - Plan 20261013-composer-pill-wheel-select
@@ -187,3 +188,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Source: TASK-096 outcome.
 - Use next time: read `attentionReason` before `status` when you show who waits for the owner.
 - Use next time: read the built output before a plan promises lazy loading.
+
+### 2026-10-14 - Plan 20261014-native-glm-provider
+
+- Learned: a built-in provider id must be added in three lists: `AGENT_PROVIDER_DEFINITIONS`, the `BUILTIN_PROVIDER_IDS` of `packages/protocol/src/provider-config.ts`, and the one in `packages/server/src/server/persisted-config.ts`. The app icon needs `packages/app/src/components/provider-icon-name.ts` too.
+- Source: TASK-104 and TASK-106 outcomes.
+- Use next time: list all four files when a plan adds a built-in provider.
+- Learned: the no-live-restart repo rule leaves every server change unverified on live during implement.
+- Source: TASK-104, TASK-105, and TASK-106 outcomes.
+- Use next time: plan a live check as a separate owner step after implement.

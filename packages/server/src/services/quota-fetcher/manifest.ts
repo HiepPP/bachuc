@@ -38,7 +38,7 @@ export const PROVIDER_USAGE_FETCHERS: readonly ProviderUsageFetcherManifestEntry
     create: (options) => new CursorQuotaProvider({ logger: options.logger, fetch: options.fetch }),
   },
   {
-    providerId: "zai",
+    providerId: "glm",
     create: (options) => new ZaiQuotaProvider({ logger: options.logger, fetch: options.fetch }),
   },
   {

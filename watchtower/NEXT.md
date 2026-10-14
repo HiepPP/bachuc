@@ -1,0 +1,48 @@
+# NEXT
+
+## Current Active Plan
+
+- Title: Native GLM provider on the Claude client
+- Slug: 20261014-native-glm-provider
+- Status: DONE
+- Updated: 2026-10-14
+
+## Tracker
+
+One row per TASK. Group ties together items that ship as one transaction.
+
+| Order | TASK                                   | Group | Status | Spec                                                                                                     | Deps               | Context                                        | Notes                                                                 |
+| ----- | -------------------------------------- | ----- | ------ | -------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------- | --------------------------------------------------------------------- |
+| 1     | TASK-104 Built-in glm provider         | A     | DONE   | [watchtower/tasks/TASK-104-built-in-glm-provider.md](watchtower/tasks/TASK-104-built-in-glm-provider.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (live probe). Commit fe8160553.      |
+| 2     | TASK-105 GLM quota on the glm provider | B     | DONE   | [watchtower/tasks/TASK-105-glm-quota.md](watchtower/tasks/TASK-105-glm-quota.md)                         | TASK-104           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (GLM card). Commit 441d73bd2. Q-042. |
+| 3     | TASK-106 GLM in the app                | C     | DONE   | [watchtower/tasks/TASK-106-glm-in-the-app.md](watchtower/tasks/TASK-106-glm-in-the-app.md)               | TASK-104           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (picker icon). Commit c2c99f274.     |
+| 4     | TASK-107 GLM docs                      | D     | DONE   | [watchtower/tasks/TASK-107-glm-docs.md](watchtower/tasks/TASK-107-glm-docs.md)                           | TASK-104, TASK-105 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Commit ecc4d67bc.                                                     |
+
+TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
+Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
+
+## Plan Verify
+
+- `npm run typecheck` -> exit 0.
+- `npm run lint` -> exit 0.
+- On live, `npm run cli -- provider ls` -> a `glm` row with label `GLM` and status `available`.
+- On live, run one glm agent with an image, `--thinking high`, and one subagent, as in the probe in [watchtower/CONTEXT.md](watchtower/CONTEXT.md) -> the image text is read, the Claude transcript under the glm config dir has `thinking` blocks, and every assistant `message.model` is a GLM id.
+- In the same probe, ask the agent to list its tools -> `WebSearch` is not in the list.
+- After the probe, `ls ~/.claude/projects | rg -c glm-native-probe` and `jq -r '.projects | keys[]' ~/.claude.json | rg -c glm-native-probe` -> no match for both. Other Claude sessions change `~/.claude.json`, so do not compare its hash.
+- In the live app, open the provider usage list -> one GLM card with the GLM icon. Needs a human or a browser check.
+
+## Handoff
+
+- Implement result: typecheck passed in the pre-commit hook of each code commit, and `npm run lint` passed on the branch. The live lines of Plan Verify are UNVERIFIED (unattended), because the run may not restart live.
+- Live verify, 2026-10-14, after `npm run cli -- daemon restart` on `feat/native-glm-provider`:
+  - `provider ls` -> `glm` / `GLM` / `available`; `provider models glm` -> 4 models.
+  - The probe agent read "BANANA 7429" and the red square. The transcript under `.dev/paseo-home/providers/glm/claude-config/projects` has 3 `thinking` blocks, one subagent file, and 8 assistant messages, all `glm-5.3-flash`.
+  - The tool list has `WebFetch` and no `WebSearch`.
+  - `~/.claude/projects` and `~/.claude.json` have no `glm-native-probe` entry, before and after the probe.
+  - Daemon API: `listProviderUsage` has a `glm` entry (`GLM`, `available`, plan `GLM Coding Max`) and no `zai` entry. The provider snapshot has `glm` as `ready`.
+  - Not checked: the GLM icon on screen. Unit tests in TASK-106 cover the icon mapping.
+- Next action: look at the GLM icon in the live app, then merge `feat/native-glm-provider` to `main`.
+
+## Archive
+
+- None.
