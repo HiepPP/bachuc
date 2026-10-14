@@ -95,6 +95,21 @@ function editRow(id: string, second: number, filePath: string): PluginTimelineSt
   };
 }
 
+// A plugin card that replaced a tool call that is not an edit.
+function pluginCard(source: ToolCallItem): PluginTimelineStreamItem {
+  return {
+    kind: "plugin",
+    id: `cards/${source.id}`,
+    timestamp: source.timestamp,
+    pluginId: "cards",
+    pluginItemId: source.id,
+    itemKind: "card",
+    version: 1,
+    data: null,
+    sourceToolCall: source,
+  };
+}
+
 const user: StreamItem = { kind: "user_message", id: "user", text: "Go", timestamp: at(0) };
 
 function buildGroup(tail: StreamItem[], isTurnActive = false): TurnStepGroup {
@@ -320,6 +335,28 @@ describe("TurnStepListView", () => {
 
     mount(buildGroup([user, read("r1", 1), note("note1", 3)], true));
     expect(one('[data-testid="note-note1"]').getAttribute("data-streaming")).toBe("true");
+  });
+
+  it("draws plugin cards of calls that are not edits in their step, in call order", () => {
+    const group = buildGroup([
+      user,
+      note("note1", 1),
+      read("r0", 2),
+      pluginCard(read("r1", 3)),
+      pluginCard(shell("s1", 4)),
+      editRow("e1", 5, "/repo/a.ts"),
+      note("final", 12),
+    ]);
+    mount(group);
+
+    // A Paseo call that is not an edit stays a count; a plugin card draws like an edit row.
+    expect(all('[data-testid^="item-"]').map((el) => el.textContent)).toEqual([
+      "cards/r1",
+      "cards/s1",
+      "edit-diffs/e1",
+    ]);
+    expect(one('[data-testid="item-cards/r1"]').closest('[role="button"]')).toBeNull();
+    expect(one('[data-testid="turn-step-meta-0"]').textContent).toContain("readFiles.other#2");
   });
 
   it("cancels the stream margins of a plugin edit row, but not of a Paseo edit row", () => {

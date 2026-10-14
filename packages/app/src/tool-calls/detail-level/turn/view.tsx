@@ -450,15 +450,23 @@ function TurnStepRowView({
             renderNote={renderNote}
           />
         ))}
-        {step.edits.map((item) => (
-          <View
-            key={item.id}
-            style={item.kind === "plugin" ? styles.pluginEdit : undefined}
-            testID={`turn-step-edit-${item.id}`}
-          >
-            {renderItem(item)}
-          </View>
-        ))}
+        {step.items.map((item) => {
+          const isEdit = step.edits.includes(item);
+          // A plugin card replaced its call, so the meta count alone would hide what the plugin
+          // drew. A Paseo call that is not an edit stays only a count.
+          if (!isEdit && item.kind !== "plugin") {
+            return null;
+          }
+          return (
+            <View
+              key={item.id}
+              style={isEdit && item.kind === "plugin" ? styles.pluginEdit : undefined}
+              testID={isEdit ? `turn-step-edit-${item.id}` : `turn-step-plugin-${item.id}`}
+            >
+              {renderItem(item)}
+            </View>
+          );
+        })}
         {step.isRunning ? <TurnLiveBox step={step} /> : null}
       </View>
     </View>
@@ -518,7 +526,10 @@ const TurnStepRow = memo(TurnStepRowView, (prev, next) => {
 
 export interface TurnStepListViewProps {
   group: TurnStepGroup;
-  /** Draws an edit row: the plugin timeline renderer, or a Paseo tool call when edit diffs are off. */
+  /**
+   * Draws an edit row or a plugin card: the plugin timeline renderer, or a Paseo tool call for an
+   * edit when edit diffs are off.
+   */
   renderItem: (item: TurnStepItem) => ReactNode;
   /** Draws one Markdown block of a step note. */
   renderNote: (item: AssistantMessageItem, isStreaming: boolean) => ReactNode;
