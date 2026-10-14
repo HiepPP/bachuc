@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { lstat, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import {
   type Decision,
   type DecisionDetail,
@@ -9,6 +11,8 @@ import {
   type Overview,
   type OverviewQuestion,
   type OverviewRun,
+  type OverviewRunEntry,
+  type OverviewTask,
 } from "../shared/overview";
 import { inside, message, plain, readBoard, readFile, section, tableRows } from "./board";
 
@@ -133,6 +137,156 @@ export function parseOverviewRun(markdown: string, now = new Date()): OverviewRu
   };
 }
 
+const execFileAsync = promisify(execFile);
+const GIT_TIMEOUT_MS = 5000;
+const GIT_LOG_LIMIT = 500;
+// A folder outside a repository, or a repository with no commits yet, has no run to show.
+const NO_GIT_LOG = /not a git repository|does not have any commits yet/i;
+// A TASK ID counts only inside parentheses, such as `(TASK-095)`. A subject like
+// `add TASK-100..103 to the plan` names a range, not the TASK that the commit finished.
+const PARENTHESES = /\(([^()]*)\)/g;
+
+export type GitLog = {
+  // `sha<TAB>iso time<TAB>subject`, newest first.
+  lines: string[];
+  // `sha<TAB>iso time<TAB>subject<TAB>body` of the commits that touch watchtower/NEXT.md.
+  planLines: string[];
+};
+export type ReadGitLog = (directory: string) => Promise<GitLog>;
+
+function gitMessage(error: unknown): string {
+  const failure = error as NodeJS.ErrnoException & { killed?: boolean; stderr?: string };
+  if (failure.killed) return `git log timed out after ${GIT_TIMEOUT_MS / 1000} s.`;
+  if (failure.code === "ENOENT") return "git is not installed.";
+  const reason = failure.stderr?.trim().split(/\r?\n/)[0] || failure.message;
+  return reason.replace(/^fatal:\s*/, "");
+}
+
+export const readGitLog: ReadGitLog = async (directory) => {
+  const git = async (separator: string[], format: string, args: string[] = []) => {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["log", "-n", String(GIT_LOG_LIMIT), ...separator, `--format=${format}`, ...args],
+      { cwd: directory, timeout: GIT_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
+    );
+    return stdout;
+  };
+  try {
+    const [log, plan] = await Promise.all([
+      git([], "%H%x09%cI%x09%s"),
+      // NUL-separated, because a commit body spans several lines.
+      git(["-z"], "%H%x09%cI%x09%s%x09%b", ["--", "watchtower/NEXT.md"]),
+    ]);
+    return {
+      lines: log.split(/\r?\n/).filter(Boolean),
+      planLines: plan
+        .split("\0")
+        .map((record) => record.replace(/\s+/g, " ").trim())
+        .filter(Boolean),
+    };
+  } catch (error) {
+    if (NO_GIT_LOG.test((error as { stderr?: string }).stderr ?? "")) {
+      return { lines: [], planLines: [] };
+    }
+    throw error;
+  }
+};
+
+type Commit = { sha: string; time: Date; subject: string };
+
+function parseCommit(line: string): Commit | null {
+  const [sha, iso, ...subject] = line.split("\t");
+  const time = new Date(iso ?? "");
+  return sha && !Number.isNaN(time.getTime()) ? { sha, time, subject: subject.join("\t") } : null;
+}
+
+function twoDigits(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+// The run of a plan that `implement` ran with no RUN.md: each TASK ends at its newest commit that
+// names it, and starts when the commit before its first commit landed. `lines` is `git log` output,
+// newest first. `planLines` is the same with the body, for commits that touch watchtower/NEXT.md; the
+// oldest one that names the plan slug sets `Started:`.
+export function runFromGitLog(
+  lines: string[],
+  tasks: Pick<OverviewTask, "id" | "status">[],
+  slug: string | null,
+  planLines: string[] = [],
+  now = new Date(),
+): OverviewRun | null {
+  const known = new Set(tasks.map((task) => task.id));
+  const commits = lines.map(parseCommit).filter((commit): commit is Commit => commit !== null);
+  // Index in `commits` of each TASK's newest and oldest counted commit.
+  const newest = new Map<string, number>();
+  const oldest = new Map<string, number>();
+  commits.forEach((commit, index) => {
+    const named = [...commit.subject.matchAll(PARENTHESES)].flatMap((group) => taskIds(group[1]));
+    for (const id of new Set(named)) {
+      if (!known.has(id)) continue;
+      if (!newest.has(id)) newest.set(id, index);
+      oldest.set(id, index);
+    }
+  });
+  if (newest.size === 0) return null;
+
+  // The commit before a counted commit is the next one in the log; the oldest in the log has none.
+  const before = (index: number) => commits[Math.min(index + 1, commits.length - 1)].time;
+  const planTimes = slug
+    ? planLines
+        .filter((record) => record.includes(slug))
+        .map((record) => parseCommit(record)?.time)
+        .filter((time): time is Date => time !== undefined)
+    : [];
+  const startedAt = planTimes.length
+    ? new Date(Math.min(...planTimes.map((time) => time.getTime())))
+    : before(Math.max(...oldest.values()));
+  const minute = (time: Date) =>
+    Math.floor(time.getTime() / 60_000) - Math.floor(startedAt.getTime() / 60_000);
+  const day = (time: Date) =>
+    `${time.getFullYear()}-${twoDigits(time.getMonth() + 1)}-${twoDigits(time.getDate())}`;
+  const clock = (time: Date) => `${twoDigits(time.getHours())}:${twoDigits(time.getMinutes())}`;
+  const full = (time: Date) => `${day(time)} ${clock(time)}`;
+  // A time on another day than `Started:` carries its date, like a dated RUN.md time.
+  const label = (time: Date) => (day(time) === day(startedAt) ? clock(time) : full(time));
+
+  const log: OverviewRunEntry[] = [...newest]
+    .map(([task, endIndex]) => {
+      const end = commits[endIndex];
+      const startTime = before(oldest.get(task) ?? endIndex);
+      // Commit times from a rebase can run backwards; a row never ends before it starts.
+      const start = startTime > end.time ? end.time : startTime;
+      return {
+        task,
+        result: "DONE",
+        detail: `commit ${end.sha.slice(0, 7)}`,
+        start: label(start),
+        end: label(end.time),
+        startMinute: minute(start),
+        endMinute: minute(end.time),
+        endTime: end.time.getTime(),
+      };
+    })
+    .sort((a, b) => a.endTime - b.endTime || a.startMinute - b.startMinute)
+    .map(({ endTime: _endTime, ...row }) => row);
+
+  const lastTime = new Date(
+    Math.max(...[...newest.values()].map((i) => commits[i].time.getTime())),
+  );
+  const finished = tasks.length > 0 && tasks.every((task) => task.status.toUpperCase() === "DONE");
+  const lastActivity = minute(lastTime);
+  const elapsed = minute(finished ? lastTime : now);
+  const stopped = !finished && elapsed - lastActivity > STALE_RUN_MINUTES;
+  return {
+    runner: "implement (git)",
+    started: full(startedAt),
+    finished: finished ? full(lastTime) : null,
+    log,
+    nowMinute: stopped ? lastActivity : elapsed,
+    stopped,
+  };
+}
+
 export function parseOverviewQuestions(markdown: string): OverviewQuestion[] {
   return tableRows(markdown, ["id", "blocks", "question", "status"])
     .filter((row) => ["OPEN", "DEFAULTED"].includes(row.status.toUpperCase()))
@@ -155,7 +309,11 @@ export function parseDecisions(markdown: string): Decision[] {
   }));
 }
 
-export async function readOverview(directory: string, now = new Date()): Promise<Overview> {
+export async function readOverview(
+  directory: string,
+  now = new Date(),
+  git: ReadGitLog = readGitLog,
+): Promise<Overview> {
   const board = await readBoard(directory, { runState: false });
   const overview: Overview = {
     plan: { title: board.title, slug: null, status: null, updated: null },
@@ -208,8 +366,18 @@ export async function readOverview(directory: string, now = new Date()): Promise
     overview.manualChecks = parseManualChecks(section(markdown, "Handoff"));
   }
 
+  const warned = overview.warnings.length;
   const run = await optional("RUN.md");
   if (run !== null) overview.run = parseOverviewRun(run, now);
+  // Only an absent RUN.md falls back to the git log; an unreadable one has warned already.
+  else if (overview.warnings.length === warned && overview.tasks.length > 0) {
+    try {
+      const { lines, planLines } = await git(directory);
+      overview.run = runFromGitLog(lines, overview.tasks, overview.plan.slug, planLines, now);
+    } catch (error) {
+      overview.warnings.push(`git log: ${gitMessage(error)}`);
+    }
+  }
   const questions = await optional("QUESTIONS.md");
   if (questions !== null) overview.questions = parseOverviewQuestions(questions);
   const decisions = await optional("DECISIONS.md");
