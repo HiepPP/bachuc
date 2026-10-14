@@ -4,7 +4,7 @@
 
 - Title: Plan tree on the Watchtower page
 - Slug: 20261014-watchtower-plan-tree
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-14
 
 ## Tracker
@@ -44,3 +44,4 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 - [watchtower/archive/20261013-fleet-map/](watchtower/archive/20261013-fleet-map/)
 - [watchtower/archive/20261013-turn-step-list-follow-ups/](watchtower/archive/20261013-turn-step-list-follow-ups/)
 - [watchtower/archive/20261013-composer-pill-wheel-select/](watchtower/archive/20261013-composer-pill-wheel-select/)
+- Archived: 2026-10-14 -> watchtower/archive/20261014-watchtower-plan-tree/
