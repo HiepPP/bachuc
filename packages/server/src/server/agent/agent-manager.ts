@@ -25,6 +25,7 @@ import type { TerminalManager } from "../../terminal/terminal-manager.js";
 
 import {
   getAgentStreamEventTurnId,
+  type AgentBackgroundProcess,
   type AgentCapabilityFlags,
   type AgentClient,
   type AgentCreateSessionOptions,
@@ -74,6 +75,10 @@ import {
 } from "./agent-stream-coalescer.js";
 import { limitAgentTimelineItemContent } from "./agent-timeline-content.js";
 import {
+  BackgroundProcessTailPoller,
+  type BackgroundProcessOwner,
+} from "./background-process-tail.js";
+import {
   AgentRunState,
   type ForegroundTurnWaiter,
   type PendingForegroundRun,
@@ -98,6 +103,9 @@ const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
 const IMPORTABLE_SESSION_LIST_TIMEOUT_MS = 90_000;
 const TIMELINE_REPLAY_SLICE_MS = 10;
+const BACKGROUND_PROCESS_TAIL_INTERVAL_MS = 1_000;
+/** Finished processes kept per agent so their origin turn can still show them. */
+const MAX_FINISHED_BACKGROUND_PROCESSES = 20;
 
 interface TimelineRowOptions {
   timestamp?: string;
@@ -425,6 +433,8 @@ interface ManagedAgentBase {
   features?: AgentFeature[];
   currentModeId: string | null;
   pendingPermissions: Map<string, AgentPermissionRequest>;
+  /** Live runtime state; a closed agent has none, because its processes died with it. */
+  backgroundProcesses: Map<string, AgentBackgroundProcess>;
   bufferedPermissionResolutions: Map<
     string,
     Extract<AgentStreamEvent, { type: "permission_resolved" }>
@@ -747,6 +757,13 @@ export class AgentManager {
   /** agentId -> records the rest of an in-progress history replay synchronously. */
   private readonly pendingTimelineReplays = new Map<string, () => void>();
   private readonly backgroundTasks = new Set<Promise<void>>();
+  /** Finished processes whose output file still needs one last read. */
+  private readonly finalTailProcessIds = new Set<string>();
+  private readonly backgroundProcessTails = new BackgroundProcessTailPoller({
+    intervalMs: BACKGROUND_PROCESS_TAIL_INTERVAL_MS,
+    listWatched: () => this.listWatchedBackgroundProcesses(),
+    onTail: (input) => this.applyBackgroundProcessTail(input),
+  });
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
   private readonly reloadedSessionCloses = new WeakMap<AgentSession, Promise<void>>();
@@ -1908,6 +1925,7 @@ export class AgentManager {
         features: record.features,
         currentModeId: record.lastModeId ?? null,
         pendingPermissions: new Map(),
+        backgroundProcesses: new Map(),
         bufferedPermissionResolutions: new Map(),
         inFlightPermissionResponses: new Set(),
         pendingReplacement: false,
@@ -3731,6 +3749,7 @@ export class AgentManager {
       availableModes: [],
       currentModeId: null,
       pendingPermissions: new Map<string, AgentPermissionRequest>(),
+      backgroundProcesses: new Map(),
       bufferedPermissionResolutions: new Map(),
       inFlightPermissionResponses: new Set(),
       pendingReplacement: false,
@@ -3795,6 +3814,7 @@ export class AgentManager {
       activeTurnStartedAt: null,
       activeTurnFirstOutputAt: null,
       pendingPermissions: new Map(),
+      backgroundProcesses: new Map(),
       bufferedPermissionResolutions: new Map(),
       inFlightPermissionResponses: new Set(),
       pendingReplacement: false,
@@ -3912,6 +3932,10 @@ export class AgentManager {
     if (event.type === "provider_subagent") {
       const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
       this.dispatch({ type: "provider_subagent", event: update });
+      return;
+    }
+    if (event.type === "background_process") {
+      this.applyBackgroundProcess(agent, event.process);
       return;
     }
     const turnId = getAgentStreamEventTurnId(event);
@@ -5003,6 +5027,68 @@ export class AgentManager {
     const row = this.timelineStore.append(agentId, item, options);
     this.enqueueDurableTimelineAppend(agentId, row);
     return row;
+  }
+
+  async stopBackgroundProcess(agentId: string, processId: string): Promise<void> {
+    const agent = this.requireSessionAgent(agentId);
+    if (!agent.backgroundProcesses.has(processId)) {
+      throw new Error(`Agent '${agentId}' has no background process '${processId}'`);
+    }
+    if (!agent.session.stopBackgroundProcess) {
+      throw new Error("Agent session does not support stopping background processes");
+    }
+    await agent.session.stopBackgroundProcess(processId);
+  }
+
+  private applyBackgroundProcess(agent: ActiveManagedAgent, process: AgentBackgroundProcess): void {
+    const previous = agent.backgroundProcesses.get(process.id);
+    // The provider does not read output; keep the tail this manager already read.
+    agent.backgroundProcesses.set(process.id, { ...process, tail: previous?.tail ?? process.tail });
+    if (process.status !== "running" && process.outputFile) {
+      this.finalTailProcessIds.add(process.id);
+    }
+    this.pruneFinishedBackgroundProcesses(agent);
+    if (process.outputFile) {
+      this.backgroundProcessTails.ensureRunning();
+    }
+    this.emitState(agent, { persist: false });
+  }
+
+  private pruneFinishedBackgroundProcesses(agent: ActiveManagedAgent): void {
+    const finished = [...agent.backgroundProcesses.values()].filter(
+      (process) => process.status !== "running",
+    );
+    for (const process of finished.slice(0, -MAX_FINISHED_BACKGROUND_PROCESSES)) {
+      agent.backgroundProcesses.delete(process.id);
+      this.finalTailProcessIds.delete(process.id);
+    }
+  }
+
+  private listWatchedBackgroundProcesses(): BackgroundProcessOwner[] {
+    const watched: BackgroundProcessOwner[] = [];
+    for (const agent of this.agents.values()) {
+      for (const process of agent.backgroundProcesses.values()) {
+        if (!process.outputFile) continue;
+        if (process.status === "running" || this.finalTailProcessIds.has(process.id)) {
+          watched.push({ agentId: agent.id, process });
+        }
+      }
+    }
+    return watched;
+  }
+
+  private applyBackgroundProcessTail(input: {
+    agentId: string;
+    processId: string;
+    tail: string[];
+  }): void {
+    const agent = this.agents.get(input.agentId);
+    const process = agent?.backgroundProcesses.get(input.processId);
+    if (!agent || !process) return;
+    if (process.status !== "running") this.finalTailProcessIds.delete(process.id);
+    if (process.tail.join("\n") === input.tail.join("\n")) return;
+    agent.backgroundProcesses.set(process.id, { ...process, tail: input.tail });
+    this.emitState(agent, { persist: false });
   }
 
   private emitState(agent: ManagedAgent, options?: { persist?: boolean }): void {

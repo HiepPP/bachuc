@@ -1911,6 +1911,19 @@ export const ja: TranslationResources = {
     input: "入力",
     output: "出力",
   },
+  backgroundProcesses: {
+    title: "バックグラウンド",
+    running: "{{count}}件実行中",
+    moved: "ここで開始したバックグラウンド処理: {{count}}件 · 最新のターンに表示中",
+    stop: "停止",
+    noOutput: "まだ出力はありません",
+    exit: "終了コード {{code}}",
+    done: "完了",
+    failed: "失敗",
+    stopped: "停止済み",
+    kindBash: "bash",
+    kindMonitor: "monitor",
+  },
   toolCallGroup: {
     editedFiles: {
       one: "{{count}}個のファイルを編集",

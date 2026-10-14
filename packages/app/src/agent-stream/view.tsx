@@ -67,6 +67,8 @@ import { OverviewToolCallGroupView } from "@/tool-calls/detail-level/overview/vi
 import { collectTurnNoteHosts, type TurnStepItem } from "@/tool-calls/detail-level/turn/model";
 import { TurnStepListView } from "@/tool-calls/detail-level/turn/view";
 import { type AgentStreamRenderModel, buildAgentStreamRenderModel } from "./model";
+import { BackgroundProcessContext, BackgroundProcessHostSlot } from "./background-process-card";
+import { useBackgroundProcesses } from "./use-background-processes";
 import { resolveStreamRenderStrategy } from "./strategy-resolver";
 import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strategy";
 import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
@@ -135,6 +137,11 @@ function renderLiveAuxiliaryNode(input: {
   );
 }
 
+// Module scope keeps the prop stable, so the memoized step list does not draw again.
+function renderBackgroundProcessFooter(hostId: string) {
+  return <BackgroundProcessHostSlot hostId={hostId} />;
+}
+
 function BottomOverlayInset({ height }: { height: number }) {
   const style = useMemo(() => ({ height }), [height]);
   return <View style={style} />;
@@ -143,12 +150,15 @@ function BottomOverlayInset({ height }: { height: number }) {
 function renderPendingPermissionsNode(input: {
   pendingPermissions: PendingPermission[];
   client: DaemonClient | null;
+  /** Running processes with no step card to sit under; the stream bottom shows them. */
+  backgroundProcesses?: ReactNode;
 }): ReactNode {
-  if (input.pendingPermissions.length === 0) {
+  if (input.pendingPermissions.length === 0 && !input.backgroundProcesses) {
     return null;
   }
   return (
     <View style={stylesheet.permissionsContainer}>
+      {input.backgroundProcesses}
       {input.pendingPermissions.map((permission) => (
         <PermissionRequestCard key={permission.key} permission={permission} client={input.client} />
       ))}
@@ -623,6 +633,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const resolveMessageHostId = useStableEvent((messageId: string) =>
       turnNoteHosts.get(messageId),
     );
+    const backgroundProcesses = useBackgroundProcesses({
+      serverId: resolvedServerId,
+      agentId,
+      tail: presentation.tail,
+      head: presentation.head,
+      groupsByHostId: presentation.turnGroupsByHostId,
+      readOnly: Boolean(readOnly),
+      toast,
+    });
     // Chat find and the chat outline address messages, and an assistant message is a
     // group of block rows, so this is a set of message ids and never of row ids. A turn
     // step note is visible when the row of its turn is.
@@ -888,6 +907,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               group={turnGroup}
               renderItem={renderTurnStepItem}
               renderNote={renderTurnStepNote}
+              hostId={item.id}
+              renderFooter={renderBackgroundProcessFooter}
             />
           );
         }
@@ -1005,13 +1026,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [pendingPermissions, agentId],
     );
 
+    const unplacedBackgroundProcesses = backgroundProcesses.unplacedNode;
     const pendingPermissionsNode = useMemo(
       () =>
         renderPendingPermissionsNode({
           pendingPermissions: pendingPermissionItems,
           client,
+          backgroundProcesses: unplacedBackgroundProcesses,
         }),
-      [client, pendingPermissionItems],
+      [client, pendingPermissionItems, unplacedBackgroundProcesses],
     );
     const turnFooterNode = useMemo(
       () =>
@@ -1166,7 +1189,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       () => [...effectiveStreamItems, ...(effectiveStreamHead ?? [])],
       [effectiveStreamItems, effectiveStreamHead],
     );
-    return (
+    const content = (
       <ChatFind
         agentId={agentId}
         serverId={resolvedServerId}
@@ -1242,6 +1265,12 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           </AssistantSelectionCopySurface>
         </ToolCallSheetProvider>
       </ChatFind>
+    );
+    // Rows read their background processes from context, so memoized history rows still update.
+    return (
+      <BackgroundProcessContext.Provider value={backgroundProcesses.context}>
+        {content}
+      </BackgroundProcessContext.Provider>
     );
   },
 );

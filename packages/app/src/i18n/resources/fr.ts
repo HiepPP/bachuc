@@ -1943,6 +1943,19 @@ export const fr: TranslationResources = {
     input: "Saisir",
     output: "Sortir",
   },
+  backgroundProcesses: {
+    title: "Arrière-plan",
+    running: "{{count}} en cours",
+    moved: "Processus d'arrière-plan lancés ici : {{count}} · affichés dans le dernier tour",
+    stop: "Arrêter",
+    noOutput: "pas encore de sortie",
+    exit: "code {{code}}",
+    done: "terminé",
+    failed: "échec",
+    stopped: "arrêté",
+    kindBash: "bash",
+    kindMonitor: "moniteur",
+  },
   toolCallGroup: {
     editedFiles: {
       one: "a modifié {{count}} fichier",

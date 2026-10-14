@@ -1923,6 +1923,19 @@ export const ru: TranslationResources = {
     input: "Входные данные",
     output: "Выходные данные",
   },
+  backgroundProcesses: {
+    title: "Фоновые",
+    running: "Выполняется: {{count}}",
+    moved: "Фоновые процессы, запущенные здесь: {{count}} · показаны в последнем ходе",
+    stop: "Остановить",
+    noOutput: "вывода пока нет",
+    exit: "код {{code}}",
+    done: "готово",
+    failed: "ошибка",
+    stopped: "остановлен",
+    kindBash: "bash",
+    kindMonitor: "monitor",
+  },
   toolCallGroup: {
     editedFiles: {
       one: "изменён {{count}} файл",

@@ -481,7 +481,28 @@ export type AgentStreamEvent =
       type: "provider_subagent";
       provider: AgentProvider;
       event: import("./provider-subagents/store.js").ProviderSubagentInputEvent;
-    };
+    }
+  /** Upserts one background process. Agent state, not a timeline row. */
+  | { type: "background_process"; provider: AgentProvider; process: AgentBackgroundProcess };
+
+export type AgentBackgroundProcessStatus = "running" | "completed" | "failed" | "stopped";
+
+/** A process the agent started in the background, such as a backgrounded shell or a monitor. */
+export interface AgentBackgroundProcess {
+  id: string;
+  kind: "bash" | "monitor";
+  description: string;
+  command: string | null;
+  status: AgentBackgroundProcessStatus;
+  /** The tool call that started it, so a client can find the turn it belongs to. */
+  toolCallId: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  exitCode: number | null;
+  outputFile: string | null;
+  /** Last lines of the output file. The manager fills it while the process runs. */
+  tail: string[];
+}
 
 export function getAgentStreamEventTurnId(event: AgentStreamEvent): string | undefined {
   return "turnId" in event ? event.turnId : undefined;
@@ -701,6 +722,8 @@ export interface AgentSession {
   /** Release live runtime resources without archiving or deleting the durable native session. */
   close(): Promise<void>;
   listCommands?(): Promise<AgentSlashCommand[]>;
+  /** Stops a background process announced through a `background_process` event. */
+  stopBackgroundProcess?(processId: string): Promise<void>;
   setModel?(modelId: string | null): Promise<void>;
   setThinkingOption?(thinkingOptionId: string | null): Promise<void | AgentProviderNotice>;
   setFeature?(featureId: string, value: unknown): Promise<void>;

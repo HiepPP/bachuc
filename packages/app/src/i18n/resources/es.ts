@@ -1939,6 +1939,19 @@ export const es: TranslationResources = {
     input: "Aporte",
     output: "Producción",
   },
+  backgroundProcesses: {
+    title: "En segundo plano",
+    running: "{{count}} en ejecución",
+    moved: "Procesos en segundo plano iniciados aquí: {{count}} · se muestran en el último turno",
+    stop: "Detener",
+    noOutput: "aún sin salida",
+    exit: "salida {{code}}",
+    done: "listo",
+    failed: "falló",
+    stopped: "detenido",
+    kindBash: "bash",
+    kindMonitor: "monitor",
+  },
   toolCallGroup: {
     editedFiles: {
       one: "editó {{count}} archivo",

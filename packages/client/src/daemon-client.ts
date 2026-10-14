@@ -3614,6 +3614,30 @@ export class DaemonClient {
     );
   }
 
+  // Gate on server_info.features.agentBackgroundProcesses.
+  async stopAgentBackgroundProcess(agentId: string, processId: string): Promise<void> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "agent.background_process.stop.request",
+      requestId,
+      agentId,
+      processId,
+    });
+    const payload = await this.sendRequest({
+      requestId,
+      message,
+      timeout: 15000,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "agent.background_process.stop.response" && msg.payload.requestId === requestId
+          ? msg.payload
+          : null,
+    });
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+  }
+
   // ============================================================================
   // Agent Interaction
   // ============================================================================

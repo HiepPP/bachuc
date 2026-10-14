@@ -29,6 +29,7 @@ const OPTIONAL_AGENT_SESSION_METHOD_NAMES = [
   "revertBoth",
   "tryHandleOutOfBand",
   "steerActiveTurn",
+  "stopBackgroundProcess",
 ] as const satisfies readonly OptionalAgentSessionMethodName[];
 
 type MissingOptionalAgentSessionMethod = Exclude<
@@ -170,6 +171,10 @@ class FakeSession implements AgentSession {
     this.recordedCalls.push(`steerActiveTurn:${options.expectedTurnId}`);
     return { status: "accepted" };
   }
+
+  async stopBackgroundProcess(processId: string) {
+    this.recordedCalls.push(`stopBackgroundProcess:${processId}`);
+  }
 }
 
 async function* emptyHistory(): AsyncGenerator<AgentStreamEvent> {
@@ -196,6 +201,7 @@ describe("wrapSessionProvider", () => {
     await expect(
       wrapped.steerActiveTurn?.("keep going", { expectedTurnId: "turn-1" }),
     ).resolves.toEqual({ status: "accepted" });
+    await wrapped.stopBackgroundProcess?.("task-1");
 
     expect(session.recordedCalls).toEqual([
       "listCommands",
@@ -208,6 +214,7 @@ describe("wrapSessionProvider", () => {
       "tryHandleOutOfBand",
       "tryHandleOutOfBand.run",
       "steerActiveTurn:turn-1",
+      "stopBackgroundProcess:task-1",
     ]);
   });
 });

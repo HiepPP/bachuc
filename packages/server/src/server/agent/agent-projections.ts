@@ -146,6 +146,10 @@ export function toAgentPayload(
     payload.lastUsage = usage;
   }
 
+  if (agent.backgroundProcesses.size > 0) {
+    payload.backgroundProcesses = Array.from(agent.backgroundProcesses.values());
+  }
+
   if (agent.lastError !== undefined) {
     payload.lastError = agent.lastError;
   }

@@ -533,12 +533,18 @@ export interface TurnStepListViewProps {
   renderItem: (item: TurnStepItem) => ReactNode;
   /** Draws one Markdown block of a step note. */
   renderNote: (item: AssistantMessageItem, isStreaming: boolean) => ReactNode;
+  /** The stream item that hosts this step list; `renderFooter` receives it. */
+  hostId?: string;
+  /** Drawn under the steps, above the rule that separates them from the answer. */
+  renderFooter?: (hostId: string) => ReactNode;
 }
 
 export const TurnStepListView = memo(function TurnStepListView({
   group,
   renderItem,
   renderNote,
+  hostId,
+  renderFooter,
 }: TurnStepListViewProps) {
   // Highlight lives in the view: it belongs to this turn only and nothing else reads it.
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
@@ -593,6 +599,7 @@ export const TurnStepListView = memo(function TurnStepListView({
           />
         ))}
       </View>
+      {hostId && renderFooter ? renderFooter(hostId) : null}
       {group.isLoading ? null : <View style={styles.rule} />}
     </View>
   );

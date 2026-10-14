@@ -1890,6 +1890,19 @@ export const ar: TranslationResources = {
     input: "مدخل",
     output: "الإخراج",
   },
+  backgroundProcesses: {
+    title: "في الخلفية",
+    running: "قيد التشغيل: {{count}}",
+    moved: "عمليات الخلفية التي بدأت هنا: {{count}} · تظهر في آخر دور",
+    stop: "إيقاف",
+    noOutput: "لا يوجد مخرج بعد",
+    exit: "رمز الخروج {{code}}",
+    done: "تم",
+    failed: "فشل",
+    stopped: "متوقف",
+    kindBash: "bash",
+    kindMonitor: "monitor",
+  },
   toolCallGroup: {
     editedFiles: {
       one: "حرّر {{count}} ملفًا",

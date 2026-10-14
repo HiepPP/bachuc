@@ -1869,6 +1869,19 @@ export const zhCN: TranslationResources = {
     input: "输入",
     output: "输出",
   },
+  backgroundProcesses: {
+    title: "后台",
+    running: "{{count}} 个运行中",
+    moved: "在此启动的后台进程：{{count}} 个 · 显示在最新一轮",
+    stop: "停止",
+    noOutput: "暂无输出",
+    exit: "退出码 {{code}}",
+    done: "完成",
+    failed: "失败",
+    stopped: "已停止",
+    kindBash: "bash",
+    kindMonitor: "monitor",
+  },
   toolCallGroup: {
     editedFiles: {
       one: "编辑了 {{count}} 个文件",

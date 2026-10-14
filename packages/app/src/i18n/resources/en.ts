@@ -1915,6 +1915,19 @@ export const en = {
     input: "Input",
     output: "Output",
   },
+  backgroundProcesses: {
+    title: "Background",
+    running: "{{count}} running",
+    moved: "Background processes started here: {{count}} · shown in the latest turn",
+    stop: "Stop",
+    noOutput: "no output yet",
+    exit: "exit {{code}}",
+    done: "done",
+    failed: "failed",
+    stopped: "stopped",
+    kindBash: "bash",
+    kindMonitor: "monitor",
+  },
   toolCallGroup: {
     editedFiles: {
       one: "edited {{count}} file",

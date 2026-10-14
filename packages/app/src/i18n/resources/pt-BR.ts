@@ -1923,6 +1923,19 @@ export const ptBR: TranslationResources = {
     input: "Entrada",
     output: "Saída",
   },
+  backgroundProcesses: {
+    title: "Segundo plano",
+    running: "{{count}} em execução",
+    moved: "Processos em segundo plano iniciados aqui: {{count}} · exibidos no último turno",
+    stop: "Parar",
+    noOutput: "ainda sem saída",
+    exit: "saída {{code}}",
+    done: "concluído",
+    failed: "falhou",
+    stopped: "parado",
+    kindBash: "bash",
+    kindMonitor: "monitor",
+  },
   toolCallGroup: {
     editedFiles: {
       one: "editou {{count}} arquivo",

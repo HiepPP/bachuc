@@ -832,6 +832,26 @@ export const AgentMessageQueueSummarySchema = z.object({
 
 export type AgentMessageQueueSummary = z.infer<typeof AgentMessageQueueSummarySchema>;
 
+// COMPAT(agentBackgroundProcesses): added in v1.0.0-hiep, remove the gate after 2027-04-14.
+// `kind` and `status` stay strings so a later value does not fail an older client's parse.
+export const AgentBackgroundProcessSchema = z.object({
+  id: z.string(),
+  /** "bash" or "monitor". */
+  kind: z.string(),
+  description: z.string(),
+  command: z.string().nullable(),
+  /** "running", "completed", "failed", or "stopped". */
+  status: z.string(),
+  toolCallId: z.string().nullable(),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+  exitCode: z.number().nullable(),
+  outputFile: z.string().nullable(),
+  tail: z.array(z.string()),
+});
+
+export type AgentBackgroundProcess = z.infer<typeof AgentBackgroundProcessSchema>;
+
 export const AgentSnapshotPayloadSchema = z.object({
   id: z.string(),
   provider: AgentProviderSchema,
@@ -862,6 +882,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   archivedAt: z.string().nullable().optional(),
   providerUnavailable: z.boolean().optional(),
   queue: AgentMessageQueueSummarySchema.optional(),
+  backgroundProcesses: z.array(AgentBackgroundProcessSchema).optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
@@ -1968,6 +1989,14 @@ export const AgentQueueResumeRequestMessageSchema = z.object({
   type: z.literal("agent.queue.resume.request"),
   requestId: z.string(),
   agentId: z.string(),
+});
+
+// COMPAT(agentBackgroundProcesses): gated on server_info.features.agentBackgroundProcesses.
+export const AgentBackgroundProcessStopRequestMessageSchema = z.object({
+  type: z.literal("agent.background_process.stop.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  processId: z.string(),
 });
 
 export const SetAgentModeRequestMessageSchema = z.object({
@@ -3351,6 +3380,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   AgentQueueCancelRequestMessageSchema,
   AgentQueuePromoteRequestMessageSchema,
   AgentQueueResumeRequestMessageSchema,
+  AgentBackgroundProcessStopRequestMessageSchema,
   SetAgentModeRequestMessageSchema,
   SetAgentModelRequestMessageSchema,
   SetAgentThinkingRequestMessageSchema,
@@ -3742,6 +3772,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentForkContextCursor: z.boolean().optional(),
         // COMPAT(agentMessageQueue): added in v1.0.0-hiep, remove gate after 2027-04-06.
         agentMessageQueue: z.boolean().optional(),
+        // COMPAT(agentBackgroundProcesses): added in v1.0.0-hiep, remove gate after 2027-04-14.
+        agentBackgroundProcesses: z.boolean().optional(),
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: z.boolean().optional(),
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain wire field.
@@ -4935,6 +4967,16 @@ export const AgentQueuePromoteResponseMessageSchema = z.object({
 export const AgentQueueResumeResponseMessageSchema = z.object({
   type: z.literal("agent.queue.resume.response"),
   payload: AgentQueueResponsePayloadSchema,
+});
+
+export const AgentBackgroundProcessStopResponseMessageSchema = z.object({
+  type: z.literal("agent.background_process.stop.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    processId: z.string(),
+    error: z.string().nullable(),
+  }),
 });
 
 export const CancelAgentResponseMessageSchema = z.object({
@@ -6968,6 +7010,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentQueueCancelResponseMessageSchema,
   AgentQueuePromoteResponseMessageSchema,
   AgentQueueResumeResponseMessageSchema,
+  AgentBackgroundProcessStopResponseMessageSchema,
   CancelAgentResponseMessageSchema,
   ClearAgentAttentionResponseMessageSchema,
   WorkspaceCreateResponseSchema,
@@ -7200,6 +7243,9 @@ export type AgentQueuePromoteResponseMessage = z.infer<
   typeof AgentQueuePromoteResponseMessageSchema
 >;
 export type AgentQueueResumeResponseMessage = z.infer<typeof AgentQueueResumeResponseMessageSchema>;
+export type AgentBackgroundProcessStopResponseMessage = z.infer<
+  typeof AgentBackgroundProcessStopResponseMessageSchema
+>;
 export type CancelAgentResponseMessage = z.infer<typeof CancelAgentResponseMessageSchema>;
 export type SendAgentMessageResponseMessage = z.infer<typeof SendAgentMessageResponseMessageSchema>;
 export type SetVoiceModeResponseMessage = z.infer<typeof SetVoiceModeResponseMessageSchema>;

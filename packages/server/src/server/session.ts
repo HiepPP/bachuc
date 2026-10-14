@@ -2697,6 +2697,8 @@ export class Session {
       case "agent.queue.promote.request":
       case "agent.queue.resume.request":
         return this.handleAgentQueueRequest(msg);
+      case "agent.background_process.stop.request":
+        return this.handleAgentBackgroundProcessStopRequest(msg);
       default:
         return undefined;
     }
@@ -8206,6 +8208,25 @@ export class Session {
         this.emit({ type: "agent.queue.resume.response", payload });
         return;
     }
+  }
+
+  private async handleAgentBackgroundProcessStopRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.background_process.stop.request" }>,
+  ): Promise<void> {
+    let error: string | null = null;
+    try {
+      await this.agentManager.stopBackgroundProcess(msg.agentId, msg.processId);
+    } catch (err) {
+      this.sessionLogger.warn(
+        { err, agentId: msg.agentId, processId: msg.processId },
+        "Stopping a background process failed",
+      );
+      error = errorToFriendlyMessage(err);
+    }
+    this.emit({
+      type: "agent.background_process.stop.response",
+      payload: { requestId: msg.requestId, agentId: msg.agentId, processId: msg.processId, error },
+    });
   }
 
   private async prepareAgentMessage(agentId: string, text: string): Promise<void> {

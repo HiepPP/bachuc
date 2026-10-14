@@ -526,6 +526,7 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
     revertBoth: inner.revertBoth?.bind(inner),
     tryHandleOutOfBand: inner.tryHandleOutOfBand?.bind(inner),
     steerActiveTurn: inner.steerActiveTurn?.bind(inner),
+    stopBackgroundProcess: inner.stopBackgroundProcess?.bind(inner),
   };
 }
 

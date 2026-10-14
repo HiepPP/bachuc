@@ -1902,6 +1902,8 @@ export class VoiceAssistantWebSocketServer {
         agentForkContextCursor: true,
         // COMPAT(agentMessageQueue): added in v1.0.0-hiep, remove gate after 2027-04-06.
         agentMessageQueue: true,
+        // COMPAT(agentBackgroundProcesses): added in v1.0.0-hiep, remove gate after 2027-04-14.
+        agentBackgroundProcesses: true,
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: true,
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain advertisement.

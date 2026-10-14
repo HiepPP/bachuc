@@ -1900,6 +1900,19 @@ export const ko: TranslationResources = {
     input: "입력",
     output: "출력",
   },
+  backgroundProcesses: {
+    title: "백그라운드",
+    running: "{{count}}개 실행 중",
+    moved: "여기서 시작한 백그라운드 프로세스: {{count}}개 · 최신 턴에 표시됨",
+    stop: "중지",
+    noOutput: "아직 출력 없음",
+    exit: "종료 코드 {{code}}",
+    done: "완료",
+    failed: "실패",
+    stopped: "중지됨",
+    kindBash: "bash",
+    kindMonitor: "monitor",
+  },
   toolCallGroup: {
     editedFiles: {
       one: "{{count}} 파일을 편집했습니다.",

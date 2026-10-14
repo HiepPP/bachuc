@@ -77,6 +77,7 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     ],
     currentModeId: "plan",
     pendingPermissions: pendingPermissionsOverride ?? new Map<string, AgentPermissionRequest>(),
+    backgroundProcesses: new Map(),
     bufferedPermissionResolutions: new Map(),
     inFlightPermissionResponses: new Set(),
     pendingReplacement: false,
@@ -109,6 +110,28 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     pendingPermissions: agent.pendingPermissions,
   } as ManagedAgent;
 }
+
+it("projects background processes only when the agent has some", () => {
+  expect(toAgentPayload(createManagedAgent()).backgroundProcesses).toBeUndefined();
+
+  const process = {
+    id: "btokf1ni8",
+    kind: "bash" as const,
+    description: "Index the repo",
+    command: "gitnexus analyze",
+    status: "running" as const,
+    toolCallId: "toolu_1",
+    startedAt: "2026-10-14T10:00:00.000Z",
+    endedAt: null,
+    exitCode: null,
+    outputFile: "/tmp/btokf1ni8.output",
+    tail: ["Parsing 4,812 / 9,310 files"],
+  };
+  const payload = toAgentPayload(
+    createManagedAgent({ backgroundProcesses: new Map([[process.id, process]]) }),
+  );
+  expect(payload.backgroundProcesses).toEqual([process]);
+});
 
 it("projects the daemon-owned active turn identity", () => {
   expect(toAgentPayload(createManagedAgent({ lifecycle: "running" })).activeTurn).toEqual({

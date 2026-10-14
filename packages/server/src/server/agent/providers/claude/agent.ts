@@ -44,6 +44,7 @@ import {
 import { parsePartialJsonObject } from "./partial-json.js";
 import { ClaudeSidechainTracker } from "./sidechain-tracker.js";
 import { ClaudeTaskState } from "./task-state.js";
+import { ClaudeBackgroundProcesses } from "./background-processes.js";
 import {
   ClaudeTaskProtocolSource,
   type ClaudeHookObservationInput,
@@ -2107,6 +2108,19 @@ class ClaudeAgentSession implements AgentSession {
     getToolInput: (toolUseId) => this.toolUseCache.get(toolUseId)?.input ?? null,
     readWorkflowResult: readClaudeWorkflowResultFile,
   });
+  private readonly backgroundProcesses = new ClaudeBackgroundProcesses({
+    lookupToolUse: (toolUseId) => {
+      const entry = this.toolUseCache.get(toolUseId);
+      if (!entry) return undefined;
+      const command = entry.input?.command;
+      return {
+        name: entry.name,
+        command: entry.commandText ?? (typeof command === "string" ? command : null),
+      };
+    },
+    isOwnedBySubagent: (taskId, toolUseId) =>
+      this.taskProtocolSource.resolveTaskOwner(taskId, toolUseId) !== undefined,
+  });
   private readonly sidechainTracker = new ClaudeSidechainTracker({
     getToolInput: (toolUseId) => this.toolUseCache.get(toolUseId)?.input ?? null,
     // Releases that predate the task protocol announce nothing, so the tracker keeps deriving
@@ -3732,11 +3746,25 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   private failRunningRuntimeTasks(): void {
-    this.dispatchEvents(
-      foldSubagentObservations(this.taskProtocolSource.failRunningTasks()).map(
+    this.dispatchEvents([
+      ...foldSubagentObservations(this.taskProtocolSource.failRunningTasks()).map(
         (event): AgentStreamEvent => ({ type: "provider_subagent", provider: "claude", event }),
       ),
-    );
+      ...this.backgroundProcesses.stopRunning().map(
+        (process): AgentStreamEvent => ({
+          type: "background_process",
+          provider: "claude",
+          process,
+        }),
+      ),
+    ]);
+  }
+
+  async stopBackgroundProcess(processId: string): Promise<void> {
+    if (!this.query) {
+      throw new Error("Claude is not running, so it has no background process to stop");
+    }
+    await this.query.stopTask(processId);
   }
 
   private startQueryPump(): void {
@@ -3986,7 +4014,15 @@ class ClaudeAgentSession implements AgentSession {
               }) satisfies AgentStreamEvent,
           );
 
-    return [...messageEvents, ...assistantTimelineEvents];
+    const backgroundProcessEvents = this.backgroundProcesses.observe(message).map(
+      (process): AgentStreamEvent => ({
+        type: "background_process",
+        provider: "claude",
+        process,
+      }),
+    );
+
+    return [...messageEvents, ...assistantTimelineEvents, ...backgroundProcessEvents];
   }
 
   private async handleMissingResumedConversation(

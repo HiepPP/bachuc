@@ -35,6 +35,7 @@ import type {
 } from "@getpaseo/protocol/agent-types";
 import type {
   AgentMessageQueueSummary,
+  AgentBackgroundProcess,
   ServerInfoStatusPayload,
   ProjectPlacementPayload,
   ServerCapabilities,
@@ -103,6 +104,8 @@ export interface Agent {
   projectPlacement?: ProjectPlacementPayload | null;
   /** Daemon-owned message queue; absent means empty. */
   queue?: AgentMessageQueueSummary;
+  /** Background shells and monitors; absent means none. */
+  backgroundProcesses?: AgentBackgroundProcess[];
 }
 
 export interface WorkspaceDescriptor {
