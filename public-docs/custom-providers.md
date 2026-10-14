@@ -43,30 +43,7 @@ The examples below are a quick tour. The full, up-to-date reference is on GitHub
 
 ## Z.AI (GLM) coding plan
 
-Z.AI exposes GLM models through an Anthropic-compatible endpoint. Point `ANTHROPIC_BASE_URL` at their API and use `ANTHROPIC_AUTH_TOKEN` for the key. Third-party endpoints don't support Anthropic's server-side tools, so disable `WebSearch`.
-
-```json
-{
-  "agents": {
-    "providers": {
-      "zai": {
-        "extends": "claude",
-        "label": "ZAI",
-        "env": {
-          "ANTHROPIC_AUTH_TOKEN": "<your-zai-api-key>",
-          "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-          "API_TIMEOUT_MS": "3000000"
-        },
-        "disallowedTools": ["WebSearch"],
-        "models": [
-          { "id": "glm-5-turbo", "label": "GLM 5 Turbo", "isDefault": true },
-          { "id": "glm-5.1", "label": "GLM 5.1" }
-        ]
-      }
-    }
-  }
-}
-```
+GLM is a built-in provider, so it needs no config entry. Set `ZAI_API_KEY` in the daemon environment, restart the daemon, and pick GLM when you create an agent. See the [full GLM setup](https://github.com/getpaseo/paseo/blob/main/docs/custom-providers.md#zai-zhipu-coding-plan).
 
 ## Alibaba Cloud (Qwen) coding plan
 
