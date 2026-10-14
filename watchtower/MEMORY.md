@@ -188,3 +188,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Source: TASK-096 outcome.
 - Use next time: read `attentionReason` before `status` when you show who waits for the owner.
 - Use next time: read the built output before a plan promises lazy loading.
+
+### 2026-10-14 - Plan 20261014-native-glm-provider
+
+- Learned: a built-in provider id must be added in three lists: `AGENT_PROVIDER_DEFINITIONS`, the `BUILTIN_PROVIDER_IDS` of `packages/protocol/src/provider-config.ts`, and the one in `packages/server/src/server/persisted-config.ts`. The app icon needs `packages/app/src/components/provider-icon-name.ts` too.
+- Source: TASK-104 and TASK-106 outcomes.
+- Use next time: list all four files when a plan adds a built-in provider.
+- Learned: the no-live-restart repo rule leaves every server change unverified on live during implement.
+- Source: TASK-104, TASK-105, and TASK-106 outcomes.
+- Use next time: plan a live check as a separate owner step after implement.

@@ -4,19 +4,19 @@
 
 - Title: Native GLM provider on the Claude client
 - Slug: 20261014-native-glm-provider
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-14
 
 ## Tracker
 
 One row per TASK. Group ties together items that ship as one transaction.
 
-| Order | TASK                                   | Group | Status      | Spec                                                                                                     | Deps               | Context                                        | Notes                                                                 |
-| ----- | -------------------------------------- | ----- | ----------- | -------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------- | --------------------------------------------------------------------- |
-| 1     | TASK-104 Built-in glm provider         | A     | DONE        | [watchtower/tasks/TASK-104-built-in-glm-provider.md](watchtower/tasks/TASK-104-built-in-glm-provider.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (live probe). Commit fe8160553.      |
-| 2     | TASK-105 GLM quota on the glm provider | B     | DONE        | [watchtower/tasks/TASK-105-glm-quota.md](watchtower/tasks/TASK-105-glm-quota.md)                         | TASK-104           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (GLM card). Commit 441d73bd2. Q-042. |
-| 3     | TASK-106 GLM in the app                | C     | DONE        | [watchtower/tasks/TASK-106-glm-in-the-app.md](watchtower/tasks/TASK-106-glm-in-the-app.md)               | TASK-104           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (picker icon). Commit c2c99f274.     |
-| 4     | TASK-107 GLM docs                      | D     | IN PROGRESS | [watchtower/tasks/TASK-107-glm-docs.md](watchtower/tasks/TASK-107-glm-docs.md)                           | TASK-104, TASK-105 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Docs follow shipped behavior.                                         |
+| Order | TASK                                   | Group | Status | Spec                                                                                                     | Deps               | Context                                        | Notes                                                                 |
+| ----- | -------------------------------------- | ----- | ------ | -------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------- | --------------------------------------------------------------------- |
+| 1     | TASK-104 Built-in glm provider         | A     | DONE   | [watchtower/tasks/TASK-104-built-in-glm-provider.md](watchtower/tasks/TASK-104-built-in-glm-provider.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (live probe). Commit fe8160553.      |
+| 2     | TASK-105 GLM quota on the glm provider | B     | DONE   | [watchtower/tasks/TASK-105-glm-quota.md](watchtower/tasks/TASK-105-glm-quota.md)                         | TASK-104           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (GLM card). Commit 441d73bd2. Q-042. |
+| 3     | TASK-106 GLM in the app                | C     | DONE   | [watchtower/tasks/TASK-106-glm-in-the-app.md](watchtower/tasks/TASK-106-glm-in-the-app.md)               | TASK-104           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (picker icon). Commit c2c99f274.     |
+| 4     | TASK-107 GLM docs                      | D     | DONE   | [watchtower/tasks/TASK-107-glm-docs.md](watchtower/tasks/TASK-107-glm-docs.md)                           | TASK-104, TASK-105 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Commit ecc4d67bc.                                                     |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
@@ -33,7 +33,8 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: run `/watchtower implement` to build TASK-104 first.
+- Implement result: typecheck passed in the pre-commit hook of each code commit, and `npm run lint` passed on the branch. The live lines of Plan Verify are UNVERIFIED (unattended), because the run may not restart live.
+- Next action: restart the live daemon on `feat/native-glm-provider`, then run the live lines of Plan Verify.
 
 ## Archive
 
