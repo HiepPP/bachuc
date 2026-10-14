@@ -11,8 +11,9 @@ const REFRESH_MS = 15_000;
 export interface AgentSender {
   // Null until a lookup succeeds. Send looks again, so it still works and reports the error.
   target: AgentTarget | null;
-  // Sends the prompt and shows a toast. Resolves true when the agent took it.
-  send(prompt: string): Promise<boolean>;
+  // Sends the prompt and shows a toast. Resolves the recipient when the agent took it,
+  // null when the send failed.
+  send(prompt: string): Promise<{ id: string; name: string } | null>;
 }
 
 // `enabled` false skips the periodic agent lookup, for a page with nothing to send.
@@ -53,10 +54,10 @@ export function useAgentSender(hostId: string, workspaceId: string, enabled: boo
         await paseo.agents.ref(target.id).send(prompt);
         toast.show(`Sent to ${target.name}`, { variant: "success" });
         void refetch();
-        return true;
+        return { id: target.id, name: target.name };
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Could not send the prompt.");
-        return false;
+        return null;
       }
     },
     [find, paseo, toast, refetch],

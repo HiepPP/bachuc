@@ -90,7 +90,7 @@ export function NeedsYouCell({
   rows: readonly NeedsYouRow[];
   // Null until the first agent lookup succeeds; send looks again and reports any error.
   target: AgentTarget | null;
-  send(prompt: string): Promise<boolean>;
+  send(prompt: string): Promise<{ id: string; name: string } | null>;
   // Opens the answer target's thread, so the owner sees where a prompt goes (ADR-0013).
   onOpenAgent?: (agentId: string) => void;
   onOpenDecision(decision: DecisionTarget): void;
@@ -111,7 +111,9 @@ export function NeedsYouCell({
   const run = async (prompt: string): Promise<boolean> => {
     setSending(true);
     try {
-      return await send(prompt);
+      const sent = await send(prompt);
+      if (sent && onOpenAgent) onOpenAgent(sent.id);
+      return sent !== null;
     } finally {
       setSending(false);
     }
@@ -254,10 +256,7 @@ export function NeedsYouCell({
           onPress={() => onOpenAgent(target.id)}
           style={({ pressed }) => ({ alignSelf: "flex-start", opacity: pressed ? 0.6 : 1 })}
         >
-          <Text
-            numberOfLines={1}
-            style={{ fontSize: 11, marginBottom: 2, color: colors.foregroundMuted }}
-          >
+          <Text style={{ fontSize: 11, marginBottom: 2, color: colors.foregroundMuted }}>
             Actions go to{" "}
             <Text style={{ color: colors.accent, textDecorationLine: "underline" }}>
               {target.name}
