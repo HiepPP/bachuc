@@ -4,7 +4,7 @@
 
 - Title: Plan tree on the Watchtower page
 - Slug: 20261014-watchtower-plan-tree
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-14
 
 ## Tracker
@@ -36,7 +36,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: answer Q-041. The live check found that a builder waiting for a permission shows as running, and that a wave with a running TASK says "ready to start". Then fix both and run TASK-103 again.
+- Next action: review `feat/watchtower-plan-tree`, merge it, and run `archive`. Every TASK is done; Q-041 was fixed in 985b868a8 and the TASK-103 re-run passed on live.
 - Plan Verify, 2026-10-14: `npm test` 90 pass, `npm run typecheck` exit 0, oxlint 0 warnings and 0 errors, removed names have no match. `npm run lint` exits 2 only through the shell's rtk ESLint wrapper; `rtk proxy npm run lint` exits 0.
 
 ## Archive

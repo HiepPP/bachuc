@@ -2,9 +2,18 @@
 
 ## Status
 
-BLOCKED
+DONE. The first run (below) was blocked on [Q-041](watchtower/QUESTIONS.md); the owner answered yes, the fix landed in 985b868a8, and the re-run passed.
 
-Blocked: the running row shows, but the amber waiting row never shows: a builder that waits for a permission is drawn as running ([Q-041](watchtower/QUESTIONS.md)).
+## Re-run after the Q-041 fix
+
+- 2026-10-14, 05:56Z to 05:59Z, same fixture and workspace, plugin reloaded on live. New Claude Haiku agents: "Fixture lead", and "build B (waiting)" in mode `default`, labelled `watchtower.task=TASK-002`, stopped on a Bash permission.
+- Waiting row -> PASS. Screenshot `/tmp/fleet/wt8-waiting.png`: TASK-002 has an amber tint, the hand icon, "Builder B asks permission", `7m / 0m`, and Open thread.
+- Open thread -> PASS. It opened the "build B (waiting)" thread, whose tab shows the needs-input badge (`/tmp/fleet/wt9-thread.png`).
+- Wave header -> PASS. Wave 2 says "running".
+- Checks after the fix: `npx tsx --test tests/plan-tree.test.ts tests/builders.test.ts` 31 pass; `npm test` 101 pass, 0 fail; `npm run typecheck` exit 0; `rtk proxy npm run lint` 0 warnings, 0 errors.
+- Anti-goal re-read: both agents archived on live; release lists none of them (`PASEO_HOME=~/.bachuc paseo ls -g`, 2026-10-14T05:58:50Z). PASS.
+
+## First run
 
 ## Setup
 
