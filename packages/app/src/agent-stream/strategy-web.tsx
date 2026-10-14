@@ -357,6 +357,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const pendingAutoScrollFrameRef = useRef<number | null>(null);
   const pendingAutoScrollTimeoutRef = useRef<number | null>(null);
   const pendingVirtualRowMeasureFramesRef = useRef(new Map<Element, number>());
+  const readingPositionFrameRef = useRef<number | null>(null);
   const historyStartReadyRef = useRef(false);
   const [historyStartPaginationState, setHistoryStartPaginationState] = useState(
     createHistoryStartPaginationState,
@@ -674,6 +675,10 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       window.cancelAnimationFrame(frame);
     }
     pendingVirtualRowMeasureFramesRef.current.clear();
+    if (readingPositionFrameRef.current !== null) {
+      window.cancelAnimationFrame(readingPositionFrameRef.current);
+      readingPositionFrameRef.current = null;
+    }
     clearMouseScrollGesture();
     clearUpwardInputEvidence();
     lastTouchClientYRef.current = null;
@@ -728,11 +733,8 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
 
   // Rows are laid out in DOM order, virtualized block first, so the first row whose bottom
   // clears the reading line is the one the reader is looking at.
-  const reportReadingPosition = useStableEvent(() => {
-    if (!isActiveRef.current) {
-      return;
-    }
-    if (!onReadingPositionChange) {
+  const measureReadingPosition = useStableEvent(() => {
+    if (!isActiveRef.current || !onReadingPositionChange) {
       return;
     }
     const scrollContainer = scrollContainerRef.current;
@@ -755,6 +757,31 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     }
     onReadingPositionChange(readingRowId);
   });
+
+  // Scroll events and commits arrive mid-frame, before the virtualizer and React finish writing
+  // the DOM. Measuring then forces an extra layout; one read per frame shares the paint layout.
+  const reportReadingPosition = useStableEvent(() => {
+    if (!isActiveRef.current || !onReadingPositionChange) {
+      return;
+    }
+    if (readingPositionFrameRef.current !== null) {
+      return;
+    }
+    readingPositionFrameRef.current = window.requestAnimationFrame(() => {
+      readingPositionFrameRef.current = null;
+      measureReadingPosition();
+    });
+  });
+
+  useEffect(
+    () => () => {
+      if (readingPositionFrameRef.current !== null) {
+        window.cancelAnimationFrame(readingPositionFrameRef.current);
+        readingPositionFrameRef.current = null;
+      }
+    },
+    [],
+  );
 
   const updateScrollMetrics = useCallback(() => {
     if (!isActiveRef.current) {
