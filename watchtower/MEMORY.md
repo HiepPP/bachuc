@@ -256,3 +256,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: GPUI cached views (`Entity::cached`) save about 2 CPU points but drop out of the accessibility tree, and a `Role::ComboBox` div did not run its click handler through `cua_repl`.
 - Source: TASK-141 outcome.
 - Use next time: keep labeled chrome views uncached, and give click targets `Role::Button`.
+- Learned: in zsh, `F="a.md b.md"; npm run format:files -- $F` passes one argument, so oxfmt prints "Expected at least one target file" and formats nothing. Two builders reported a passing format check this way, and the lead found 3 unformatted files.
+- Source: TASK-142 and TASK-143 lead re-check, 2026-10-16.
+- Use next time: pass file lists as separate arguments or with `${=F}`, and treat "Expected at least one target file" as a failed check.
+- Learned: Paseo `create_agent` on release failed with "Too many orchestrator sessions; reload the plugin". The `jev-orchestrator` bridge keeps bound leases across reloads (`hiep-plugins/plugins/jev-orchestrator/server/bridge.ts`), so a reload did not help. The run used native builder subagents instead.
+- Source: implement run of 2026-10-15.
+- Use next time: check that `create_agent` works before a run that needs Paseo builders.
