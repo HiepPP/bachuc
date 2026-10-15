@@ -1,0 +1,26 @@
+[package]
+name = "bachuc-app"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "bachuc-desktop"
+path = "src/main.rs"
+
+[dependencies]
+bachuc-client = { path = "../client" }
+bachuc-composer = { path = "../composer" }
+bachuc-diagram = { path = "../diagram" }
+bachuc-terminal = { path = "../terminal" }
+bachuc-theme = { path = "../theme" }
+bachuc-timeline = { path = "../timeline" }
+# gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot; keep the same pin in every crate.
+gpui-kit = "=0.7.3"
+log = "0.4"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# GPUI has no dock badge API, so the badge goes through NSDockTile.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSDockTile", "NSResponder"] }
+objc2-foundation = { version = "0.3", features = ["NSString"] }
