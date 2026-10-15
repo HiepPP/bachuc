@@ -56,6 +56,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a Swift or SwiftUI desktop client, and new long-term work on the Electron renderer UI, while the GPUI client measured 6.5% CPU against 24% for Swift and 1.2 GB or more for Electron on the same stream. Reason: [ADR-0034](watchtower/decisions/ADR-0034-rust-gpui-client-over-swift-and-electron.md).
 - Avoid hand-written Rust protocol structs while the zod schemas can export JSON Schema for code generation. Reason: [ADR-0035](watchtower/decisions/ADR-0035-generated-protocol-types-over-hand-written-rust-types.md).
 - Avoid a live WebView inside each timeline row, and SVG export of diagrams, while `gpui-wry` views do not clip inside GPUI scroll lists and GPUI's usvg drops `foreignObject` labels and KaTeX HTML. Reason: [ADR-0037](watchtower/decisions/ADR-0037-hidden-webview-png-snapshots-over-svg-and-inline-webviews.md).
+- Avoid a WebView for every plugin surface, one declarative UI contract for all plugin UI, and a Rust rewrite of every plugin, while 10 of 14 contribution kinds are data items, each WebView costs 55 to 83 MB, and plugins need hot reload. Reason: [ADR-0038](watchtower/decisions/ADR-0038-native-data-kinds-and-webview-panes-over-all-webview-or-rewrite.md).
 
 ## Learnings
 

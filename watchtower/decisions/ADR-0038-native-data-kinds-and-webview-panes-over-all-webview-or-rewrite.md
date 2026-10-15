@@ -1,6 +1,6 @@
 # ADR-0038 Native data kinds and WebView panes over all-WebView or full rewrite
 
-Status: proposed
+Status: accepted
 Date: 2026-10-16
 Supersedes: -
 Scope: `packages/desktop-gpui/**`, `hiep-plugins/plugins/*/index.client.tsx`, `packages/plugin/src/client/**`
@@ -19,7 +19,7 @@ Scope: `packages/desktop-gpui/**`, `hiep-plugins/plugins/*/index.client.tsx`, `p
 - Render the data kinds (command center, sidebar, slash command, settings, composer pill, attachment source, theme, transformers) as native GPUI views fed by a data contract.
 - Host a free-form page or panel as a plugin pane: a new `TabContent` variant that owns one live WebView in the tab area, outside any scroll list. Decide per plugin later whether to move it to a declarative contract.
 - Render timeline renderers as PNG snapshots through the ADR-0037 path.
-- Proposed by the implement run; the owner accepts or rejects.
+- Proposed by the implement run; the owner accepted it as written on 2026-10-16.
 
 ## Consequences
 

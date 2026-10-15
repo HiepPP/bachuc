@@ -4,12 +4,12 @@
 
 - Title: GPUI desktop client to replace the Electron UI
 - Slug: 20261015-gpui-desktop-client
-- Status: DONE
+- Status: ACTIVE
 - Updated: 2026-10-16
 
 ## Tracker
 
-One row per TASK. Group ties together items that ship as one transaction. Waves: 1 = A; 2 = B, C; 3 = D, E, F; 4 = G; 5 = H, I.
+One row per TASK. Group ties together items that ship as one transaction. Waves: 1 = A; 2 = B, C; 3 = D, E, F; 4 = G; 5 = H, I; 6 = J.
 
 | Order | TASK                                                        | Group | Status | Spec                                                                                                       | Deps                                   | Context                                        | Notes                                                                                                                 |
 | ----- | ----------------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -23,6 +23,7 @@ One row per TASK. Group ties together items that ship as one transaction. Waves:
 | 8     | TASK-141 App shell with host switcher, sidebar, and panes   | G     | DONE   | [watchtower/tasks/TASK-141-app-shell.md](watchtower/tasks/TASK-141-app-shell.md)                           | TASK-137, TASK-138, TASK-139, TASK-140 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Joins all parts into one app. Commit fbce39e7c. implement: manual checks pending; CPU over 10% on long turns (Q-065). |
 | 9     | TASK-142 Accessibility audit with VoiceOver and the AX tree | H     | DONE   | [watchtower/tasks/TASK-142-accessibility-audit.md](watchtower/tasks/TASK-142-accessibility-audit.md)       | TASK-141                               | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | VoiceOver pass needs a human. Commit 261f9ea44. implement: manual checks pending.                                     |
 | 10    | TASK-143 Design the plugin UI host for the GPUI client      | I     | DONE   | [watchtower/tasks/TASK-143-plugin-ui-host-design.md](watchtower/tasks/TASK-143-plugin-ui-host-design.md)   | TASK-141                               | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Writes a proposed ADR only. Commit 1661ed495; ADR-0038 proposed.                                                      |
+| 11    | TASK-144 Cut timeline and shell render cost on long turns   | J     | TODO   | [watchtower/tasks/TASK-144-long-turn-render-cost.md](watchtower/tasks/TASK-144-long-turn-render-cost.md)   | TASK-141                               | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Q-065 answer: 10% at 2 and 15 minutes.                                                                                |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
@@ -39,7 +40,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 - The daemon restarts while a stream tab is open -> the client reconnects, refetches, and shows no duplicate rows; owner TASK-136
 - An agent with a timeline longer than one page -> scrolling to the top loads older items without a jump; owner TASK-138
-- A broken mermaid block -> the timeline shows the code block, not an empty gap; owner TASK-138
+- A running turn that grows past 60 steps -> CPU stays at or below 10% and does not grow with the step count; owner TASK-144
 - The selected host is down at app start -> the app shows a disconnected state and retries; owner TASK-141
 - A terminal pane resized while output streams -> the emulator and the daemon PTY agree on the size; owner TASK-140
 
@@ -52,8 +53,9 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
   - Agent check on live in one window -> covered by the TASK-141 checks (new mock tab streams, terminal tab, composer). No separate lead run: UNVERIFIED (unattended).
   - `measure.sh 60` on the app -> 9.7% CPU and 209 MB on a young stream (PASS), but 13.4% on a 15-minute turn (FAIL). See Q-065.
   - `git diff --stat main -- packages/protocol packages/server packages/app packages/desktop` -> empty. PASS.
-- Open for the owner: Q-057 and Q-065 in [watchtower/QUESTIONS.md](watchtower/QUESTIONS.md), the proposed [ADR-0038](watchtower/decisions/ADR-0038-native-data-kinds-and-webview-panes-over-all-webview-or-rewrite.md), the six accessibility gaps in [packages/desktop-gpui/docs/a11y-audit.md](packages/desktop-gpui/docs/a11y-audit.md), and the VoiceOver pass.
-- Next action: answer Q-065, then review `feat/bachuc-gpui` and run `/watchtower archive`.
+- Owner answers on 2026-10-16: Q-065 cut the timeline cost and keep 10%; Q-057 export the `server_info` schema in the next GPUI plan; [ADR-0038](watchtower/decisions/ADR-0038-native-data-kinds-and-webview-panes-over-all-webview-or-rewrite.md) accepted.
+- Still open: the six accessibility gaps in [packages/desktop-gpui/docs/a11y-audit.md](packages/desktop-gpui/docs/a11y-audit.md) and the VoiceOver pass.
+- Next action: run `/watchtower implement` on `feat/bachuc-gpui`. Wave 6 is group J (TASK-144, the Q-065 fix).
 
 ## Archive
 
