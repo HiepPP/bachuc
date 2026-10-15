@@ -1,5 +1,184 @@
 import { describe, expect, it } from "vitest";
-import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
+import { timelineItemIdentity } from "@getpaseo/protocol/timeline-identity";
+import type { AgentTimelineItem } from "./agent-sdk-types.js";
+import { InMemoryAgentTimelineStore, type TimelineHistoryReader } from "./agent-timeline-store.js";
+import type { AgentTimelineFetchResult, AgentTimelineRow } from "./agent-timeline-store-types.js";
+
+function toolCall(callId: string, status: "running" | "completed"): AgentTimelineItem {
+  return {
+    type: "tool_call",
+    callId,
+    name: "Read",
+    status,
+    detail: { type: "unknown", input: null, output: status === "completed" ? "done" : null },
+    error: null,
+  };
+}
+
+/**
+ * About 600 rows: prompts, assistant runs of 3 chunks, reasoning runs, short tool calls, and one
+ * tool call that starts near the top and completes near the end.
+ */
+function longTimeline(): AgentTimelineRow[] {
+  const items: Array<{ item: AgentTimelineItem; turnId: string }> = [];
+  for (let turn = 0; turn < 30; turn++) {
+    const turnId = `turn-${turn}`;
+    items.push({ item: { type: "user_message", text: `prompt ${turn}` }, turnId });
+    if (turn === 0) items.push({ item: toolCall("long", "running"), turnId });
+    items.push({ item: { type: "reasoning", text: `think ${turn} ` }, turnId });
+    items.push({ item: { type: "reasoning", text: "more" }, turnId });
+    for (let step = 0; step < 4; step++) {
+      items.push({ item: toolCall(`call-${turn}-${step}`, "running"), turnId });
+      items.push({ item: { type: "assistant_message", text: `a${turn}.${step} ` }, turnId });
+      items.push({ item: { type: "assistant_message", text: "b " }, turnId });
+      items.push({ item: { type: "assistant_message", text: "c" }, turnId });
+      items.push({ item: toolCall(`call-${turn}-${step}`, "completed"), turnId });
+    }
+    if (turn === 28) items.push({ item: toolCall("long", "completed"), turnId: "turn-0" });
+  }
+  return items.map(({ item, turnId }, index) => ({
+    seq: index + 1,
+    timestamp: `2026-01-01T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+    turnId,
+    item,
+  }));
+}
+
+function historyOf(source: readonly AgentTimelineRow[]): TimelineHistoryReader {
+  return {
+    readRows: (fromSeq, toSeq) => source.filter((row) => row.seq >= fromSeq && row.seq <= toSeq),
+    readIdentityRows: (identities, beforeSeq) =>
+      source.filter(
+        (row) => row.seq < beforeSeq && identities.includes(timelineItemIdentity(row.item) ?? "\0"),
+      ),
+    latestPromptSeq: () => source.findLast((row) => row.item.type === "user_message")?.seq ?? null,
+  };
+}
+
+function memorySourceRows(store: InMemoryAgentTimelineStore, agentId: string): number {
+  return store
+    .getRows(agentId)
+    .flatMap((row) => row.sourceSeqRanges)
+    .reduce((sum, range) => sum + range.endSeq - range.startSeq + 1, 0);
+}
+
+function stores(source: AgentTimelineRow[], tailRows: number) {
+  const full = new InMemoryAgentTimelineStore();
+  full.initialize("agent", { rows: source, epoch: "epoch" });
+  const trimmed = new InMemoryAgentTimelineStore({ tailRows });
+  trimmed.initialize("agent", { rows: source, epoch: "epoch" });
+  trimmed.trimFlushed("agent", source.length);
+  return { full, trimmed, history: historyOf(source) };
+}
+
+describe("InMemoryAgentTimelineStore tail", () => {
+  it("drops flushed rows below the tail and keeps rows that are not flushed", () => {
+    const source = longTimeline();
+    const store = new InMemoryAgentTimelineStore({ tailRows: 50 });
+    store.initialize("agent", { rows: source, epoch: "epoch" });
+
+    store.trimFlushed("agent", 0);
+    expect(memorySourceRows(store, "agent")).toBe(source.length);
+
+    store.trimFlushed("agent", 100);
+    expect(Math.min(...store.getRows("agent").map((row) => row.seqEnd))).toBeGreaterThan(100);
+
+    store.trimFlushed("agent", source.length);
+    // Memory keeps the 50 tail rows plus older rows only of items that reach into the tail:
+    // the long tool call and the item that spans the edge.
+    const cutoff = source.length + 1 - 50;
+    const kept = store.getRows("agent");
+    expect(kept.every((row) => row.seqEnd >= cutoff)).toBe(true);
+    const olderRows = kept
+      .flatMap((row) => row.sourceSeqRanges)
+      .filter((range) => range.startSeq < cutoff)
+      .reduce((sum, range) => sum + Math.min(range.endSeq, cutoff - 1) - range.startSeq + 1, 0);
+    expect(memorySourceRows(store, "agent") - olderRows).toBe(50);
+    expect(olderRows).toBeLessThanOrEqual(5);
+  });
+
+  it("pages before from the tail to the first row with every item once", () => {
+    const source = longTimeline();
+    const { full, trimmed, history } = stores(source, 50);
+    const expected = full.fetch("agent", { direction: "tail", limit: 0 }).rows;
+
+    const collected: AgentTimelineFetchResult["rows"] = [];
+    let page = trimmed.fetch("agent", { direction: "tail", limit: 7 }, history);
+    collected.unshift(...page.rows);
+    while (page.hasOlder) {
+      const cursor = { epoch: "epoch", seq: page.startSeq! };
+      page = trimmed.fetch("agent", { direction: "before", cursor, limit: 7 }, history);
+      expect(page.rows.length).toBeGreaterThan(0);
+      collected.unshift(...page.rows);
+    }
+
+    expect(collected).toEqual(expected);
+  });
+
+  it("pages after from the first row to the end with the same final items", () => {
+    const source = longTimeline();
+    const { full, trimmed, history } = stores(source, 50);
+    const expected = full.fetch("agent", { direction: "tail", limit: 0 }).rows;
+
+    const bySeqStart = new Map<number, AgentTimelineFetchResult["rows"][number]>();
+    let cursorSeq = 0;
+    for (let pages = 0; pages < 500; pages++) {
+      const cursor = { epoch: "epoch", seq: cursorSeq };
+      const page = trimmed.fetch("agent", { direction: "after", cursor, limit: 7 }, history);
+      for (const row of page.rows) bySeqStart.set(row.seqStart, row);
+      if (!page.hasNewer) break;
+      cursorSeq = page.endSeq!;
+    }
+
+    expect([...bySeqStart.values()].sort((a, b) => a.seqStart - b.seqStart)).toEqual(expected);
+  });
+
+  it("widens the tail to a latest prompt that sits below the tail edge", () => {
+    const source = longTimeline().slice(0, 560);
+    const prompt = source.findLast((row) => row.item.type === "user_message")!;
+    const promptSeq = prompt.seq;
+    const tailRows = source.length - promptSeq - 3;
+    const { full, trimmed, history } = stores(source, tailRows);
+    expect(trimmed.getRows("agent").some((row) => row.item.type === "user_message")).toBe(false);
+
+    const options = { direction: "tail" as const, limit: 2, includeLatestPrompt: true };
+    const page = trimmed.fetch("agent", options, history);
+
+    expect(page.rows[0]?.item).toEqual(prompt.item);
+    expect(page.rows.length).toBeGreaterThan(2);
+    expect(page).toEqual(full.fetch("agent", options));
+  });
+
+  it("serves pages within the tail from memory and keeps whole timelines without a trim", () => {
+    const source = longTimeline();
+    const { full, trimmed } = stores(source, 50);
+    const failing: TimelineHistoryReader = {
+      readRows: () => {
+        throw new Error("no history");
+      },
+      readIdentityRows: () => {
+        throw new Error("no history");
+      },
+      latestPromptSeq: () => {
+        throw new Error("no history");
+      },
+    };
+
+    const tail = trimmed.fetch("agent", { direction: "tail", limit: 3 }, failing);
+    expect(tail.rows).toEqual(full.fetch("agent", { direction: "tail", limit: 3 }).rows);
+    expect(tail.hasOlder).toBe(true);
+    expect(() => trimmed.fetch("agent", { direction: "tail", limit: 0 })).toThrow(
+      /before its in-memory tail is unavailable/,
+    );
+
+    const untrimmed = new InMemoryAgentTimelineStore({ tailRows: 50 });
+    untrimmed.initialize("agent", { rows: source, epoch: "epoch" });
+    expect(memorySourceRows(untrimmed, "agent")).toBe(source.length);
+    expect(untrimmed.fetch("agent", { direction: "tail", limit: 0 }, failing)).toEqual(
+      full.fetch("agent", { direction: "tail", limit: 0 }),
+    );
+  });
+});
 
 describe("InMemoryAgentTimelineStore", () => {
   it("keeps turn metrics per turn and clears them on delete and initialize", () => {

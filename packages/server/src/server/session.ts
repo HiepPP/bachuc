@@ -1,4 +1,3 @@
-import { searchTimeline } from "./agent/chat-search/index.js";
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { BrowserAutomationHostCapabilitySchema } from "@getpaseo/protocol/browser-automation/capabilities";
 import type { SessionEventSubscription } from "@getpaseo/protocol/messages";
@@ -7825,12 +7824,14 @@ export class Session {
   ): Promise<void> {
     try {
       await this.ensureAgentTimelineReadable(msg.agentId);
-      const rows = await this.agentManager.getTimelineRows(msg.agentId);
       const { epoch } = this.agentManager.fetchTimelineForRead(msg.agentId, {
         direction: "tail",
         limit: 1,
       });
-      const result = await searchTimeline({ rows, query: msg.query, cursor: msg.cursor });
+      const result = await this.agentManager.searchTimeline(msg.agentId, {
+        query: msg.query,
+        cursor: msg.cursor,
+      });
       if (
         this.agentManager.fetchTimelineForRead(msg.agentId, { direction: "tail", limit: 1 })
           .epoch !== epoch
@@ -7874,7 +7875,7 @@ export class Session {
   ): Promise<void> {
     try {
       await this.ensureAgentTimelineReadable(msg.agentId);
-      const rows = await this.agentManager.getTimelineRows(msg.agentId);
+      const rows = await this.agentManager.getTimelinePromptRows(msg.agentId);
       const timeline = this.agentManager.fetchTimelineForRead(msg.agentId, {
         direction: "tail",
         limit: 1,
