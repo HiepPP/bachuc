@@ -1,0 +1,18 @@
+[package]
+name = "bachuc-client"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bachuc-protocol = { path = "../protocol" }
+# gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot; keep the same pin in every crate.
+gpui-kit = "=0.7.3"
+anyhow = "1"
+futures = "0.3"
+log = "0.4"
+polling = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tungstenite = "0.24"
+uuid = { version = "1", features = ["v4"] }
