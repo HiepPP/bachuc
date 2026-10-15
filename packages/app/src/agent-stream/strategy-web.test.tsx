@@ -9,6 +9,12 @@ import { RetainedPanelActivity } from "@/components/retained-panel";
 import type { StreamItem } from "@/types/stream";
 import type { StreamRenderInput, StreamSegmentRenderers, StreamViewportHandle } from "./strategy";
 import { createWebStreamStrategy } from "./strategy-web";
+import {
+  hasPendingLatestPromptAnchor,
+  requestLatestPromptAnchor,
+  settleLatestPromptAnchor,
+} from "./latest-prompt-anchor";
+import { PROMPT_JUMP_TOP_INSET_PX } from "./prompt-jump-settle";
 
 vi.hoisted(() => {
   Object.defineProperty(window, "matchMedia", {
@@ -1577,5 +1583,224 @@ describe("createWebStreamStrategy", () => {
     });
     expect(container.querySelector('[data-testid="agent-chat-scroll"]')).toBe(scrollContainer);
     expect(scrollTo).toHaveBeenCalledWith({ top: 2200, behavior: "auto" });
+  });
+
+  describe("latest-prompt anchor", () => {
+    const ROW_HEIGHT_PX = 100;
+    const scrollTops = new WeakMap<Element, number>();
+    const prototypeKeys = ["scrollTop", "scrollHeight", "clientHeight"] as const;
+    const originalDescriptors = new Map<string, PropertyDescriptor | undefined>();
+    let originalGetBoundingClientRect: HTMLElement["getBoundingClientRect"];
+    const scrollTo = vi.fn();
+
+    function rowTop(element: Element): number {
+      const scrollContainer = element.closest('[data-testid="agent-chat-scroll"]');
+      const rowIds = [...document.querySelectorAll<HTMLElement>("[data-history-row-id]")].map(
+        (row) => row.dataset.historyRowId,
+      );
+      const index = rowIds.indexOf((element as HTMLElement).dataset.historyRowId);
+      return index * ROW_HEIGHT_PX - (scrollContainer ? (scrollTops.get(scrollContainer) ?? 0) : 0);
+    }
+
+    function rect(top: number): DOMRect {
+      return {
+        top,
+        bottom: top + ROW_HEIGHT_PX,
+        left: 0,
+        right: 0,
+        width: 0,
+        height: 0,
+      } as DOMRect;
+    }
+
+    beforeEach(() => {
+      for (const key of prototypeKeys) {
+        originalDescriptors.set(key, Object.getOwnPropertyDescriptor(HTMLElement.prototype, key));
+      }
+      // A model viewport: rows stack at fixed heights and scrolling moves them up.
+      Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+        configurable: true,
+        get() {
+          return scrollTops.get(this) ?? 0;
+        },
+        set(value: number) {
+          scrollTops.set(this, value);
+        },
+      });
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          return 5000;
+        },
+      });
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+        configurable: true,
+        get() {
+          return 400;
+        },
+      });
+      originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+      HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+        if (this.dataset.historyRowId) return rect(rowTop(this));
+        return rect(0);
+      };
+      scrollTo.mockReset();
+      HTMLElement.prototype.scrollTo = scrollTo;
+      // jsdom has no CSS namespace; the jump queries rows by escaped message id.
+      vi.stubGlobal("CSS", { escape: (value: string) => value });
+    });
+
+    afterEach(() => {
+      settleLatestPromptAnchor("agent");
+      for (const key of prototypeKeys) {
+        const descriptor = originalDescriptors.get(key);
+        if (descriptor) Object.defineProperty(HTMLElement.prototype, key, descriptor);
+        else Reflect.deleteProperty(HTMLElement.prototype, key);
+      }
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      vi.unstubAllGlobals();
+    });
+
+    function reply(index: number): StreamItem {
+      return {
+        kind: "assistant_message",
+        id: `reply-${index}`,
+        text: `Reply ${index}`,
+        timestamp: new Date("2026-04-20T00:00:00.000Z"),
+      };
+    }
+
+    function renderInput(
+      historyMounted: StreamItem[],
+      overrides: Partial<StreamRenderInput> = {},
+    ): StreamRenderInput {
+      return {
+        agentId: "agent",
+        segments: { historyVirtualized: [], historyMounted, liveHead: [] },
+        boundary: { hasVirtualizedHistory: false, hasMountedHistory: true, hasLiveHead: false },
+        renderers: createRenderers(vi.fn()),
+        listEmptyComponent: null,
+        viewportRef: React.createRef<StreamViewportHandle>(),
+        routeBottomAnchorRequest: null,
+        isAuthoritativeHistoryReady: true,
+        onNearBottomChange: vi.fn(),
+        onNearHistoryStart: vi.fn().mockReturnValue(true),
+        isLoadingOlderHistory: false,
+        hasOlderHistory: false,
+        olderHistoryProgressKey: null,
+        scrollEnabled: true,
+        listStyle: null,
+        baseListContentContainerStyle: null,
+        forwardListContentContainerStyle: null,
+        ...overrides,
+      };
+    }
+
+    function getScrollContainer(): HTMLElement {
+      const scrollContainer = container?.querySelector('[data-testid="agent-chat-scroll"]');
+      if (!(scrollContainer instanceof HTMLElement)) {
+        throw new Error("Expected agent chat scroll container");
+      }
+      return scrollContainer;
+    }
+
+    function promptTop(): number {
+      const prompt = container?.querySelector('[data-history-row-id="message-3"]');
+      if (!(prompt instanceof HTMLElement)) throw new Error("Expected the latest prompt row");
+      return prompt.getBoundingClientRect().top - getScrollContainer().getBoundingClientRect().top;
+    }
+
+    async function nextFrames(count: number): Promise<void> {
+      for (let frame = 0; frame < count; frame += 1) {
+        await act(async () => {
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        });
+      }
+    }
+
+    const rows = [userMessage(1), reply(2), userMessage(3), reply(4), reply(5), reply(6)];
+
+    function mount(input: StreamRenderInput) {
+      const strategy = createWebStreamStrategy({ isMobileBreakpoint: false });
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() => {
+        root?.render(strategy.render(input));
+      });
+      return strategy;
+    }
+
+    function rerender(strategy: ReturnType<typeof mount>, input: StreamRenderInput): void {
+      act(() => {
+        root?.render(strategy.render(input));
+      });
+    }
+
+    function endAnchor(): void {
+      settleLatestPromptAnchor("agent");
+    }
+
+    it("does not scroll to the bottom on activation while an anchor is pending", () => {
+      requestLatestPromptAnchor("agent");
+      mount(renderInput(rows));
+
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(getScrollContainer().scrollTop).toBe(2 * ROW_HEIGHT_PX - PROMPT_JUMP_TOP_INSET_PX);
+    });
+
+    it("stays hidden until the jump settles, then shows the prompt at the top", async () => {
+      requestLatestPromptAnchor("agent");
+      mount(renderInput(rows));
+
+      expect(getScrollContainer().style.visibility).toBe("hidden");
+      expect(hasPendingLatestPromptAnchor("agent")).toBe(true);
+
+      await nextFrames(3);
+
+      expect(hasPendingLatestPromptAnchor("agent")).toBe(false);
+      expect(getScrollContainer().style.visibility).toBe("");
+      expect(promptTop()).toBe(PROMPT_JUMP_TOP_INSET_PX);
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    it("lands a cache-painted transcript on the prompt before history is synced", async () => {
+      requestLatestPromptAnchor("agent");
+      mount(renderInput(rows, { isAuthoritativeHistoryReady: false }));
+
+      await nextFrames(3);
+
+      expect(hasPendingLatestPromptAnchor("agent")).toBe(false);
+      expect(promptTop()).toBe(PROMPT_JUMP_TOP_INSET_PX);
+    });
+
+    it("keeps the prompt's top offset when newer rows append after landing", async () => {
+      requestLatestPromptAnchor("agent");
+      const input = renderInput(rows, { isAuthoritativeHistoryReady: false });
+      const strategy = mount(input);
+      await nextFrames(3);
+      expect(promptTop()).toBe(PROMPT_JUMP_TOP_INSET_PX);
+
+      rerender(strategy, {
+        ...input,
+        isAuthoritativeHistoryReady: true,
+        segments: { ...input.segments, historyMounted: [...rows, reply(7), reply(8)] },
+      });
+      await nextFrames(2);
+
+      expect(promptTop()).toBe(PROMPT_JUMP_TOP_INSET_PX);
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
+
+    it("opens at the bottom when the anchor ends without a prompt to land on", () => {
+      requestLatestPromptAnchor("agent");
+      mount(renderInput([reply(1), reply(2)]));
+      expect(scrollTo).not.toHaveBeenCalled();
+
+      act(endAnchor);
+
+      expect(getScrollContainer().style.visibility).toBe("");
+      expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: "auto" });
+    });
   });
 });

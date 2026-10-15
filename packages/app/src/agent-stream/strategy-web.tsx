@@ -29,10 +29,12 @@ import type { StreamRenderInput, StreamStrategy, StreamViewportHandle } from "./
 import { useRevisedHistoryRows } from "./history-row-revision";
 import { createStreamStrategy } from "./strategy";
 import {
+  beginLatestPromptAnchor,
   findLatestPromptId,
   getLatestPromptAnchorVersion,
+  hasPendingLatestPromptAnchor,
+  settleLatestPromptAnchor,
   subscribeLatestPromptAnchor,
-  takeLatestPromptAnchor,
 } from "./latest-prompt-anchor";
 import {
   abandonHistoryStartPaginationRequest,
@@ -333,7 +335,10 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const handleContentRef = useCallback((node: HTMLElement | null) => {
     contentRef.current = node;
   }, []);
-  const [followOutput, setFollowOutputr] = useState(true);
+  // A transcript that opens on its latest prompt must not pin to the bottom first.
+  const [followOutput, setFollowOutputr] = useState(
+    () => !hasPendingLatestPromptAnchor(props.agentId),
+  );
   const followOutputRef = useRef(followOutput);
   const setFollowOutput = (value: boolean) => {
     followOutputRef.current = value;
@@ -796,7 +801,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     reportReadingPosition();
   }, [onNearBottomChange, reportReadingPosition]);
 
-  const { isJumpSettling, scrollToMessage } = useScrollToMessage({
+  const { isJumpSettling, jumpToMessage, scrollToMessage } = useScrollToMessage({
     active: isActive,
     scrollContainerRef,
     rowVirtualizer,
@@ -870,6 +875,9 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     if (!isActiveRef.current || !isActivationReady) {
       return;
     }
+    if (hasPendingLatestPromptAnchor(props.agentId)) {
+      return;
+    }
     if (hasRouteBottomAnchorRequest && !followOutputRef.current) {
       return;
     }
@@ -896,36 +904,60 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     forceStickToBottom,
     hasRouteBottomAnchorRequest,
     isActivationReady,
+    props.agentId,
     scheduleStickToBottom,
   ]);
 
-  // Declared after the activation effect above, so in the commit that activates the transcript
-  // this runs second and replaces its bottom pin. `scrollToMessage` stops following output, which
-  // keeps later activation passes from pinning to the bottom again.
+  // The activation effect above skips its bottom pin while a latest-prompt anchor is pending.
+  // This lands the prompt as soon as any segment holds it, a cached paint included, and the
+  // anchor stays pending until the jump settles. `jumpToMessage` stops following output, which
+  // keeps later activation passes from pinning to the bottom.
   const latestPromptAnchorVersion = useSyncExternalStore(
     subscribeLatestPromptAnchor,
     getLatestPromptAnchorVersion,
     getLatestPromptAnchorVersion,
   );
+  const isLatestPromptAnchorPending = hasPendingLatestPromptAnchor(props.agentId);
+  const wasLatestPromptAnchorPendingRef = useRef(isLatestPromptAnchorPending);
+  const latestPromptAnchorJumpStartedRef = useRef(false);
   useLayoutEffect(() => {
-    if (!isActive || !isActivationReady) return;
+    if (!isActive || !hasPendingLatestPromptAnchor(props.agentId)) return;
     const promptId = findLatestPromptId([
       segments.historyVirtualized,
       segments.historyMounted,
       segments.liveHead,
     ]);
-    if (!promptId || !takeLatestPromptAnchor(props.agentId)) return;
-    scrollToMessage(promptId);
+    if (!promptId) return;
+    const requestId = beginLatestPromptAnchor(props.agentId);
+    if (requestId === null) return;
+    const agentId = props.agentId;
+    const started = jumpToMessage(promptId, {
+      onSettled: () => settleLatestPromptAnchor(agentId, requestId),
+    });
+    // The prompt row is not laid out yet; reveal rather than hide the transcript until the cap.
+    if (!started) settleLatestPromptAnchor(agentId, requestId);
+    else latestPromptAnchorJumpStartedRef.current = true;
   }, [
     isActive,
-    isActivationReady,
+    jumpToMessage,
     latestPromptAnchorVersion,
     props.agentId,
-    scrollToMessage,
     segments.historyMounted,
     segments.historyVirtualized,
     segments.liveHead,
   ]);
+  // An anchor that ends without a jump (no prompt, an error, the cap) opens at the bottom.
+  useLayoutEffect(() => {
+    const wasPending = wasLatestPromptAnchorPendingRef.current;
+    wasLatestPromptAnchorPendingRef.current = isLatestPromptAnchorPending;
+    if (isLatestPromptAnchorPending) {
+      if (!wasPending) latestPromptAnchorJumpStartedRef.current = false;
+      return;
+    }
+    if (!wasPending || latestPromptAnchorJumpStartedRef.current || !isActiveRef.current) return;
+    setFollowOutput(true);
+    forceStickToBottom();
+  }, [forceStickToBottom, isLatestPromptAnchorPending, latestPromptAnchorVersion]);
 
   // Following output is a layout invariant: rows, footer, and bottom offset must
   // reach the browser in the same paint.
@@ -1207,6 +1239,8 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   useEffect(() => {
     const handle: StreamViewportHandle = {
       scrollToBottom: () => {
+        // A bottom request (jump to bottom, a sent message, rewind) replaces a pending anchor.
+        settleLatestPromptAnchor(props.agentId);
         setFollowOutput(true);
         cancelPendingStickToBottom();
         forceStickToBottom();
@@ -1229,6 +1263,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   }, [
     cancelPendingStickToBottom,
     forceStickToBottom,
+    props.agentId,
     scheduleStickToBottom,
     scrollToMessage,
     viewportRef,
@@ -1246,6 +1281,17 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       boxSizing: "border-box",
     };
   }, [isMobileBreakpoint]);
+  const liveAuxiliary = useMemo(() => {
+    return renderLiveAuxiliary();
+  }, [renderLiveAuxiliary]);
+  const shouldRenderEmpty =
+    !boundary.hasMountedHistory &&
+    !boundary.hasVirtualizedHistory &&
+    !boundary.hasLiveHead &&
+    !liveAuxiliary;
+  // Layout and measurement go on while hidden, so the jump settles before the first paint.
+  // An empty transcript keeps its loading treatment visible.
+  const isHiddenForLatestPromptAnchor = isLatestPromptAnchorPending && !shouldRenderEmpty;
   const scrollContainerStyle = useMemo((): CSSProperties => {
     const overlayScrollbarEnabled = scrollEnabled && !isMobileBreakpoint;
     return {
@@ -1255,8 +1301,9 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       overflowY: scrollEnabled ? "auto" : "hidden",
       overscrollBehaviorY: "contain",
       scrollbarWidth: overlayScrollbarEnabled ? "none" : undefined,
+      visibility: isHiddenForLatestPromptAnchor ? "hidden" : undefined,
     };
-  }, [isMobileBreakpoint, scrollEnabled]);
+  }, [isHiddenForLatestPromptAnchor, isMobileBreakpoint, scrollEnabled]);
   const viewportStyle = useMemo(
     (): CSSProperties => ({
       position: "relative",
@@ -1314,9 +1361,6 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     () => [...mountedHistoryRows, ...liveHeadRows],
     [liveHeadRows, mountedHistoryRows],
   );
-  const liveAuxiliary = useMemo(() => {
-    return renderLiveAuxiliary();
-  }, [renderLiveAuxiliary]);
   const historyStartSlot = useMemo(() => {
     const isLoadingOperation = isHistoryStartLoadingOperation(historyStartPaginationState);
     return (
@@ -1329,11 +1373,6 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       </div>
     );
   }, [historyStartPaginationState]);
-  const shouldRenderEmpty =
-    !boundary.hasMountedHistory &&
-    !boundary.hasVirtualizedHistory &&
-    !boundary.hasLiveHead &&
-    !liveAuxiliary;
 
   return (
     <div style={viewportStyle}>

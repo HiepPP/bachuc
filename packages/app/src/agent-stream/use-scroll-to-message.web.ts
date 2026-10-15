@@ -38,6 +38,7 @@ export function useScrollToMessage({
   onNearBottomChange,
 }: UseScrollToMessageInput) {
   const occurrenceRef = useRef<ScrollToMessageOccurrence | undefined>(undefined);
+  const nextOnSettledRef = useRef<(() => void) | undefined>(undefined);
   const removeAbortListener = useRef<(() => void) | null>(null);
   const settleController = useMemo(
     () =>
@@ -69,9 +70,14 @@ export function useScrollToMessage({
             const container = scrollContainerRef.current;
             if (container) container.scrollTop = scrollTop;
           },
+          // The controller subscribes once per jump and unsubscribes exactly when the jump
+          // ends (landed, out of frames, user intent, or cancelled), so the unsubscribe is
+          // where the jump reports that it settled.
           subscribeToUserIntent(listener) {
+            const onSettled = nextOnSettledRef.current;
+            nextOnSettledRef.current = undefined;
             const container = scrollContainerRef.current;
-            if (!container) return () => undefined;
+            if (!container) return () => onSettled?.();
             const handleKeyDown = (event: KeyboardEvent) => {
               if (SCROLL_AFFECTING_KEYS.has(event.key)) listener();
             };
@@ -82,6 +88,7 @@ export function useScrollToMessage({
               container.removeEventListener("wheel", listener);
               container.removeEventListener("touchstart", listener);
               container.removeEventListener("keydown", handleKeyDown);
+              onSettled?.();
             };
           },
         },
@@ -104,16 +111,24 @@ export function useScrollToMessage({
     }
   }, [active, settleController]);
 
-  const scrollToMessage = useCallback(
-    (messageId: string, occurrence?: ScrollToMessageOccurrence) => {
+  /**
+   * Scrolls `messageId` to the top and starts settling it. Returns false when no jump started.
+   * `onSettled` runs once when a started jump ends, however it ends.
+   */
+  const jumpToMessage = useCallback(
+    (
+      messageId: string,
+      options: { occurrence?: ScrollToMessageOccurrence; onSettled?: () => void } = {},
+    ): boolean => {
+      const { occurrence, onSettled } = options;
       occurrenceRef.current = occurrence;
       removeAbortListener.current?.();
       const cancel = () => settleController.cancel();
       occurrence?.signal.addEventListener("abort", cancel, { once: true });
       removeAbortListener.current = () => occurrence?.signal.removeEventListener("abort", cancel);
-      if (!active) return;
+      if (!active) return false;
       const container = scrollContainerRef.current;
-      if (!container) return;
+      if (!container) return false;
       cancelPendingStickToBottom();
       setFollowOutput(false);
 
@@ -126,20 +141,22 @@ export function useScrollToMessage({
           container.getBoundingClientRect().top -
           PROMPT_JUMP_TOP_INSET_PX;
         container.scrollTop += delta;
+        nextOnSettledRef.current = onSettled;
         settleController.start(messageId);
         onNearBottomChange(false);
-        return;
+        return true;
       }
 
       const rowMessageId = resolveMessageHostId?.(messageId) ?? messageId;
       const index = historyVirtualized.findIndex(
         (item) => getStreamItemMessageId(item) === rowMessageId,
       );
-      if (index >= 0) {
-        rowVirtualizer.scrollToIndex(index, { align: "start" });
-        settleController.start(messageId);
-        onNearBottomChange(false);
-      }
+      if (index < 0) return false;
+      rowVirtualizer.scrollToIndex(index, { align: "start" });
+      nextOnSettledRef.current = onSettled;
+      settleController.start(messageId);
+      onNearBottomChange(false);
+      return true;
     },
     [
       active,
@@ -154,8 +171,16 @@ export function useScrollToMessage({
     ],
   );
 
+  const scrollToMessage = useCallback(
+    (messageId: string, occurrence?: ScrollToMessageOccurrence) => {
+      jumpToMessage(messageId, { occurrence });
+    },
+    [jumpToMessage],
+  );
+
   return {
     isJumpSettling: settleController.isActive,
+    jumpToMessage,
     scrollToMessage,
   };
 }

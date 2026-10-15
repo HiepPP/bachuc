@@ -10,12 +10,14 @@ describe("agent-ready-screen bottom anchor intent", () => {
       cachedIntent: null,
       routeKey: "server-1:agent-1",
       hasAppliedAuthoritativeHistoryAtEntry: false,
+      hasPendingLatestPromptAnchorAtEntry: false,
     });
 
     const intentAfterHistoryApplies = deriveRouteBottomAnchorIntent({
       cachedIntent: intentAtEntry,
       routeKey: "server-1:agent-1",
       hasAppliedAuthoritativeHistoryAtEntry: true,
+      hasPendingLatestPromptAnchorAtEntry: false,
     });
 
     expect(intentAfterHistoryApplies).toEqual({
@@ -39,6 +41,7 @@ describe("agent-ready-screen bottom anchor intent", () => {
       cachedIntent: null,
       routeKey: "server-1:agent-2",
       hasAppliedAuthoritativeHistoryAtEntry: true,
+      hasPendingLatestPromptAnchorAtEntry: false,
     });
 
     expect(
@@ -53,11 +56,34 @@ describe("agent-ready-screen bottom anchor intent", () => {
     });
   });
 
+  it("latches no bottom request for a route entered with a pending latest-prompt anchor", () => {
+    const intentAtEntry = deriveRouteBottomAnchorIntent({
+      cachedIntent: null,
+      routeKey: "server-1:agent-4",
+      hasAppliedAuthoritativeHistoryAtEntry: false,
+      hasPendingLatestPromptAnchorAtEntry: true,
+    });
+    const intentAfterAnchorLands = deriveRouteBottomAnchorIntent({
+      cachedIntent: intentAtEntry,
+      routeKey: "server-1:agent-4",
+      hasAppliedAuthoritativeHistoryAtEntry: true,
+      hasPendingLatestPromptAnchorAtEntry: false,
+    });
+
+    expect(
+      deriveRouteBottomAnchorRequest({
+        intent: intentAfterAnchorLands,
+        effectiveAgentId: "agent-4",
+      }),
+    ).toBeNull();
+  });
+
   it("does not create a request until the effective agent exists", () => {
     const intent = deriveRouteBottomAnchorIntent({
       cachedIntent: null,
       routeKey: "server-1:agent-3",
       hasAppliedAuthoritativeHistoryAtEntry: false,
+      hasPendingLatestPromptAnchorAtEntry: false,
     });
 
     expect(

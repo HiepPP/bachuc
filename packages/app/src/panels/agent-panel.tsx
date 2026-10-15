@@ -69,7 +69,12 @@ import {
 import {
   deriveRouteBottomAnchorIntent,
   deriveRouteBottomAnchorRequest,
+  type RouteBottomAnchorIntent,
 } from "@/screens/agent/agent-ready-screen-bottom-anchor";
+import {
+  hasPendingLatestPromptAnchor,
+  settleLatestPromptAnchor,
+} from "@/agent-stream/latest-prompt-anchor";
 import { WorkspaceDraftAgentTab } from "@/composer/draft/workspace-tab";
 import { AgentTracks } from "@/panels/agent-tracks";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
@@ -747,10 +752,7 @@ function ChatAgentContent({
   const clearOnAgentBlurRef = useRef<() => void>(() => {});
   const wasPaneFocusedRef = useRef(isPaneFocused);
   const initAttemptTokenRef = useRef(0);
-  const routeBottomAnchorRequestRef = useRef<{
-    routeKey: string;
-    reason: "initial-entry" | "resume";
-  } | null>(null);
+  const routeBottomAnchorRequestRef = useRef<RouteBottomAnchorIntent | null>(null);
   const agentState = useSessionStore(
     useShallow((state) => selectChatAgentState(state, serverId, agentId)),
   );
@@ -809,6 +811,10 @@ function ChatAgentContent({
     status: visibilityCatchUpStatus,
     sync: viewedTimelineSync,
   });
+  // A failed catch-up shows its error at once instead of behind a hidden, unlanded transcript.
+  useEffect(() => {
+    if (agentId && visibilityCatchUpStatus === "error") settleLatestPromptAnchor(agentId);
+  }, [agentId, visibilityCatchUpStatus]);
   const hasActiveCreateHandoff = useCreateFlowStore((state) =>
     findActiveCreateHandoff({ pendingByDraftId: state.pendingByDraftId, serverId, agentId }),
   );
@@ -907,6 +913,9 @@ function ChatAgentContent({
     cachedIntent: routeBottomAnchorRequestRef.current,
     routeKey: routeEntryKey,
     hasAppliedAuthoritativeHistoryAtEntry: hasAppliedAuthoritativeHistory,
+    // Only the web transcript lands a latest-prompt anchor; native keeps its bottom pin.
+    hasPendingLatestPromptAnchorAtEntry:
+      isWeb && agentId !== undefined && hasPendingLatestPromptAnchor(agentId),
   });
   const routeBottomAnchorRequest = useMemo(
     () =>
