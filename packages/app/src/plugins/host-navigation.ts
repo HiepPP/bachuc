@@ -4,7 +4,11 @@ import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
 import { useMemo } from "react";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
-import { requestLatestPromptAnchor } from "@/agent-stream/latest-prompt-anchor";
+import {
+  cancelLatestPromptAnchor,
+  requestLatestPromptAnchor,
+} from "@/agent-stream/latest-prompt-anchor";
+import { prefetchAgent } from "@/timeline/agent-prefetch";
 
 import { getIsElectron } from "@/constants/platform";
 import { createWorkspaceBrowser } from "@/desktop/browser/store";
@@ -19,6 +23,8 @@ export function usePluginHostNavigation(
         browserAvailable: getIsElectron(),
         openAgent: navigateToAgent,
         requestLatestPromptAnchor,
+        cancelLatestPromptAnchor,
+        prefetchAgent,
         openWorkspace: navigateToWorkspace,
         createBrowser: createWorkspaceBrowser,
         resolveWorkspace: ({ serverId: targetServerId, workspaceId }) =>

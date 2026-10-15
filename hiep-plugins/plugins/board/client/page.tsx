@@ -40,6 +40,7 @@ import { lastSettings } from "./warm";
 import { useClock } from "./clock";
 import { closeRemovedRuntimes, removeFinishedRun } from "./remove";
 import { reducedMotion } from "./motion";
+import { createPrefetchIntent } from "./prefetch";
 import { focusRing, keyboardFocus } from "./focus";
 import { repoDivider, repoLabel, repoMark, repoSurface } from "./repo-color";
 import { TaskChip } from "./task-chip";
@@ -289,6 +290,7 @@ function RunCard({
   theme,
   onRemove,
   onOpen,
+  onPrefetch,
   onToggleDiffs,
   onOpenProject,
   onStar,
@@ -322,6 +324,8 @@ function RunCard({
   theme: PluginSurfaceProps["theme"];
   onRemove?: (id: string) => Promise<void>;
   onOpen?: (agentId: string) => void;
+  /** Warms the thread on hover intent or press-in, so the open paints at once. */
+  onPrefetch?: (agentId: string) => void;
   /** Turns edit diffs on or off for the thread without opening it. */
   onToggleDiffs?: (agentId: string, off: boolean) => Promise<void>;
   /** Starts a conversation in the card's project from its repo label. */
@@ -342,6 +346,9 @@ function RunCard({
   const [starError, setStarError] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState(false);
+  const [prefetchIntent] = useState(createPrefetchIntent);
+  useEffect(() => () => prefetchIntent.cancel(), [prefetchIntent]);
+  const prefetch = () => onPrefetch?.(run.agentId);
   const s = (value: number) => value * scale;
   const colors = theme.colors;
   const running = run.status === "running";
@@ -587,9 +594,16 @@ function RunCard({
         accessibilityHint={`${run.project}, ${modelLabel(run)}, ${label}, ${timing}${duration ? `, duration ${duration}` : ""}`}
         disabled={!onOpen}
         onPress={() => onOpen?.(run.agentId)}
+        onPressIn={() => prefetchIntent.pressIn(prefetch)}
         {...focusProps("card")}
-        onHoverIn={() => setHovered(true)}
-        onHoverOut={() => setHovered(false)}
+        onHoverIn={() => {
+          setHovered(true);
+          prefetchIntent.hoverIn(prefetch);
+        }}
+        onHoverOut={() => {
+          setHovered(false);
+          prefetchIntent.hoverOut();
+        }}
         style={({ pressed }) => ({
           position: "absolute",
           inset: 0,
@@ -1102,6 +1116,7 @@ const RunColumn = memo(function RunColumn({
   theme,
   onRemove,
   onOpen,
+  onPrefetch,
   onToggleDiffs,
   onOpenProject,
   onOpenTask,
@@ -1121,6 +1136,7 @@ const RunColumn = memo(function RunColumn({
   theme: PluginSurfaceProps["theme"];
   onRemove?: (id: string) => Promise<void>;
   onOpen?: (agentId: string) => void;
+  onPrefetch?: (agentId: string) => void;
   onToggleDiffs?: (agentId: string, off: boolean) => Promise<void>;
   onOpenProject?: (run: BoardRun) => void;
   onStar: (id: string, starred: boolean) => Promise<void>;
@@ -1188,6 +1204,7 @@ const RunColumn = memo(function RunColumn({
             theme={theme}
             onRemove={onRemove}
             onOpen={onOpen}
+            onPrefetch={onPrefetch}
             onToggleDiffs={onToggleDiffs}
             onOpenProject={onOpenProject}
             onOpenTask={onOpenTask}
@@ -1429,6 +1446,10 @@ function HostBoard({
     navigation?.openAgent({ agentId, serverId: host.id, anchor: "latest-prompt" });
   });
   const openAgent = navigation ? openAgentStable : undefined;
+  const prefetchAgentStable = useStableCallback((agentId: string) => {
+    navigation?.prefetchAgent?.({ agentId, serverId: host.id, anchor: "latest-prompt" });
+  });
+  const prefetchAgent = navigation?.prefetchAgent ? prefetchAgentStable : undefined;
   // A TASK chip opens the Watchtower page on the thread's own workspace, at that TASK.
   const openWatchtower = client.openWatchtower;
   const openTaskStable = useStableCallback((run: BoardRun) => {
@@ -1636,6 +1657,7 @@ function HostBoard({
               emptyMessage="No conversations are running."
               theme={theme}
               onOpen={openAgent}
+              onPrefetch={prefetchAgent}
               onToggleDiffs={toggleDiffs}
               onOpenProject={onOpenProject}
               onOpenTask={onOpenTask}
@@ -1653,6 +1675,7 @@ function HostBoard({
               emptyMessage="No finished conversations observed yet."
               theme={theme}
               onOpen={openAgent}
+              onPrefetch={prefetchAgent}
               onToggleDiffs={toggleDiffs}
               onOpenProject={onOpenProject}
               onOpenTask={onOpenTask}

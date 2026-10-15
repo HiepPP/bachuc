@@ -3,6 +3,7 @@
  */
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { hasPendingLatestPromptAnchor } from "@/agent-stream/latest-prompt-anchor";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { usePluginHostNavigation } from "./host-navigation";
@@ -55,5 +56,14 @@ describe("usePluginHostNavigation", () => {
       serverId: "host-2",
       workspaceId: "workspace-2",
     });
+  });
+
+  it("ends a pending latest-prompt anchor when the next open goes to the bottom", () => {
+    const { result } = renderHook(() => usePluginHostNavigation("host-1"));
+
+    act(() => result.current.openAgent({ agentId: "agent-1", anchor: "latest-prompt" }));
+    expect(hasPendingLatestPromptAnchor("agent-1")).toBe(true);
+    act(() => result.current.openAgent({ agentId: "agent-1" }));
+    expect(hasPendingLatestPromptAnchor("agent-1")).toBe(false);
   });
 });

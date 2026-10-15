@@ -6,6 +6,7 @@ describe("plugin host navigation", () => {
     const destinations: unknown[] = [];
     const browsers: string[] = [];
     const anchors: string[] = [];
+    const prefetches: unknown[] = [];
     const workspaces = new Set(["selected:one", "remote:two"]);
     const navigation = createPluginHostNavigation("selected", {
       browserAvailable: electron,
@@ -13,14 +14,28 @@ describe("plugin host navigation", () => {
         workspaces.has(`${serverId}:${workspaceId}`) ? workspaceId : null,
       openAgent: (input) => destinations.push(input),
       requestLatestPromptAnchor: (agentId) => anchors.push(agentId),
+      cancelLatestPromptAnchor: () => anchors.push("cancel"),
+      prefetchAgent: (input) => prefetches.push(input),
       openWorkspace: (input) => destinations.push(input),
       createBrowser: ({ initialUrl }) => {
         browsers.push(initialUrl);
         return { browserId: `browser-${browsers.length}` };
       },
     });
-    return { navigation, destinations, browsers, workspaces, anchors };
+    return { navigation, destinations, browsers, workspaces, anchors, prefetches };
   }
+
+  it("prefetches agents on the selected host unless another host is named", () => {
+    const { navigation, prefetches, destinations, anchors } = setup();
+    navigation.prefetchAgent!({ agentId: "a", anchor: "latest-prompt" });
+    navigation.prefetchAgent!({ agentId: "b", serverId: "remote" });
+    expect(prefetches).toEqual([
+      { serverId: "selected", agentId: "a", anchor: "latest-prompt" },
+      { serverId: "remote", agentId: "b", anchor: undefined },
+    ]);
+    expect(destinations).toEqual([]);
+    expect(anchors).toEqual([]);
+  });
 
   it("creates and focuses a local browser in the selected or explicit host workspace", () => {
     const { navigation, destinations, browsers } = setup();
@@ -45,12 +60,12 @@ describe("plugin host navigation", () => {
     ]);
   });
 
-  it("requests the latest prompt anchor only when an agent is opened with it", () => {
+  it("requests the latest prompt anchor with it and cancels a pending one for a bottom open", () => {
     const { navigation, destinations, anchors } = setup();
     navigation.openAgent({ agentId: "a" });
     navigation.openAgent({ agentId: "b", anchor: "bottom" });
     navigation.openAgent({ agentId: "c", serverId: "remote", anchor: "latest-prompt" });
-    expect(anchors).toEqual(["c"]);
+    expect(anchors).toEqual(["cancel", "cancel", "c"]);
     expect(destinations).toEqual([
       { serverId: "selected", agentId: "a" },
       { serverId: "selected", agentId: "b" },

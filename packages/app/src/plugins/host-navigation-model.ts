@@ -6,6 +6,12 @@ interface HostNavigationOwner {
   browserAvailable: boolean;
   openAgent(input: { serverId: string; agentId: string }): void;
   requestLatestPromptAnchor(agentId: string): void;
+  cancelLatestPromptAnchor(): void;
+  prefetchAgent(input: {
+    serverId: string;
+    agentId: string;
+    anchor?: "bottom" | "latest-prompt";
+  }): void;
   openWorkspace(input: NavigateToWorkspaceInput): void;
   resolveWorkspace(input: { serverId: string; workspaceId: string }): string | null;
   createBrowser(input: { initialUrl: string }): { browserId: string };
@@ -18,8 +24,11 @@ export function createPluginHostNavigation(
   return {
     openAgent: ({ agentId, serverId: targetServerId, anchor }) => {
       if (anchor === "latest-prompt") owner.requestLatestPromptAnchor(agentId);
+      else owner.cancelLatestPromptAnchor();
       owner.openAgent({ serverId: targetServerId ?? serverId, agentId });
     },
+    prefetchAgent: ({ agentId, serverId: targetServerId, anchor }) =>
+      owner.prefetchAgent({ serverId: targetServerId ?? serverId, agentId, anchor }),
     openWorkspace: ({ workspaceId, serverId: targetServerId }) =>
       owner.openWorkspace({ serverId: targetServerId ?? serverId, workspaceId }),
     openBrowser: owner.browserAvailable
