@@ -229,3 +229,67 @@ it("includes transitive tool updates in a contiguous projected tail", () => {
   expect(tail.rows.map((row) => row.seqStart)).toEqual([1, 2, 3, 5]);
   expect(tail).toMatchObject({ startSeq: 1, endSeq: 6, hasOlder: false });
 });
+
+describe("latest prompt tail", () => {
+  function storeWithPromptThenErrors(input: { errorsAfterPrompt: number }) {
+    const store = new InMemoryAgentTimelineStore();
+    store.initialize("a", { epoch: "epoch-1" });
+    store.append("a", { type: "error", message: "before" });
+    store.append("a", { type: "user_message", text: "Prompt", messageId: "prompt" });
+    for (let index = 0; index < input.errorsAfterPrompt; index++) {
+      store.append("a", { type: "error", message: `after-${index}` });
+    }
+    return store;
+  }
+
+  it("widens the tail to the latest user message", () => {
+    const store = storeWithPromptThenErrors({ errorsAfterPrompt: 5 });
+
+    const page = store.fetch("a", { direction: "tail", limit: 2, includeLatestPrompt: true });
+
+    expect(page.rows.map((row) => row.item.type)).toEqual([
+      "user_message",
+      "error",
+      "error",
+      "error",
+      "error",
+      "error",
+    ]);
+    expect(page).toMatchObject({ startSeq: 2, endSeq: 7, hasOlder: true, hasNewer: false });
+  });
+
+  it("returns the normal tail when the prompt is more than 200 items back", () => {
+    const store = storeWithPromptThenErrors({ errorsAfterPrompt: 200 });
+
+    const page = store.fetch("a", { direction: "tail", limit: 3, includeLatestPrompt: true });
+
+    expect(page.rows.map((row) => row.seq)).toEqual([200, 201, 202]);
+    expect(page.hasOlder).toBe(true);
+  });
+
+  it("widens up to exactly 200 items", () => {
+    const store = storeWithPromptThenErrors({ errorsAfterPrompt: 199 });
+
+    const page = store.fetch("a", { direction: "tail", limit: 3, includeLatestPrompt: true });
+
+    expect(page.rows).toHaveLength(200);
+    expect(page.rows[0]?.item).toEqual({
+      type: "user_message",
+      text: "Prompt",
+      messageId: "prompt",
+    });
+  });
+
+  it("returns the normal tail when no user message exists", () => {
+    const store = new InMemoryAgentTimelineStore();
+    store.initialize("a", { epoch: "epoch-1" });
+    for (let index = 0; index < 5; index++) {
+      store.append("a", { type: "error", message: `error-${index}` });
+    }
+
+    const page = store.fetch("a", { direction: "tail", limit: 2, includeLatestPrompt: true });
+
+    expect(page.rows.map((row) => row.seq)).toEqual([4, 5]);
+    expect(page.hasOlder).toBe(true);
+  });
+});

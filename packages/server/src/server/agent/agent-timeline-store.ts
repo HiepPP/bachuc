@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   TimelineProjection,
+  projectTimelineRows,
   selectProjectedTimelinePage,
   type ProjectedTimelineRow,
 } from "./timeline-projection.js";
@@ -29,6 +30,19 @@ interface AgentTimelineState {
   turnMetrics: Map<string, TurnMetrics>;
 }
 const DEFAULT_TIMELINE_FETCH_LIMIT = 200;
+const LATEST_PROMPT_TAIL_CAP = 200;
+
+/** Tail limit that reaches the latest user message, or the base limit when it is out of reach. */
+function latestPromptTailLimit(rows: readonly AgentTimelineRow[], baseLimit: number): number {
+  if (baseLimit === 0) return 0;
+  const projected = projectTimelineRows({ rows, mode: "projected" });
+  const promptIndex = projected.findLastIndex((entry) => entry.item.type === "user_message");
+  if (promptIndex === -1) return baseLimit;
+  const promptLimit = projected.length - promptIndex;
+  if (promptLimit > LATEST_PROMPT_TAIL_CAP) return baseLimit;
+  return Math.max(baseLimit, promptLimit);
+}
+
 function cloneRow<T extends AgentTimelineRow>(row: T): T {
   return { ...row };
 }
@@ -111,12 +125,14 @@ export class InMemoryAgentTimelineStore {
       rows.length > 0 &&
       cursor.seq < state.minSeq - 1;
     const reset = staleCursor || gap;
+    const baseLimit = options?.limit ?? DEFAULT_TIMELINE_FETCH_LIMIT;
+    const widensToPrompt = options?.includeLatestPrompt === true && direction === "tail";
     const page = selectProjectedTimelinePage({
       rows,
       bounds: window,
       direction: reset ? "tail" : direction,
       cursorSeq: cursor?.seq,
-      limit: options?.limit ?? DEFAULT_TIMELINE_FETCH_LIMIT,
+      limit: widensToPrompt ? latestPromptTailLimit(rows, baseLimit) : baseLimit,
     });
     return {
       epoch: state.epoch,

@@ -106,4 +106,27 @@ describe("ProviderSubagentStore", () => {
     expect(page.rows.at(-1)?.seq).toBe(101);
     expect(page.hasOlder).toBe(false);
   });
+
+  test("restores persisted descriptors with an empty child timeline", () => {
+    const subagents = new ProviderSubagentStore();
+    const descriptor = {
+      id: "child-1",
+      parentAgentId: "parent-a",
+      parentSubagentId: null,
+      provider: "claude",
+      title: "Explore",
+      description: null,
+      status: "completed" as const,
+      createdAt: "2026-07-12T10:00:00.000Z",
+      updatedAt: "2026-07-12T10:00:02.000Z",
+      toolCallId: "tool-1",
+      cwd: "/workspace/child",
+      subtitle: null,
+    };
+
+    subagents.restore("parent-a", [descriptor]);
+
+    expect(subagents.list("parent-a")).toEqual([descriptor]);
+    expect(subagents.fetchTimeline("parent-a", "child-1").rows).toEqual([]);
+  });
 });

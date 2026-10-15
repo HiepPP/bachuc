@@ -14,7 +14,6 @@ import {
   type ManagedAgent,
 } from "./agent-manager.js";
 import { AgentStorage } from "./agent-storage.js";
-import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
 import { toAgentPayload } from "./agent-projections.js";
 import { projectTimelineRows } from "./timeline-projection.js";
 import { getOpenAgentTabLabel, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
@@ -24,11 +23,12 @@ import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent-loading.
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import type { StoredAgentRecord } from "./agent-storage.js";
 import type {
-  AgentTimelineFetchOptions,
-  AgentTimelineFetchResult,
   AgentTimelineRow,
-  AgentTimelineStore,
+  DurableTimelineMeta,
+  DurableTimelineSnapshot,
+  DurableTimelineStore,
 } from "./agent-timeline-store-types.js";
+import type { ProviderSubagentDescriptor } from "./provider-subagents/store.js";
 import type {
   AgentCapabilityFlags,
   AgentClient,
@@ -118,71 +118,75 @@ async function fetchEmptyCatalog(): Promise<ProviderCatalog> {
   return { models: [], modes: [] };
 }
 
-class RecordingTimelineStore implements AgentTimelineStore {
+interface RecordedTimeline {
+  meta: DurableTimelineMeta;
+  rows: Map<number, AgentTimelineRow>;
+  providerSubagents: ProviderSubagentDescriptor[];
+}
+
+class RecordingTimelineStore implements DurableTimelineStore {
   readonly writes: AgentTimelineRow[][] = [];
-  private readonly memory = new InMemoryAgentTimelineStore();
+  private readonly timelines = new Map<string, RecordedTimeline>();
 
-  private ensure(agentId: string): void {
-    if (!this.memory.has(agentId)) this.memory.initialize(agentId);
+  rows(agentId: string): AgentTimelineRow[] {
+    const rows = this.timelines.get(agentId)?.rows.values() ?? [];
+    return [...rows].sort((left, right) => left.seq - right.seq);
   }
 
-  async appendCommitted(
-    agentId: string,
-    item: AgentTimelineItem,
-    options?: { timestamp?: string; turnId?: string },
-  ): Promise<AgentTimelineRow> {
-    this.ensure(agentId);
-    return this.memory.append(agentId, item, options);
+  getMeta(agentId: string): DurableTimelineMeta | null {
+    const timeline = this.timelines.get(agentId);
+    return timeline ? { ...timeline.meta } : null;
   }
 
-  async fetchCommitted(
-    agentId: string,
-    options?: AgentTimelineFetchOptions,
-  ): Promise<AgentTimelineFetchResult> {
-    this.ensure(agentId);
-    return this.memory.fetch(agentId, options);
+  async load(agentId: string): Promise<DurableTimelineSnapshot | null> {
+    const timeline = this.timelines.get(agentId);
+    if (!timeline) return null;
+    return {
+      ...timeline.meta,
+      rows: this.rows(agentId),
+      providerSubagents: [...timeline.providerSubagents],
+    };
   }
 
-  async getLatestCommittedSeq(agentId: string): Promise<number> {
-    return this.memory.has(agentId) ? (this.memory.getRows(agentId).at(-1)?.seq ?? 0) : 0;
+  reset(agentId: string, epoch: string): void {
+    this.timelines.set(agentId, {
+      meta: { epoch, nextSeq: 1, complete: false },
+      rows: new Map(),
+      providerSubagents: [],
+    });
   }
 
-  async getCommittedRows(agentId: string): Promise<AgentTimelineRow[]> {
-    return this.memory.has(agentId) ? this.memory.getRows(agentId) : [];
-  }
-
-  async getLastItem(agentId: string): Promise<AgentTimelineItem | null> {
-    return this.memory.has(agentId) ? this.memory.getLastItem(agentId) : null;
-  }
-
-  async getLastAssistantMessage(agentId: string): Promise<string | null> {
-    return this.memory.has(agentId) ? this.memory.getLastAssistantMessage(agentId) : null;
-  }
-
-  async deleteAgent(agentId: string): Promise<void> {
-    this.memory.delete(agentId);
-  }
-
-  async bulkInsert(agentId: string, rows: readonly AgentTimelineRow[]): Promise<void> {
+  append(agentId: string, rows: readonly AgentTimelineRow[]): void {
     this.writes.push(rows.map((row) => ({ ...row })));
-    this.ensure(agentId);
+    const timeline = this.timelines.get(agentId);
+    if (!timeline) return;
     for (const row of rows) {
-      this.memory.append(agentId, row.item, {
-        timestamp: row.timestamp,
-        turnId: row.turnId,
-      });
+      timeline.rows.set(row.seq, { ...row });
+      timeline.meta.nextSeq = Math.max(timeline.meta.nextSeq, row.seq + 1);
     }
   }
 
-  async updateCommittedRow(agentId: string, row: AgentTimelineRow): Promise<void> {
-    this.ensure(agentId);
-    const rows: AgentTimelineRow[] = this.memory.getRows(agentId);
-    const index = rows.findIndex((candidate) => candidate.seq === row.seq);
-    if (index >= 0) {
-      rows[index] = row;
-      this.memory.initialize(agentId, { rows });
-    }
+  update(agentId: string, row: AgentTimelineRow): void {
+    this.append(agentId, [row]);
   }
+
+  setProviderSubagents(agentId: string, descriptors: readonly ProviderSubagentDescriptor[]): void {
+    const timeline = this.timelines.get(agentId);
+    if (timeline) timeline.providerSubagents = [...descriptors];
+  }
+
+  setComplete(agentId: string, complete: boolean): void {
+    const timeline = this.timelines.get(agentId);
+    if (timeline) timeline.meta.complete = complete;
+  }
+
+  deleteAgent(agentId: string): void {
+    this.timelines.delete(agentId);
+  }
+
+  flush(): void {}
+
+  close(): void {}
 }
 
 function createFeature(args: { id: string; label: string; value: boolean }): AgentFeature {
@@ -766,7 +770,7 @@ test("refreshing an agent replaces the injected timeline store instead of append
   }
 });
 
-test("a failed history replay leaves the committed timeline intact", async () => {
+test("a failed history replay commits no partial rows", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-timeline-replay-fail-"));
   const store = new RecordingTimelineStore();
   let failReplay = false;
@@ -813,7 +817,6 @@ test("a failed history replay leaves the committed timeline intact", async () =>
     await manager.reloadAgentSession(agent.id, undefined, { rehydrateFromDisk: true });
     await manager.hydrateTimelineFromProvider(agent.id, { broadcast: true });
     await manager.flush();
-    const committed = await manager.getTimelineRows(agent.id);
 
     failReplay = true;
     await manager.reloadAgentSession(agent.id, undefined, { rehydrateFromDisk: true });
@@ -822,13 +825,19 @@ test("a failed history replay leaves the committed timeline intact", async () =>
     ).rejects.toThrow("history stream closed");
     await manager.flush();
 
-    expect(await manager.getTimelineRows(agent.id)).toEqual(committed);
+    // The replay is collected before either store is touched, so the half read stays out.
+    expect(await manager.getTimelineRows(agent.id)).toEqual([]);
+    expect(store.rows(agent.id)).toEqual([]);
 
     // A retry once the provider recovers replaces that history rather than stacking on it.
     failReplay = false;
     await manager.hydrateTimelineFromProvider(agent.id, { broadcast: true });
     await manager.flush();
     expect((await manager.getTimelineRows(agent.id)).map((row) => row.item)).toEqual([
+      { type: "user_message", text: "continue" },
+      { type: "assistant_message", text: "done" },
+    ]);
+    expect(store.rows(agent.id).map((row) => row.item)).toEqual([
       { type: "user_message", text: "continue" },
       { type: "assistant_message", text: "done" },
     ]);

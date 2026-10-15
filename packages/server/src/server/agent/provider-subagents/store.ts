@@ -131,6 +131,17 @@ export class ProviderSubagentStore {
     return { type: "upsert", subagent };
   }
 
+  /** Restores persisted descriptors. Child transcripts are not persisted, so they start empty. */
+  restore(parentAgentId: string, descriptors: readonly ProviderSubagentDescriptor[]): void {
+    for (const descriptor of descriptors) {
+      const key = storeKey(parentAgentId, descriptor.id);
+      this.descriptors.set(key, { ...descriptor, parentAgentId });
+      if (!this.timelines.has(key)) {
+        this.timelines.initialize(key);
+      }
+    }
+  }
+
   list(parentAgentId: string): ProviderSubagentDescriptor[] {
     return [...this.descriptors.values()]
       .filter((subagent) => subagent.parentAgentId === parentAgentId)

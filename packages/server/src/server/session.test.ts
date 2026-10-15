@@ -26,8 +26,11 @@ import { Session } from "./session.js";
 import { OWNER_PERMISSIONS, type DaemonPermission } from "./authorization/index.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import { StructuredAgentFallbackError } from "./agent/agent-response-loop.js";
-import type { StoredAgentRecord } from "./agent/agent-storage.js";
-import type { AgentManagerEvent } from "./agent/agent-manager.js";
+import { AgentStorage, type StoredAgentRecord } from "./agent/agent-storage.js";
+import { AgentManager, type AgentManagerEvent } from "./agent/agent-manager.js";
+import { startAgentRun } from "./agent/agent-prompt.js";
+import { openTimelineCacheStore, type SqliteTimelineStore } from "./agent/sqlite-timeline-store.js";
+import { createTestAgentClients } from "./test-utils/fake-agent-client.js";
 import type { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import { WorkspaceLabelError, type WorkspaceLabelService } from "./workspace-labels/index.js";
 import { createPersistedProjectRecord } from "./workspace-registry.js";
@@ -5932,4 +5935,170 @@ test("provider snapshots preserve versionless visibility while capabilities upda
     "plugin-provider",
   ]);
   expect(references.compactSnapshot!.entries[0]!.modes![0]!.icon).toBe("ShieldCheck");
+});
+
+describe("thread reads of a closed agent", () => {
+  interface Daemon {
+    manager: AgentManager;
+    storage: AgentStorage;
+    store: SqliteTimelineStore;
+  }
+
+  let home: string;
+  const daemons: Daemon[] = [];
+  const logger = pino({ level: "silent" });
+
+  afterEach(async () => {
+    for (const daemon of daemons.splice(0)) {
+      for (const agent of daemon.manager.listAgents()) {
+        await daemon.manager.closeAgent(agent.id).catch(() => undefined);
+      }
+      daemon.store.close();
+    }
+    if (home) rmSync(home, { recursive: true, force: true });
+  });
+
+  async function startDaemon(): Promise<Daemon> {
+    const store = await openTimelineCacheStore(home, logger);
+    if (!store) throw new Error("node:sqlite is unavailable");
+    const storage = new AgentStorage(join(home, "agents"), logger);
+    const manager = new AgentManager({
+      clients: createTestAgentClients(),
+      registry: storage,
+      durableTimelineStore: store,
+      logger,
+    });
+    const daemon = { manager, storage, store };
+    daemons.push(daemon);
+    return daemon;
+  }
+
+  /** Closes the agent and restarts the daemon, so the next read finds only the cache. */
+  async function closedAgentAfterRestart(): Promise<{ daemon: Daemon; agentId: string }> {
+    home = mkdtempSync(join(tmpdir(), "session-thread-read-"));
+    const first = await startDaemon();
+    const agent = await first.manager.createAgent({ provider: "claude", cwd: home }, undefined, {
+      workspaceId: undefined,
+    });
+    await startAgentRun(first.manager, agent.id, "hello there", logger, {
+      runOptions: { clientMessageId: "prompt-1" },
+    });
+    await first.manager.waitForAgentEvent(agent.id);
+    await first.manager.closeAgent(agent.id);
+    await first.manager.flush();
+    await first.storage.flush();
+    daemons.splice(daemons.indexOf(first), 1);
+    first.store.close();
+    return { daemon: await startDaemon(), agentId: agent.id };
+  }
+
+  function sessionFor(daemon: Daemon, messages: SessionOutboundMessage[]): Session {
+    const manager = daemon.manager;
+    return createSessionForTest({
+      messages,
+      agentStorage: {
+        get: (id: string) => daemon.storage.get(id),
+      },
+      agentManager: {
+        getAgent: manager.getAgent.bind(manager),
+        getRegisteredProviderIds: manager.getRegisteredProviderIds.bind(manager),
+        createAgent: manager.createAgent.bind(manager),
+        resumeAgentFromPersistence: manager.resumeAgentFromPersistence.bind(manager),
+        hydrateTimelineFromProvider: manager.hydrateTimelineFromProvider.bind(manager),
+        waitForAgentClose: manager.waitForAgentClose.bind(manager),
+        loadTimelineForRead: manager.loadTimelineForRead.bind(manager),
+        backfillTimelineFromProvider: manager.backfillTimelineFromProvider.bind(manager),
+        fetchTimelineForRead: manager.fetchTimelineForRead.bind(manager),
+        getTurnMetrics: manager.getTurnMetrics.bind(manager),
+        clearAgentAttention: manager.clearAgentAttention.bind(manager),
+        listProviderSubagentsForRead: manager.listProviderSubagentsForRead.bind(manager),
+      },
+    });
+  }
+
+  function timelineResponse(messages: SessionOutboundMessage[], requestId: string) {
+    const response = messages.find(
+      (
+        message,
+      ): message is Extract<SessionOutboundMessage, { type: "fetch_agent_timeline_response" }> =>
+        message.type === "fetch_agent_timeline_response" && message.payload.requestId === requestId,
+    );
+    if (!response) throw new Error(`No timeline response for ${requestId}`);
+    return response.payload;
+  }
+
+  test("fetches the timeline with a stored-agent payload and no resume", async () => {
+    const { daemon, agentId } = await closedAgentAfterRestart();
+    const resume = vi.spyOn(daemon.manager, "resumeAgentFromPersistence");
+    const messages: SessionOutboundMessage[] = [];
+    const session = sessionFor(daemon, messages);
+
+    await session.handleMessage({
+      type: "fetch_agent_timeline_request",
+      requestId: "tail",
+      agentId,
+      direction: "tail",
+      limit: 1,
+    });
+    await session.handleMessage({
+      type: "fetch_agent_timeline_request",
+      requestId: "widened",
+      agentId,
+      direction: "tail",
+      limit: 1,
+      includeLatestPrompt: true,
+    });
+
+    const tail = timelineResponse(messages, "tail");
+    expect(tail.error).toBeNull();
+    expect(tail.agent?.id).toBe(agentId);
+    expect(tail.agent?.status).toBe("closed");
+    expect(tail.entries).toHaveLength(1);
+    const widened = timelineResponse(messages, "widened");
+    expect(widened.error).toBeNull();
+    expect(widened.entries.length).toBeGreaterThan(1);
+    expect(widened.entries[0]?.item.type).toBe("user_message");
+    expect(widened.epoch).toBe(tail.epoch);
+    expect(resume).not.toHaveBeenCalled();
+    expect(daemon.manager.getAgent(agentId)).toBeNull();
+  });
+
+  test("clears attention and lists provider subagents without a resume", async () => {
+    const { daemon, agentId } = await closedAgentAfterRestart();
+    const record = await daemon.storage.get(agentId);
+    if (!record) throw new Error("expected a stored agent");
+    await daemon.storage.upsert({
+      ...record,
+      requiresAttention: true,
+      attentionReason: "finished",
+      attentionTimestamp: record.updatedAt,
+    });
+    const resume = vi.spyOn(daemon.manager, "resumeAgentFromPersistence");
+    const messages: SessionOutboundMessage[] = [];
+    const session = sessionFor(daemon, messages);
+
+    await session.handleMessage({
+      type: "clear_agent_attention",
+      agentId,
+      requestId: "clear",
+    });
+    await session.handleMessage({
+      type: "agent.provider_subagents.list.request",
+      requestId: "subagents",
+      parentAgentId: agentId,
+    });
+
+    const cleared = findByType(messages, "clear_agent_attention_response");
+    expect(cleared?.payload.agents.map((agent) => agent.id)).toEqual([agentId]);
+    expect(cleared?.payload.agents[0]?.requiresAttention).toBe(false);
+    expect((await daemon.storage.get(agentId))?.requiresAttention).toBe(false);
+    const subagents = findByType(messages, "agent.provider_subagents.list.response");
+    expect(subagents?.payload).toMatchObject({
+      parentAgentId: agentId,
+      subagents: [],
+      error: null,
+    });
+    expect(resume).not.toHaveBeenCalled();
+    expect(daemon.manager.getAgent(agentId)).toBeNull();
+  });
 });

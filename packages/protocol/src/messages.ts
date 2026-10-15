@@ -1897,6 +1897,9 @@ export const FetchAgentTimelineRequestMessageSchema = z.object({
   projection: z.enum(["projected", "canonical"]).optional(),
   // Allow the client to merge this bounded page outside its contiguous loaded range.
   mergeWindow: z.boolean().optional(),
+  // Only with direction "tail": widen the tail page back to the latest user_message.
+  // COMPAT(timelineLatestPromptTail): added in v1.0.0-hiep, remove the gate after 2027-04-15.
+  includeLatestPrompt: z.boolean().optional(),
 });
 
 export const AgentTimelineSearchRequestMessageSchema = z.object({
@@ -3760,6 +3763,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentDetach: z.boolean().optional(),
         // COMPAT(agentRuntimeClose): added in v0.10.2, remove gate after 2027-10-01.
         agentRuntimeClose: z.boolean().optional(),
+        // COMPAT(timelineLatestPromptTail): added in v1.0.0-hiep, remove the gate after 2027-04-15.
+        timelineLatestPromptTail: z.boolean().optional(),
         // COMPAT(agentThinkingUpdate): added in v0.2.4, remove gate after 2027-01-28.
         agentThinkingUpdate: z.boolean().optional(),
         // COMPAT(daemonDiagnostics): added in v0.1.100, remove gate after 2026-12-25 once daemon floor >= v0.1.100.

@@ -1,11 +1,12 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { AgentManager } from "./agent-manager.js";
-import { ensureAgentLoaded } from "./agent-loading.js";
+import { ensureAgentLoaded, ensureAgentTimelineReadable } from "./agent-loading.js";
+import { openTimelineCacheStore, type SqliteTimelineStore } from "./sqlite-timeline-store.js";
 import { startAgentRun } from "./agent-prompt.js";
 import { AgentStorage } from "./agent-storage.js";
 import type {
@@ -198,4 +199,134 @@ test("loads an archived agent's history after its working directory is removed",
     await storage.flush().catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
+});
+
+describe("ensureAgentTimelineReadable", () => {
+  interface Daemon {
+    manager: AgentManager;
+    storage: AgentStorage;
+    store: SqliteTimelineStore;
+  }
+
+  let root: string;
+  const daemons: Daemon[] = [];
+
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), "agent-loading-readable-"));
+  });
+
+  afterEach(async () => {
+    for (const daemon of daemons.splice(0)) {
+      for (const agent of daemon.manager.listAgents()) {
+        await daemon.manager.closeAgent(agent.id).catch(() => undefined);
+      }
+      daemon.store.close();
+    }
+    await rm(root, { recursive: true, force: true });
+  });
+
+  /** One daemon process on the shared home: its own storage, cache handle, and manager. */
+  async function startDaemon(): Promise<Daemon> {
+    const logger = createTestLogger();
+    const store = await openTimelineCacheStore(root, logger);
+    if (!store) throw new Error("node:sqlite is unavailable");
+    const storage = new AgentStorage(path.join(root, "agents"), logger);
+    const manager = new AgentManager({
+      clients: createTestAgentClients(),
+      registry: storage,
+      durableTimelineStore: store,
+      logger,
+    });
+    const daemon = { manager, storage, store };
+    daemons.push(daemon);
+    return daemon;
+  }
+
+  /** Ends a daemon without closing its agents, as a crash would; their cache stays incomplete. */
+  async function crashDaemon(daemon: Daemon): Promise<void> {
+    await daemon.manager.flush();
+    await daemon.storage.flush();
+    daemons.splice(daemons.indexOf(daemon), 1);
+    daemon.store.close();
+  }
+
+  async function createAgentWithTurn(daemon: Daemon): Promise<string> {
+    const agent = await daemon.manager.createAgent({ provider: "claude", cwd: root }, undefined, {
+      workspaceId: undefined,
+    });
+    await daemon.manager.runAgent(agent.id, "hello there");
+    return agent.id;
+  }
+
+  function deps(daemon: Daemon) {
+    return {
+      agentManager: daemon.manager,
+      agentStorage: daemon.storage,
+      logger: createTestLogger(),
+    };
+  }
+
+  test("reads a closed agent's cached timeline after a restart without a resume", async () => {
+    const first = await startDaemon();
+    const agentId = await createAgentWithTurn(first);
+    const before = first.manager.fetchTimeline(agentId, { direction: "tail", limit: 0 });
+    await first.manager.closeAgent(agentId);
+    await crashDaemon(first);
+
+    const second = await startDaemon();
+    const resume = vi.spyOn(second.manager, "resumeAgentFromPersistence");
+    const backfill = vi.spyOn(second.manager, "backfillTimelineFromProvider");
+
+    const readable = await ensureAgentTimelineReadable(agentId, deps(second));
+
+    expect(readable.kind).toBe("stored");
+    expect(resume).not.toHaveBeenCalled();
+    expect(backfill).not.toHaveBeenCalled();
+    expect(second.manager.getAgent(agentId)).toBeNull();
+    const after = second.manager.fetchTimelineForRead(agentId, { direction: "tail", limit: 0 });
+    expect(after.epoch).toBe(before.epoch);
+    expect(after.rows).toEqual(before.rows);
+  });
+
+  test("runs one backfill for concurrent reads of an agent with no cached timeline", async () => {
+    const first = await startDaemon();
+    const agentId = await createAgentWithTurn(first);
+    const before = first.manager.fetchTimeline(agentId, { direction: "tail", limit: 0 });
+    await crashDaemon(first);
+
+    const second = await startDaemon();
+    const resume = vi.spyOn(second.manager, "resumeAgentFromPersistence");
+    const backfill = vi.spyOn(second.manager, "backfillTimelineFromProvider");
+
+    const results = await Promise.all([
+      ensureAgentTimelineReadable(agentId, deps(second)),
+      ensureAgentTimelineReadable(agentId, deps(second)),
+      ensureAgentTimelineReadable(agentId, deps(second)),
+    ]);
+
+    expect(results.map((result) => result.kind)).toEqual(["stored", "stored", "stored"]);
+    expect(backfill).toHaveBeenCalledTimes(1);
+    expect(resume).not.toHaveBeenCalled();
+    const after = second.manager.fetchTimelineForRead(agentId, { direction: "tail", limit: 0 });
+    expect(after.rows.length).toBeGreaterThan(0);
+    expect(after.rows.map((row) => row.item)).toEqual(before.rows.map((row) => row.item));
+  });
+
+  test("resumes the agent when the backfill fails", async () => {
+    const first = await startDaemon();
+    const agentId = await createAgentWithTurn(first);
+    await crashDaemon(first);
+
+    const second = await startDaemon();
+    vi.spyOn(second.manager, "backfillTimelineFromProvider").mockRejectedValue(
+      new Error("provider history unreadable"),
+    );
+    const resume = vi.spyOn(second.manager, "resumeAgentFromPersistence");
+
+    const readable = await ensureAgentTimelineReadable(agentId, deps(second));
+
+    expect(readable.kind).toBe("live");
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(second.manager.getAgent(agentId)).not.toBeNull();
+  });
 });

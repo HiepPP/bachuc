@@ -2,7 +2,7 @@ import type { Logger } from "pino";
 
 import type { AgentProvider } from "./agent-sdk-types.js";
 import type { AgentManager, ManagedAgent } from "./agent-manager.js";
-import type { AgentStorage } from "./agent-storage.js";
+import type { AgentStorage, StoredAgentRecord } from "./agent-storage.js";
 import {
   buildConfigOverrides,
   buildSessionConfig,
@@ -58,6 +58,72 @@ export async function ensureUnarchivedAgentLoaded(
   }
 
   return agent;
+}
+
+export type ReadableAgent =
+  | { kind: "live"; agent: ManagedAgent }
+  | { kind: "stored"; record: StoredAgentRecord };
+
+export type TimelineReaderManager = AgentLoaderManager &
+  Pick<AgentManager, "loadTimelineForRead" | "backfillTimelineFromProvider">;
+
+export interface EnsureAgentTimelineReadableDeps extends EnsureAgentLoadedDeps {
+  agentManager: TimelineReaderManager;
+}
+
+const pendingTimelineBackfills = new Map<string, Promise<void>>();
+
+/**
+ * Makes an agent's timeline readable without resuming it when a stored copy exists: the live
+ * agent, else the timeline cache, else a provider-history backfill. Falls back to
+ * ensureAgentLoaded only when the backfill cannot run.
+ */
+export async function ensureAgentTimelineReadable(
+  agentId: string,
+  deps: EnsureAgentTimelineReadableDeps,
+): Promise<ReadableAgent> {
+  const live = deps.agentManager.getAgent(agentId);
+  if (live) return { kind: "live", agent: live };
+  const inflight = pendingAgentInitializations.get(agentId);
+  if (inflight) return { kind: "live", agent: await inflight.promise };
+
+  const record = await deps.agentStorage.get(agentId);
+  if (!record) {
+    throw new Error(`Agent not found: ${agentId}`);
+  }
+
+  const source = await deps.agentManager.loadTimelineForRead(agentId);
+  if (source === "missing") {
+    const validProviders = deps.validProviders ?? deps.agentManager.getRegisteredProviderIds();
+    if (!toAgentPersistenceHandle(validProviders, record.persistence)) {
+      // Never started, or its provider is gone: there is no history to read, so load as before.
+      return { kind: "live", agent: await ensureAgentLoaded(agentId, deps) };
+    }
+    try {
+      await backfillTimelineOnce(agentId, record, deps.agentManager);
+    } catch (error) {
+      deps.logger.warn({ err: error, agentId }, "Timeline backfill failed; resuming the agent");
+      return { kind: "live", agent: await ensureAgentLoaded(agentId, deps) };
+    }
+  }
+
+  // A resume can register the agent while the read loads; its timeline is the same one.
+  const resumed = deps.agentManager.getAgent(agentId);
+  return resumed ? { kind: "live", agent: resumed } : { kind: "stored", record };
+}
+
+function backfillTimelineOnce(
+  agentId: string,
+  record: StoredAgentRecord,
+  agentManager: TimelineReaderManager,
+): Promise<void> {
+  const inflight = pendingTimelineBackfills.get(agentId);
+  if (inflight) return inflight;
+  const backfill = agentManager
+    .backfillTimelineFromProvider(agentId, record)
+    .finally(() => pendingTimelineBackfills.delete(agentId));
+  pendingTimelineBackfills.set(agentId, backfill);
+  return backfill;
 }
 
 export async function ensureAgentLoaded(

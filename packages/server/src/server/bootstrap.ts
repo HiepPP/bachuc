@@ -130,6 +130,7 @@ import type { LocalSpeechProviderConfig } from "./speech/providers/local/config.
 import type { RequestedSpeechProviders } from "./speech/speech-types.js";
 import { createSpeechService } from "./speech/speech-runtime.js";
 import { AgentManager } from "./agent/agent-manager.js";
+import { openTimelineCacheStore } from "./agent/sqlite-timeline-store.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
@@ -925,7 +926,9 @@ export async function createPaseoDaemon(
     if (git) configureGitProcessPolicy(git);
   });
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
+  const timelineCacheStore = await openTimelineCacheStore(config.paseoHome, logger);
   const agentManager = new AgentManager({
+    durableTimelineStore: timelineCacheStore ?? undefined,
     pluginLifecycle: pluginRuntime,
     clients: initialAgentManagerState.clients,
     providerDefinitions: initialAgentManagerState.providerDefinitions,
@@ -1801,6 +1804,8 @@ export async function createPaseoDaemon(
     agentManager.prepareForShutdown();
     await closeAllAgents(logger, agentManager);
     await agentManager.flushForShutdown().catch(() => undefined);
+    // Closing every agent above marked their cached timelines complete; this writes the rest.
+    timelineCacheStore?.close();
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
     await agentProviderRuntime.shutdown();

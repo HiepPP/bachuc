@@ -1890,6 +1890,8 @@ export class VoiceAssistantWebSocketServer {
         agentDetach: true,
         // COMPAT(agentRuntimeClose): added in v0.10.2, remove gate after 2027-10-01.
         agentRuntimeClose: true,
+        // COMPAT(timelineLatestPromptTail): added in v1.0.0-hiep, remove the gate after 2027-04-15.
+        timelineLatestPromptTail: true,
         // COMPAT(agentThinkingUpdate): added in v0.2.4, remove gate after 2027-01-28.
         agentThinkingUpdate: true,
         // COMPAT(daemonDiagnostics): added in v0.1.100, remove gate after 2026-12-25 once daemon floor >= v0.1.100.
