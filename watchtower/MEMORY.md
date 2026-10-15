@@ -250,3 +250,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the gpui-kit `test-support` dev feature and the tree-sitter `css`, `html`, `toml`, and `yaml` features break workspace resolution on `cocoa` (=0.26.0 against the locked 0.26.1).
 - Source: TASK-139 and TASK-138 outcomes; Q-063.
 - Use next time: test GPUI view crates through plain functions, and do not enable those features.
+- Learned: repeated title-bar clicks count as double-clicks and zoom a GPUI window, which then draws a clipped area. This replaces the title-bar click advice above. Running `open <bundle>` in a loop kept the window in front during a read.
+- Source: TASK-141 outcome.
+- Use next time: keep a GPUI bundle in front with an `open` loop, and read `getAXState` twice.
+- Learned: GPUI cached views (`Entity::cached`) save about 2 CPU points but drop out of the accessibility tree, and a `Role::ComboBox` div did not run its click handler through `cua_repl`.
+- Source: TASK-141 outcome.
+- Use next time: keep labeled chrome views uncached, and give click targets `Role::Button`.
