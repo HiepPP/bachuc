@@ -101,6 +101,7 @@ class InMemoryAgentManager {
       currentModeId: null,
       availableModes: [],
       pendingPermissions: new Map(),
+      backgroundProcesses: new Map(),
       bufferedPermissionResolutions: new Map(),
       inFlightPermissionResponses: new Set(),
       pendingReplacement: false,
@@ -119,6 +120,10 @@ class InMemoryAgentManager {
   }
 
   fetchTimeline(_agentId: string, options?: AgentTimelineFetchOptions) {
+    return this.timeline.fetch("agent-1", options);
+  }
+
+  fetchTimelineForRead(_agentId: string, options?: AgentTimelineFetchOptions) {
     return this.timeline.fetch("agent-1", options);
   }
 
