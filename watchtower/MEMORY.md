@@ -226,3 +226,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: many source rows can project to few items: a 3,701-row mock thread gave 88 items, which fit in the first app page, so a UI scroll sent no older-page request. Page it through `fetch_agent_timeline` with the CLI client (`connectToDaemon` from `packages/cli/src/utils/client.ts`) to test SQL pages on live. The mock `five-minute-stream` model gives about 3,700 source rows.
 - Source: Q-052 check on 2026-10-15.
 - Use next time: plan a live paging check as an RPC script, not a UI scroll.
+
+### 2026-10-15 - Plan 20261015-gpui-desktop-client
+
+- Learned: `typify` 0.8 silently merges JSON Schema types that share a name, so `packages/desktop-gpui/crates/protocol/build.rs` gives each type a unique title and fails the build when typify names a type itself. Generated names come from message tags, for example `AgentStreamPayloadEvent` and `TimelineItem`; read them in `target/debug/build/bachuc-protocol-*/out/protocol.rs`.
+- Source: TASK-135 outcome.
+- Use next time: name generated Rust protocol types in specs only after you read the generated file.
+- Learned: `git diff --exit-code` on a new untracked file always passes. Compare `shasum` of two runs instead.
+- Source: TASK-135 outcome.
+- Use next time: do not use `git diff` as an idempotence check for a file the TASK creates.
