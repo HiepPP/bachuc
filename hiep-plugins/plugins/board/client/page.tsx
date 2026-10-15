@@ -1071,18 +1071,21 @@ function RunCluster({ tree, collapsed, onToggle, depth = 0, ...card }: ClusterPr
             marginLeft: nested ? s(11) : 0,
             borderLeftWidth: nested ? 1 : 0,
             borderLeftColor: colors.border,
-            columnGap: edge,
             rowGap: gap,
             flexDirection: "row",
             flexWrap: "wrap",
             alignItems: "flex-start",
           }}
         >
-          {tree.children.map((child) => (
+          {/* Percent widths, not pixels from onLayout: web reports a rounded width, so pixel
+              cells could overflow by a fraction, wrap, and flip the layout on every resize. */}
+          {tree.children.map((child, index) => (
             <View
               key={child.run.id}
               style={{
-                width: twoColumns ? (panelWidth - edge * 3 - (nested ? 1 : 0)) / 2 : "100%",
+                width: twoColumns ? "50%" : "100%",
+                paddingLeft: twoColumns && index % 2 ? edge / 2 : 0,
+                paddingRight: twoColumns && !(index % 2) ? edge / 2 : 0,
                 minWidth: 0,
               }}
             >

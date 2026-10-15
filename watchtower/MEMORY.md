@@ -52,6 +52,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a branch timeline, Running now, or Up next on the Watchtower page, and a second tab or a side-by-side timeline for the plan tree, while the owner chose the tree after comparing mockups. Reason: [ADR-0029](watchtower/decisions/ADR-0029-plan-tree-over-branch-timeline.md).
 - Avoid `glm-acp-agent` as the main GLM path, a config-entry-only GLM setup, and a GLM provider that shares `~/.claude`, while the Claude path passed the live probe and the owner's hooks and plugins live in `~/.claude`. Reason: [ADR-0030](watchtower/decisions/ADR-0030-built-in-glm-on-claude-client-over-acp-and-config.md).
 - Avoid memory-only timelines, unbounded in-memory timelines for live agents, JSONL timeline files, better-sqlite3, Drizzle, and a database for agent records, while `node:sqlite` with FTS5 runs in the Electron daemon runtime and agent listing stays fast in memory. Reason: [ADR-0032](watchtower/decisions/ADR-0032-sqlite-served-old-pages-over-memory-only-serving.md).
+- Avoid pixel widths computed from `onLayout` for cells that must share a row on Board, while react-native-web reports a rounded `offsetWidth`. Reason: [ADR-0033](watchtower/decisions/ADR-0033-percent-cells-over-measured-pixel-cells-on-board.md).
 
 ## Learnings
 
@@ -198,3 +199,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the no-live-restart repo rule leaves every server change unverified on live during implement.
 - Source: TASK-104, TASK-105, and TASK-106 outcomes.
 - Use next time: plan a live check as a separate owner step after implement.
+
+### 2026-10-15 - Board subagent rows flashing
+
+- Learned: react-native-web gives `onLayout` a width from `offsetWidth`, rounded to a whole pixel. Pixel cells sized from it can overflow a row by less than 1 px and wrap. The wrap changes the height, the scroll bar toggles, and the layout flips without end.
+- Source: Board flashing fix on 2026-10-15, ADR-0033.
+- Use next time: on web, size cells that share a row with percent or flex values. Use a measured width only for a breakpoint choice.
