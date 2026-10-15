@@ -5,7 +5,7 @@ Agent chat delivery has two paths:
 1. **Live stream** — `agent_stream` WebSocket messages for immediacy. These may be delta-shaped lifecycle updates.
 2. **Authoritative history** — `fetch_agent_timeline_request` for correctness. This always returns full projected timeline items, never lifecycle deltas.
 
-The daemon retains projected items in memory. Each source event advances the stream sequence,
+The daemon retains recent projected items in memory ([cache and reads](#timeline-cache-and-reads)). Each source event advances the stream sequence,
 then replaces the previous tool state or merges into the current text item. Intermediate payloads
 are never retained for history or catch-up. Provider history is the transcript authority and
 rebuilds the projection when the timeline cache has no copy.
@@ -28,6 +28,15 @@ timeline read never resumes the agent. `ensureAgentTimelineReadable` serves, in 
 agent, the in-memory timeline, a complete cache entry, then a backfill from provider history
 without registering a runtime. If the backfill cannot run, it falls back to `ensureAgentLoaded`.
 
+Memory holds a bounded tail (`TIMELINE_TAIL_ROWS`), not the whole timeline. Once the cache holds a
+row, the flush listener trims it from memory, and only while the cache serves that agent (same
+epoch, no missed write). A page that reaches below the tail reads a window of cached rows, widened
+so no assistant or reasoning run and no tool call is cut. The fetch result and `window.minSeq` still
+describe the whole timeline. Prompt listing and chat search read the cache too:
+an FTS5 index over user and assistant messages, with a fallback to memory on a cache error. Search
+matches whole words or word prefixes only. A query without diacritics matches text with them; a
+query with diacritics matches exactly.
+
 - An entry is trusted only when marked complete. A live runtime clears the mark and closing the
   runtime sets it, so a crash or a failed cache write leaves the entry unused and the next read
   backfills.
@@ -35,9 +44,14 @@ without registering a runtime. If the backfill cannot run, it falls back to `ens
   [data model](data-model.md#store-surface-rules) for the file.
 - Non-live timelines in memory are capped at 64; evicted ones reload from the cache under the same
   epoch. Backfills run two at a time per daemon.
-- **Stale after external edits.** The cache is not re-read from the provider while it is complete.
-  If you run `claude --resume` outside Paseo, the thread shows the old copy until you press Reload
-  agent. Before the cache, a daemon restart picked such edits up.
+- **External edits.** A complete entry stores a transcript fingerprint (path, size, and mtime of the
+  Claude transcript and its subagent files, from `stat` only). A read or resume compares it; a
+  change drops the cached copy and rebuilds from provider history. A provider without a fingerprint
+  keeps the old path, so Reload agent is the way to pick up its outside edits.
+- **Viewed threads on the client.** The app keeps stream items for the 8 most recently viewed
+  threads per host. Visible threads count toward the 8 and are never evicted, nor is the focused
+  thread or one with a submission in flight. An evicted thread reopens from the replica cache plus
+  one resume fetch.
 
 ## Prefetch
 
