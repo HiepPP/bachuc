@@ -810,6 +810,10 @@ export class AgentManager {
   private readonly durableTimelineStore?: DurableTimelineStore;
   /** Agents whose cache entry missed a write; never served from the cache until a reset lands. */
   private readonly untrustedDurableTimelines = new Set<string>();
+  /** Trimmed timelines whose cache failed: a restore from provider history is queued or running. */
+  private readonly pendingTimelineRestores = new Set<string>();
+  /** Live agents whose restore waits for the current run to end. */
+  private readonly deferredTimelineRestores = new Set<string>();
   /** Agent ids whose timeline was read or closed, least recent first; drives cold eviction. */
   private readonly recentTimelineReads = new Set<string>();
   private activeTimelineBackfills = 0;
@@ -1651,6 +1655,7 @@ export class AgentManager {
         { err: error, agentId },
         "Timeline cache failed; the agent's cached timeline is not trusted",
       );
+      this.scheduleTimelineRestore(agentId);
     }
     try {
       // Keeps the next daemon from trusting the entry. The in-memory mark above already covers
@@ -1659,6 +1664,97 @@ export class AgentManager {
     } catch {
       // Already logged for this agent.
     }
+  }
+
+  /**
+   * A trimmed timeline holds only its tail once the cache stops serving it, so prompt lists,
+   * search, and older pages miss rows. Queues a rebuild from provider history. Callers are
+   * synchronous flush and read paths, so the rebuild starts after they return.
+   */
+  private scheduleTimelineRestore(agentId: string): void {
+    if (this.pendingTimelineRestores.has(agentId)) return;
+    try {
+      if (!this.isTimelineTrimmed(agentId)) return;
+    } catch (error) {
+      this.logger.warn({ err: error, agentId }, "Timeline restore check failed");
+      return;
+    }
+    this.pendingTimelineRestores.add(agentId);
+    this.trackBackgroundTask(Promise.resolve().then(() => this.restoreTrimmedTimeline(agentId)));
+  }
+
+  /** True when some source row of the loaded timeline sits only in the cache. */
+  private isTimelineTrimmed(agentId: string): boolean {
+    if (!this.timelineStore.has(agentId)) return false;
+    const { window } = this.timelineStore.fetch(agentId, { direction: "tail", limit: 1 });
+    if (window.minSeq === 0) return false;
+    let heldRows = 0;
+    for (const row of this.timelineStore.getRows(agentId)) {
+      for (const range of row.sourceSeqRanges) heldRows += range.endSeq - range.startSeq + 1;
+    }
+    return heldRows < window.maxSeq - window.minSeq + 1;
+  }
+
+  /**
+   * Rebuilds a trimmed timeline whose cache failed. A stored agent takes the read backfill; a
+   * live agent takes the forced hydrate that rewind uses, only between runs. A failure keeps the
+   * tail serving, as before the restore.
+   */
+  private async restoreTrimmedTimeline(agentId: string): Promise<void> {
+    try {
+      if (this.agents.has(agentId)) {
+        await this.runLifecycleMutation(agentId, () => this.restoreLiveTimelineUnlocked(agentId));
+        return;
+      }
+      if (!this.needsTimelineRestore(agentId)) return;
+      const record = await this.registry?.get(agentId);
+      if (!record) return;
+      await this.backfillTimelineFromProvider(agentId, record);
+    } catch (error) {
+      this.logger.warn({ err: error, agentId }, "Timeline restore from provider history failed");
+    } finally {
+      this.pendingTimelineRestores.delete(agentId);
+    }
+  }
+
+  private async restoreLiveTimelineUnlocked(agentId: string): Promise<void> {
+    if (!this.agents.has(agentId) || !this.needsTimelineRestore(agentId)) return;
+    // Replacing the timeline mid-run would drop or repeat the run's rows; emitState retries.
+    if (this.hasInFlightRun(agentId) || this.pendingTimelineReplays.has(agentId)) {
+      this.deferredTimelineRestores.add(agentId);
+      return;
+    }
+    // The run lock keeps a new turn from starting while provider history is read.
+    const lock = this.runs.createPendingRun(agentId);
+    try {
+      await this.hydrateTimelineFromProvider(agentId, {
+        force: true,
+        broadcast: true,
+        broadcastTimeline: false,
+      });
+      this.dispatch({
+        type: "timeline_replacement",
+        agentId,
+        epoch: this.timelineStore.getEpoch(agentId),
+      });
+    } finally {
+      this.runs.settleForegroundRun(agentId, lock.token);
+    }
+  }
+
+  private needsTimelineRestore(agentId: string): boolean {
+    return this.untrustedDurableTimelines.has(agentId) && this.isTimelineTrimmed(agentId);
+  }
+
+  /**
+   * Called on each state change. The run record may clear just after the state that ends a run,
+   * so this checks only the lifecycle, and the restore re-checks the run inside the lane.
+   */
+  private resumeDeferredTimelineRestore(agent: ManagedAgent): void {
+    if (!this.deferredTimelineRestores.has(agent.id)) return;
+    if (agent.lifecycle === "running" || agent.activeForegroundTurnId) return;
+    this.deferredTimelineRestores.delete(agent.id);
+    this.scheduleTimelineRestore(agent.id);
   }
 
   private requireLoadedTimeline(agentId: string): void {
@@ -5640,6 +5736,7 @@ export class AgentManager {
       type: "agent_state",
       agent: { ...agent },
     });
+    this.resumeDeferredTimelineRestore(agent);
   }
 
   private syncFeaturesFromSession(agent: ManagedAgent): void {

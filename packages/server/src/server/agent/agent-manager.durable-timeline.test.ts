@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   appendFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import pino, { type Logger } from "pino";
@@ -171,6 +172,60 @@ async function requireRecord(daemon: Daemon, agentId: string): Promise<StoredAge
   const record = await daemon.registry.get(agentId);
   if (!record) throw new Error(`Missing record ${agentId}`);
   return record;
+}
+
+/** Provider history of 30 turns; only the first answer holds the word "zanzibar". */
+const TRIM_HISTORY: AgentTimelineItem[] = Array.from({ length: 30 }, (_, turn) => [
+  { type: "user_message", text: `prompt ${turn}` } as const,
+  {
+    type: "assistant_message",
+    text: turn === 0 ? "the zanzibar answer" : `answer ${turn}`,
+  } as const,
+]).flat();
+
+function failingWrite(): never {
+  throw new Error("disk I/O error");
+}
+
+/** The fake provider's history file for the agent's session. */
+function historyFile(daemon: Daemon, agentId: string): string {
+  const sessionId = daemon.manager.getAgent(agentId)?.persistence?.sessionId;
+  if (!sessionId) throw new Error(`Agent ${agentId} has no session`);
+  return join(tmpdir(), "paseo-fake-provider-history", "claude", `${sessionId}.jsonl`);
+}
+
+function writeHistory(file: string, items: readonly AgentTimelineItem[]): void {
+  mkdirSync(dirname(file), { recursive: true });
+  const lines = items.map((item) => JSON.stringify({ type: "timeline", provider: "claude", item }));
+  writeFileSync(file, `${lines.join("\n")}\n`);
+}
+
+/** A live agent with TRIM_HISTORY in memory, trimmed to its 20-row tail by a cache flush. */
+async function trimmedAgent(daemon: Daemon): Promise<{ agentId: string; file: string }> {
+  const agent = await daemon.manager.createAgent({ provider: "claude", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  const file = historyFile(daemon, agent.id);
+  writeHistory(file, TRIM_HISTORY);
+  await daemon.manager.hydrateTimelineFromProvider(agent.id, { force: true });
+  daemon.store.flush();
+  expect((await daemon.manager.getTimelineRows(agent.id)).length).toBeLessThanOrEqual(20);
+  return { agentId: agent.id, file };
+}
+
+/** Pages from the tail to the start, five items at a time. */
+function pageToStart(daemon: Daemon, agentId: string) {
+  let page = daemon.manager.fetchTimeline(agentId, { direction: "tail", limit: 5 });
+  const collected = [...page.rows];
+  while (page.hasOlder) {
+    page = daemon.manager.fetchTimeline(agentId, {
+      direction: "before",
+      cursor: { epoch: page.epoch, seq: page.startSeq! },
+      limit: 5,
+    });
+    collected.unshift(...page.rows);
+  }
+  return collected;
 }
 
 describe("AgentManager durable timeline", () => {
@@ -588,6 +643,52 @@ describe("AgentManager durable timeline", () => {
       .map((line) => JSON.parse(line) as { agentId?: string; msg?: string })
       .filter((entry) => entry.agentId === agentId && entry.msg?.startsWith("Timeline cache"));
     expect(failures).toHaveLength(1);
+  });
+
+  test("a trimmed timeline whose cache fails restores from provider history", async () => {
+    const daemon = await startDaemon(logger, { timelineTailRows: 20 });
+    const { agentId, file } = await trimmedAgent(daemon);
+    const lastPrompt: AgentTimelineItem = { type: "user_message", text: "prompt 30" };
+    const history = [...TRIM_HISTORY, lastPrompt];
+    writeHistory(file, history);
+    vi.spyOn(daemon.store, "append").mockImplementation(failingWrite);
+
+    await daemon.manager.appendTimelineItem(agentId, lastPrompt);
+    await daemon.manager.flush();
+
+    const prompts = await daemon.manager.getTimelinePromptRows(agentId);
+    expect(prompts.map((row) => row.item)).toEqual(
+      history.filter((item) => item.type === "user_message"),
+    );
+    const search = await daemon.manager.searchTimeline(agentId, { query: "zanzibar" });
+    expect(search.locations).toHaveLength(1);
+    const pages = pageToStart(daemon, agentId);
+    expect(pages.map((row) => row.item)).toEqual(history);
+    expect(new Set(pages.map((row) => row.seq)).size).toBe(pages.length);
+  });
+
+  test("a failed restore throws nothing and keeps the tail serving", async () => {
+    const lines: string[] = [];
+    const daemon = await startDaemon(
+      pino({ level: "warn" }, { write: (line: string) => lines.push(line) }),
+      { timelineTailRows: 20 },
+    );
+    const { agentId, file } = await trimmedAgent(daemon);
+    // Provider history that cannot be read: the restore's history read fails.
+    rmSync(file);
+    mkdirSync(file);
+    vi.spyOn(daemon.store, "append").mockImplementation(failingWrite);
+
+    await daemon.manager.appendTimelineItem(agentId, { type: "user_message", text: "prompt 30" });
+    await daemon.manager.flush();
+
+    const messages = lines.map((line) => (JSON.parse(line) as { msg?: string }).msg);
+    expect(messages).toContain("Timeline restore from provider history failed");
+    const tail = daemon.manager.fetchTimeline(agentId, { direction: "tail", limit: 5 });
+    expect(tail.rows.at(-1)?.item).toEqual({ type: "user_message", text: "prompt 30" });
+    expect((await daemon.manager.getTimelineRows(agentId)).length).toBeLessThanOrEqual(21);
+    expect(() => pageToStart(daemon, agentId)).toThrow(/cannot serve agent/);
+    rmSync(file, { recursive: true, force: true });
   });
 });
 
