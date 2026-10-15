@@ -3088,7 +3088,9 @@ export class AgentManager {
         timestamp: row.timestamp,
       },
     );
-    await this.persistSnapshot(agent);
+    // Record writes coalesce for up to 250 ms; plugin appends and worktree setup steps must not
+    // wait for that. flush() still waits for the write.
+    this.enqueueBackgroundPersist(agent);
     return { seq: row.seq, epoch: this.timelineStore.getEpoch(agentId) };
   }
 
