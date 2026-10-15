@@ -34,6 +34,19 @@ test("a TASK ID label maps to every TASK of its group", () => {
   assert.equal(byTask["TASK-090"]?.id, "b1");
 });
 
+test("a standalone TASK ID label maps to that TASK only", () => {
+  const tasks = [
+    { id: "TASK-001", group: "standalone" },
+    { id: "TASK-002", group: "standalone" },
+  ];
+  const { byTask } = matchBuilders([builder("b1", "TASK-001")], tasks, NOW);
+  assert.deepEqual(Object.keys(byTask), ["TASK-001"]);
+  assert.deepEqual(
+    Object.keys(matchBuilders([builder("b2", "standalone")], tasks, NOW).byTask),
+    [],
+  );
+});
+
 test("live TASKs are those whose builder runs or waits, sorted", () => {
   const match = matchBuilders(
     [

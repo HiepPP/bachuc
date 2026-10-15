@@ -55,16 +55,22 @@ function parentOf(agent: BuilderCandidate): string | null {
   return parent || null;
 }
 
+// Plans write `standalone` in the Group column of a TASK that shares no file, so it is no group.
+function groupOf(task: BuilderTask): string | null {
+  return task.group && task.group !== "standalone" ? task.group : null;
+}
+
 function tasksOf(label: string, tasks: readonly BuilderTask[]): string[] {
   if (TASK_ID.test(label)) {
     const task = tasks.find((candidate) => candidate.id === label);
     if (!task) return [];
+    const group = groupOf(task);
     // A builder labelled with the first TASK ID of its group works on the whole group.
-    return task.group
-      ? tasks.filter((candidate) => candidate.group === task.group).map((candidate) => candidate.id)
+    return group
+      ? tasks.filter((candidate) => groupOf(candidate) === group).map((candidate) => candidate.id)
       : [task.id];
   }
-  return tasks.filter((task) => task.group === label).map((task) => task.id);
+  return tasks.filter((task) => groupOf(task) === label).map((task) => task.id);
 }
 
 /** IDs of the TASKs whose builder runs or waits for a permission, sorted. */
