@@ -4,7 +4,7 @@
 
 - Title: SQLite-backed RAM and CPU cuts
 - Slug: 20261015-sqlite-ram-cpu-cuts
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-15
 
 ## Tracker
@@ -38,7 +38,8 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 - All 8 TASKs are DONE on `feat/sqlite-ram-cpu-cuts` (2026-10-15). Commits: A `e6758a7c8`, B `1c5c4d2d3`, D `1c4210462`, F `8d040740b`, E `3af0405c7`, G `3124a2191`. Nothing was pushed.
 - Plan Verify passed: typecheck, lint, each changed test file, and the dependency grep. The live check ran on live 6768: 12 threads opened in turn, search returned 25 hits, 4 prompts ran on a mock thread, and `eventLoopDelay.maxMs` stayed at 39.9 ms or below.
 - Follow-up: since TASK-129, some full-timeline callers see only the 1,000-row memory tail: MCP `get_agent_activity` without a limit, the session `timelineSize` counts, `import-sessions`, and plugin `publishAgentStream`. See the TASK-129 outcome.
-- Next action: review and merge `feat/sqlite-ram-cpu-cuts`, then run `watchtower archive`.
+- The follow-up shipped: `21a5b892a` moved `get_agent_activity` to the cache path, `bfd79b58f` restores a trimmed timeline when its cache fails, and `a58f5632c` stopped `appendTimelineItem` from waiting for the record write.
+- Merged to `main` through PR #70 as `4fb0338b1` on 2026-10-15.
 
 ## Archive
 
@@ -46,3 +47,4 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 - [watchtower/archive/20261014-watchtower-plan-tree/](watchtower/archive/20261014-watchtower-plan-tree/)
 - [watchtower/archive/20261014-native-glm-provider/](watchtower/archive/20261014-native-glm-provider/)
 - Older plans are under [watchtower/archive/](watchtower/archive/).
+- Archived: 2026-10-15 -> watchtower/archive/20261015-sqlite-ram-cpu-cuts/
