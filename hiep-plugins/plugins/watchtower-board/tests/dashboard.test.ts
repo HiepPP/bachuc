@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { dashboardSummary, groupTasks, plural, questionsFor, taskTitle } from "../client/dashboard";
+import {
+  dashboardSummary,
+  groupTasks,
+  plural,
+  questionsFor,
+  taskTitle,
+  withLiveStatus,
+} from "../client/dashboard";
 import type { Task } from "../shared/board";
 
 function task(id: string, status: string): Task {
@@ -91,4 +98,22 @@ test("groups dashboard tasks and separates IDs from titles", () => {
     ["TASK-004"],
   );
   assert.equal(taskTitle(tasks[0]), "Example task");
+});
+
+test("a TASK with a live builder counts as active; a Done TASK stays done", () => {
+  const tasks = withLiveStatus(
+    [task("TASK-001", "BLOCKED"), task("TASK-002", "TODO"), task("TASK-003", "DONE")],
+    new Set(["TASK-001", "TASK-003"]),
+  );
+  assert.deepEqual(
+    tasks.map(({ status }) => status),
+    ["IN PROGRESS", "TODO", "DONE"],
+  );
+  const { counts } = dashboardSummary(tasks);
+  assert.equal(counts.active, 1);
+  assert.equal(counts.blocked, 0);
+  assert.deepEqual(
+    groupTasks(tasks).active.map(({ id }) => id),
+    ["TASK-001"],
+  );
 });

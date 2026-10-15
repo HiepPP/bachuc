@@ -1,5 +1,5 @@
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Platform, Pressable, Text, View } from "react-native";
 import type { OverviewRunEntry } from "../shared/overview";
 import type { BuilderMatch, RunAgent } from "./builders";
@@ -48,12 +48,22 @@ function useReducedMotion(): boolean {
   return reduced;
 }
 
-// The only animation of the tree: one turning icon per running row, off under reduced motion.
-function Spinner({ color }: { color: string }) {
+type Rotation = Animated.AnimatedInterpolation<string>;
+
+// The only animation of the tree. One clock turns every running row's icon, so ten running rows
+// cost one animation loop, not ten. Null when nothing runs or under reduced motion.
+const TurnContext = createContext<Rotation | null>(null);
+
+function useTurn(spinning: boolean): Rotation | null {
   const reduced = useReducedMotion();
   const turn = useRef(new Animated.Value(0)).current;
+  const rotate = useMemo(
+    () => turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }),
+    [turn],
+  );
+  const on = spinning && !reduced;
   useEffect(() => {
-    if (reduced) return;
+    if (!on) return;
     turn.setValue(0);
     const loop = Animated.loop(
       Animated.timing(turn, {
@@ -65,13 +75,14 @@ function Spinner({ color }: { color: string }) {
     );
     loop.start();
     return () => loop.stop();
-  }, [reduced, turn]);
-  const rotate = turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
-  return (
-    <Animated.View style={{ transform: [{ rotate }] }}>
-      <Icon name="LoaderCircle" size={16} color={color} />
-    </Animated.View>
-  );
+  }, [on, turn]);
+  return on ? rotate : null;
+}
+
+function Spinner({ color }: { color: string }) {
+  const rotate = useContext(TurnContext);
+  const icon = <Icon name="LoaderCircle" size={16} color={color} />;
+  return rotate ? <Animated.View style={{ transform: [{ rotate }] }}>{icon}</Animated.View> : icon;
 }
 
 type RowState = "done" | "running" | "waiting" | "planned" | "blocked";
@@ -410,67 +421,75 @@ export function PlanTree({
       .filter((builder) => builder.state === "running" || builder.state === "waiting")
       .map((builder) => builder.id),
   );
+  // Same rule as TaskRow: a running row whose builder waits shows a hand, not a spinner.
+  const rotate = useTurn(
+    tree.waves.some((wave) =>
+      wave.rows.some((row) => row.kind === "running" && builders[row.id]?.state !== "waiting"),
+    ),
+  );
   return (
-    <View accessibilityRole="list">
-      <LeadRow
-        lead={lead}
-        builderCount={active.size}
-        planTitle={planTitle}
-        runState={runState}
-        onOpenAgent={onOpenAgent}
-        theme={theme}
-      />
-      {tree.waves.map((wave) => {
-        return (
-          <View key={wave.number} style={{ marginBottom: 10 }}>
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "baseline",
-                gap: 8,
-                paddingVertical: 4,
-                paddingHorizontal: 8,
-              }}
-            >
-              <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>
-                Wave {wave.number}
-              </Text>
-              <Text
-                numberOfLines={1}
-                style={{ flex: 1, fontSize: 11.5, color: colors.foregroundMuted }}
+    <TurnContext.Provider value={rotate}>
+      <View accessibilityRole="list">
+        <LeadRow
+          lead={lead}
+          builderCount={active.size}
+          planTitle={planTitle}
+          runState={runState}
+          onOpenAgent={onOpenAgent}
+          theme={theme}
+        />
+        {tree.waves.map((wave) => {
+          return (
+            <View key={wave.number} style={{ marginBottom: 10 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "baseline",
+                  gap: 8,
+                  paddingVertical: 4,
+                  paddingHorizontal: 8,
+                }}
               >
-                {wave.header}
-              </Text>
+                <Text style={{ fontSize: 12.5, fontWeight: "600", color: colors.foreground }}>
+                  Wave {wave.number}
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  style={{ flex: 1, fontSize: 11.5, color: colors.foregroundMuted }}
+                >
+                  {wave.header}
+                </Text>
+              </View>
+              <View
+                style={
+                  narrow
+                    ? undefined
+                    : {
+                        marginLeft: SPINE_INSET,
+                        paddingLeft: SPINE_GAP,
+                        borderLeftWidth: SPINE_WIDTH,
+                        borderLeftColor: colors.border,
+                      }
+                }
+              >
+                {wave.rows.map((row) => (
+                  <TaskRow
+                    key={row.id}
+                    row={row}
+                    builder={builders[row.id]}
+                    taskClass={classes?.[row.id]}
+                    sha={commits?.[row.id]}
+                    narrow={narrow}
+                    theme={theme}
+                    onSelectTask={onSelectTask}
+                    onOpenAgent={onOpenAgent}
+                  />
+                ))}
+              </View>
             </View>
-            <View
-              style={
-                narrow
-                  ? undefined
-                  : {
-                      marginLeft: SPINE_INSET,
-                      paddingLeft: SPINE_GAP,
-                      borderLeftWidth: SPINE_WIDTH,
-                      borderLeftColor: colors.border,
-                    }
-              }
-            >
-              {wave.rows.map((row) => (
-                <TaskRow
-                  key={row.id}
-                  row={row}
-                  builder={builders[row.id]}
-                  taskClass={classes?.[row.id]}
-                  sha={commits?.[row.id]}
-                  narrow={narrow}
-                  theme={theme}
-                  onSelectTask={onSelectTask}
-                  onOpenAgent={onOpenAgent}
-                />
-              ))}
-            </View>
-          </View>
-        );
-      })}
-    </View>
+          );
+        })}
+      </View>
+    </TurnContext.Provider>
   );
 }

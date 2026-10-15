@@ -7,7 +7,7 @@ import { readBoardRpc } from "../shared/board";
 import { readOverviewRpc } from "../shared/overview";
 import { useAgentSender } from "./agent-target";
 import { matchBuilders } from "./builders";
-import { dashboardSummary } from "./dashboard";
+import { dashboardSummary, withLiveStatus } from "./dashboard";
 import { type DecisionTarget, DecisionModal } from "./decision-modal";
 import { lifecyclePhases, needsYou } from "./lifecycle";
 import { NeedsYouCell } from "./needs-you";
@@ -121,6 +121,20 @@ export function WatchtowerOverview({
   const mainWidth = stacked ? width : width - RAIL_WIDTH;
   const narrow = mainWidth > 0 && mainWidth < NARROW;
   const data = overview.data;
+  const runAgents = useRunAgents(host.id, workspaceId);
+  const builders = useMemo(() => matchBuilders(runAgents, data?.tasks ?? []), [runAgents, data]);
+  // A string key, so the 15 s agent refresh rebuilds the tree only when the set changes.
+  const liveKey = Object.entries(builders.byTask)
+    .filter(([, builder]) => builder.state === "running" || builder.state === "waiting")
+    .map(([taskId]) => taskId)
+    .sort()
+    .join(",");
+  const live = useMemo(() => new Set(liveKey ? liveKey.split(",") : []), [liveKey]);
+  // The rail reads the same live status as the plan tree.
+  const liveBoard = useMemo(
+    () => board.data && { ...board.data, tasks: withLiveStatus(board.data.tasks, live) },
+    [board.data, live],
+  );
   const derived = useMemo(() => {
     if (!data) return null;
     const timeline = buildTimeline(data);
@@ -134,8 +148,8 @@ export function WatchtowerOverview({
       const clock = minute === undefined ? null : clockAt(started, minute);
       return clock ? { ...row, meta: `${row.meta}, answer by ${clock}` } : row;
     });
-    const { counts } = dashboardSummary(data.tasks);
-    const built = buildPlanTree(data, started);
+    const { counts } = dashboardSummary(withLiveStatus(data.tasks, live));
+    const built = buildPlanTree(data, started, live);
     // Without RUN.md there are no logged times, so any time text would be a guess from minute 0.
     const tree: PlanTreeModel = data.run
       ? built
@@ -161,12 +175,10 @@ export function WatchtowerOverview({
         todo: counts.todo,
       },
     };
-  }, [data]);
+  }, [data, live]);
   // The ADR the owner is reading, if any.
   const [decision, setDecision] = useState<DecisionTarget | null>(null);
   const agent = useAgentSender(host.id, workspaceId, (derived?.rows.length ?? 0) > 0);
-  const runAgents = useRunAgents(host.id, workspaceId);
-  const builders = useMemo(() => matchBuilders(runAgents, data?.tasks ?? []), [runAgents, data]);
   // The TASK selected in the task list. The opener starts it, a row of the tree or the list sets it.
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialTaskId ?? null);
   // Only the stacked page scrolls as one; the rail of the wide page has its own scroll view.
@@ -244,7 +256,7 @@ export function WatchtowerOverview({
   ) : null;
   const archived = data ? <ArchivedPlansCell history={data.history} theme={theme} /> : null;
   // The rail: the former Explorer board. Its log lists every RUN.md row, newest first.
-  const progress = board.data ? <ProgressCard tasks={board.data.tasks} theme={theme} /> : null;
+  const progress = liveBoard ? <ProgressCard tasks={liveBoard.tasks} theme={theme} /> : null;
   const waiting = board.data ? (
     <WaitingCard
       questions={board.data.questions}
@@ -254,7 +266,7 @@ export function WatchtowerOverview({
   ) : null;
   const tasks = (
     <TasksCard
-      board={board.data}
+      board={liveBoard}
       error={board.error}
       workspaceId={workspaceId}
       sourceKey={workspaceId}

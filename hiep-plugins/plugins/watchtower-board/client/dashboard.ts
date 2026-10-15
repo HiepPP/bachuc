@@ -11,6 +11,17 @@ export function taskGroup(status: string): TaskGroup {
   return "unknown";
 }
 
+// A TASK that a builder agent works on now counts as active, whatever its file says: a rerun of a
+// Blocked TASK runs before the lead rewrites its status. Done stays done.
+export function withLiveStatus<T extends { id: string; status: string }>(
+  tasks: readonly T[],
+  live: ReadonlySet<string>,
+): T[] {
+  return tasks.map((task) =>
+    live.has(task.id) && task.status !== "DONE" ? { ...task, status: "IN PROGRESS" } : task,
+  );
+}
+
 export function dashboardSummary(tasks: readonly Pick<Task, "status">[]) {
   const counts: Record<TaskGroup, number> = {
     active: 0,

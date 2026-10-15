@@ -150,6 +150,28 @@ test("a wave with a running TASK says running", () => {
   assert.equal(waves[1].header, "running");
 });
 
+test("a Blocked or Todo TASK with a live builder runs; a Done TASK stays done", () => {
+  const { waves } = buildPlanTree(
+    {
+      tasks: [
+        task("TASK-001", "BLOCKED", [], "E"),
+        task("TASK-002", "TODO", [], "F"),
+        task("TASK-003", "DONE", [], "E"),
+        task("TASK-004", "BLOCKED", [], "G"),
+      ],
+      run: null,
+      questions: [],
+    },
+    STARTED,
+    new Set(["TASK-001", "TASK-002", "TASK-003"]),
+  );
+  assert.deepEqual(
+    waves[0].rows.map((item) => item.kind),
+    ["running", "running", "done", "blocked"],
+  );
+  assert.match(waves[0].header, /^running, /);
+});
+
 test("a finished wave says done instead of a start condition", () => {
   const { waves } = buildPlanTree(
     {

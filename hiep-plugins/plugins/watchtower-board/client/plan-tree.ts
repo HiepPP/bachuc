@@ -81,11 +81,12 @@ function rowFor(
   bar: TimelineBar | undefined,
   average: number,
   origin: number | null,
+  live: boolean,
 ): PlanTreeRow {
   const kind: BarKind =
     item.status === "DONE"
       ? "done"
-      : item.status === "IN PROGRESS"
+      : item.status === "IN PROGRESS" || live
         ? "running"
         : item.status === "BLOCKED"
           ? "blocked"
@@ -135,8 +136,13 @@ function headerFor(
 }
 
 // Waves are dependency levels of the Tracker. `started` is the run's `Started:` text, which gives
-// planned rows and the finish estimate a clock; without it they carry no clock time.
-export function buildPlanTree(input: PlanTreeInput, started: string | null | undefined): PlanTree {
+// planned rows and the finish estimate a clock; without it they carry no clock time. `live` holds
+// the TASK IDs a builder agent works on now: a rerun of a Blocked TASK runs before its file says so.
+export function buildPlanTree(
+  input: PlanTreeInput,
+  started: string | null | undefined,
+  live: ReadonlySet<string> = new Set(),
+): PlanTree {
   const seen = new Set<string>();
   const tasks = input.tasks.filter((item) => !seen.has(item.id) && seen.add(item.id));
   const inPlan = new Set(tasks.map((item) => item.id));
@@ -159,7 +165,9 @@ export function buildPlanTree(input: PlanTreeInput, started: string | null | und
 
   const doneIds = new Set(tasks.filter((item) => item.status === "DONE").map((item) => item.id));
   const waves = buckets.map((bucket, index): PlanTreeWave => {
-    const rows = bucket.tasks.map((item) => rowFor(item, bars.get(item.id), average, origin));
+    const rows = bucket.tasks.map((item) =>
+      rowFor(item, bars.get(item.id), average, origin, live.has(item.id)),
+    );
     return {
       number: index + 1,
       header: headerFor(index + 1, rows, bucket.tasks, bucket.cyclic, doneIds, inPlan),
