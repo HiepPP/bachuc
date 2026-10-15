@@ -1,0 +1,104 @@
+{
+  "type": "session",
+  "message": {
+    "type": "fetch_agents_response",
+    "payload": {
+      "requestId": "rec-1",
+      "entries": [
+        {
+          "agent": {
+            "id": "ad9b52ad-43b7-4e54-a2ae-8820e72ba034",
+            "provider": "mock",
+            "cwd": "/tmp/gpui-bench",
+            "workspaceId": "wks_ff13e1687a325a52",
+            "model": "thirty-minute-stream",
+            "thinkingOptionId": null,
+            "effectiveThinkingOptionId": null,
+            "runtimeInfo": {
+              "provider": "mock",
+              "sessionId": "40f0efdc-0d52-47ea-8255-8eacbafca8d9",
+              "model": "thirty-minute-stream",
+              "modeId": "load-test"
+            },
+            "createdAt": "2026-10-15T09:40:54.245Z",
+            "updatedAt": "2026-10-15T09:41:51.583Z",
+            "lastUserMessageAt": "2026-10-15T09:40:54.765Z",
+            "status": "idle",
+            "activeTurn": null,
+            "capabilities": {
+              "supportsStreaming": true,
+              "supportsSessionPersistence": true,
+              "supportsSessionListing": true,
+              "supportsDynamicModes": false,
+              "supportsMcpServers": false,
+              "supportsReasoningStream": true,
+              "supportsToolInvocations": true,
+              "supportsRewindConversation": true,
+              "supportsRewindFiles": true,
+              "supportsRewindBoth": true
+            },
+            "currentModeId": "load-test",
+            "availableModes": [
+              {
+                "id": "load-test",
+                "label": "Load Test",
+                "description": "Streams repeated markdown, reasoning, and tool calls for app stress testing",
+                "icon": "ShieldOff",
+                "colorTier": "dangerous"
+              },
+              {
+                "id": "approval-test",
+                "label": "Approval Test",
+                "description": "Alternate development-only permission mode for preference tests",
+                "icon": "ShieldCheck",
+                "colorTier": "safe"
+              }
+            ],
+            "features": [],
+            "pendingPermissions": [],
+            "persistence": {
+              "provider": "mock",
+              "sessionId": "40f0efdc-0d52-47ea-8255-8eacbafca8d9",
+              "metadata": {
+                "model": "thirty-minute-stream",
+                "modeId": "load-test",
+                "cwd": "/tmp/gpui-bench"
+              }
+            },
+            "title": "start bench",
+            "labels": {},
+            "lastUsage": {
+              "inputTokens": 32,
+              "outputTokens": 590,
+              "contextWindowMaxTokens": 128000,
+              "contextWindowUsedTokens": 1180
+            },
+            "requiresAttention": true,
+            "attentionReason": "finished",
+            "attentionTimestamp": "2026-10-15T09:41:51.582Z",
+            "archivedAt": null
+          },
+          "project": {
+            "projectKey": "prj_c092fa7622f511a5",
+            "projectName": "gpui-bench",
+            "workspaceName": "gpui-bench",
+            "checkout": {
+              "cwd": "/tmp/gpui-bench",
+              "isGit": false,
+              "currentBranch": null,
+              "remoteUrl": null,
+              "worktreeRoot": null,
+              "isPaseoOwnedWorktree": false,
+              "mainRepoRoot": null
+            }
+          }
+        }
+      ],
+      "pageInfo": {
+        "nextCursor": "eyJzb3J0IjpbeyJrZXkiOiJ1cGRhdGVkX2F0IiwiZGlyZWN0aW9uIjoiZGVzYyJ9XSwidmFsdWVzIjp7InVwZGF0ZWRfYXQiOjE3OTIwNTczMTE1ODN9LCJpZCI6ImFkOWI1MmFkLTQzYjctNGU1NC1hMmFlLTg4MjBlNzJiYTAzNCJ9",
+        "prevCursor": null,
+        "hasMore": true
+      }
+    }
+  }
+}

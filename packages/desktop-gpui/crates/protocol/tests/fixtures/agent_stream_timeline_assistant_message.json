@@ -1,0 +1,22 @@
+{
+  "type": "session",
+  "message": {
+    "type": "agent_stream",
+    "payload": {
+      "agentId": "ad9b52ad-43b7-4e54-a2ae-8820e72ba034",
+      "event": {
+        "type": "timeline",
+        "provider": "mock",
+        "item": {
+          "type": "assistant_message",
+          "text": " thin layo",
+          "messageId": "90df33e6-bfc9-4daf-8365-84ebc827e3fc"
+        },
+        "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0"
+      },
+      "timestamp": "2026-10-15T09:41:00.146Z",
+      "seq": 55,
+      "epoch": "0c5182c9-4a9f-446e-809f-6597102e14e5"
+    }
+  }
+}

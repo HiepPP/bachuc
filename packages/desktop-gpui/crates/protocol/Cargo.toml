@@ -1,0 +1,21 @@
+[package]
+name = "bachuc-protocol"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+typify = "=0.8.0"
+schemars = "0.8"
+serde_json = "1"
+syn = "2"
+quote = "1"
+heck = "0.5"
+prettyplease = "0.2"
+
+[dev-dependencies]
+tungstenite = "0.24"

@@ -13,6 +13,7 @@ This is an npm workspace monorepo:
 - `packages/cli` — Docker-style CLI (`paseo run/ls/logs/wait`)
 - `packages/relay` — E2E encrypted relay for remote access
 - `packages/desktop` — Electron desktop wrapper
+- `packages/desktop-gpui` — Rust GPUI desktop client, a Cargo workspace; run cargo through its `cargo.sh`
 - `packages/website` — Marketing site (paseo.sh)
 - `hiep-plugins` — The user's own Paseo plugins (`hiep-plugins/plugins/*`), with their own `AGENTS.md`
 
