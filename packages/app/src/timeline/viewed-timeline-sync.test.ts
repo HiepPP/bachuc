@@ -1,10 +1,20 @@
-import { expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { DaemonClient, type DaemonTransport } from "@getpaseo/client/internal/daemon-client";
-import type { SessionInboundMessage, SessionOutboundMessage } from "@getpaseo/protocol/messages";
+import type {
+  AgentStreamEventPayload,
+  SessionInboundMessage,
+  SessionOutboundMessage,
+} from "@getpaseo/protocol/messages";
+import type { CachedTimeline } from "@/runtime/replica-cache";
+import { selectAgentTimelineState, useSessionStore } from "@/stores/session-store";
+import type { AgentStreamReducerEvent } from "./session-stream-reducers";
 import type { ProjectedTimelineForwardFetchPlan } from "./timeline-sync-plan";
 import {
   consumeForcedTimelineTailReplacement,
+  createTimelineReplica,
+  createViewedTimelineOwner,
   createViewedTimelineSync,
+  RECENT_STREAM_LIMIT,
   type TimelineResponsePayload,
   type ViewedTimelineStatus,
   type ViewedTimelineSyncPorts,
@@ -224,7 +234,16 @@ class TimelineWorld {
   readonly forcedTimelineTailReplacements = new Set<string>();
   readonly reportedCurrent: TimelineCurrentReport[] = [];
   cacheGate: Deferred<void> | null = null;
+  /** Threads that hold stream items, as the owner's store would report them. */
+  readonly heldStreams = new Set<string>();
+  readonly evictions: string[] = [];
   readonly sync = createViewedTimelineSync({
+    listStreamAgentIds: () => [...this.heldStreams],
+    evictStream: (agentId) => {
+      this.heldStreams.delete(agentId);
+      this.evictions.push(agentId);
+      return true;
+    },
     replaceDemandedAgentIds: () => undefined,
     onCatchUpEnded: (agentId) => {
       this.reportedCurrent.push({
@@ -307,6 +326,15 @@ class TimelineWorld {
 
   show(sourceId: string, agentIds: string[]): void {
     this.sync.replaceVisibleAgentIds(sourceId, agentIds);
+  }
+
+  /** Shows each thread in turn in one pane and lets its cache load and items land. */
+  async openInTurn(sourceId: string, agentIds: string[]): Promise<void> {
+    for (const agentId of agentIds) {
+      this.show(sourceId, [agentId]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      this.heldStreams.add(agentId);
+    }
   }
 
   /** Chats the user opened earlier in this session and has since navigated away from. */
@@ -1279,4 +1307,256 @@ test("disposing a view releases its pending observation before bootstrap complet
   request.succeed();
   await Promise.resolve();
   world.expectNoPendingFetch();
+});
+
+const threadIds = (count: number, prefix = "thread") =>
+  Array.from({ length: count }, (_, index) => `${prefix}-${String(index + 1).padStart(2, "0")}`);
+
+test("opening 12 threads in turn keeps stream items for the 8 most recent", async () => {
+  const world = new TimelineWorld();
+  const threads = threadIds(12);
+  await world.openInTurn("pane", threads);
+
+  expect(RECENT_STREAM_LIMIT).toBe(8);
+  expect([...world.heldStreams].sort()).toEqual(threads.slice(4));
+  expect(world.evictions).toEqual(threads.slice(0, 4));
+  world.sync.dispose();
+});
+
+test("a thread visible in a split pane is never evicted, even when it is the oldest", async () => {
+  const world = new TimelineWorld();
+  await world.openInTurn("left", ["pinned"]);
+  await world.openInTurn("right", threadIds(12));
+
+  expect(world.evictions).not.toContain("pinned");
+  expect(world.heldStreams.has("pinned")).toBe(true);
+  expect(world.heldStreams.size).toBe(8);
+  world.sync.dispose();
+});
+
+test("each host keeps its own cap of 8 threads", async () => {
+  const first = new TimelineWorld();
+  const second = new TimelineWorld();
+  const threads = threadIds(12);
+  for (const agentId of threads) {
+    await first.openInTurn("pane", [agentId]);
+    await second.openInTurn("pane", [agentId]);
+  }
+
+  expect([...first.heldStreams].sort()).toEqual(threads.slice(4));
+  expect([...second.heldStreams].sort()).toEqual(threads.slice(4));
+  first.sync.dispose();
+  second.sync.dispose();
+});
+
+test("an evicted hidden thread waits for its next view before it catches up", async () => {
+  const world = new TimelineWorld();
+  world.sync.setConnected(true);
+  world.show("pane", ["thread-01"]);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("thread-01")).respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("thread-01")).toBe("ready"));
+  world.heldStreams.add("thread-01");
+
+  for (const agentId of threadIds(8).slice(1).concat("thread-09")) {
+    world.show("pane", [agentId]);
+    (await world.nextMembership()).succeed();
+    (await world.nextFetch(agentId)).respond({ hasNewer: false });
+    await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus(agentId)).toBe("ready"));
+    world.heldStreams.add(agentId);
+  }
+  world.show("pane", ["thread-10"]);
+  (await world.nextMembership()).succeed();
+  expect(world.evictions).toEqual(["thread-01", "thread-02"]);
+
+  world.sync.recoverGap("thread-01", { epoch: "epoch-thread-01", endSeq: 1 });
+  (await world.nextFetch("thread-10")).respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("thread-10")).toBe("ready"));
+  world.expectNoPendingFetch();
+  expect(world.sync.getAgentTimelineStatus("thread-01")).toBe("pending");
+
+  const cacheReads = world.cacheRequests.filter((agentId) => agentId === "thread-01").length;
+  world.cursors.set("thread-01", { epoch: "epoch-thread-01", endSeq: 1 });
+  world.show("pane", ["thread-01"]);
+  const reopened = await world.nextFetch("thread-01");
+  expect(world.cacheRequests.filter((agentId) => agentId === "thread-01")).toHaveLength(
+    cacheReads + 1,
+  );
+  expect(reopened.request).toEqual({
+    direction: "after",
+    cursor: { epoch: "epoch-thread-01", seq: 1 },
+    limit: 40,
+    projection: "projected",
+  });
+  reopened.respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("thread-01")).toBe("ready"));
+  world.expectNoPendingFetch();
+  world.sync.dispose();
+});
+
+describe("reopening an evicted thread through the owner", () => {
+  const SERVER_ID = "recent-stream-cap-host";
+  const EPOCH = "epoch-1";
+
+  afterEach(() => useSessionStore.getState().clearSession(SERVER_ID));
+
+  function row(agentId: string, seq: number): string {
+    return `${agentId} row ${seq}`;
+  }
+
+  function page(
+    agentId: string,
+    rows: string[],
+    direction: "tail" | "after",
+    afterSeq: number,
+  ): TimelineResponsePayload {
+    const entries = rows.slice(afterSeq).map((text, index) => {
+      const seq = afterSeq + index + 1;
+      return {
+        provider: "codex" as const,
+        item: { type: "user_message" as const, text, messageId: `${agentId}-${seq}` },
+        timestamp: new Date(Date.UTC(2026, 9, 15, 0, 0, seq)).toISOString(),
+        seqStart: seq,
+        seqEnd: seq,
+        sourceSeqRanges: [{ startSeq: seq, endSeq: seq }],
+        collapsed: [],
+      };
+    });
+    return {
+      requestId: `${agentId}-${direction}-${afterSeq}`,
+      agentId,
+      agent: null,
+      direction,
+      projection: "projected",
+      reset: false,
+      epoch: EPOCH,
+      window: { minSeq: 1, maxSeq: rows.length, nextSeq: rows.length + 1 },
+      startCursor: entries.length > 0 ? { epoch: EPOCH, seq: afterSeq + 1 } : null,
+      endCursor: entries.length > 0 ? { epoch: EPOCH, seq: rows.length } : null,
+      entries,
+      error: null,
+      hasNewer: false,
+      hasOlder: false,
+      staleCursor: false,
+      gap: false,
+    };
+  }
+
+  function liveRow(agentId: string, seq: number): AgentStreamReducerEvent {
+    return {
+      event: {
+        type: "timeline",
+        provider: "codex",
+        item: { type: "user_message", text: row(agentId, seq), messageId: `${agentId}-${seq}` },
+      } as AgentStreamEventPayload,
+      seq,
+      epoch: EPOCH,
+      timestamp: new Date(Date.UTC(2026, 9, 15, 0, 0, seq)),
+    };
+  }
+
+  function renderedRows(agentId: string): string[] {
+    const session = useSessionStore.getState().sessions[SERVER_ID];
+    return [
+      ...(session?.agentStreamTail.get(agentId) ?? []),
+      ...(session?.agentStreamHead.get(agentId) ?? []),
+    ].map((item) => (item.kind === "user_message" ? item.text : item.kind));
+  }
+
+  const timelineStatus = (agentId: string) =>
+    selectAgentTimelineState(useSessionStore.getState().sessions[SERVER_ID], agentId).status;
+
+  test("paints from the cache, issues one fetch, then applies live rows in order", async () => {
+    useSessionStore.getState().initializeSession(SERVER_ID, null);
+    const daemonRows = new Map<string, string[]>();
+    const stored = new Map<string, CachedTimeline>();
+    const fetches: Array<{ agentId: string; request: ProjectedTimelineForwardFetchPlan }> = [];
+    const errors: unknown[] = [];
+    let gate: { agentId: string; release: Deferred<void> } | null = null;
+    const replica = createTimelineReplica({
+      serverId: SERVER_ID,
+      storage: {
+        readTimeline: async (_serverId, agentId) => stored.get(agentId),
+        commitTimeline: (_serverId, agentId, timeline) => stored.set(agentId, timeline),
+      },
+      prepareAgent: async () => undefined,
+    });
+    const owner = createViewedTimelineOwner({
+      serverId: SERVER_ID,
+      replica,
+      replaceDemandedAgentIds: () => undefined,
+      drainQueuedAgentMessage: () => undefined,
+      ports: {
+        observe: () => ({ ready: Promise.resolve(), release: async () => undefined }),
+        readCursor: () => undefined,
+        fetchPage: async (agentId, request) => {
+          fetches.push({ agentId, request });
+          if (gate?.agentId === agentId) await gate.release.promise;
+          const rows = daemonRows.get(agentId) ?? [];
+          const afterSeq = request.direction === "after" ? request.cursor.seq : 0;
+          owner.applyTimelineResponse(page(agentId, rows, request.direction, afterSeq));
+          return { hasNewer: false, endCursor: { epoch: EPOCH, seq: rows.length } };
+        },
+        fetchLatestTail: async () => {
+          throw new Error("unexpected latest-tail fallback");
+        },
+        reportError: (error) => errors.push(error),
+        schedule: () => () => undefined,
+      },
+    });
+    owner.setConnected(true);
+
+    const threads = threadIds(9);
+    for (const agentId of threads) {
+      daemonRows.set(
+        agentId,
+        [1, 2, 3].map((seq) => row(agentId, seq)),
+      );
+      owner.replaceVisibleAgentIds("pane", [agentId]);
+      await vi.waitFor(() => expect(timelineStatus(agentId)).toBe("synced"));
+    }
+    const first = threads[0];
+    expect(timelineStatus(first)).toBe("cold");
+    expect(stored.get(first)?.range).toEqual({ epoch: EPOCH, startSeq: 1, endSeq: 3 });
+
+    // Rows the daemon streams while the thread is evicted wait for the reopen catch-up.
+    daemonRows.get(first)?.push(row(first, 4), row(first, 5));
+    owner.enqueueStreamEvent(first, liveRow(first, 4));
+    owner.enqueueStreamEvent(first, liveRow(first, 5));
+    owner.flushStreamAgent(first);
+    expect(renderedRows(first)).toEqual([]);
+
+    fetches.length = 0;
+    gate = { agentId: first, release: deferred<void>() };
+    owner.replaceVisibleAgentIds("pane", [first]);
+    await vi.waitFor(() => expect(timelineStatus(first)).toBe("painted"));
+    expect(renderedRows(first)).toEqual([1, 2, 3].map((seq) => row(first, seq)));
+
+    gate.release.resolve();
+    await vi.waitFor(() => expect(timelineStatus(first)).toBe("synced"));
+    await vi.waitFor(() => expect(owner.getAgentTimelineStatus(first)).toBe("ready"));
+    expect(fetches).toEqual([
+      {
+        agentId: first,
+        request: {
+          direction: "after",
+          cursor: { epoch: EPOCH, seq: 3 },
+          limit: 40,
+          projection: "projected",
+        },
+      },
+    ]);
+    expect(renderedRows(first)).toEqual([1, 2, 3, 4, 5].map((seq) => row(first, seq)));
+
+    owner.enqueueStreamEvent(first, liveRow(first, 6));
+    owner.flushStreamAgent(first);
+    expect(renderedRows(first)).toEqual([1, 2, 3, 4, 5, 6].map((seq) => row(first, seq)));
+
+    const session = useSessionStore.getState().sessions[SERVER_ID];
+    const held = new Set(session?.agentStreamTail.keys() ?? []);
+    expect(held.size).toBe(8);
+    expect(held.has(threads[1])).toBe(false);
+    expect(errors).toEqual([]);
+    owner.dispose();
+  });
 });

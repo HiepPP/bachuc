@@ -168,11 +168,11 @@ describe("SqliteTimelineStore", () => {
     });
   });
 
-  it("rebuilds an empty cache from a file with an unknown schema version", async () => {
+  it("rebuilds an empty cache from a file with an older schema version", async () => {
     const raw = await openRaw(dbPath);
     raw.exec("CREATE TABLE timelines (agent_id TEXT PRIMARY KEY, junk TEXT)");
     raw.exec("INSERT INTO timelines VALUES ('agent-1', 'x')");
-    raw.exec("PRAGMA user_version = 2");
+    raw.exec("PRAGMA user_version = 1");
     raw.close();
 
     const store = await openStore();
@@ -229,6 +229,145 @@ describe("SqliteTimelineStore", () => {
 
     expect(counts).toEqual([0, 500, 1_000, 1_200]);
     expect(store.getMeta("agent-1")).toEqual({ epoch: "epoch-1", nextSeq: 1_201, complete: false });
+  });
+
+  it("lists prompt rows by item type, flushing buffered rows first", async () => {
+    const store = await openStore();
+    store.reset("agent-1", "epoch-1");
+    const prompt = (seq: number, text: string): AgentTimelineRow => ({
+      seq,
+      timestamp: `2026-10-15T00:00:0${seq}.000Z`,
+      item: { type: "user_message", text, messageId: `u-${seq}` },
+    });
+    store.append("agent-1", [prompt(1, "first"), row(2), row(3), prompt(4, "second")]);
+    store.update("agent-1", { ...prompt(4, "second"), providerMessageId: "provider-4" });
+
+    expect(store.listPromptRows("agent-1")).toEqual([
+      prompt(1, "first"),
+      { ...prompt(4, "second"), providerMessageId: "provider-4" },
+    ]);
+    expect(store.listPromptRows("agent-2")).toEqual([]);
+  });
+
+  it("indexes projected messages: chunks of one message join, across flushes", async () => {
+    const store = await openStore();
+    store.reset("agent-1", "epoch-1");
+    const chunk = (seq: number, text: string, turnId = "turn-1"): AgentTimelineRow => ({
+      seq,
+      timestamp: "2026-10-15T00:00:00.000Z",
+      turnId,
+      item: { type: "assistant_message", text },
+    });
+    store.append("agent-1", [
+      { seq: 1, timestamp: "2026-10-15T00:00:00.000Z", item: { type: "user_message", text: "go" } },
+      chunk(2, "split wo"),
+    ]);
+    store.flush();
+    store.append("agent-1", [chunk(3, "rd here"), chunk(4, "other turn", "turn-2")]);
+
+    expect(store.findSearchCandidates("agent-1", "word", 0, 10)).toEqual([
+      { seq: 3, role: "assistant", text: "split word here" },
+    ]);
+    // Indexed per chunk, "rd" would be a word of its own.
+    expect(store.findSearchCandidates("agent-1", "rd", 0, 10)).toEqual([]);
+    expect(store.findSearchCandidates("agent-1", "turn", 0, 10)).toEqual([
+      { seq: 4, role: "assistant", text: "other turn" },
+    ]);
+    expect(store.findSearchCandidates("agent-1", "word", 3, 10)).toEqual([]);
+    // A query without a word lists every message.
+    expect(store.findSearchCandidates("agent-1", "&&", 0, 2)?.map((hit) => hit.seq)).toEqual([
+      1, 3,
+    ]);
+  });
+
+  it("matches without diacritics, including đ", async () => {
+    const store = await openStore();
+    store.reset("agent-1", "epoch-1");
+    store.append("agent-1", [
+      { seq: 1, timestamp: "t", item: { type: "user_message", text: "Đường Tiếng Việt" } },
+    ]);
+
+    expect(store.findSearchCandidates("agent-1", "duong tieng viet", 0, 10)).toHaveLength(1);
+    expect(store.findSearchCandidates("agent-1", "đường", 0, 10)).toHaveLength(1);
+  });
+
+  it("re-indexes a rewritten message and drops the index on reset and delete", async () => {
+    const store = await openStore();
+    store.reset("agent-1", "epoch-1");
+    store.append("agent-1", [
+      { seq: 1, timestamp: "t", item: { type: "user_message", text: "alpha" } },
+    ]);
+    store.flush();
+    store.update("agent-1", {
+      seq: 1,
+      timestamp: "t",
+      providerMessageId: "provider-1",
+      item: { type: "user_message", text: "alpha" },
+    });
+
+    expect(store.findSearchCandidates("agent-1", "alpha", 0, 10)).toEqual([
+      { seq: 1, role: "user", text: "alpha" },
+    ]);
+    store.reset("agent-1", "epoch-2");
+    expect(store.findSearchCandidates("agent-1", "alpha", 0, 10)).toEqual([]);
+    store.append("agent-1", [
+      { seq: 1, timestamp: "t", item: { type: "user_message", text: "alpha" } },
+    ]);
+    store.deleteAgent("agent-1");
+    expect(store.findSearchCandidates("agent-1", "alpha", 0, 10)).toEqual([]);
+  });
+
+  it("reads seq windows and identity rows, and reports each committed flush", async () => {
+    const store = await openStore();
+    const flushed: Array<[string, number]> = [];
+    store.setFlushListener((agentId, maxSeq) => flushed.push([agentId, maxSeq]));
+    store.reset("agent-1", "epoch-1");
+    const tool = (seq: number, status: "running" | "completed"): AgentTimelineRow => ({
+      seq,
+      timestamp: "t",
+      item: {
+        type: "tool_call",
+        callId: "call-1",
+        name: "Read",
+        status,
+        detail: { type: "unknown", input: null, output: null },
+        error: null,
+      },
+    });
+    const rows = Array.from({ length: 2_500 }, (_, index) => row(index + 1));
+    rows[9] = tool(10, "running");
+    rows[2_399] = tool(2_400, "completed");
+    store.append("agent-1", rows);
+
+    expect(store.readRowWindow("agent-1", 2_000, 2_002)?.map((entry) => entry.seq)).toEqual([
+      2_000, 2_001, 2_002,
+    ]);
+    expect(store.readRowWindow("agent-1", 1, 2_500)).toEqual(rows);
+    expect(store.readIdentityRows("agent-1", ["call-1"], 2_400)).toEqual([rows[9]]);
+    expect(store.readIdentityRows("agent-1", ["call-1"], 2_401)).toEqual([rows[9], rows[2_399]]);
+    expect(flushed.at(-1)).toEqual(["agent-1", 2_500]);
+  });
+
+  it("stores a transcript fingerprint with complete and clears it otherwise", async () => {
+    const first = await openStore();
+    first.reset("agent-1", "epoch-1");
+    first.append("agent-1", [row(1)]);
+    first.setComplete("agent-1", true, "fingerprint-1");
+    first.close();
+
+    const second = await openStore();
+    expect(second.getMeta("agent-1")).toEqual({
+      epoch: "epoch-1",
+      nextSeq: 2,
+      complete: true,
+      transcriptFingerprint: "fingerprint-1",
+    });
+    expect((await second.load("agent-1"))?.transcriptFingerprint).toBe("fingerprint-1");
+    second.setComplete("agent-1", false);
+    expect(second.getMeta("agent-1")).toEqual({ epoch: "epoch-1", nextSeq: 2, complete: false });
+    second.setComplete("agent-1", true);
+    second.reset("agent-1", "epoch-2");
+    expect(second.getMeta("agent-1")?.transcriptFingerprint).toBeUndefined();
   });
 
   it("loads more rows than one page in seq order", async () => {

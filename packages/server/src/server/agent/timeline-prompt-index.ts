@@ -21,6 +21,7 @@ function promptPreview(text: string): string {
   return `${collapsed.slice(0, PROMPT_PREVIEW_MAX_LENGTH - 1)}…`;
 }
 
+/** Takes the cache's prompt rows or a whole in-memory timeline; only user messages count. */
 export function buildTimelinePromptIndex(
   epoch: string,
   rows: readonly AgentTimelineRow[],

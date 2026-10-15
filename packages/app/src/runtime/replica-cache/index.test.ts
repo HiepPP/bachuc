@@ -9,7 +9,14 @@ import type { StreamItem } from "@/types/stream";
 import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { ReplicaCache } from ".";
 import type { DirectoryCheckpoint } from "@/runtime/replica-cache";
-import type { ReplicaHostRows, ReplicaRow, ReplicaRowChanges, ReplicaRowStore } from "./row-store";
+import type {
+  ReplicaHostStats,
+  ReplicaRow,
+  ReplicaRowChanges,
+  ReplicaRowKey,
+  ReplicaRowStore,
+} from "./row-store";
+import { replicaPayloadBytes } from "./row-store-schema";
 
 const SERVER_ID = "cached-host";
 
@@ -30,6 +37,11 @@ class MemoryStorage implements ReplicaRowStore {
     ids?: readonly string[];
   }> = [];
   writes = 0;
+  /** Payload strings handed out by reads. Budget work must leave it untouched. */
+  payloadsRead = 0;
+  statReads = 0;
+  private readonly writtenAt = new Map<string, number>();
+  private clock = 0;
   cleanups = 0;
   nextWriteFailure: Error | null = null;
   persistentWriteFailure: Error | null = null;
@@ -59,22 +71,37 @@ class MemoryStorage implements ReplicaRowStore {
     await this.readGate;
     const acceptedKinds = new Set(kinds);
     const acceptedIds = ids ? new Set(ids) : null;
-    return [...this.rows.values()].filter(
+    const matched = [...this.rows.values()].filter(
       (row) =>
         row.serverId === serverId &&
         acceptedKinds.has(row.kind) &&
         (!acceptedIds || acceptedIds.has(row.id)),
     );
+    this.payloadsRead += matched.length;
+    return matched;
   }
 
-  async readAll(): Promise<ReplicaHostRows[]> {
-    const hosts = new Map<string, ReplicaRow[]>();
+  async readKeys(serverId: string, kinds: readonly ReplicaRow["kind"][]): Promise<ReplicaRowKey[]> {
+    const acceptedKinds = new Set(kinds);
+    return [...this.rows.values()]
+      .filter((row) => row.serverId === serverId && acceptedKinds.has(row.kind))
+      .map(({ serverId: rowServerId, kind, id }) => ({ serverId: rowServerId, kind, id }));
+  }
+
+  async readHostStats(serverIds?: readonly string[]): Promise<ReplicaHostStats[]> {
+    this.statReads += 1;
+    const hosts = new Map<string, ReplicaHostStats>();
     for (const row of this.rows.values()) {
-      const rows = hosts.get(row.serverId) ?? [];
-      rows.push(row);
-      hosts.set(row.serverId, rows);
+      if (serverIds && !serverIds.includes(row.serverId)) continue;
+      const stats = hosts.get(row.serverId) ?? {
+        serverId: row.serverId,
+        bytes: 0,
+        lastWrittenAt: this.writtenAt.get(row.serverId) ?? 0,
+      };
+      stats.bytes += replicaPayloadBytes(row.payload);
+      hosts.set(row.serverId, stats);
     }
-    return [...hosts].map(([serverId, rows]) => ({ serverId, rows }));
+    return [...hosts.values()];
   }
 
   async apply(changes: ReplicaRowChanges): Promise<void> {
@@ -87,11 +114,15 @@ class MemoryStorage implements ReplicaRowStore {
     }
     this.changes.push(changes);
     for (const key of changes.deletes) this.rows.delete(this.key(key));
-    for (const row of changes.upserts) this.rows.set(this.key(row), row);
+    for (const row of changes.upserts) {
+      this.rows.set(this.key(row), row);
+      this.writtenAt.set(row.serverId, ++this.clock);
+    }
   }
 
   async deleteHost(serverId: string): Promise<void> {
     for (const [key, row] of this.rows) if (row.serverId === serverId) this.rows.delete(key);
+    this.writtenAt.delete(serverId);
   }
 
   async renameHost(oldServerId: string, newServerId: string): Promise<void> {
@@ -101,6 +132,8 @@ class MemoryStorage implements ReplicaRowStore {
       const renamed = { ...row, serverId: newServerId };
       this.rows.set(this.key(renamed), renamed);
     }
+    this.writtenAt.set(newServerId, ++this.clock);
+    this.writtenAt.delete(oldServerId);
   }
 
   async clear(): Promise<void> {
@@ -117,6 +150,10 @@ function createCache(storage: MemoryStorage, maxBytes?: number): ReplicaCache {
   });
   cache.setHosts([SERVER_ID]);
   return cache;
+}
+
+function storedServerIds(storage: MemoryStorage): string[] {
+  return [...new Set([...storage.rows.values()].map((row) => row.serverId))].sort();
 }
 
 function requireTimelineRow(storage: MemoryStorage): ReplicaRow {
@@ -861,6 +898,68 @@ describe("ReplicaCache", () => {
         .map((row) => row.kind)
         .sort(),
     ).toEqual(["agent", "checkpoint", "project", "workspace"]);
+  });
+
+  describe("budget from stored sizes", () => {
+    function hostBytes(storage: MemoryStorage, serverId: string): number {
+      return [...storage.rows.values()]
+        .filter((row) => row.serverId === serverId)
+        .reduce((total, row) => total + replicaPayloadBytes(row.payload), 0);
+    }
+
+    async function storeHosts(storage: MemoryStorage, serverIds: string[]): Promise<void> {
+      const writer = new ReplicaCache(storage, noLegacyCleanup);
+      writer.setHosts(serverIds);
+      for (const serverId of serverIds) {
+        commitDirectory(writer, serverId, directory());
+        writer.commitTimeline(serverId, "agent-1", timeline());
+        await writer.flush();
+      }
+    }
+
+    it("reads no row payloads to compute the budget", async () => {
+      const storage = new MemoryStorage();
+      await storeHosts(storage, [SERVER_ID, "other-host"]);
+      storage.payloadsRead = 0;
+      storage.statReads = 0;
+      const cache = new ReplicaCache(storage, noLegacyCleanup);
+      cache.setHosts([SERVER_ID, "other-host"]);
+
+      cache.commitTimeline(SERVER_ID, "agent-1", timeline("Changed"));
+      cache.replaceDirectoryBaseline(SERVER_ID, directory());
+      await cache.flush();
+
+      expect(storage.statReads).toBeGreaterThan(0);
+      expect(storage.payloadsRead).toBe(0);
+    });
+
+    it("evicts the least recently written host when the total passes the budget", async () => {
+      const storage = new MemoryStorage();
+      await storeHosts(storage, ["oldest", "middle"]);
+      const hostSize = hostBytes(storage, "oldest");
+      const cache = new ReplicaCache(storage, {
+        ...noLegacyCleanup,
+        maxBytes: hostBytes(storage, "oldest") + hostBytes(storage, "middle") + 100,
+      });
+      cache.setHosts(["oldest", "middle", "newest"]);
+
+      commitDirectory(cache, "newest", directory());
+      await cache.flush();
+
+      expect(storedServerIds(storage)).toEqual(["middle", "newest"]);
+      expect(hostBytes(storage, "middle")).toBe(hostSize);
+    });
+
+    it("drops hosts that are no longer registered when the totals load", async () => {
+      const storage = new MemoryStorage();
+      await storeHosts(storage, [SERVER_ID, "removed-host"]);
+      const cache = createCache(storage);
+
+      commitDirectory(cache, SERVER_ID, directory());
+      await cache.flush();
+
+      expect(storedServerIds(storage)).toEqual([SERVER_ID]);
+    });
   });
 
   it("runs legacy cleanup once when storage is first used", async () => {

@@ -1,14 +1,23 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { writeJsonFileAtomic } from "../atomic-file.js";
+
+// A receipt guards a retried request; 7 days is far past any retry window.
+export const RECEIPT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const RECEIPT_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const ReceiptSchema = z.object({
   fingerprint: z.string(),
   state: z.enum(["pending", "completed"]),
   agentId: z.string(),
 });
+interface ReceiptSweepOptions {
+  now?: () => number;
+  maxAgeMs?: number;
+  onError?: (error: unknown) => void;
+}
 interface SendMessageInput {
   agentId: string;
   messageId: string;
@@ -20,7 +29,54 @@ interface SendMessageInput {
 /** Owns message delivery receipts; creation is owned by CreationService. */
 export class MessageReceipts {
   private readonly pending = new Map<string, Promise<void>>();
-  constructor(private readonly directory: string) {}
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  constructor(
+    private readonly directory: string,
+    private readonly options: ReceiptSweepOptions = {},
+  ) {}
+
+  /** Sweeps now, then every 24 hours. The first sweep runs off the caller's path. */
+  startSweeping(): void {
+    if (this.sweepTimer) return;
+    const run = () => {
+      void this.sweep().catch((error: unknown) => this.options.onError?.(error));
+    };
+    this.sweepTimer = setInterval(run, RECEIPT_SWEEP_INTERVAL_MS);
+    this.sweepTimer.unref();
+    setImmediate(run);
+  }
+
+  stopSweeping(): void {
+    if (!this.sweepTimer) return;
+    clearInterval(this.sweepTimer);
+    this.sweepTimer = null;
+  }
+
+  /** Deletes receipt files older than the age limit, judged by file mtime only. */
+  async sweep(): Promise<number> {
+    const { now = Date.now, maxAgeMs = RECEIPT_MAX_AGE_MS, onError } = this.options;
+    let names: string[];
+    try {
+      names = await readdir(this.directory);
+    } catch (error) {
+      if (!isNotFound(error)) onError?.(error);
+      return 0;
+    }
+    const cutoff = now() - maxAgeMs;
+    let deleted = 0;
+    for (const name of names) {
+      if (!name.endsWith(".json")) continue;
+      const file = path.join(this.directory, name);
+      try {
+        if ((await stat(file)).mtimeMs >= cutoff) continue;
+        await unlink(file);
+        deleted++;
+      } catch (error) {
+        if (!isNotFound(error)) onError?.(error);
+      }
+    }
+    return deleted;
+  }
 
   send(input: SendMessageInput): Promise<void> {
     // Preserve the existing on-disk identity and shape across daemon upgrades.
@@ -60,9 +116,13 @@ async function readReceipt(file: string): Promise<z.infer<typeof ReceiptSchema> 
   try {
     return ReceiptSchema.parse(JSON.parse(await readFile(file, "utf8")));
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+    if (isNotFound(error)) return null;
     throw error;
   }
+}
+
+function isNotFound(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function digest(value: unknown): string {

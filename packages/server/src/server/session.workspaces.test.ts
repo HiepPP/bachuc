@@ -33,7 +33,11 @@ import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { createTerminalManager } from "../terminal/terminal-manager.js";
 import { AgentManager, type AgentManagerEvent, type ManagedAgent } from "./agent/agent-manager.js";
 import type { ProviderSubagentDescriptor } from "./agent/provider-subagents/store.js";
-import { AgentStorage, type StoredAgentRecord } from "./agent/agent-storage.js";
+import {
+  AGENT_RECORD_WRITE_WINDOW_MS,
+  AgentStorage,
+  type StoredAgentRecord,
+} from "./agent/agent-storage.js";
 import type {
   AgentClient,
   AgentCreateSessionOptions,
@@ -102,6 +106,19 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 async function flushWorkspaceUpdateBackgroundWork(): Promise<void> {
   await waitForImmediate();
+}
+
+// Agent record writes wait for a timer, and real file I/O can schedule that timer
+// after one advance ends, so advance the fake clock until the work settles.
+async function settleWithFakeTimers<T>(work: Promise<T>): Promise<T> {
+  const state = { settled: false };
+  const tracked = work.finally(() => {
+    state.settled = true;
+  });
+  while (!state.settled) {
+    await vi.advanceTimersByTimeAsync(AGENT_RECORD_WRITE_WINDOW_MS);
+  }
+  return tracked;
 }
 
 afterEach(async () => {
@@ -1381,14 +1398,16 @@ test("create_agent_request does not title an existing workspace from the agent p
       }),
     );
 
-    await session.handleMessage({
-      type: "create_agent_request",
-      requestId: "req-create-existing-title",
-      workspaceId: "ws-existing",
-      config: { provider: "codex", cwd },
-      initialPrompt: "Fix login bug\nwith better validation",
-      attachments: [],
-    });
+    await settleWithFakeTimers(
+      session.handleMessage({
+        type: "create_agent_request",
+        requestId: "req-create-existing-title",
+        workspaceId: "ws-existing",
+        config: { provider: "codex", cwd },
+        initialPrompt: "Fix login bug\nwith better validation",
+        attachments: [],
+      }),
+    );
     await vi.runAllTimersAsync();
 
     const [createdAgent] = agentManager.listAgents();

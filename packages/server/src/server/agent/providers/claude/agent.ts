@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { promises } from "node:fs";
 import path from "node:path";
@@ -132,7 +132,9 @@ import {
   type ProviderCatalog,
   type ProviderRefreshContext,
   type ResolveAgentDefaultModeInput,
+  type AgentResumeSessionOptions,
 } from "../../agent-sdk-types.js";
+import type { CachedHistoryResumeOptions } from "../../agent-timeline-store-types.js";
 import { importSessionFromPersistence } from "../../provider-session-import.js";
 import { runProviderRefreshActivity } from "../../provider-refresh-deadline.js";
 import {
@@ -1563,10 +1565,21 @@ export class ClaudeAgentClient implements AgentClient {
     });
   }
 
+  async getTranscriptFingerprint(
+    handle: AgentPersistenceHandle,
+    overrides?: Partial<AgentSessionConfig>,
+  ): Promise<string | null> {
+    const cwd = overrides?.cwd ?? coerceSessionMetadata(handle.metadata).cwd;
+    if (!handle.sessionId || !cwd) return null;
+    const configDir = claudeConfigDir(this.buildProviderEnv());
+    return claudeTranscriptFingerprint(resolveClaudeHistoryPath(cwd, handle.sessionId, configDir));
+  }
+
   async resumeSession(
     handle: AgentPersistenceHandle,
     overrides?: Partial<AgentSessionConfig>,
     launchContext?: AgentLaunchContext,
+    options?: AgentResumeSessionOptions & CachedHistoryResumeOptions,
   ): Promise<AgentSession> {
     const metadata = coerceSessionMetadata(handle.metadata);
     const merged: Partial<AgentSessionConfig> = { ...metadata, ...overrides };
@@ -1590,7 +1603,10 @@ export class ClaudeAgentClient implements AgentClient {
       resolveBinary: this.resolveBinary,
       rewindSdk: this.rewindSdk,
     });
-    if (handle.sessionId) {
+    if (handle.sessionId && options?.historyCached) {
+      // The timeline cache already holds this transcript; parse it only once a turn needs it.
+      session.deferPersistedHistory(handle.sessionId);
+    } else if (handle.sessionId) {
       await session.loadPersistedHistory(handle.sessionId);
     }
     return session;
@@ -2136,6 +2152,8 @@ class ClaudeAgentSession implements AgentSession {
     { type: "provider_subagent" }
   >[] = [];
   private historyPending = false;
+  /** A resume whose history the timeline cache holds: loaded on first need, at most once. */
+  private deferredHistory: { sessionId: string; load: Promise<void> | null } | null = null;
   private turnState: TurnState = "idle";
   private nextTurnOrdinal = 1;
   private cancelCurrentTurn: (() => void) | null = null;
@@ -2418,6 +2436,7 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+    await this.loadDeferredHistory();
     if (
       !this.historyPending ||
       (this.persistedHistory.length === 0 && this.persistedProviderSubagentEvents.length === 0)
@@ -2917,6 +2936,7 @@ class ClaudeAgentSession implements AgentSession {
       };
     }
 
+    await this.loadDeferredHistory();
     const candidates = this.getRewindCandidateUserMessageIds();
     if (candidates.length === 0) {
       return {
@@ -3006,6 +3026,7 @@ class ClaudeAgentSession implements AgentSession {
     this.emittedUserMessageIds.clear();
     this.rewindTurnAnchors.length = 0;
     this.taskState.reset();
+    this.deferredHistory = null;
     await this.loadPersistedHistory(sessionId);
     if (oldSessionId && oldSessionId !== sessionId) {
       this.dispatchEvents([
@@ -3037,6 +3058,7 @@ class ClaudeAgentSession implements AgentSession {
     this.emittedUserMessageIds.clear();
     this.rewindTurnAnchors.length = 0;
     this.taskState.reset();
+    this.deferredHistory = null;
   }
 
   private rememberUserMessageId(messageId: string | null | undefined): void {
@@ -3145,6 +3167,8 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   private async ensureQuery(): Promise<Query> {
+    // Task state and rewind targets come from the transcript, so a turn needs it loaded.
+    await this.loadDeferredHistory();
     if (this.query && !this.queryRestartNeeded) {
       return this.query;
     }
@@ -4938,6 +4962,20 @@ class ClaudeAgentSession implements AgentSession {
     }
   }
 
+  /** Called by resumeSession for a history the timeline cache holds; see loadDeferredHistory. */
+  deferPersistedHistory(sessionId: string): void {
+    this.deferredHistory = { sessionId, load: null };
+  }
+
+  private loadDeferredHistory(): Promise<void> {
+    const deferred = this.deferredHistory;
+    if (!deferred) return Promise.resolve();
+    deferred.load ??= this.loadPersistedHistory(deferred.sessionId).finally(() => {
+      if (this.deferredHistory === deferred) this.deferredHistory = null;
+    });
+    return deferred.load;
+  }
+
   /** Called by resumeSession before the session is handed out, and by rewind. */
   async loadPersistedHistory(sessionId: string): Promise<void> {
     try {
@@ -5148,26 +5186,7 @@ class ClaudeAgentSession implements AgentSession {
   private resolveHistoryPath(sessionId: string): string | null {
     const cwd = this.config.cwd;
     if (!cwd) return null;
-    const configDir = claudeConfigDir(this.buildSdkEnv());
-    const candidates = [cwd];
-    try {
-      const realCwd = fs.realpathSync(cwd);
-      if (realCwd !== cwd) {
-        candidates.push(realCwd);
-      }
-    } catch {
-      // Fall back to the configured cwd when the path has already disappeared.
-    }
-    for (const candidate of candidates) {
-      const historyPath = path.join(
-        claudeProjectDirSync(candidate, { configDir }),
-        `${sessionId}.jsonl`,
-      );
-      if (fs.existsSync(historyPath)) {
-        return historyPath;
-      }
-    }
-    return path.join(claudeProjectDirSync(cwd, { configDir }), `${sessionId}.jsonl`);
+    return resolveClaudeHistoryPath(cwd, sessionId, claudeConfigDir(this.buildSdkEnv()));
   }
 
   private convertHistoryEntry(entry: ClaudeHistoryEntry): AgentTimelineItem[] {
@@ -5911,6 +5930,61 @@ interface ClaudeSidechainHistory {
 }
 
 const CLAUDE_SUBAGENT_META_FILE = /^agent-(.+)\.meta\.json$/;
+
+function resolveClaudeHistoryPath(cwd: string, sessionId: string, configDir: string): string {
+  const candidates = [cwd];
+  try {
+    const realCwd = fs.realpathSync(cwd);
+    if (realCwd !== cwd) {
+      candidates.push(realCwd);
+    }
+  } catch {
+    // Fall back to the configured cwd when the path has already disappeared.
+  }
+  for (const candidate of candidates) {
+    const historyPath = path.join(
+      claudeProjectDirSync(candidate, { configDir }),
+      `${sessionId}.jsonl`,
+    );
+    if (fs.existsSync(historyPath)) {
+      return historyPath;
+    }
+  }
+  return path.join(claudeProjectDirSync(cwd, { configDir }), `${sessionId}.jsonl`);
+}
+
+/**
+ * Path, size, and mtime of the transcript and of each subagent transcript, from stat calls and
+ * directory listings only. Null when the transcript is missing or a stat fails.
+ */
+async function claudeTranscriptFingerprint(historyPath: string): Promise<string | null> {
+  try {
+    const parent = await fsPromises.stat(historyPath);
+    const parts = [`${historyPath}\t${parent.size}\t${parent.mtimeMs}`];
+    const sidechainDirectory = path.join(
+      path.dirname(historyPath),
+      path.basename(historyPath, ".jsonl"),
+      "subagents",
+    );
+    const directories = fs.existsSync(sidechainDirectory) ? [sidechainDirectory] : [];
+    while (directories.length > 0) {
+      const directory = directories.pop();
+      if (!directory) continue;
+      for (const entry of await fsPromises.readdir(directory, { withFileTypes: true })) {
+        const entryPath = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+          directories.push(entryPath);
+        } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+          const file = await fsPromises.stat(entryPath);
+          parts.push(`${entryPath}\t${file.size}\t${file.mtimeMs}`);
+        }
+      }
+    }
+    return createHash("sha256").update(parts.sort().join("\n")).digest("hex");
+  } catch {
+    return null;
+  }
+}
 
 async function readClaudeSidechainHistory(historyPath: string): Promise<ClaudeSidechainHistory> {
   const sessionDirectory = path.join(

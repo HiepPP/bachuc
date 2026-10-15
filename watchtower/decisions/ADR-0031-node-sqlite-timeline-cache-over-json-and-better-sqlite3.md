@@ -1,6 +1,6 @@
 # ADR-0031 node:sqlite timeline cache over JSON files and better-sqlite3
 
-Status: accepted
+Status: superseded by ADR-0032
 Date: 2026-10-15
 Supersedes: -
 Scope: `packages/server/src/server/agent/sqlite-timeline-store.ts`, `packages/server/src/server/agent/agent-timeline-store-types.ts`, `packages/server/src/server/agent/agent-manager.ts`, `packages/server/src/server/agent/agent-loading.ts`, `packages/server/src/server/bootstrap.ts`, `package.json`, `packages/*/package.json`

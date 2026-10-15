@@ -5,12 +5,9 @@ import {
   describeBranchPill,
   describeChangesPill,
   describePrPill,
-  describeRefsPill,
-  describeRepoPill,
-  describeSyncPill,
   syncState,
 } from "../client/buttons";
-import { syncIcons } from "../client/sync-icon";
+import { branchIcons } from "../client/sync-icon";
 import type { BranchInfo } from "../shared/branch";
 
 const base: BranchInfo = {
@@ -77,59 +74,64 @@ test("PR pill is a one-click action, hidden without a pull request", () => {
   assert.equal(withPr.behavior.kind, "action");
 });
 
-test("repo pill shows the repository name and hides without a web remote", () => {
-  const open = async () => {};
-  assert.equal(describeRepoPill(base, open).visible, false);
-  const pill = describeRepoPill({ ...base, remoteUrl: "https://github.com/o/r" }, open);
-  assert.equal(pill.visible, true);
-  assert.equal(pill.label, "r");
-  assert.equal(pill.icon, "Github");
-  assert.equal(pill.title, "Open https://github.com/o/r");
+const noop = async () => {};
+const branchActions = { copy: noop, openRepo: noop, fetch: noop, refresh: noop };
+
+function menuItem(info: BranchInfo, id: string, actions = branchActions) {
+  const pill = describeBranchPill(info, actions);
+  if (pill.behavior.kind !== "menu") throw new Error("expected a menu");
+  const item = pill.behavior.items.find((entry) => entry.kind === "item" && entry.id === id);
+  if (item?.kind !== "item") throw new Error(`missing ${id} item`);
+  return item;
+}
+
+test("branch pill adds nonzero push and pull counts and tints its icon", () => {
+  const tracked = { ...base, upstream: "origin/feat/board-avatars" };
+  const pill = (info: BranchInfo) => describeBranchPill(info, branchActions);
+  const untracked = pill({ ...base, ahead: 4, behind: 4 });
+  assert.equal(untracked.label, "feat/board-avatars");
+  assert.equal(untracked.icon, "GitBranch");
+  const inSync = pill({ ...tracked, ahead: 0, behind: 0 });
+  assert.equal(inSync.label, "feat/board-avatars");
+  assert.equal(inSync.icon, branchIcons.synced);
+  const ahead = pill({ ...tracked, ahead: 2, behind: 0 });
+  assert.equal(ahead.label, "feat/board-avatars ↑2");
+  assert.equal(ahead.icon, branchIcons.ahead);
+  assert.equal(pill({ ...tracked, ahead: 0, behind: 1 }).label, "feat/board-avatars ↓1");
+  const both = pill({ ...tracked, ahead: 2, behind: 3 });
+  assert.equal(both.label, "feat/board-avatars ↑2 ↓3");
+  assert.equal(both.icon, branchIcons.behind);
 });
 
-test("sync pill shows commits to push and pull, hidden only without an upstream", async () => {
-  let fetched = 0;
-  const refresh = async () => {
-    fetched += 1;
+test("branch menu opens the origin repository, hidden without a web remote", async () => {
+  let opened = 0;
+  const actions = {
+    ...branchActions,
+    openRepo: async () => {
+      opened += 1;
+    },
   };
-  const tracked = { ...base, upstream: "origin/feat/board-avatars" };
-  assert.equal(describeSyncPill(base, refresh).visible, false);
-  const inSync = describeSyncPill({ ...tracked, ahead: 0, behind: 0 }, refresh);
-  assert.equal(inSync.visible, true);
-  assert.equal(inSync.label, "Synced");
-  assert.equal(inSync.icon, syncIcons.synced);
-  assert.equal(inSync.title, "In sync vs origin/feat/board-avatars · click to fetch");
-  const ahead = describeSyncPill({ ...tracked, ahead: 2, behind: 0 }, refresh);
-  assert.equal(ahead.visible, true);
-  assert.equal(ahead.label, "↑2 | ↓0");
-  assert.equal(ahead.icon, syncIcons.ahead);
-  assert.equal(ahead.title, "2 to push vs origin/feat/board-avatars · click to fetch");
-  const both = describeSyncPill({ ...tracked, ahead: 2, behind: 3 }, refresh);
-  assert.equal(both.label, "↑2 | ↓3");
-  assert.equal(both.icon, syncIcons.behind);
-  assert.equal(both.title, "2 to push, 3 to pull vs origin/feat/board-avatars · click to fetch");
-  assert.equal(describeSyncPill({ ...tracked, ahead: 0, behind: 1 }, refresh).label, "↑0 | ↓1");
-  assert.equal(both.behavior.kind, "action");
-  if (both.behavior.kind === "action") await both.behavior.onPress();
-  assert.equal(fetched, 1);
+  assert.equal(menuItem(base, "open-repo").visible, false);
+  const github = menuItem({ ...base, remoteUrl: "https://github.com/o/r" }, "open-repo", actions);
+  assert.equal(github.visible, true);
+  assert.equal(github.title, "Open r on GitHub");
+  assert.equal(github.icon, "Github");
+  if (github.behavior.kind === "action") await github.behavior.onPress();
+  assert.equal(opened, 1);
+  const gitlab = menuItem({ ...base, remoteUrl: "https://gitlab.com/o/r" }, "open-repo");
+  assert.equal(gitlab.title, "Open r");
+  assert.equal(gitlab.icon, "Globe");
 });
 
 test("branch menu offers Fetch only when the branch has an upstream", async () => {
   let fetched = 0;
   const actions = {
-    copy: async () => {},
+    ...branchActions,
     fetch: async () => {
       fetched += 1;
     },
-    refresh: async () => {},
   };
-  const fetchItem = (info: BranchInfo) => {
-    const pill = describeBranchPill(info, actions);
-    if (pill.behavior.kind !== "menu") throw new Error("expected a menu");
-    const item = pill.behavior.items.find((entry) => entry.kind === "item" && entry.id === "fetch");
-    if (item?.kind !== "item") throw new Error("missing Fetch item");
-    return item;
-  };
+  const fetchItem = (info: BranchInfo) => menuItem(info, "fetch", actions);
   assert.equal(fetchItem(base).visible, false);
   const tracked = fetchItem({ ...base, upstream: "origin/feat/board-avatars" });
   assert.equal(tracked.visible, true);
@@ -143,24 +145,6 @@ test("sync state puts pulling first", () => {
   assert.equal(syncState(3, 0), "ahead");
   assert.equal(syncState(0, 1), "behind");
   assert.equal(syncState(3, 1), "behind");
-});
-
-test("refs menu item ids satisfy the host button id rule", () => {
-  const refs = [
-    { kind: "pr" as const, value: "42" },
-    { kind: "commit" as const, value: "fad9d70" },
-    { kind: "branch" as const, value: "feat/x" },
-  ];
-  const pill = describeRefsPill(
-    { ...base, remoteUrl: "https://github.com/o/r" },
-    refs,
-    async () => {},
-  );
-  assert.equal(pill.behavior.kind, "menu");
-  if (pill.behavior.kind !== "menu") return;
-  const ids = pill.behavior.items.map((item) => item.id);
-  for (const id of ids) assert.match(id, /^[a-z][a-z0-9-]*$/);
-  assert.equal(new Set(ids).size, refs.length);
 });
 
 test("changes pill shows file and line counts only when the work tree is dirty", () => {

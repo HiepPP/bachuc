@@ -1,4 +1,11 @@
-import type { ReplicaHostRows, ReplicaRow, ReplicaRowChanges, ReplicaRowStore } from "./row-store";
+import type {
+  ReplicaHostStats,
+  ReplicaRow,
+  ReplicaRowChanges,
+  ReplicaRowKey,
+  ReplicaRowStore,
+} from "./row-store";
+import { replicaPayloadBytes } from "./row-store-schema";
 
 export type SqliteValue = string | number | null;
 
@@ -19,6 +26,8 @@ const CREATE_ROWS_SQL = `
     kind TEXT NOT NULL CHECK (kind IN ('agent', 'workspace', 'project', 'timeline', 'checkpoint')),
     id TEXT NOT NULL,
     payload TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    written_at INTEGER NOT NULL,
     PRIMARY KEY (server_id, kind, id)
   )
 `;
@@ -32,6 +41,12 @@ const CREATE_META_SQL = `
 
 interface StoredMeta {
   value: string;
+}
+
+interface StoredHostStats {
+  server_id: string;
+  bytes: number;
+  last_written_at: number;
 }
 
 interface StoredRow {
@@ -89,22 +104,35 @@ export function createSqliteReplicaRowStore(
     }
   }
 
-  async function readAll(): Promise<ReplicaHostRows[]> {
-    const storedRows = await getConnection().all<StoredRow>(
-      "SELECT server_id, kind, id, payload FROM rows ORDER BY server_id, kind, id",
+  async function readKeys(
+    serverId: string,
+    kinds: readonly ReplicaRow["kind"][],
+  ): Promise<ReplicaRowKey[]> {
+    if (kinds.length === 0) return [];
+    const storedKeys = await getConnection().all<Omit<StoredRow, "payload">>(
+      `SELECT server_id, kind, id FROM rows
+       WHERE server_id = ? AND kind IN (${kinds.map(() => "?").join(", ")})
+       ORDER BY kind, id`,
+      [serverId, ...kinds],
     );
-    const hosts = new Map<string, ReplicaRow[]>();
-    for (const storedRow of storedRows) {
-      const rows = hosts.get(storedRow.server_id) ?? [];
-      rows.push({
-        serverId: storedRow.server_id,
-        kind: storedRow.kind,
-        id: storedRow.id,
-        payload: storedRow.payload,
-      });
-      hosts.set(storedRow.server_id, rows);
-    }
-    return Array.from(hosts, ([serverId, rows]) => ({ serverId, rows }));
+    return storedKeys.map((key) => ({ serverId: key.server_id, kind: key.kind, id: key.id }));
+  }
+
+  async function readHostStats(serverIds?: readonly string[]): Promise<ReplicaHostStats[]> {
+    if (serverIds?.length === 0) return [];
+    const hostClause = serverIds
+      ? ` WHERE server_id IN (${serverIds.map(() => "?").join(", ")})`
+      : "";
+    const stats = await getConnection().all<StoredHostStats>(
+      `SELECT server_id, SUM(bytes) AS bytes, MAX(written_at) AS last_written_at
+       FROM rows${hostClause} GROUP BY server_id ORDER BY server_id`,
+      serverIds ? [...serverIds] : [],
+    );
+    return stats.map((host) => ({
+      serverId: host.server_id,
+      bytes: host.bytes,
+      lastWrittenAt: host.last_written_at,
+    }));
   }
 
   async function read(
@@ -138,11 +166,21 @@ export function createSqliteReplicaRowStore(
           key.id,
         ]);
       }
+      const writtenAt = Date.now();
       for (const row of changes.upserts) {
         await transaction.run(
-          `INSERT INTO rows (server_id, kind, id, payload) VALUES (?, ?, ?, ?)
-           ON CONFLICT (server_id, kind, id) DO UPDATE SET payload = excluded.payload`,
-          [row.serverId, row.kind, row.id, row.payload],
+          `INSERT INTO rows (server_id, kind, id, payload, bytes, written_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (server_id, kind, id) DO UPDATE SET
+             payload = excluded.payload, bytes = excluded.bytes, written_at = excluded.written_at`,
+          [
+            row.serverId,
+            row.kind,
+            row.id,
+            row.payload,
+            replicaPayloadBytes(row.payload),
+            writtenAt,
+          ],
         );
       }
     });
@@ -156,9 +194,10 @@ export function createSqliteReplicaRowStore(
     if (oldServerId === newServerId) return;
     await getConnection().transaction(async (transaction) => {
       await transaction.run(
-        `INSERT INTO rows (server_id, kind, id, payload)
-         SELECT ?, kind, id, payload FROM rows WHERE server_id = ?
-         ON CONFLICT (server_id, kind, id) DO UPDATE SET payload = excluded.payload`,
+        `INSERT INTO rows (server_id, kind, id, payload, bytes, written_at)
+         SELECT ?, kind, id, payload, bytes, written_at FROM rows WHERE server_id = ?
+         ON CONFLICT (server_id, kind, id) DO UPDATE SET
+           payload = excluded.payload, bytes = excluded.bytes, written_at = excluded.written_at`,
         [newServerId, oldServerId],
       );
       await transaction.run("DELETE FROM rows WHERE server_id = ?", [oldServerId]);
@@ -169,5 +208,5 @@ export function createSqliteReplicaRowStore(
     await getConnection().run("DELETE FROM rows");
   }
 
-  return { open, read, readAll, apply, deleteHost, renameHost, clear };
+  return { open, read, readKeys, readHostStats, apply, deleteHost, renameHost, clear };
 }

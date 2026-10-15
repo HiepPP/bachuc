@@ -61,14 +61,23 @@ import type { AgentOwner } from "./agent-owner.js";
 import {
   InMemoryAgentTimelineStore,
   type SeedAgentTimelineOptions,
+  type TimelineHistoryReader,
 } from "./agent-timeline-store.js";
 import type {
   AgentTimelineFetchOptions,
   AgentTimelineFetchResult,
   AgentTimelineRow,
+  CachedHistoryResumeOptions,
+  DurableTimelineSearchCandidate,
   DurableTimelineSnapshot,
   DurableTimelineStore,
+  TranscriptFingerprintSource,
 } from "./agent-timeline-store-types.js";
+import {
+  searchCandidates,
+  searchTimeline as searchTimelineRows,
+  type SearchResult,
+} from "./chat-search/index.js";
 import {
   AGENT_STREAM_COALESCE_DEFAULT_WINDOW_MS,
   AgentStreamCoalescer,
@@ -107,6 +116,8 @@ const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 /** Non-live timelines kept in memory; older complete ones reload from the cache on the next read. */
 const COLD_TIMELINE_CAP = 64;
 const TIMELINE_BACKFILL_CONCURRENCY = 2;
+/** Candidate messages per SQL read during a search; each read blocks the event loop. */
+const SEARCH_CANDIDATE_PAGE = 500;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
 const IMPORTABLE_SESSION_LIST_TIMEOUT_MS = 90_000;
 const TIMELINE_REPLAY_SLICE_MS = 10;
@@ -203,6 +214,38 @@ interface TimeoutOptions {
   operation: Promise<void>;
   timeoutMs: number;
   onLateError?: (error: unknown) => void;
+}
+
+function hasTranscriptFingerprint(
+  client: AgentClient,
+): client is AgentClient & TranscriptFingerprintSource {
+  return (
+    typeof (client as Partial<TranscriptFingerprintSource>).getTranscriptFingerprint === "function"
+  );
+}
+
+type WindowTimelineStore = DurableTimelineStore &
+  Required<Pick<DurableTimelineStore, "readRowWindow" | "readIdentityRows" | "listPromptRows">>;
+
+function isWindowTimelineStore(store: DurableTimelineStore): store is WindowTimelineStore {
+  return (
+    store.readRowWindow !== undefined &&
+    store.readIdentityRows !== undefined &&
+    store.listPromptRows !== undefined
+  );
+}
+
+function* pagedSearchCandidates(
+  firstPage: readonly DurableTimelineSearchCandidate[],
+  nextPage: (afterSeq: number) => readonly DurableTimelineSearchCandidate[],
+): Generator<DurableTimelineSearchCandidate> {
+  let page = firstPage;
+  for (;;) {
+    yield* page;
+    const last = page.at(-1);
+    if (!last || page.length < SEARCH_CANDIDATE_PAGE) return;
+    page = nextPage(last.seq);
+  }
 }
 
 function formatProviderList(providers: readonly string[]): string {
@@ -352,6 +395,8 @@ export interface AgentManagerOptions {
   onAgentAttention?: AgentAttentionCallback;
   onWorkspaceStateMayHaveChanged?: (params: { cwd: string }) => void;
   durableTimelineStore?: DurableTimelineStore;
+  /** Source rows a timeline keeps in memory once the cache stores older ones; for tests. */
+  timelineTailRows?: number;
   terminalManager?: TerminalManager | null;
   mcpBaseUrl?: string;
   mcpAuthToken?: string;
@@ -752,7 +797,7 @@ export class AgentManager {
   private readonly providerEnabled = new Map<AgentProvider, boolean>();
   private readonly providerDefinitions = new Map<AgentProvider, ProviderEnabledFlag>();
   private readonly agents = new Map<string, LiveManagedAgent>();
-  private readonly timelineStore = new InMemoryAgentTimelineStore();
+  private readonly timelineStore: InMemoryAgentTimelineStore;
   private readonly providerSubagents = new ProviderSubagentStore();
   private readonly agentsAwaitingInitialSnapshotPersist = new Set<string>();
   private readonly sessionEventTails = new Map<string, Promise<void>>();
@@ -765,6 +810,10 @@ export class AgentManager {
   private readonly durableTimelineStore?: DurableTimelineStore;
   /** Agents whose cache entry missed a write; never served from the cache until a reset lands. */
   private readonly untrustedDurableTimelines = new Set<string>();
+  /** Trimmed timelines whose cache failed: a restore from provider history is queued or running. */
+  private readonly pendingTimelineRestores = new Set<string>();
+  /** Live agents whose restore waits for the current run to end. */
+  private readonly deferredTimelineRestores = new Set<string>();
   /** Agent ids whose timeline was read or closed, least recent first; drives cold eviction. */
   private readonly recentTimelineReads = new Set<string>();
   private activeTimelineBackfills = 0;
@@ -807,6 +856,8 @@ export class AgentManager {
     this.idFactory = options?.idFactory ?? (() => randomUUID());
     this.registry = options?.registry;
     this.durableTimelineStore = options?.durableTimelineStore;
+    this.timelineStore = new InMemoryAgentTimelineStore({ tailRows: options.timelineTailRows });
+    this.listenForTimelineFlushes();
     this.onAgentAttention = options?.onAgentAttention;
     this.onWorkspaceStateMayHaveChanged = options?.onWorkspaceStateMayHaveChanged;
     this.mcpBaseUrl = options?.mcpBaseUrl ?? null;
@@ -1229,36 +1280,150 @@ export class AgentManager {
     return this.timelineStore.getRows(id);
   }
 
+  /** User message rows for the prompt list: from the timeline cache when it serves, else memory. */
+  async getTimelinePromptRows(id: string): Promise<AgentTimelineRow[]> {
+    const store = this.cacheServingTimeline(id);
+    if (store?.listPromptRows) {
+      try {
+        const rows = store.listPromptRows(id);
+        if (rows) return rows;
+      } catch (error) {
+        this.logger.warn({ err: error, agentId: id }, "Timeline cache prompt read failed");
+      }
+    }
+    const rows = await this.getTimelineRows(id);
+    return rows.filter((row) => row.item.type === "user_message");
+  }
+
+  /**
+   * Searches user and assistant messages. When the timeline cache serves the agent, FTS5 picks
+   * the candidate messages; otherwise every message in memory is counted.
+   */
+  async searchTimeline(
+    id: string,
+    input: { query: string; cursor?: number },
+  ): Promise<SearchResult> {
+    const store = this.cacheServingTimeline(id);
+    const findCandidates = store?.findSearchCandidates?.bind(store);
+    if (findCandidates) {
+      try {
+        const firstPage = findCandidates(id, input.query, input.cursor ?? 0, SEARCH_CANDIDATE_PAGE);
+        if (firstPage) {
+          return await searchCandidates({
+            candidates: pagedSearchCandidates(firstPage, (afterSeq) => {
+              const page = findCandidates(id, input.query, afterSeq, SEARCH_CANDIDATE_PAGE);
+              if (!page) throw new Error(`Timeline cache stopped serving agent '${id}'`);
+              return page;
+            }),
+            query: input.query,
+            cursor: input.cursor,
+            foldDiacritics: true,
+          });
+        }
+      } catch (error) {
+        this.logger.warn({ err: error, agentId: id }, "Timeline cache search failed");
+      }
+    }
+    return searchTimelineRows({ rows: await this.getTimelineRows(id), ...input });
+  }
+
+  /**
+   * The cache store when it holds this agent's loaded timeline: same epoch, and no write missed.
+   * Every timeline load either restores a complete entry or resets the entry under its epoch.
+   */
+  private cacheServingTimeline(agentId: string): DurableTimelineStore | null {
+    const store = this.durableTimelineStore;
+    if (!store || this.untrustedDurableTimelines.has(agentId)) return null;
+    if (!this.timelineStore.has(agentId)) return null;
+    try {
+      return store.getMeta(agentId)?.epoch === this.timelineStore.getEpoch(agentId) ? store : null;
+    } catch (error) {
+      this.distrustDurableTimeline(agentId, error);
+      return null;
+    }
+  }
+
+  /** The cache store when it serves this agent and can read row windows, for tail trims. */
+  private windowStoreFor(agentId: string): WindowTimelineStore | null {
+    const store = this.cacheServingTimeline(agentId);
+    return store && isWindowTimelineStore(store) ? store : null;
+  }
+
+  private listenForTimelineFlushes(): void {
+    this.durableTimelineStore?.setFlushListener?.((agentId, maxSeq) =>
+      this.trimFlushedTimeline(agentId, maxSeq),
+    );
+  }
+
+  /** Called after each cache flush: memory keeps only the tail of rows the cache holds. */
+  private trimFlushedTimeline(agentId: string, flushedThroughSeq: number): void {
+    if (!this.timelineStore.has(agentId) || !this.windowStoreFor(agentId)) return;
+    this.timelineStore.trimFlushed(agentId, flushedThroughSeq);
+  }
+
+  /** Reads pages past the in-memory tail. Throws when the cache stopped serving the agent. */
+  private timelineHistoryReader(agentId: string): TimelineHistoryReader {
+    let resolved: WindowTimelineStore | null = null;
+    const store = (): WindowTimelineStore => {
+      resolved ??= this.windowStoreFor(agentId);
+      if (!resolved) throw new Error(`Timeline cache cannot serve agent '${agentId}'`);
+      return resolved;
+    };
+    const served = <T>(value: T | null): T => {
+      if (value === null) throw new Error(`Timeline cache cannot serve agent '${agentId}'`);
+      return value;
+    };
+    return {
+      readRows: (fromSeq, toSeq) => served(store().readRowWindow(agentId, fromSeq, toSeq)),
+      readIdentityRows: (identities, beforeSeq) =>
+        served(store().readIdentityRows(agentId, identities, beforeSeq)),
+      latestPromptSeq: () => served(store().listPromptRows(agentId)).at(-1)?.seq ?? null,
+    };
+  }
+
   fetchTimeline(id: string, options?: AgentTimelineFetchOptions): AgentTimelineFetchResult {
     this.requireAgent(id);
-    return this.timelineStore.fetch(id, options);
+    return this.timelineStore.fetch(id, options, this.timelineHistoryReader(id));
   }
 
   /** Fetches a timeline without a live agent. Call loadTimelineForRead or a backfill first. */
   fetchTimelineForRead(id: string, options?: AgentTimelineFetchOptions): AgentTimelineFetchResult {
     this.requireLoadedTimeline(id);
     this.markTimelineRead(id);
-    return this.timelineStore.fetch(id, options);
+    return this.timelineStore.fetch(id, options, this.timelineHistoryReader(id));
   }
 
   /**
    * Makes a timeline readable without resuming its agent. `missing` means neither memory nor a
    * complete cache entry holds it; the caller backfills from provider history.
    */
-  loadTimelineForRead(agentId: string): Promise<TimelineReadSource> {
-    if (this.hasReadableTimeline(agentId)) {
+  async loadTimelineForRead(agentId: string): Promise<TimelineReadSource> {
+    const servesFromMemory =
+      this.hasReadableTimeline(agentId) &&
+      (this.agents.has(agentId) || (await this.cacheMatchesTranscript(agentId)));
+    if (servesFromMemory && this.hasReadableTimeline(agentId)) {
       this.markTimelineRead(agentId);
-      return Promise.resolve("memory");
+      return "memory";
     }
     return this.runLifecycleMutation(agentId, () => this.loadTimelineForReadUnlocked(agentId));
   }
 
   private async loadTimelineForReadUnlocked(agentId: string): Promise<TimelineReadSource> {
+    if (this.agents.has(agentId) && this.hasReadableTimeline(agentId)) {
+      this.markTimelineRead(agentId);
+      return "memory";
+    }
+    if (!this.hasReadableTimeline(agentId) && !this.isDurableTimelineComplete(agentId)) {
+      return "missing";
+    }
+    if (!(await this.cacheMatchesTranscript(agentId))) {
+      this.dropStaleTimeline(agentId);
+      return "missing";
+    }
     if (this.hasReadableTimeline(agentId)) {
       this.markTimelineRead(agentId);
       return "memory";
     }
-    if (!this.isDurableTimelineComplete(agentId)) return "missing";
     const snapshot = await this.loadDurableTimeline(agentId);
     if (!snapshot?.complete) return "missing";
     // A create outside the lifecycle lane may have registered the agent during the load.
@@ -1305,6 +1470,8 @@ export class AgentManager {
       } as AgentSessionConfig),
       { purpose: "history", resolveDefaultModel: false },
     );
+    // Taken before the read: a write during the read then shows as a change on the next open.
+    const transcriptFingerprint = await this.transcriptFingerprintFor(handle, config);
     const session = await client.resumeSession(handle, config, undefined, { purpose: "history" });
     const now = new Date().toISOString();
     const rows: AgentTimelineRow[] = [];
@@ -1340,11 +1507,83 @@ export class AgentManager {
         store.reset(agentId, epoch);
         store.append(agentId, rows);
         store.setProviderSubagents(agentId, this.providerSubagents.list(agentId));
-        store.setComplete(agentId, true);
+        store.setComplete(agentId, true, transcriptFingerprint);
       },
       { replacesEntry: true },
     );
     this.markTimelineRead(agentId);
+  }
+
+  /**
+   * The provider's stat-only transcript fingerprint. Undefined when the provider gives none;
+   * null when it gives one but cannot read it now.
+   */
+  private async transcriptFingerprintFor(
+    handle: AgentPersistenceHandle | null | undefined,
+    overrides: Partial<AgentSessionConfig>,
+  ): Promise<string | null | undefined> {
+    if (!handle) return undefined;
+    const client = this.clients.get(handle.provider);
+    if (!client || !hasTranscriptFingerprint(client)) return undefined;
+    try {
+      return await client.getTranscriptFingerprint(handle, overrides);
+    } catch (error) {
+      this.logger.warn({ err: error, provider: handle.provider }, "Transcript fingerprint failed");
+      return null;
+    }
+  }
+
+  /**
+   * False when a complete cache entry may be stale: the provider transcript changed since the
+   * entry was written, or its fingerprint cannot be read. True for providers without one.
+   */
+  private async cacheMatchesTranscript(agentId: string): Promise<boolean> {
+    const store = this.durableTimelineStore;
+    const record = store ? await this.registry?.get(agentId) : null;
+    if (!store || !record) return true;
+    const handle = toAgentPersistenceHandle(this.clients.keys(), record.persistence);
+    const current = await this.transcriptFingerprintFor(handle, buildConfigOverrides(record));
+    if (current === undefined) return true;
+    try {
+      return current !== null && current === store.getMeta(agentId)?.transcriptFingerprint;
+    } catch (error) {
+      this.distrustDurableTimeline(agentId, error);
+      return false;
+    }
+  }
+
+  /**
+   * True when a complete cache entry holds the timeline and the provider transcript is unchanged,
+   * so the provider may skip its history parse. A changed or unreadable transcript drops the
+   * cached copy, and registration rebuilds the timeline from provider history.
+   */
+  private async resumeHistoryCached(
+    agentId: string,
+    handle: AgentPersistenceHandle,
+    config: Partial<AgentSessionConfig>,
+  ): Promise<boolean> {
+    if (this.agents.has(agentId) || !this.isDurableTimelineComplete(agentId)) return false;
+    const current = await this.transcriptFingerprintFor(handle, config);
+    if (current === undefined) return false;
+    let stored: string | undefined;
+    try {
+      stored = this.durableTimelineStore?.getMeta(agentId)?.transcriptFingerprint;
+    } catch (error) {
+      this.distrustDurableTimeline(agentId, error);
+      return false;
+    }
+    if (current !== null && current === stored) return true;
+    this.dropStaleTimeline(agentId);
+    return false;
+  }
+
+  /** The transcript changed outside Paseo: the cached copy stops serving until a backfill. */
+  private dropStaleTimeline(agentId: string): void {
+    this.writeDurableTimeline(agentId, (store) => store.setComplete(agentId, false));
+    if (this.agents.has(agentId) || this.pendingTimelineReplays.has(agentId)) return;
+    this.timelineStore.delete(agentId);
+    this.providerSubagents.deleteParent(agentId);
+    this.recentTimelineReads.delete(agentId);
   }
 
   private restoreDurableTimeline(agentId: string, snapshot: DurableTimelineSnapshot): void {
@@ -1354,6 +1593,8 @@ export class AgentManager {
       nextSeq: snapshot.nextSeq,
     });
     this.providerSubagents.restore(agentId, snapshot.providerSubagents);
+    // The cache holds every restored row, so memory keeps only the tail.
+    this.trimFlushedTimeline(agentId, snapshot.nextSeq - 1);
   }
 
   /**
@@ -1414,6 +1655,7 @@ export class AgentManager {
         { err: error, agentId },
         "Timeline cache failed; the agent's cached timeline is not trusted",
       );
+      this.scheduleTimelineRestore(agentId);
     }
     try {
       // Keeps the next daemon from trusting the entry. The in-memory mark above already covers
@@ -1422,6 +1664,97 @@ export class AgentManager {
     } catch {
       // Already logged for this agent.
     }
+  }
+
+  /**
+   * A trimmed timeline holds only its tail once the cache stops serving it, so prompt lists,
+   * search, and older pages miss rows. Queues a rebuild from provider history. Callers are
+   * synchronous flush and read paths, so the rebuild starts after they return.
+   */
+  private scheduleTimelineRestore(agentId: string): void {
+    if (this.pendingTimelineRestores.has(agentId)) return;
+    try {
+      if (!this.isTimelineTrimmed(agentId)) return;
+    } catch (error) {
+      this.logger.warn({ err: error, agentId }, "Timeline restore check failed");
+      return;
+    }
+    this.pendingTimelineRestores.add(agentId);
+    this.trackBackgroundTask(Promise.resolve().then(() => this.restoreTrimmedTimeline(agentId)));
+  }
+
+  /** True when some source row of the loaded timeline sits only in the cache. */
+  private isTimelineTrimmed(agentId: string): boolean {
+    if (!this.timelineStore.has(agentId)) return false;
+    const { window } = this.timelineStore.fetch(agentId, { direction: "tail", limit: 1 });
+    if (window.minSeq === 0) return false;
+    let heldRows = 0;
+    for (const row of this.timelineStore.getRows(agentId)) {
+      for (const range of row.sourceSeqRanges) heldRows += range.endSeq - range.startSeq + 1;
+    }
+    return heldRows < window.maxSeq - window.minSeq + 1;
+  }
+
+  /**
+   * Rebuilds a trimmed timeline whose cache failed. A stored agent takes the read backfill; a
+   * live agent takes the forced hydrate that rewind uses, only between runs. A failure keeps the
+   * tail serving, as before the restore.
+   */
+  private async restoreTrimmedTimeline(agentId: string): Promise<void> {
+    try {
+      if (this.agents.has(agentId)) {
+        await this.runLifecycleMutation(agentId, () => this.restoreLiveTimelineUnlocked(agentId));
+        return;
+      }
+      if (!this.needsTimelineRestore(agentId)) return;
+      const record = await this.registry?.get(agentId);
+      if (!record) return;
+      await this.backfillTimelineFromProvider(agentId, record);
+    } catch (error) {
+      this.logger.warn({ err: error, agentId }, "Timeline restore from provider history failed");
+    } finally {
+      this.pendingTimelineRestores.delete(agentId);
+    }
+  }
+
+  private async restoreLiveTimelineUnlocked(agentId: string): Promise<void> {
+    if (!this.agents.has(agentId) || !this.needsTimelineRestore(agentId)) return;
+    // Replacing the timeline mid-run would drop or repeat the run's rows; emitState retries.
+    if (this.hasInFlightRun(agentId) || this.pendingTimelineReplays.has(agentId)) {
+      this.deferredTimelineRestores.add(agentId);
+      return;
+    }
+    // The run lock keeps a new turn from starting while provider history is read.
+    const lock = this.runs.createPendingRun(agentId);
+    try {
+      await this.hydrateTimelineFromProvider(agentId, {
+        force: true,
+        broadcast: true,
+        broadcastTimeline: false,
+      });
+      this.dispatch({
+        type: "timeline_replacement",
+        agentId,
+        epoch: this.timelineStore.getEpoch(agentId),
+      });
+    } finally {
+      this.runs.settleForegroundRun(agentId, lock.token);
+    }
+  }
+
+  private needsTimelineRestore(agentId: string): boolean {
+    return this.untrustedDurableTimelines.has(agentId) && this.isTimelineTrimmed(agentId);
+  }
+
+  /**
+   * Called on each state change. The run record may clear just after the state that ends a run,
+   * so this checks only the lifecycle, and the restore re-checks the run inside the lane.
+   */
+  private resumeDeferredTimelineRestore(agent: ManagedAgent): void {
+    if (!this.deferredTimelineRestores.has(agent.id)) return;
+    if (agent.lifecycle === "running" || agent.activeForegroundTurnId) return;
+    this.deferredTimelineRestores.delete(agent.id);
+    this.scheduleTimelineRestore(agent.id);
   }
 
   private requireLoadedTimeline(agentId: string): void {
@@ -1690,11 +2023,21 @@ export class AgentManager {
       },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
+    const historyCached = await this.resumeHistoryCached(
+      resolvedAgentId,
+      handle,
+      providerLaunchConfig,
+    );
+    const sessionResumeOptions:
+      | (AgentResumeSessionOptions & CachedHistoryResumeOptions)
+      | undefined = historyCached
+      ? { ...currentResumeOptions, historyCached }
+      : currentResumeOptions;
     const session = await client.resumeSession(
       handle,
       providerLaunchConfig,
       launchContext,
-      currentResumeOptions,
+      sessionResumeOptions,
     );
     await this.requireExternalMcpSupport(session, storedConfig);
     return this.registerSession(session, storedConfig, resolvedAgentId, {
@@ -2016,10 +2359,14 @@ export class AgentManager {
       persistError = error;
     }
     if (persistError === undefined && !this.untrustedDurableTimelines.has(agentId)) {
+      // The closed session writes its transcript no more, so this fingerprint matches the cache.
+      const transcriptFingerprint = this.durableTimelineStore
+        ? await this.transcriptFingerprintFor(closedAgent.persistence, closedAgent.config)
+        : undefined;
       // The drained session can append nothing more, so the cache now holds the whole timeline.
       this.writeDurableTimeline(agentId, (store) => {
         store.setProviderSubagents(agentId, this.providerSubagents.list(agentId));
-        store.setComplete(agentId, true);
+        store.setComplete(agentId, true, transcriptFingerprint);
       });
     }
     this.markTimelineRead(agentId);
@@ -2741,7 +3088,9 @@ export class AgentManager {
         timestamp: row.timestamp,
       },
     );
-    await this.persistSnapshot(agent);
+    // Record writes coalesce for up to 250 ms; plugin appends and worktree setup steps must not
+    // wait for that. flush() still waits for the write.
+    this.enqueueBackgroundPersist(agent);
     return { seq: row.seq, epoch: this.timelineStore.getEpoch(agentId) };
   }
 
@@ -3501,14 +3850,14 @@ export class AgentManager {
 
   async rewind(agentId: string, messageId: string, mode: RewindMode): Promise<void> {
     const agent = this.requireSessionAgent(agentId);
-    const submittedRow = this.timelineStore
-      .getRows(agentId)
-      .find(
-        (row) =>
-          row.item.type === "user_message" &&
-          row.item.messageId === messageId &&
-          row.item.clientMessageId === messageId,
-      );
+    // A prompt older than the in-memory tail is read from the cache.
+    const isSubmittedRow = (row: AgentTimelineRow) =>
+      row.item.type === "user_message" &&
+      row.item.messageId === messageId &&
+      row.item.clientMessageId === messageId;
+    const submittedRow =
+      this.timelineStore.getRows(agentId).find(isSubmittedRow) ??
+      (await this.getTimelinePromptRows(agentId)).find(isSubmittedRow);
     if (submittedRow && !submittedRow.providerMessageId) {
       throw new Error("Cannot rewind before the provider acknowledges the submitted prompt");
     }
@@ -5389,6 +5738,7 @@ export class AgentManager {
       type: "agent_state",
       agent: { ...agent },
     });
+    this.resumeDeferredTimelineRestore(agent);
   }
 
   private syncFeaturesFromSession(agent: ManagedAgent): void {

@@ -12,7 +12,10 @@ import {
 } from "@/stores/session-store";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
-import { getSendingClientMessageIds } from "@/composer/submission/model";
+import {
+  getActiveMessageSubmissions,
+  getSendingClientMessageIds,
+} from "@/composer/submission/model";
 import {
   getInitDeferred,
   getInitKey,
@@ -321,6 +324,10 @@ export interface ViewedTimelineSyncPorts {
   onCatchUpEnded(agentId: string): void;
   reportError(error: unknown): void;
   schedule(task: () => void, delayMs: number): () => void;
+  /** Threads that hold stream items now. With `evictStream`, it turns on the recent-thread cap. */
+  listStreamAgentIds?(): string[];
+  /** Drops the stream items and cursors of one hidden thread. False keeps the thread. */
+  evictStream?(agentId: string): boolean;
 }
 
 export type ViewedTimelineStatus = "ready" | "pending" | "error" | "retrying";
@@ -350,7 +357,7 @@ export interface ViewedTimelineSync extends ViewedTimelineUiBridge {
 
 export type ViewedTimelineOwnerPorts = Omit<
   ViewedTimelineSyncPorts,
-  "prepare" | "replaceDemandedAgentIds" | "onCatchUpEnded"
+  "prepare" | "replaceDemandedAgentIds" | "onCatchUpEnded" | "listStreamAgentIds" | "evictStream"
 >;
 
 export interface ViewedTimelineOwner extends ViewedTimelineSync {
@@ -367,6 +374,8 @@ export function createViewedTimelineOwner(input: {
   ports: ViewedTimelineOwnerPorts;
 }): ViewedTimelineOwner {
   const forcedTailReplacements = new Set<string>();
+  // Evicted threads have no base, so their live events wait for the reopen catch-up instead.
+  const evictedAgentIds = new Set<string>();
   const sync = createViewedTimelineSync({
     ...input.ports,
     fetchLatestTail: async (agentId) => {
@@ -377,11 +386,31 @@ export function createViewedTimelineOwner(input: {
         forcedTailReplacements.delete(agentId);
       }
     },
-    prepare: (agentId) => input.replica.prepare(agentId),
+    prepare: (agentId) => {
+      evictedAgentIds.delete(agentId);
+      return input.replica.prepare(agentId);
+    },
     readCursor: (agentId) => input.replica.readCursor(agentId) ?? input.ports.readCursor(agentId),
     replaceDemandedAgentIds: input.replaceDemandedAgentIds,
     onCatchUpEnded: (agentId) =>
       useCreateFlowStore.getState().clearByAgent({ serverId: input.serverId, agentId }),
+    listStreamAgentIds: () => {
+      const session = useSessionStore.getState().sessions[input.serverId];
+      if (!session) return [];
+      return [...new Set([...session.agentStreamTail.keys(), ...session.agentStreamHead.keys()])];
+    },
+    evictStream: (agentId) => {
+      const session = useSessionStore.getState().sessions[input.serverId];
+      if (!session || session.focusedAgentId === agentId) return false;
+      if (getActiveMessageSubmissions(session.messageSubmissions.get(agentId)).length > 0) {
+        return false;
+      }
+      // Commit queued events first so the replica cache holds the newest rows for the reopen.
+      streamQueue.flushAgent(agentId);
+      useSessionStore.getState().evictAgentStream(input.serverId, agentId);
+      evictedAgentIds.add(agentId);
+      return true;
+    },
   });
   const streamQueue = createSessionAgentStreamReducerQueue({
     serverId: input.serverId,
@@ -401,9 +430,12 @@ export function createViewedTimelineOwner(input: {
         recoverGap: (agentId, cursor) => sync.recoverGap(agentId, cursor),
         drainQueuedAgentMessage: input.drainQueuedAgentMessage,
       });
-      if (accepted) input.replica.timelineUpdated(payload.agentId);
+      if (!accepted) return;
+      evictedAgentIds.delete(payload.agentId);
+      input.replica.timelineUpdated(payload.agentId);
     },
     enqueueStreamEvent(agentId, event) {
+      if (evictedAgentIds.has(agentId)) return;
       streamQueue.enqueue(agentId, event);
     },
     flushStreamAgent(agentId) {
@@ -420,6 +452,8 @@ const RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 30_000;
 // Bounds the reconnect wave of hidden open chats; each one can cost the daemon a backfill.
 const HIDDEN_CATCH_UP_CONCURRENCY = 2;
+// Threads per host that keep stream items in memory; older hidden ones reopen from the cache.
+export const RECENT_STREAM_LIMIT = 8;
 
 type CatchUpStatus = "running" | "complete" | "error";
 
@@ -521,6 +555,9 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   // Membership then survives hiding, workspace switches, backgrounding and reconnect;
   // only closing the tab or ending the session takes it out.
   let openedAgentIds: string[] = [];
+  // Most recently viewed first. Evicted threads skip catch-up until they are viewed again.
+  let recentAgentIds: string[] = [];
+  const evictedAgentIds = new Set<string>();
 
   const visibleAgentIds = () => normalizeAgentIds([...sources.values()].flat());
 
@@ -736,6 +773,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       ...acknowledged.filter((id) => !visible.includes(id)),
     ];
     for (const agentId of ordered) {
+      if (evictedAgentIds.has(agentId)) continue;
       const capped = cappedCatchUps.get(agentId);
       if (capped) {
         startCatchUp(agentId, capped);
@@ -860,6 +898,40 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     commitDesiredMembership(normalizeAgentIds([...openedAgentIds, ...visibleAgentIds()]));
   };
 
+  // A thread with a load or a fetch in flight stays; the next trim takes it.
+  const trimRecentStreams = () => {
+    if (!ports.listStreamAgentIds || !ports.evictStream) return;
+    const held = ports.listStreamAgentIds();
+    const heldIds = new Set(held);
+    const visible = visibleAgentIds();
+    // A visible thread still loading takes its slot now, so the cap holds once its items land.
+    let excess = new Set([...held, ...visible]).size - RECENT_STREAM_LIMIT;
+    if (excess <= 0) return;
+    const oldestFirst = [
+      ...held.filter((agentId) => !recentAgentIds.includes(agentId)),
+      ...recentAgentIds.filter((agentId) => heldIds.has(agentId)).toReversed(),
+    ];
+    let statusChanged = false;
+    for (const agentId of oldestFirst) {
+      if (excess <= 0) break;
+      if (visible.includes(agentId) || cacheLoads.has(agentId)) continue;
+      if (catchUps.get(agentId)?.status === "running") continue;
+      if (!ports.evictStream(agentId)) continue;
+      excess -= 1;
+      evictedAgentIds.add(agentId);
+      cancelCatchUp(agentId);
+      loadedCache.delete(agentId);
+      if (visibilityCatchUpErrors.delete(agentId)) statusChanged = true;
+      if (manualRetries.delete(agentId)) statusChanged = true;
+      if (isDesired(agentId) && !visibilityCatchUpPending.has(agentId)) {
+        visibilityCatchUpPending.add(agentId);
+        statusChanged = true;
+      }
+    }
+    recentAgentIds = recentAgentIds.filter((agentId) => !evictedAgentIds.has(agentId));
+    if (statusChanged) notifyListeners();
+  };
+
   return {
     subscribe(listener) {
       listeners.add(listener);
@@ -884,11 +956,24 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     },
     replaceVisibleAgentIds(sourceId, agentIds) {
       const normalized = normalizeAgentIds(agentIds);
+      const previousVisible = visibleAgentIds();
       if (normalized.length === 0) sources.delete(sourceId);
       else sources.set(sourceId, normalized);
+      const visible = visibleAgentIds();
+      const entering = visible.filter((agentId) => !previousVisible.includes(agentId));
+      if (entering.length > 0) {
+        recentAgentIds = [
+          ...entering,
+          ...recentAgentIds.filter((agentId) => !entering.includes(agentId)),
+        ];
+      }
+      for (const agentId of visible) evictedAgentIds.delete(agentId);
       rememberOpenedAgentIds(normalized);
       publishVisibleMembership();
+      // An evicted thread repaints from the cache even before its catch-up can run.
+      for (const agentId of entering) ensureCacheLoaded(agentId);
       startAcknowledgedCatchUps();
+      if (previousVisible.some((agentId) => !visible.includes(agentId))) trimRecentStreams();
     },
     setActive(nextActive) {
       if (active === nextActive) return;
@@ -924,7 +1009,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       void reconcileMembership();
     },
     recoverGap(agentId, cursor) {
-      if (!isDesired(agentId)) return;
+      if (!isDesired(agentId) || evictedAgentIds.has(agentId)) return;
       capExemptAgentIds.add(agentId);
       startCatchUp(agentId, {
         request: planTimelineCatchUpAfter({ epoch: cursor.epoch, seq: cursor.endSeq }),
@@ -946,6 +1031,8 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       ports.replaceDemandedAgentIds([]);
       acknowledged = [];
       openedAgentIds = [];
+      recentAgentIds = [];
+      evictedAgentIds.clear();
       loadedCache.clear();
       cacheLoads.clear();
       cappedCatchUps.clear();

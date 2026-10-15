@@ -17,9 +17,11 @@ export interface ReplicaRowChanges {
   deletes: ReplicaRowKey[];
 }
 
-export interface ReplicaHostRows {
+/** Stored payload bytes and the last upsert time of one host. Hosts with no rows are absent. */
+export interface ReplicaHostStats {
   serverId: string;
-  rows: ReplicaRow[];
+  bytes: number;
+  lastWrittenAt: number;
 }
 
 export interface ReplicaRowStore {
@@ -29,7 +31,10 @@ export interface ReplicaRowStore {
     kinds: readonly ReplicaRowKind[],
     ids?: readonly string[],
   ): Promise<ReplicaRow[]>;
-  readAll(): Promise<ReplicaHostRows[]>;
+  /** Keys only; never reads payloads. */
+  readKeys(serverId: string, kinds: readonly ReplicaRowKind[]): Promise<ReplicaRowKey[]>;
+  /** Per-host totals kept in the same transaction as the row writes. Omit the ids for all hosts. */
+  readHostStats(serverIds?: readonly string[]): Promise<ReplicaHostStats[]>;
   apply(changes: ReplicaRowChanges): Promise<void>;
   deleteHost(serverId: string): Promise<void>;
   renameHost(oldServerId: string, newServerId: string): Promise<void>;

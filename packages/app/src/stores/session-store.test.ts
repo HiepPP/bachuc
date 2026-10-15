@@ -267,6 +267,54 @@ describe("agent timeline state", () => {
     });
   });
 
+  it("evicts one thread's stream items and cursors and keeps its other state", () => {
+    initializeTestSession();
+    const store = useSessionStore.getState();
+    const tasks = [{ id: "1", text: "Inspect", status: "pending" as const, completed: false }];
+    for (const agentId of ["agent-1", "agent-2"]) {
+      store.setAgents("test-server", (agents) =>
+        new Map(agents).set(agentId, createTestAgent(agentId)),
+      );
+      store.applyAgentTimelineResponseState("test-server", agentId, {
+        items: [submittedMessage(`${agentId}-row`)],
+        head: [submittedMessage(`${agentId}-live`)],
+        range: { epoch: "epoch-1", startSeq: 1, endSeq: 4 },
+        older: "available",
+        newer: true,
+        synchronized: true,
+        acknowledgedClientMessageIds: [],
+      });
+      store.setAgentStreamState("test-server", agentId, { taskSnapshot: tasks });
+    }
+
+    store.evictAgentStream("test-server", "agent-1");
+
+    const session = useSessionStore.getState().sessions["test-server"];
+    expect(selectAgentTimelineState(session, "agent-1")).toEqual({ status: "cold" });
+    expect(session?.agentStreamHead.has("agent-1")).toBe(false);
+    expect(session?.agentTimelineCursor.has("agent-1")).toBe(false);
+    expect(session?.agentTimelineHasOlder.has("agent-1")).toBe(false);
+    expect(session?.agentTimelineHasNewer.has("agent-1")).toBe(false);
+    expect(session?.agentHistorySyncGeneration.has("agent-1")).toBe(false);
+    expect(session?.agents.get("agent-1")?.id).toBe("agent-1");
+    expect(taskTexts(session?.agentTasks.get("agent-1") ?? [])).toEqual(["Inspect"]);
+    expect(selectAgentTimelineState(session, "agent-2")).toMatchObject({
+      status: "synced",
+      range: { epoch: "epoch-1", startSeq: 1, endSeq: 4 },
+    });
+    expect(session?.agentStreamHead.get("agent-2")).toHaveLength(1);
+  });
+
+  it("leaves the store untouched when the evicted thread holds nothing", () => {
+    initializeTestSession();
+    const before = useSessionStore.getState().sessions;
+
+    useSessionStore.getState().evictAgentStream("test-server", "agent-1");
+    useSessionStore.getState().evictAgentStream("missing-server", "agent-1");
+
+    expect(useSessionStore.getState().sessions).toBe(before);
+  });
+
   it("stores turn liveness transitions without duplicating their policy", () => {
     initializeTestSession();
     const store = useSessionStore.getState();

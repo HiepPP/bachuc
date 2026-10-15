@@ -1,27 +1,20 @@
 # Thread branch
 
 Shows the current git branch of each conversation's working directory as a composer pill,
-beside Tasks and Subagents. When the branch has a pull request, a second pill `#42` appears;
-one click opens it in the system browser. A third pill named after the `origin` repository opens
-its web page (GitHub, GitLab, or any http/ssh remote). A sync pill `↑2 | ↓1` shows commits waiting
-to push and to pull against the upstream. Its icon is a green check with **Synced** when there is
-nothing to move, an accent upload cloud when only pushing is left, and an amber download cloud when
-there is something to pull. It hides when the branch has no upstream, and a click runs `git fetch`
-then recounts. Between clicks the pull count reflects the last fetch;
-the 15-second poll never fetches.
+beside Tasks and Subagents. When the branch has an upstream and commits wait to move, the pill
+adds them, as in `main ↑2 ↓1`; a zero count is left out. Its branch icon turns accent when only
+pushing is left and amber when there is something to pull. In sync, or without an upstream, the
+pill shows only the branch name. The pull count reflects the last fetch; the 15-second poll never
+fetches. When the branch has a pull request, a second pill `#42` appears; one click opens it in
+the system browser.
 
 A changes pill `3 files +14 -3` appears only when the work tree has uncommitted changes. It counts
 tracked files from `git status` (untracked files are not counted, matching the dirty check) and
 staged plus unstaged lines against `HEAD`. A click refreshes it.
 
-A links pill `3 links` lists the PRs (`#42`), commits (7–40 hex chars), and branches named in the
-agent's last reply and opens each on the `origin` remote (GitHub or GitLab routes). Branches count
-only as inline code after the word "branch", with a prefix like `feat/`, or as `main`/`master`/
-`develop`. The reply is re-read when a turn ends. Refs always resolve against this workspace's
-`origin`, so a ref from another repository opens the wrong page.
-
-The branch pill menu offers **Copy branch name**, **Fetch** (runs `git fetch`, shown when the branch
-has an upstream), and **Refresh**.
+The branch pill menu offers **Copy branch name**, **Open bachuc on GitHub** (the `origin` web page
+of GitHub, GitLab, or any http/ssh remote, named after the repository), **Fetch** (runs
+`git fetch` then recounts, shown when the branch has an upstream), and **Refresh**.
 A detached HEAD shows `@<short sha>`. Non-git directories show no pill.
 
 New workspace shows one branch pill for the selected project's directory, before any thread

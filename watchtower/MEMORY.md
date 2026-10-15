@@ -51,7 +51,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a three.js Fleet map tab in the app, and a hidden tab that keeps `three` in the bundle, while `three` loads at app start and the agent tree lives as 2D UI on the Watchtower page. Reason: [ADR-0028](watchtower/decisions/ADR-0028-no-fleet-map-tab-over-three-js-fleet-map.md).
 - Avoid a branch timeline, Running now, or Up next on the Watchtower page, and a second tab or a side-by-side timeline for the plan tree, while the owner chose the tree after comparing mockups. Reason: [ADR-0029](watchtower/decisions/ADR-0029-plan-tree-over-branch-timeline.md).
 - Avoid `glm-acp-agent` as the main GLM path, a config-entry-only GLM setup, and a GLM provider that shares `~/.claude`, while the Claude path passed the live probe and the owner's hooks and plugins live in `~/.claude`. Reason: [ADR-0030](watchtower/decisions/ADR-0030-built-in-glm-on-claude-client-over-acp-and-config.md).
-- Avoid memory-only timelines, JSONL timeline files, better-sqlite3, Drizzle, and a database for agent records, while `node:sqlite` runs in the Electron daemon runtime and agent listing stays fast in memory. Reason: [ADR-0031](watchtower/decisions/ADR-0031-node-sqlite-timeline-cache-over-json-and-better-sqlite3.md).
+- Avoid memory-only timelines, unbounded in-memory timelines for live agents, JSONL timeline files, better-sqlite3, Drizzle, and a database for agent records, while `node:sqlite` with FTS5 runs in the Electron daemon runtime and agent listing stays fast in memory. Reason: [ADR-0032](watchtower/decisions/ADR-0032-sqlite-served-old-pages-over-memory-only-serving.md).
+- Avoid pixel widths computed from `onLayout` for cells that must share a row on Board, while react-native-web reports a rounded `offsetWidth`. Reason: [ADR-0033](watchtower/decisions/ADR-0033-percent-cells-over-measured-pixel-cells-on-board.md).
 
 ## Learnings
 
@@ -198,3 +199,27 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the no-live-restart repo rule leaves every server change unverified on live during implement.
 - Source: TASK-104, TASK-105, and TASK-106 outcomes.
 - Use next time: plan a live check as a separate owner step after implement.
+
+### 2026-10-15 - Board subagent rows flashing
+
+- Learned: react-native-web gives `onLayout` a width from `offsetWidth`, rounded to a whole pixel. Pixel cells sized from it can overflow a row by less than 1 px and wrap. The wrap changes the height, the scroll bar toggles, and the layout flips without end.
+- Source: Board flashing fix on 2026-10-15, ADR-0033.
+- Use next time: on web, size cells that share a row with percent or flex values. Use a measured width only for a breakpoint choice.
+
+### 2026-10-15 - Plan 20261015-sqlite-ram-cpu-cuts
+
+- Learned: Vitest resolves `./row-store` in the replica cache to `row-store.native.ts`, and `host-runtime.test.ts` has its own fake `ReplicaRowStore`.
+- Source: TASK-126 outcome.
+- Use next time: import runtime values from `row-store-schema.ts`, and list `host-runtime.test.ts` in `Files:` when the row store interface changes.
+- Learned: FTS5 `unicode61 remove_diacritics 2` does not fold `đ`, and it matches only whole words or word prefixes.
+- Source: TASK-128 outcome; Q-048.
+- Use next time: fold `đ` to `d` on both sides, and do not promise a mid-word match from the cache path.
+- Learned: a coalesced write whose promise waits for the file commit makes every awaited persist slower, and it hangs fake-timer tests that await a persist before they advance the clock.
+- Source: TASK-131 outcome; Q-043.
+- Use next time: when a spec debounces a write, say whether callers await the commit or only the cache update, and list the tests that await it.
+- Learned: the formatter ignores `docs/`, so `npm run format:check:files -- docs/<file>` exits 2 with "Expected at least one target file".
+- Source: TASK-133 outcome.
+- Use next time: do not put a format check for `docs/` files in a Verify line.
+- Learned: many source rows can project to few items: a 3,701-row mock thread gave 88 items, which fit in the first app page, so a UI scroll sent no older-page request. Page it through `fetch_agent_timeline` with the CLI client (`connectToDaemon` from `packages/cli/src/utils/client.ts`) to test SQL pages on live. The mock `five-minute-stream` model gives about 3,700 source rows.
+- Source: Q-046 check on 2026-10-15.
+- Use next time: plan a live paging check as an RPC script, not a UI scroll.

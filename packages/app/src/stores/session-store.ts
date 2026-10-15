@@ -502,6 +502,11 @@ interface SessionStoreActions {
     message: UserMessageItem,
   ) => boolean;
   clearAgentStreamHead: (serverId: string, agentId: string) => void;
+  /**
+   * Drops one thread's stream items and sequence cursors so it reopens cold. Directory,
+   * unread, attention, task, and submission state stay.
+   */
+  evictAgentStream: (serverId: string, agentId: string) => void;
   setAgentTimelineCursor: (
     serverId: string,
     state:
@@ -1224,6 +1229,41 @@ export const useSessionStore = create<SessionStore>()(
               [serverId]: { ...session, agentStreamHead: nextHead },
             },
           };
+        });
+      },
+
+      evictAgentStream: (serverId, agentId) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session) return prev;
+          const without = <T>(current: Map<string, T>): Map<string, T> => {
+            if (!current.has(agentId)) return current;
+            const next = new Map(current);
+            next.delete(agentId);
+            return next;
+          };
+          const next: SessionState = {
+            ...session,
+            agentStreamTail: without(session.agentStreamTail),
+            agentStreamHead: without(session.agentStreamHead),
+            agentTimelineCursor: without(session.agentTimelineCursor),
+            agentTimelineHasOlder: without(session.agentTimelineHasOlder),
+            agentTimelineHasNewer: without(session.agentTimelineHasNewer),
+            agentTimelineOlderFetchInFlight: without(session.agentTimelineOlderFetchInFlight),
+            agentHistorySyncGeneration: without(session.agentHistorySyncGeneration),
+            agentAuthoritativeHistoryApplied: without(session.agentAuthoritativeHistoryApplied),
+          };
+          const changed =
+            next.agentStreamTail !== session.agentStreamTail ||
+            next.agentStreamHead !== session.agentStreamHead ||
+            next.agentTimelineCursor !== session.agentTimelineCursor ||
+            next.agentTimelineHasOlder !== session.agentTimelineHasOlder ||
+            next.agentTimelineHasNewer !== session.agentTimelineHasNewer ||
+            next.agentTimelineOlderFetchInFlight !== session.agentTimelineOlderFetchInFlight ||
+            next.agentHistorySyncGeneration !== session.agentHistorySyncGeneration ||
+            next.agentAuthoritativeHistoryApplied !== session.agentAuthoritativeHistoryApplied;
+          if (!changed) return prev;
+          return { ...prev, sessions: { ...prev.sessions, [serverId]: next } };
         });
       },
 

@@ -34,7 +34,9 @@ Paseo uses **file-based JSON persistence** instead of a traditional database. Al
 
 All server-side stores live under `$PASEO_HOME` (defaults to `~/.paseo`).
 
-`timeline-cache.sqlite` is the one SQLite file, and it is a cache, not a store. A file with another `user_version` or a corrupt file is rebuilt empty, and there are no migrations. See [timeline sync](timeline-sync.md#timeline-cache-and-reads).
+`timeline-cache.sqlite` is the one SQLite file, and it is a cache, not a store. A file with another `user_version` or a corrupt file is rebuilt empty, and there are no migrations. It also holds the FTS5 search index and the transcript fingerprint. See [timeline sync](timeline-sync.md#timeline-cache-and-reads).
+
+Agent records coalesce writes: a read sees the newest record at once, and one file write per agent starts at most 250 ms after its first unsaved update. An awaited `upsert` settles when that write commits. `agent-requests/` holds message and creation receipts, and the daemon deletes files older than 7 days by mtime.
 
 ## Store Surface Rules
 
@@ -609,9 +611,9 @@ An invalid directory row and its affected checkpoint cursor are repaired in one 
 later launch cannot accept a checkpoint for a partial baseline. Directory changes and their
 checkpoint are also applied in one transaction.
 
-The cache is capped at 32 MiB and evicts whole hosts in least-recently-written order. Budget
-bookkeeping may scan opaque row sizes during a deferred write, never during host registry startup or
-before a requested cache row can paint. The row store is not encrypted. A cached timeline can contain
+The cache is capped at 32 MiB and evicts whole hosts in least-recently-written order. The store keeps
+per-host byte totals and last-write times next to the rows, so budget bookkeeping reads totals and
+never scans row payloads. The row store is not encrypted. A cached timeline can contain
 source code, prompts, and tool output; encrypted-at-rest storage is a separate security decision.
 
 ### Draft Store

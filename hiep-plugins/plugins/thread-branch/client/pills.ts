@@ -5,23 +5,14 @@ import type {
 } from "@getpaseo/plugin/client";
 import { copyText } from "@getpaseo/plugin/client/react-native";
 import { getBranchRpc, type BranchInfo } from "../shared/branch";
-import {
-  describeBranchPill,
-  describeChangesPill,
-  describePrPill,
-  describeRefsPill,
-  describeRepoPill,
-  describeSyncPill,
-} from "./buttons";
+import { describeBranchPill, describeChangesPill, describePrPill } from "./buttons";
 import { openUrl } from "./open";
-import { extractGitRefs, type GitRef } from "./refs";
 
 export const POLL_MS = 15_000;
 
 interface Tracked {
   workspaceId: string;
   cwd: string;
-  status?: string;
 }
 
 type Client = Pick<PluginClientContext, "rpc" | "addComposerPill"> & {
@@ -32,10 +23,7 @@ export interface PillDeps {
   open?: (url: string) => Promise<void>;
   copy?: (text: string) => Promise<void>;
   intervalMs?: number;
-  lastReply?: (agentId: string) => Promise<string | null>;
 }
-
-const REPLY_WINDOW = 50;
 
 function signature(info: BranchInfo) {
   return JSON.stringify([
@@ -57,33 +45,17 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
   const open = deps.open ?? openUrl;
   const copy = deps.copy ?? copyText;
   const intervalMs = deps.intervalMs ?? POLL_MS;
-  const lastReply =
-    deps.lastReply ??
-    (async (agentId: string) => {
-      const page = await client.paseo.agents
-        .ref(agentId)
-        .timeline.refetch({ direction: "tail", limit: REPLY_WINDOW, projection: "projected" });
-      for (let index = page.entries.length - 1; index >= 0; index--) {
-        const item = page.entries[index].item;
-        if (item.type === "assistant_message") return item.text;
-      }
-      return null;
-    });
   const agents = new Map<string, Tracked>();
   const pills = new Map<
     string,
     {
       branch: PluginButtonRegistration;
-      sync: PluginButtonRegistration;
       pr: PluginButtonRegistration;
-      repo: PluginButtonRegistration;
-      refs: PluginButtonRegistration;
       changes: PluginButtonRegistration;
       signature: string;
     }
   >();
   const infoByCwd = new Map<string, BranchInfo>();
-  const refsByAgent = new Map<string, GitRef[]>();
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -117,14 +89,10 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
     infoByCwd.set(cwd, info);
     for (const [agentId, tracked] of agents) {
       if (tracked.cwd !== cwd) continue;
-      const agentRefs = refsByAgent.get(agentId) ?? [];
-      const next = signature(info) + JSON.stringify(agentRefs);
+      const next = signature(info);
       const actions = actionsFor(cwd);
       const branch = describeBranchPill(info, actions);
-      const sync = describeSyncPill(info, actions.fetch);
       const pr = describePrPill(info, actions.openPr);
-      const repo = describeRepoPill(info, actions.openRepo);
-      const refs = describeRefsPill(info, agentRefs, open);
       const changes = describeChangesPill(info, actions.refresh);
       const existing = pills.get(agentId);
       if (existing) {
@@ -132,10 +100,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
         if (existing.signature === next) continue;
         try {
           existing.branch.update(branch);
-          existing.sync.update(sync);
           existing.pr.update(pr);
-          existing.repo.update(repo);
-          existing.refs.update(refs);
           existing.changes.update(changes);
           existing.signature = next;
         } catch (error) {
@@ -157,10 +122,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
       try {
         pills.set(agentId, {
           branch: add("thread-branch", branch),
-          sync: add("thread-branch-sync", sync),
           pr: add("thread-branch-pr", pr),
-          repo: add("thread-branch-repo", repo),
-          refs: add("thread-branch-refs", refs),
           changes: add("thread-branch-changes", changes),
           signature: next,
         });
@@ -178,15 +140,6 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
     const info = await client.rpc(getBranchRpc, input);
     if (stopped) return;
     apply(cwd, info);
-  }
-
-  async function refreshRefs(agentId: string) {
-    const text = await lastReply(agentId);
-    const tracked = agents.get(agentId);
-    if (stopped || !tracked) return;
-    refsByAgent.set(agentId, text ? extractGitRefs(text) : []);
-    const info = infoByCwd.get(tracked.cwd);
-    if (info) apply(tracked.cwd, info);
   }
 
   async function refreshAll() {
@@ -210,13 +163,10 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
     }, intervalMs);
   }
 
-  function track(agent: { id: string; cwd: string; workspaceId?: string | null; status?: string }) {
+  function track(agent: { id: string; cwd: string; workspaceId?: string | null }) {
     if (!agent.workspaceId || !agent.cwd) return;
     const previous = agents.get(agent.id);
-    agents.set(agent.id, { workspaceId: agent.workspaceId, cwd: agent.cwd, status: agent.status });
-    // Re-read the reply once per turn: on first sight and when a running turn ends.
-    if (!previous || (previous.status === "running" && agent.status !== "running"))
-      void refreshRefs(agent.id).catch(() => {});
+    agents.set(agent.id, { workspaceId: agent.workspaceId, cwd: agent.cwd });
     if (previous && previous.cwd !== agent.cwd) untrack(agent.id, true);
     const known = infoByCwd.get(agent.cwd);
     if (known) apply(agent.cwd, known);
@@ -227,16 +177,10 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
   function untrack(agentId: string, keepAgent = false) {
     const existing = pills.get(agentId);
     existing?.branch.remove();
-    existing?.sync.remove();
     existing?.pr.remove();
-    existing?.repo.remove();
-    existing?.refs.remove();
     existing?.changes.remove();
     pills.delete(agentId);
-    if (!keepAgent) {
-      agents.delete(agentId);
-      refsByAgent.delete(agentId);
-    }
+    if (!keepAgent) agents.delete(agentId);
   }
 
   const unsubscribe = client.paseo.agents.subscribe((update) => {
@@ -291,17 +235,13 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
     clearTimeout(timer);
     unsubscribe();
     void observation?.release().catch(() => {});
-    for (const { branch, sync, pr, repo, refs, changes } of pills.values()) {
+    for (const { branch, pr, changes } of pills.values()) {
       branch.remove();
-      sync.remove();
       pr.remove();
-      repo.remove();
-      refs.remove();
       changes.remove();
     }
     pills.clear();
     agents.clear();
     infoByCwd.clear();
-    refsByAgent.clear();
   };
 }

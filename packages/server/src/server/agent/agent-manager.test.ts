@@ -13,7 +13,7 @@ import {
   type AgentManagerEvent,
   type ManagedAgent,
 } from "./agent-manager.js";
-import { AgentStorage } from "./agent-storage.js";
+import { AGENT_RECORD_WRITE_WINDOW_MS, AgentStorage } from "./agent-storage.js";
 import { toAgentPayload } from "./agent-projections.js";
 import { projectTimelineRows } from "./timeline-projection.js";
 import { getOpenAgentTabLabel, PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
@@ -1838,6 +1838,44 @@ test("does not persist an initializing session after shutdown closes it", async 
       agents: [],
       record: { lastStatus: "closed" },
     });
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("appendTimelineItem returns before the coalesced record write, and flush writes it", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-append-latency-test-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const manager = new AgentManager({
+    clients: createTestAgentClients(),
+    registry: storage,
+    logger,
+  });
+
+  try {
+    const agent = await manager.createAgent({ provider: "claude", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    await storage.flush();
+
+    const startedAt = performance.now();
+    for (let index = 0; index < 10; index++) {
+      await manager.appendTimelineItem(agent.id, {
+        type: "assistant_message",
+        text: `step ${index}`,
+        messageId: `step-${index}`,
+      });
+    }
+    const elapsedMs = performance.now() - startedAt;
+    // Waiting for the record write would cost one write window per append.
+    expect(elapsedMs).toBeLessThan(AGENT_RECORD_WRITE_WINDOW_MS);
+
+    await manager.flush();
+    await storage.flush();
+    const reread = new AgentStorage(join(workdir, "agents"), logger);
+    expect((await reread.get(agent.id))?.updatedAt).toBe(
+      manager.getAgent(agent.id)?.updatedAt.toISOString(),
+    );
   } finally {
     rmSync(workdir, { recursive: true, force: true });
   }

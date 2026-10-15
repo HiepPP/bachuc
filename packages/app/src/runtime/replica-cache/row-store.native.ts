@@ -9,7 +9,7 @@ import {
 } from "./row-store-sqlite";
 
 export type {
-  ReplicaHostRows,
+  ReplicaHostStats,
   ReplicaRow,
   ReplicaRowChanges,
   ReplicaRowKey,

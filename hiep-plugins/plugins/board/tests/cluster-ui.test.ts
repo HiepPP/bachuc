@@ -223,9 +223,9 @@ test("child grid responds to its own panel width and Board scale", () => {
   };
   const width = (id: string) => nodes.find((node) => node.key === id)!.props.style.width;
   measure(440);
-  assert.equal(typeof width("child"), "number");
-  assert.equal(width("child"), width("sibling"));
-  assert.ok(width("child") * 2 < 440);
+  // Percent cells: a rounded onLayout width can never push the second cell onto its own row.
+  assert.equal(width("child"), "50%");
+  assert.equal(width("sibling"), "50%");
   measure(320);
   assert.equal(width("child"), "100%");
   measure(440);
