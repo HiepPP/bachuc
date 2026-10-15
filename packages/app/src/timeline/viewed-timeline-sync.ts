@@ -340,6 +340,8 @@ export interface ViewedTimelineSync extends ViewedTimelineUiBridge {
    * restored from disk at launch and those tabs are chats the user opened days ago.
    */
   replaceOpenTabAgentIds(agentIds: string[]): void;
+  /** True while the agent is in the desired membership, so its subscription keeps it current. */
+  isAgentDesired(agentId: string): boolean;
   setActive(active: boolean): void;
   setConnected(connected: boolean): void;
   recoverGap(agentId: string, cursor: { epoch: string; endSeq: number }): void;
@@ -416,6 +418,8 @@ export function createViewedTimelineOwner(input: {
 
 const RETRY_DELAY_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 30_000;
+// Bounds the reconnect wave of hidden open chats; each one can cost the daemon a backfill.
+const HIDDEN_CATCH_UP_CONCURRENCY = 2;
 
 type CatchUpStatus = "running" | "complete" | "error";
 
@@ -483,6 +487,14 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   // Authoritative fetch owed but not runnable yet: disconnected, unacknowledged, or parked.
   // Membership acknowledgement and catch-up completion drain parked requests.
   const pendingCatchUps = new Map<string, ProjectedTimelineForwardFetchPlan>();
+  // Hidden catch-ups held back by the concurrency cap, with the options they were started with.
+  // Any catch-up settling drains them.
+  const cappedCatchUps = new Map<
+    string,
+    { request?: ProjectedTimelineForwardFetchPlan; supersede: boolean }
+  >();
+  // Gap recovery and manual retries: correctness or user driven, so they skip the cap.
+  const capExemptAgentIds = new Set<string>();
   const visibilityCatchUpPending = new Set<string>();
   const visibilityCatchUpErrors = new Map<string, string>();
   // User-initiated retries only. Background retries stay silent; a retry the user asked for
@@ -557,6 +569,8 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     catchUps.get(agentId)?.cancelRetry?.();
     catchUps.delete(agentId);
     pendingCatchUps.delete(agentId);
+    cappedCatchUps.delete(agentId);
+    capExemptAgentIds.delete(agentId);
   };
 
   const fetchUntilCurrent = async (
@@ -646,6 +660,17 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     );
   };
 
+  const isHiddenCatchUpCapped = (agentId: string) => {
+    if (capExemptAgentIds.has(agentId)) return false;
+    const visible = visibleAgentIds();
+    if (visible.includes(agentId)) return false;
+    let running = 0;
+    for (const [id, state] of catchUps) {
+      if (id !== agentId && state.status === "running" && !visible.includes(id)) running += 1;
+    }
+    return running >= HIDDEN_CATCH_UP_CONCURRENCY;
+  };
+
   const startCatchUp = (
     agentId: string,
     options: {
@@ -654,6 +679,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     } = {},
   ) => {
     const { request, supersede = false } = options;
+    cappedCatchUps.delete(agentId);
     if (!canCatchUp(agentId)) {
       if (request) pendingCatchUps.set(agentId, request);
       return;
@@ -675,8 +701,14 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       return;
     }
     if (decision === "keep") {
+      capExemptAgentIds.delete(agentId);
       return;
     }
+    if (isHiddenCatchUpCapped(agentId)) {
+      cappedCatchUps.set(agentId, { request, supersede });
+      return;
+    }
+    capExemptAgentIds.delete(agentId);
     current?.cancelRetry?.();
     const generation = (catchUpGenerations.get(agentId) ?? 0) + 1;
     catchUpGenerations.set(agentId, generation);
@@ -704,6 +736,11 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       ...acknowledged.filter((id) => !visible.includes(id)),
     ];
     for (const agentId of ordered) {
+      const capped = cappedCatchUps.get(agentId);
+      if (capped) {
+        startCatchUp(agentId, capped);
+        continue;
+      }
       const pendingCatchUp = pendingCatchUps.get(agentId);
       const current = catchUps.get(agentId);
       // Completion of a different chat must not bypass a failed chat's backoff or
@@ -761,6 +798,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     notifyListeners();
     if (catchUp?.status === "error") {
       catchUp.cancelRetry?.();
+      capExemptAgentIds.add(agentId);
       startCatchUp(agentId, { request: catchUp.request, supersede: true });
       return;
     }
@@ -836,6 +874,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     getAgentTimelineError(agentId) {
       return visibilityCatchUpErrors.get(agentId) ?? null;
     },
+    isAgentDesired: isDesired,
     replaceOpenTabAgentIds(agentIds) {
       const openTabs = new Set(agentIds);
       const next = openedAgentIds.filter((agentId) => openTabs.has(agentId));
@@ -886,6 +925,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     },
     recoverGap(agentId, cursor) {
       if (!isDesired(agentId)) return;
+      capExemptAgentIds.add(agentId);
       startCatchUp(agentId, {
         request: planTimelineCatchUpAfter({ epoch: cursor.epoch, seq: cursor.endSeq }),
         supersede: true,
@@ -908,6 +948,8 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       openedAgentIds = [];
       loadedCache.clear();
       cacheLoads.clear();
+      cappedCatchUps.clear();
+      capExemptAgentIds.clear();
       visibilityCatchUpPending.clear();
       visibilityCatchUpErrors.clear();
       manualRetries.clear();

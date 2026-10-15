@@ -59,6 +59,19 @@ export function planTimelineResumeFetch(
     : planTimelineTailFetch();
 }
 
+/**
+ * Asks the daemon to widen a tail page back to the latest prompt, so an open that lands on that
+ * prompt needs no second fetch. Only tail plans carry it, and only when the host supports it.
+ */
+export function withLatestPromptTail<Plan extends { direction: "tail" | "after" | "before" }>(
+  plan: Plan,
+  input: { hostSupportsLatestPromptTail: boolean; latestPromptAnchorPending: boolean },
+): Plan | (Plan & { includeLatestPrompt: true }) {
+  if (plan.direction !== "tail") return plan;
+  if (!input.hostSupportsLatestPromptTail || !input.latestPromptAnchorPending) return plan;
+  return { ...plan, includeLatestPrompt: true };
+}
+
 export function planTimelineOlderFetch(cursor: TimelineSyncCursor) {
   return {
     direction: "before",

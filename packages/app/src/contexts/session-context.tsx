@@ -13,7 +13,8 @@ import {
 } from "@/hooks/use-agent-initialization";
 import type { StreamItem } from "@/types/stream";
 import { deriveAgentStreamTurnLiveness } from "@/timeline/session-stream-reducers";
-import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
+import { planTimelineTailFetch, withLatestPromptTail } from "@/timeline/timeline-sync-plan";
+import { hasPendingLatestPromptAnchor } from "@/agent-stream/latest-prompt-anchor";
 import { requestTimelineReplacement } from "@/timeline/timeline-replacement";
 import { type ViewedTimelineOwner } from "@/timeline/viewed-timeline-sync";
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
@@ -433,6 +434,16 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         console.warn("[Session] timeline replacement refresh failed", { serverId, error });
       });
     };
+    const withLatestPrompt = <Plan extends { direction: "tail" | "after" | "before" }>(
+      agentId: string,
+      plan: Plan,
+    ) =>
+      withLatestPromptTail(plan, {
+        hostSupportsLatestPromptTail:
+          useSessionStore.getState().sessions[serverId]?.serverInfo?.features
+            ?.timelineLatestPromptTail === true,
+        latestPromptAnchorPending: hasPendingLatestPromptAnchor(agentId),
+      });
     const sync = getHostRuntimeStore().createViewedTimelineOwner(serverId, {
       observe: (agentIds) => {
         const observation = client.observeTimeline(agentIds);
@@ -471,7 +482,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           setAgentInitializing(agentId, true);
         }
         try {
-          const page = await getHostRuntimeStore().fetchAgentTimeline(serverId, agentId, request);
+          const page = await getHostRuntimeStore().fetchAgentTimeline(
+            serverId,
+            agentId,
+            withLatestPrompt(agentId, request),
+          );
           if (shouldInitialize && getInitDeferred(initKey)) {
             refreshAgentInitializationTimeout({ key: initKey, agentId, setAgentInitializing });
           }
@@ -485,7 +500,11 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         }
       },
       fetchLatestTail: (agentId) =>
-        getHostRuntimeStore().fetchAgentTimeline(serverId, agentId, planTimelineTailFetch()),
+        getHostRuntimeStore().fetchAgentTimeline(
+          serverId,
+          agentId,
+          withLatestPrompt(agentId, planTimelineTailFetch()),
+        ),
       reportError: (error) => {
         console.warn("[Session] viewed timeline synchronization failed", { serverId, error });
       },

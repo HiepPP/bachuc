@@ -125,6 +125,96 @@ test("switching chats promotes the newly visible catch-up while another visible 
   world.sync.dispose();
 });
 
+test("reconnect fetches the visible chat first and at most two hidden chats at a time", async () => {
+  const world = new TimelineWorld();
+  const hidden = Array.from({ length: 10 }, (_, index) => `hidden-${index}`);
+  world.openedEarlier(hidden);
+  world.show("pane", ["z-visible"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  const visible = await world.nextFetch("z-visible");
+  world.expectNoPendingFetch();
+  visible.respond({ hasNewer: false });
+
+  const finished: string[] = [];
+  while (finished.length < hidden.length) {
+    const expected = Math.min(2, hidden.length - finished.length);
+    await vi.waitFor(() => expect(world.pendingFetchAgentIds()).toHaveLength(expected));
+    const [agentId] = world.pendingFetchAgentIds();
+    (await world.nextFetch(agentId)).respond({ hasNewer: false });
+    finished.push(agentId);
+  }
+
+  expect([...finished].sort()).toEqual(hidden);
+  await vi.waitFor(() =>
+    expect(hidden.every((id) => world.sync.getAgentTimelineStatus(id) === "ready")).toBe(true),
+  );
+  world.expectNoPendingFetch();
+  world.sync.dispose();
+});
+
+test("a hidden chat held back by the cap starts at once when revealed", async () => {
+  const world = new TimelineWorld();
+  world.openedEarlier(["a-hidden", "b-hidden", "c-hidden"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  await vi.waitFor(() => expect(world.pendingFetchAgentIds()).toEqual(["a-hidden", "b-hidden"]));
+
+  world.show("pane", ["c-hidden"]);
+
+  const revealed = await world.nextFetch("c-hidden");
+  expect(world.pendingFetchAgentIds()).toEqual(["a-hidden", "b-hidden"]);
+  revealed.respond({ hasNewer: false });
+  (await world.nextFetch("a-hidden")).respond({ hasNewer: false });
+  (await world.nextFetch("b-hidden")).respond({ hasNewer: false });
+  world.expectNoPendingFetch();
+  world.sync.dispose();
+});
+
+test("gap recovery of a hidden chat bypasses the hidden catch-up cap", async () => {
+  const world = new TimelineWorld();
+  world.openedEarlier(["a-hidden", "b-hidden", "c-hidden"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  await vi.waitFor(() => expect(world.pendingFetchAgentIds()).toEqual(["a-hidden", "b-hidden"]));
+
+  world.sync.recoverGap("c-hidden", { epoch: "epoch-c-hidden", endSeq: 10 });
+
+  const gap = await world.nextFetch("c-hidden");
+  expect(gap.request).toEqual({
+    direction: "after",
+    cursor: { epoch: "epoch-c-hidden", seq: 10 },
+    limit: 40,
+    projection: "projected",
+  });
+  expect(world.pendingFetchAgentIds()).toEqual(["a-hidden", "b-hidden"]);
+  gap.respond({ hasNewer: false });
+  (await world.nextFetch("a-hidden")).respond({ hasNewer: false });
+  (await world.nextFetch("b-hidden")).respond({ hasNewer: false });
+  world.expectNoPendingFetch();
+  world.sync.dispose();
+});
+
+test("a manual retry of a hidden chat bypasses the hidden catch-up cap", async () => {
+  const world = new TimelineWorld();
+  world.openedEarlier(["a-hidden", "b-hidden", "c-hidden"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed();
+  (await world.nextFetch("a-hidden")).fail("temporarily unavailable");
+  await world.nextError();
+  await vi.waitFor(() => expect(world.pendingFetchAgentIds()).toEqual(["b-hidden", "c-hidden"]));
+
+  world.sync.retryVisibleAgentTimeline("a-hidden");
+
+  const retried = await world.nextFetch("a-hidden");
+  expect(world.pendingFetchAgentIds()).toEqual(["b-hidden", "c-hidden"]);
+  retried.respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("a-hidden")).toBe("ready"));
+  (await world.nextFetch("b-hidden")).respond({ hasNewer: false });
+  (await world.nextFetch("c-hidden")).respond({ hasNewer: false });
+  world.sync.dispose();
+});
+
 class TimelineWorld {
   constructor(private readonly observeMembership?: ViewedTimelineSyncPorts["observe"]) {}
   readonly errors: string[] = [];
@@ -244,6 +334,10 @@ class TimelineWorld {
     return this.fetches.length;
   }
 
+  pendingFetchAgentIds(): string[] {
+    return this.fetches.map((fetch) => fetch.agentId).sort();
+  }
+
   applyTimelineResponse(payload: TimelineResponsePayload): TimelineResponsePayload {
     return consumeForcedTimelineTailReplacement(payload, this.forcedTimelineTailReplacements);
   }
@@ -332,6 +426,19 @@ class TimelineWorld {
     }
   }
 }
+
+test("an agent is desired from its first show until its tab closes, even while its catch-up is pending", () => {
+  const world = new TimelineWorld();
+  expect(world.sync.isAgentDesired("agent-a")).toBe(false);
+  world.show("pane", ["agent-a"]);
+  expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("pending");
+  expect(world.sync.isAgentDesired("agent-a")).toBe(true);
+  world.sync.replaceVisibleAgentIds("pane", []);
+  expect(world.sync.isAgentDesired("agent-a")).toBe(true);
+  world.sync.replaceOpenTabAgentIds([]);
+  expect(world.sync.isAgentDesired("agent-a")).toBe(false);
+  world.sync.dispose();
+});
 
 test("uses a tail fetch when an agent becomes visible", async () => {
   const world = new TimelineWorld();

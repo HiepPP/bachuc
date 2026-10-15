@@ -3,10 +3,12 @@ import { TIMELINE_FETCH_PAGE_SIZE } from "@/timeline/timeline-fetch-policy";
 import {
   isTimelineCatchUpComplete,
   isTimelineResumeSnapshotAuthoritative,
+  planTimelineCatchUpAfter,
   planTimelineOlderFetch,
   planTimelinePromptJump,
   planTimelineResumeFetch,
   planTimelineTailFetch,
+  withLatestPromptTail,
 } from "./timeline-sync-plan";
 
 describe("timeline sync planning", () => {
@@ -27,6 +29,19 @@ describe("timeline sync planning", () => {
       limit: TIMELINE_FETCH_PAGE_SIZE,
       projection: "projected",
     });
+  });
+
+  test("a tail plan asks for the latest prompt only with host support and a pending anchor", () => {
+    const tail = planTimelineTailFetch();
+    const both = { hostSupportsLatestPromptTail: true, latestPromptAnchorPending: true };
+
+    expect(withLatestPromptTail(tail, both)).toEqual({ ...tail, includeLatestPrompt: true });
+    expect(withLatestPromptTail(tail, { ...both, hostSupportsLatestPromptTail: false })).toEqual(
+      tail,
+    );
+    expect(withLatestPromptTail(tail, { ...both, latestPromptAnchorPending: false })).toEqual(tail);
+    const after = planTimelineCatchUpAfter({ epoch: "epoch-1", seq: 49 });
+    expect(withLatestPromptTail(after, both)).toEqual(after);
   });
 
   test("older history loads one bounded page before the start cursor", () => {
