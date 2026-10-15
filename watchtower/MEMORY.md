@@ -53,6 +53,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid `glm-acp-agent` as the main GLM path, a config-entry-only GLM setup, and a GLM provider that shares `~/.claude`, while the Claude path passed the live probe and the owner's hooks and plugins live in `~/.claude`. Reason: [ADR-0030](watchtower/decisions/ADR-0030-built-in-glm-on-claude-client-over-acp-and-config.md).
 - Avoid memory-only timelines, unbounded in-memory timelines for live agents, JSONL timeline files, better-sqlite3, Drizzle, and a database for agent records, while `node:sqlite` with FTS5 runs in the Electron daemon runtime and agent listing stays fast in memory. Reason: [ADR-0032](watchtower/decisions/ADR-0032-sqlite-served-old-pages-over-memory-only-serving.md).
 - Avoid pixel widths computed from `onLayout` for cells that must share a row on Board, while react-native-web reports a rounded `offsetWidth`. Reason: [ADR-0033](watchtower/decisions/ADR-0033-percent-cells-over-measured-pixel-cells-on-board.md).
+- Avoid a Swift or SwiftUI desktop client, and new long-term work on the Electron renderer UI, while the GPUI client measured 6.5% CPU against 24% for Swift and 1.2 GB or more for Electron on the same stream. Reason: [ADR-0034](watchtower/decisions/ADR-0034-rust-gpui-client-over-swift-and-electron.md).
+- Avoid hand-written Rust protocol structs while the zod schemas can export JSON Schema for code generation. Reason: [ADR-0035](watchtower/decisions/ADR-0035-generated-protocol-types-over-hand-written-rust-types.md).
+- Avoid a live WebView inside each timeline row, and SVG export of diagrams, while `gpui-wry` views do not clip inside GPUI scroll lists and GPUI's usvg drops `foreignObject` labels and KaTeX HTML. Reason: [ADR-0037](watchtower/decisions/ADR-0037-hidden-webview-png-snapshots-over-svg-and-inline-webviews.md).
 
 ## Learnings
 
@@ -184,10 +187,10 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 ### 2026-10-14 - Plan 20261014-watchtower-plan-tree
 
 - Learned: in agent shells, `npm run lint` in a plugin folder can exit 2 with "ESLint output (JSON parse failed)", because an rtk ESLint wrapper intercepts it. The oxlint run itself is clean.
-- Source: TASK-096, TASK-097, and TASK-098 outcomes; lead re-check.
+- Source: TASK-109, TASK-110, and TASK-111 outcomes; lead re-check.
 - Use next time: run `rtk proxy npm run lint` and trust its exit code.
 - Learned: the plugin agent snapshot has no `parentAgentId` or `lastActivityAt`; the parent comes from the label `paseo.parent-agent-id`, and activity from `updatedAt`. An agent that waits for a permission still reports `running`.
-- Source: TASK-096 outcome.
+- Source: TASK-109 outcome.
 - Use next time: read `attentionReason` before `status` when you show who waits for the owner.
 - Use next time: read the built output before a plan promises lazy loading.
 
@@ -212,14 +215,14 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Source: TASK-126 outcome.
 - Use next time: import runtime values from `row-store-schema.ts`, and list `host-runtime.test.ts` in `Files:` when the row store interface changes.
 - Learned: FTS5 `unicode61 remove_diacritics 2` does not fold `đ`, and it matches only whole words or word prefixes.
-- Source: TASK-128 outcome; Q-048.
+- Source: TASK-128 outcome; Q-054.
 - Use next time: fold `đ` to `d` on both sides, and do not promise a mid-word match from the cache path.
 - Learned: a coalesced write whose promise waits for the file commit makes every awaited persist slower, and it hangs fake-timer tests that await a persist before they advance the clock.
-- Source: TASK-131 outcome; Q-043.
+- Source: TASK-131 outcome; Q-049.
 - Use next time: when a spec debounces a write, say whether callers await the commit or only the cache update, and list the tests that await it.
 - Learned: the formatter ignores `docs/`, so `npm run format:check:files -- docs/<file>` exits 2 with "Expected at least one target file".
 - Source: TASK-133 outcome.
 - Use next time: do not put a format check for `docs/` files in a Verify line.
 - Learned: many source rows can project to few items: a 3,701-row mock thread gave 88 items, which fit in the first app page, so a UI scroll sent no older-page request. Page it through `fetch_agent_timeline` with the CLI client (`connectToDaemon` from `packages/cli/src/utils/client.ts`) to test SQL pages on live. The mock `five-minute-stream` model gives about 3,700 source rows.
-- Source: Q-046 check on 2026-10-15.
+- Source: Q-052 check on 2026-10-15.
 - Use next time: plan a live paging check as an RPC script, not a UI scroll.

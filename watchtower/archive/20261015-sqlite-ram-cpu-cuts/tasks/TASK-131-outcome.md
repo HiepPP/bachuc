@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE. The coalescing keeps the contract the owner chose in Q-043 (option A). The 2 fake-timer tests that hung now advance or flush the clock, with their assertions unchanged.
+DONE. The coalescing keeps the contract the owner chose in Q-049 (option A). The 2 fake-timer tests that hung now advance or flush the clock, with their assertions unchanged.
 
 ## Changed
 
@@ -16,7 +16,7 @@ DONE. The coalescing keeps the contract the owner chose in Q-043 (option A). The
 
 - Readers (`get`, `list`, and the other queries) see the newest record before its file write.
 - A write of an agent starts at most 250 ms after its first unsaved update. One write holds every update made in that window.
-- The promise of `upsert` and `applySnapshot` settles when a file write that holds the record commits. If that write fails, the promise rejects. Each awaited persist can take up to 250 ms (Q-043, option A).
+- The promise of `upsert` and `applySnapshot` settles when a file write that holds the record commits. If that write fails, the promise rejects. Each awaited persist can take up to 250 ms (Q-049, option A).
 - `flush()` returns only after every scheduled and in-flight write settles.
 - A delete cancels the scheduled write and resolves its promise. Updates after `beginDelete` change nothing.
 - `setTitle` no longer waits for the pending write, because the cache holds the newest record.
@@ -42,7 +42,7 @@ Data loss window <= 250 ms of updates and 0 updates lost on a clean shutdown. Tr
 | baseline         | no window; every update writes at once; 18/18 pass                                                                                 | `agent-storage.test.ts` | 2026-10-15T03:52Z |
 | after coalescing | write starts 250 ms after the first update, even with updates every 50 ms; shutdown flush leaves 3/3 records with their last value | `agent-storage.test.ts` | 2026-10-15T03:53Z |
 | completion       | same, 24/24 pass                                                                                                                   | `agent-storage.test.ts` | 2026-10-15T03:57Z |
-| test fixes       | same, 24/24 pass after the Q-043 test fixes                                                                                        | `agent-storage.test.ts` | 2026-10-15T04:52Z |
+| test fixes       | same, 24/24 pass after the Q-049 test fixes                                                                                        | `agent-storage.test.ts` | 2026-10-15T04:52Z |
 
 ## Lessons
 

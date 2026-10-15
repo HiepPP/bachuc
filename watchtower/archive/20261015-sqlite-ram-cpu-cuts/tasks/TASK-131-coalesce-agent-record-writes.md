@@ -17,7 +17,7 @@ Boundaries:
 - Window: 250 ms trailing per agent. Readers see the newest record at once from the storage cache.
 - Never lose the last write: flush pending writes on daemon shutdown and when a caller awaits a flush. A delete cancels a pending write for that agent.
 - Keep the atomic temp-file and rename write and the per-agent write order.
-- Q-043 answer (owner, 2026-10-15): option A. The promise of `upsert` and `applySnapshot` settles when the file write commits and rejects on a write error. Accept up to 250 ms per awaited persist. Fix the fake-timer tests that await a persist before they advance the clock: `session.workspaces.test.ts` and the `send_agent_prompt` case in `mcp-server.test.ts`.
+- Q-049 answer (owner, 2026-10-15): option A. The promise of `upsert` and `applySnapshot` settles when the file write commits and rejects on a write error. Accept up to 250 ms per awaited persist. Fix the fake-timer tests that await a persist before they advance the clock: `session.workspaces.test.ts` and the `send_agent_prompt` case in `mcp-server.test.ts`.
 
 How:
 
@@ -31,8 +31,8 @@ Files:
 - [packages/server/src/server/agent/agent-storage.ts](packages/server/src/server/agent/agent-storage.ts) (coalesced writes and flush)
 - [packages/server/src/server/agent/agent-storage.test.ts](packages/server/src/server/agent/agent-storage.test.ts) (coalescing cases)
 - [packages/server/src/server/bootstrap.ts](packages/server/src/server/bootstrap.ts) (call the flush on shutdown, only if no current shutdown path flushes storage)
-- [packages/server/src/server/session.workspaces.test.ts](packages/server/src/server/session.workspaces.test.ts) (advance fake timers while a persist is pending; Q-043)
-- [packages/server/src/server/agent/mcp-server.test.ts](packages/server/src/server/agent/mcp-server.test.ts) (same fix for the `send_agent_prompt` wait case; Q-043)
+- [packages/server/src/server/session.workspaces.test.ts](packages/server/src/server/session.workspaces.test.ts) (advance fake timers while a persist is pending; Q-049)
+- [packages/server/src/server/agent/mcp-server.test.ts](packages/server/src/server/agent/mcp-server.test.ts) (same fix for the `send_agent_prompt` wait case; Q-049)
 
 Expected result:
 

@@ -6,15 +6,15 @@ Discrepancy: 5 found. The code matches the design in all four phases, but the pl
 
 ## Per TASK
 
-- TASK-108: match.
-- TASK-109: match. Chunked `initialize` was cut after a measured 7-14 ms for 5,000 rows.
-- TASK-110: plan said reset the cache inside `primeTimelineFromLegacyProviderHistory` -> shipped no reset there. Mistake: a design gap; memory and cache already share one epoch, so the reset drops rows. Fix: none needed. Also left synchronous cache writes unguarded. Mistake: error paths were not in the spec. Fix: TASK-111 guarded them.
-- TASK-111: plan listed six files -> shipped also the cache-write guard in `agent-manager.ts` and a fake-manager change in `wire-compat.test.ts`. Mistake: the spec missed that the shared test fake needs the new read method. Fix: list shared test fakes in the spec.
-- TASK-112: match.
-- TASK-113: plan section 4.4 asked to re-land after an epoch change -> not built. A bottom open through host navigation did not end a pending anchor. Mistake: the file that opens agents was outside its ownership. Fix: TASK-115 added `cancelLatestPromptAnchor`; re-landing stays open.
-- TASK-114: plan said skip desired agents -> shipped an approximate check. Mistake: no public desired check existed in a file another TASK owned. Fix: TASK-115 added `isAgentDesired`.
-- TASK-115: plan was the board calls only -> shipped two follow-ups in files of TASK-112, TASK-113, and TASK-114. Mistake: none, but it broke the one-owner-per-file rule across groups. Fix: put follow-ups in the group that owns the file.
-- TASK-116: match. The orphan `db:query` script in the root `package.json` was left.
+- TASK-117: match.
+- TASK-118: match. Chunked `initialize` was cut after a measured 7-14 ms for 5,000 rows.
+- TASK-119: plan said reset the cache inside `primeTimelineFromLegacyProviderHistory` -> shipped no reset there. Mistake: a design gap; memory and cache already share one epoch, so the reset drops rows. Fix: none needed. Also left synchronous cache writes unguarded. Mistake: error paths were not in the spec. Fix: TASK-120 guarded them.
+- TASK-120: plan listed six files -> shipped also the cache-write guard in `agent-manager.ts` and a fake-manager change in `wire-compat.test.ts`. Mistake: the spec missed that the shared test fake needs the new read method. Fix: list shared test fakes in the spec.
+- TASK-121: match.
+- TASK-122: plan section 4.4 asked to re-land after an epoch change -> not built. A bottom open through host navigation did not end a pending anchor. Mistake: the file that opens agents was outside its ownership. Fix: TASK-124 added `cancelLatestPromptAnchor`; re-landing stays open.
+- TASK-123: plan said skip desired agents -> shipped an approximate check. Mistake: no public desired check existed in a file another TASK owned. Fix: TASK-124 added `isAgentDesired`.
+- TASK-124: plan was the board calls only -> shipped two follow-ups in files of TASK-121, TASK-122, and TASK-123. Mistake: none, but it broke the one-owner-per-file rule across groups. Fix: put follow-ups in the group that owns the file.
+- TASK-125: match. The orphan `db:query` script in the root `package.json` was left.
 
 ## Plan-Level
 

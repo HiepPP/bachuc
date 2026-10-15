@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE. Every spec check passes, and the code is committed in `1c5c4d2d3`. The lead ran the live check after the owner allowed a live restart (Q-045).
+DONE. Every spec check passes, and the code is committed in `1c5c4d2d3`. The lead ran the live check after the owner allowed a live restart (Q-051).
 
 ## Changed
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE. Every spec check passes, and the code is committed in `1c4210462`. The lead ran the live anti-goal check after the owner allowed a live restart (Q-046).
+DONE. Every spec check passes, and the code is committed in `1c4210462`. The lead ran the live anti-goal check after the owner allowed a live restart (Q-052).
 
 ## Changed
 
