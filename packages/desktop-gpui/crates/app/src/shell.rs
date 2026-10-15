@@ -169,23 +169,19 @@ impl Shell {
 
     // ----- data for the chrome views -----
 
-    pub(crate) fn sidebar_data(&self, cx: &App) -> SidebarData {
+    pub(crate) fn sidebar_data<'a>(&'a self, cx: &'a App) -> SidebarData<'a> {
         let client = self.client.read(cx);
         SidebarData {
-            agents: client.agents().to_vec(),
-            workspaces: client.workspaces().to_vec(),
+            agents: client.agents(),
+            workspaces: client.workspaces(),
             active_agent: match self.tabs.active().map(|tab| &tab.kind) {
-                Some(TabKind::Agent(id)) => Some(id.clone()),
+                Some(TabKind::Agent(id)) => Some(id.as_str()),
                 _ => None,
             },
-            hosts: self
-                .hosts
-                .iter()
-                .map(|host| (host.name.clone(), host.url.clone()))
-                .collect(),
+            hosts: &self.hosts,
             host_index: self.host_index,
             hosts_open: self.hosts_open,
-            connection: self.connection.clone(),
+            connection: &self.connection,
         }
     }
 

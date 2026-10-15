@@ -76,13 +76,14 @@ impl Render for Sidebar {
             return div().into_any_element();
         };
         let data = shell.read(cx).sidebar_data(cx);
-        let groups = group_agents(&data.agents, &data.workspaces);
+        let groups = group_agents(data.agents, data.workspaces);
 
         let host_rows = data.hosts_open.then(|| {
             data.hosts
                 .iter()
                 .enumerate()
-                .map(|(ix, (name, url))| {
+                .map(|(ix, host)| {
+                    let (name, url) = (&host.name, &host.url);
                     let current = ix == data.host_index;
                     div()
                         .id(("host", ix))
@@ -118,11 +119,11 @@ impl Render for Sidebar {
                     .truncate()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child(group.name.clone())
+                    .child(group.name.to_string())
                     .into_any_element(),
             );
-            for agent in &group.agents {
-                let selected = data.active_agent.as_deref() == Some(agent.id.as_str());
+            for &agent in &group.agents {
+                let selected = data.active_agent == Some(agent.id.as_str());
                 let dot = status_color(agent, &theme);
                 let title = agent_title(agent);
                 let mut label = format!("Agent {title}, {}", agent.status);
@@ -169,7 +170,7 @@ impl Render for Sidebar {
             }
         }
         let empty = rows.is_empty();
-        let empty_text = if data.connection == Connection::Connected {
+        let empty_text = if *data.connection == Connection::Connected {
             "No agents yet. Press Cmd+N to start one."
         } else {
             "Waiting for the host."
@@ -177,7 +178,7 @@ impl Render for Sidebar {
         let host_name = data
             .hosts
             .get(data.host_index)
-            .map(|(name, _)| name.clone())
+            .map(|host| host.name.as_str())
             .unwrap_or_default();
 
         v_flex()
@@ -266,15 +267,16 @@ impl Sidebar {
     }
 }
 
-/// What the sidebar shows, copied out of the shell.
-pub struct SidebarData {
-    pub agents: Vec<AgentSummary>,
-    pub workspaces: Vec<bachuc_client::WorkspaceSummary>,
-    pub active_agent: Option<String>,
-    pub hosts: Vec<(String, String)>,
+/// What the sidebar shows, borrowed from the shell and its client: the sidebar draws on every
+/// frame of a stream, so it copies no list.
+pub struct SidebarData<'a> {
+    pub agents: &'a [AgentSummary],
+    pub workspaces: &'a [bachuc_client::WorkspaceSummary],
+    pub active_agent: Option<&'a str>,
+    pub hosts: &'a [bachuc_client::HostConfig],
     pub host_index: usize,
     pub hosts_open: bool,
-    pub connection: Connection,
+    pub connection: &'a Connection,
 }
 
 // ----- tab bar -----

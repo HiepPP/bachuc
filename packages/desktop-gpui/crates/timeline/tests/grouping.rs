@@ -5,7 +5,11 @@
 //! compact-screen half of "regroups history when the turn ends" has no GPUI counterpart.
 
 use bachuc_theme::TurnLabel;
-use bachuc_timeline::grouping::{Row, TurnGroup, group_turns, turn_note_hosts};
+use std::rc::Rc;
+
+use bachuc_timeline::grouping::{
+    Row, SharedRow, TurnGroup, TurnGrouper, group_turns, turn_note_hosts,
+};
 use serde_json::{Value, json};
 
 const BASE_MS: i64 = 1_767_225_600_000; // 2026-01-01T00:00:00Z
@@ -525,4 +529,110 @@ fn regroups_history_when_the_turn_ends() {
     assert_eq!(t.row_ids(&t.rows(true)), ["user", "r1", "done"]);
     assert_eq!(t.row_ids(&t.rows(false)), ["user", "r1", "final", "done"]);
     assert_eq!(t.only_group(false).run.items.len(), 3);
+}
+
+/// One projected entry with its own sequence numbers, as a page or a live row brings it.
+fn entry(seq_start: u64, seq_end: u64, fx: Fx) -> Value {
+    json!({
+        "item": fx.item, "timestamp": stamp(fx.second), "seqStart": seq_start,
+        "seqEnd": seq_end, "sourceSeqRanges": [{"startSeq": seq_start, "endSeq": seq_end}],
+        "collapsed": []
+    })
+}
+
+/// The `Rc` addresses of the turn groups of the grouper's last sync.
+fn turn_addresses(grouper: &TurnGrouper) -> Vec<*const TurnGroup> {
+    grouper
+        .rows()
+        .iter()
+        .filter_map(|row| match row {
+            SharedRow::Turn(group) => Some(Rc::as_ptr(group)),
+            SharedRow::Item(_) => None,
+        })
+        .collect()
+}
+
+#[test]
+fn incremental_rows_match_full_regroup() {
+    let mut grouper = TurnGrouper::default();
+    let mut check = |entries: &[Value], active: bool, case: &str| {
+        let full = group_turns(entries, active);
+        assert_eq!(grouper.update(entries, active), full, "{case}");
+        grouper.rows().len()
+    };
+
+    // The first page starts inside a finished turn; an open turn follows.
+    let mut entries = vec![
+        entry(12, 12, read("a", 2)),
+        entry(13, 13, edit("e1", 3, "/repo/a.ts")),
+        entry(14, 14, note("answer", 4)),
+        entry(20, 20, user()),
+        entry(21, 21, note("look", 6)),
+        entry(22, 22, read("b", 7)),
+    ];
+    check(&entries, true, "first sync");
+
+    // Appending to the open turn keeps the finished turn's group and rebuilds the open one.
+    let mut grouper_before = TurnGrouper::default();
+    grouper_before.update(&entries, true);
+    let before = turn_addresses(&grouper_before);
+    entries.push(entry(23, 23, running_shell("s1", 8)));
+    assert_eq!(
+        grouper_before.update(&entries, true),
+        group_turns(&entries, true)
+    );
+    let after = turn_addresses(&grouper_before);
+    assert_eq!(after.len(), 2);
+    assert_eq!(after[0], before[0], "the finished turn keeps its group");
+    assert_ne!(after[1], before[1], "the open turn regroups");
+    assert_eq!(grouper_before.changed(), [6]);
+    check(&entries, true, "append to the open turn");
+
+    // A call completes in place: same seqStart, a larger seqEnd.
+    entries[6] = entry(23, 24, shell("s1", 9));
+    check(&entries, true, "a call completes");
+    entries.push(entry(25, 25, note("next", 10)));
+    entries.push(entry(26, 26, edit("e2", 11, "/repo/b.ts")));
+    check(&entries, true, "a new step");
+
+    // An assistant message grows: its seqEnd changes.
+    let mut grown = entry(25, 27, note("next", 10));
+    grown["item"]["text"] = json!("next, and more");
+    entries[7] = grown;
+    check(&entries, true, "a note grows");
+
+    // The agent status flips with no entry change.
+    check(&entries, false, "the agent goes idle");
+    check(&entries, true, "the agent runs again");
+
+    // The open turn finishes.
+    entries.push(entry(28, 28, note("done", 12)));
+    check(&entries, true, "the answer streams");
+    check(&entries, false, "the turn finishes");
+
+    // A new turn starts while the older one is finished.
+    entries.push(entry(30, 30, user()));
+    entries.push(entry(31, 31, read("c", 14)));
+    check(&entries, true, "a new turn starts");
+    entries.push(entry(32, 32, running_shell("s2", 15)));
+    check(&entries, true, "the new turn runs a call");
+
+    // An older page arrives and regroups the top turn.
+    let older = [entry(10, 10, user()), entry(11, 11, note("plan", 1))];
+    entries.splice(0..0, older);
+    check(&entries, true, "an older page");
+
+    // An entry in the middle goes away.
+    entries.remove(6);
+    check(&entries, true, "a middle entry is removed");
+
+    // The timeline is replaced.
+    let replaced = vec![
+        entry(40, 40, user()),
+        entry(41, 41, note("fresh", 20)),
+        entry(42, 42, read("d", 21)),
+    ];
+    let rows = check(&replaced, true, "the timeline is replaced");
+    assert_eq!(rows, 2);
+    check(&[], false, "the timeline empties");
 }

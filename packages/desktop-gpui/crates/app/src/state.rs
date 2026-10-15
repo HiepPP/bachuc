@@ -127,27 +127,30 @@ pub fn initial_host(hosts: &[HostConfig], preferred: Option<&str>) -> usize {
         .unwrap_or(0)
 }
 
-/// Agents of one workspace, as the sidebar lists them.
+/// Agents of one workspace, as the sidebar lists them. It borrows the client's lists, because
+/// the sidebar groups them on every frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SidebarGroup {
-    pub name: String,
-    pub agents: Vec<AgentSummary>,
+pub struct SidebarGroup<'a> {
+    pub name: &'a str,
+    pub agents: Vec<&'a AgentSummary>,
 }
 
 /// Groups agents by workspace name, in workspace order. Agents with no known workspace come
 /// last under "Other". A workspace with no agent is left out.
-pub fn group_agents(agents: &[AgentSummary], workspaces: &[WorkspaceSummary]) -> Vec<SidebarGroup> {
+pub fn group_agents<'a>(
+    agents: &'a [AgentSummary],
+    workspaces: &'a [WorkspaceSummary],
+) -> Vec<SidebarGroup<'a>> {
     let mut groups: Vec<SidebarGroup> = Vec::new();
     let mut other = Vec::new();
     for workspace in workspaces {
-        let members: Vec<AgentSummary> = agents
+        let members: Vec<&AgentSummary> = agents
             .iter()
             .filter(|agent| agent.workspace_id.as_deref() == Some(workspace.id.as_str()))
-            .cloned()
             .collect();
         if !members.is_empty() {
             groups.push(SidebarGroup {
-                name: workspace.name.clone(),
+                name: &workspace.name,
                 agents: members,
             });
         }
@@ -158,12 +161,12 @@ pub fn group_agents(agents: &[AgentSummary], workspaces: &[WorkspaceSummary]) ->
             .as_deref()
             .is_some_and(|id| workspaces.iter().any(|workspace| workspace.id == id));
         if !known {
-            other.push(agent.clone());
+            other.push(agent);
         }
     }
     if !other.is_empty() {
         groups.push(SidebarGroup {
-            name: "Other".into(),
+            name: "Other",
             agents: other,
         });
     }
@@ -471,7 +474,7 @@ mod tests {
             agent("a5", Some("w2"), 0),
         ];
         let groups = group_agents(&agents, &workspaces);
-        let names: Vec<&str> = groups.iter().map(|group| group.name.as_str()).collect();
+        let names: Vec<&str> = groups.iter().map(|group| group.name).collect();
         assert_eq!(names, ["alpha", "beta", "Other"]);
         let beta: Vec<&str> = groups[1].agents.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(beta, ["a1", "a5"]);

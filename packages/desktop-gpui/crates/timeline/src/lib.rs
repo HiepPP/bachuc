@@ -10,7 +10,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bachuc_client::{Client, ClientEvent};
 use bachuc_diagram::{DiagramReady, DiagramRenderer, image_size};
@@ -23,8 +23,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::Value;
 
-use diff::LineKind;
-use grouping::{Row, StepCounts, TurnGroup, TurnStep, entry_key, item_type};
+use diff::{DiffLine, LineKind};
+use grouping::{SharedRow, StepCounts, TurnGroup, TurnGrouper, TurnStep, entry_key, item_type};
 use markdown::{Block, Segment};
 
 /// Rows within this many of the top load the page before the first entry.
@@ -37,6 +37,8 @@ const STRIP_WIDTH: f32 = 170.;
 /// Live box lines of the running step's last command.
 const OUTPUT_LINES: usize = 2;
 const MAX_THOUGHT_CHARS: usize = 400;
+/// A clock tick this soon after a sync redraw adds no change, so it draws nothing.
+const CLOCK_SKIP_AFTER_SYNC: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum RowKey {
@@ -46,6 +48,7 @@ enum RowKey {
     Permission(String),
 }
 
+#[derive(Clone)]
 enum RowKind {
     Entry(usize),
     TurnHeader(Rc<TurnGroup>),
@@ -54,6 +57,7 @@ enum RowKind {
     Permission(Value),
 }
 
+#[derive(Clone)]
 struct ViewRow {
     key: RowKey,
     /// Changes whenever what the row draws changes.
@@ -74,6 +78,13 @@ struct Message {
     states: Vec<Option<Entity<TextViewState>>>,
 }
 
+/// The diff lines of one edit or write call and their added and removed counts.
+#[derive(Default)]
+struct Diff {
+    lines: Vec<DiffLine>,
+    stats: (usize, usize),
+}
+
 /// The timeline of one agent. Create it with `cx.new(|cx| TimelineView::new(...))`.
 pub struct TimelineView {
     client: Entity<Client>,
@@ -83,17 +94,28 @@ pub struct TimelineView {
     /// The entries the rows point into: a copy of the client's, so a sync between two
     /// `TimelineChanged` events cannot move them under the rows.
     entries: Vec<Value>,
+    grouper: TurnGrouper,
+    /// Per entry: the hash of what it draws, and whether it holds a diagram. A sync hashes only
+    /// the entries the grouper read again.
+    entry_hashes: Vec<(u64, bool)>,
     rows: Vec<ViewRow>,
+    /// Set when an entry hash changed outside a sync, so no turn keeps its old rows.
+    rows_stale: bool,
     version: Option<u64>,
     has_older: bool,
     loaded: bool,
     turn_active: bool,
     messages: HashMap<u64, Message>,
+    /// Diffs of edit and write calls by entry key, built when the entry changes rather than on
+    /// every frame.
+    diffs: HashMap<u64, Rc<Diff>>,
     /// Edits whose diff the user hid; diffs are open by default (ADR-0019).
     hidden_diffs: HashSet<u64>,
     /// Permission requests answered from this view, waiting for the daemon to resolve them.
     answered: HashSet<String>,
     clock: Option<Task<()>>,
+    /// When the last sync redrew the view.
+    synced_at: Option<Instant>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -133,9 +155,9 @@ impl TimelineView {
                 }
                 ClientEvent::Disconnected { .. } => cx.notify(),
             }),
-            cx.subscribe(&diagrams, |this, _, _: &DiagramReady, cx| {
+            cx.subscribe(&diagrams, |this, _, ready: &DiagramReady, cx| {
                 for (index, row) in this.rows.iter().enumerate() {
-                    if row.has_diagram {
+                    if row.has_diagram && this.shows_diagram(row, ready) {
                         this.list.remeasure_items(index..index + 1);
                     }
                 }
@@ -157,15 +179,20 @@ impl TimelineView {
             diagrams,
             list,
             entries: Vec::new(),
+            grouper: TurnGrouper::default(),
+            entry_hashes: Vec::new(),
             rows: Vec::new(),
+            rows_stale: false,
             version: None,
             has_older: false,
             loaded: false,
             turn_active: false,
             messages: HashMap::new(),
+            diffs: HashMap::new(),
             hidden_diffs: HashSet::new(),
             answered: HashSet::new(),
             clock: None,
+            synced_at: None,
             _subscriptions: subscriptions,
         };
         this.sync(cx);
@@ -204,14 +231,39 @@ impl TimelineView {
         self.loaded = true;
         self.has_older = state.has_older;
         let permissions = state.pending_permissions.clone();
-        self.entries = reuse_entries(std::mem::take(&mut self.entries), &state.entries);
+        copy_changed(&mut self.entries, &state.entries);
         self.answered
             .retain(|id| permissions.iter().any(|request| request["id"] == **id));
+        self.grouper.sync(&self.entries, turn_active);
         self.update_messages(cx);
+        self.update_hashes();
 
+        // A turn whose group did not change keeps its rows; its `Rc` stays alive in the old
+        // rows, so no new group can take its address.
+        let old_turns: HashMap<*const TurnGroup, usize> = if self.rows_stale {
+            HashMap::new()
+        } else {
+            self.rows
+                .iter()
+                .enumerate()
+                .filter_map(|(index, row)| match &row.kind {
+                    RowKind::TurnHeader(group) => Some((Rc::as_ptr(group), index)),
+                    _ => None,
+                })
+                .collect()
+        };
+        self.rows_stale = false;
         let mut rows: Vec<ViewRow> = Vec::new();
-        for row in grouping::group_turns(&self.entries, turn_active) {
-            self.push_rows(row, &mut rows);
+        for row in self.grouper.rows() {
+            match row {
+                SharedRow::Item(index) => rows.push(self.entry_row(*index)),
+                SharedRow::Turn(group) => match old_turns.get(&Rc::as_ptr(group)) {
+                    Some(&header) => {
+                        rows.extend_from_slice(&self.rows[header..=header + group.steps.len()])
+                    }
+                    None => self.push_turn_rows(group, &mut rows),
+                },
+            }
         }
         rows.extend(permissions.into_iter().map(|request| {
             let id = request["id"].as_str().unwrap_or("").to_string();
@@ -229,6 +281,7 @@ impl TimelineView {
         }));
         self.apply_rows(rows);
         self.update_clock(cx);
+        self.synced_at = Some(Instant::now());
         cx.notify();
     }
 
@@ -285,93 +338,146 @@ impl TimelineView {
     }
 
     /// Hashes what an entry draws and tells whether it holds a diagram.
-    fn hash_entry(&self, index: usize, hasher: &mut DefaultHasher) -> bool {
+    fn hash_entry(&self, index: usize) -> (u64, bool) {
         let entry = &self.entries[index];
         let key = entry_key(entry);
-        key.hash(hasher);
-        entry["seqEnd"].as_u64().hash(hasher);
-        self.hidden_diffs.contains(&key).hash(hasher);
-        self.messages.get(&key).is_some_and(|message| {
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        entry["seqEnd"].as_u64().hash(&mut hasher);
+        self.hidden_diffs.contains(&key).hash(&mut hasher);
+        let has_diagram = self.messages.get(&key).is_some_and(|message| {
             message
                 .segments
                 .iter()
                 .any(|segment| matches!(segment, Segment::Diagram { .. }))
-        })
+        });
+        (hasher.finish(), has_diagram)
     }
 
-    /// A turn takes one list item for its header and one per step, so a long turn lays out
-    /// only the steps on screen.
-    fn push_rows(&self, row: Row, rows: &mut Vec<ViewRow>) {
-        match row {
-            Row::Item(index) => {
-                let mut hasher = DefaultHasher::new();
-                let has_diagram = self.hash_entry(index, &mut hasher);
-                let key = entry_key(&self.entries[index]);
-                rows.push(ViewRow {
-                    key: RowKey::Entry(key),
-                    fingerprint: hasher.finish(),
-                    anchor: Some(key),
-                    last: Some(key),
-                    has_diagram,
-                    kind: RowKind::Entry(index),
-                });
+    /// Hashes the entries the last grouper sync read again, and builds the diffs of the edit
+    /// and write calls among them.
+    fn update_hashes(&mut self) {
+        if self.grouper.shifted() {
+            let live: HashSet<u64> = (0..self.entries.len())
+                .map(|index| self.grouper.key(index))
+                .collect();
+            self.diffs.retain(|key, _| live.contains(key));
+        }
+        self.entry_hashes.truncate(self.entries.len());
+        for index in self.grouper.changed().to_vec() {
+            let entry = &self.entries[index];
+            if grouping::edited_file_path(entry).is_some() {
+                let lines = diff::entry_lines(entry);
+                let stats = diff::stats(&lines);
+                self.diffs
+                    .insert(entry_key(entry), Rc::new(Diff { lines, stats }));
             }
-            Row::Turn(group) => {
-                let group = Rc::new(group);
-                let mut hasher = DefaultHasher::new();
-                for &index in &group.run.items {
-                    self.hash_entry(index, &mut hasher);
-                }
-                group.is_loading.hash(&mut hasher);
-                group.running_step.hash(&mut hasher);
-                let key = entry_key(&self.entries[group.run.items[0]]);
-                rows.push(ViewRow {
-                    key: RowKey::Turn(key),
-                    fingerprint: hasher.finish(),
-                    anchor: Some(key),
-                    last: None,
-                    has_diagram: false,
-                    kind: RowKind::TurnHeader(group.clone()),
-                });
-                for (position, step) in group.steps.iter().enumerate() {
-                    let mut hasher = DefaultHasher::new();
-                    let mut has_diagram = false;
-                    for &index in step.note.iter().chain(&step.items) {
-                        has_diagram |= self.hash_entry(index, &mut hasher);
-                    }
-                    (step.label as u8).hash(&mut hasher);
-                    step.is_running.hash(&mut hasher);
-                    // The last step draws the rule under a finished turn.
-                    (position + 1 == group.steps.len() && !group.is_loading).hash(&mut hasher);
-                    let key = entry_key(&self.entries[step.id]);
-                    let last = step
-                        .note
-                        .iter()
-                        .chain(&step.items)
-                        .map(|&index| entry_key(&self.entries[index]))
-                        .max();
-                    rows.push(ViewRow {
-                        key: RowKey::Step(key),
-                        fingerprint: hasher.finish(),
-                        anchor: Some(key),
-                        last,
-                        has_diagram,
-                        kind: RowKind::Step(group.clone(), position),
-                    });
-                }
+            let hash = self.hash_entry(index);
+            match self.entry_hashes.get_mut(index) {
+                Some(slot) => *slot = hash,
+                None => self.entry_hashes.push(hash),
             }
         }
     }
 
+    fn entry_row(&self, index: usize) -> ViewRow {
+        let key = self.grouper.key(index);
+        let (fingerprint, has_diagram) = self.entry_hashes[index];
+        ViewRow {
+            key: RowKey::Entry(key),
+            fingerprint,
+            anchor: Some(key),
+            last: Some(key),
+            has_diagram,
+            kind: RowKind::Entry(index),
+        }
+    }
+
+    /// A turn takes one list item for its header and one per step, so a long turn lays out
+    /// only the steps on screen.
+    fn push_turn_rows(&self, group: &Rc<TurnGroup>, rows: &mut Vec<ViewRow>) {
+        // The header is one line of title, clock, strip, and summary: a step body leaves its
+        // height alone.
+        let mut hasher = DefaultHasher::new();
+        group.is_loading.hash(&mut hasher);
+        group.step_count.hash(&mut hasher);
+        group.running_step.hash(&mut hasher);
+        group.changed_files.hash(&mut hasher);
+        let key = self.grouper.key(group.run.items[0]);
+        rows.push(ViewRow {
+            key: RowKey::Turn(key),
+            fingerprint: hasher.finish(),
+            anchor: Some(key),
+            last: None,
+            has_diagram: false,
+            kind: RowKind::TurnHeader(group.clone()),
+        });
+        for (position, step) in group.steps.iter().enumerate() {
+            let mut hasher = DefaultHasher::new();
+            let mut has_diagram = false;
+            for &index in step.note.iter().chain(&step.items) {
+                let (hash, diagram) = self.entry_hashes[index];
+                hash.hash(&mut hasher);
+                has_diagram |= diagram;
+            }
+            (step.label as u8).hash(&mut hasher);
+            step.is_running.hash(&mut hasher);
+            // The last step draws the rule under a finished turn.
+            (position + 1 == group.steps.len() && !group.is_loading).hash(&mut hasher);
+            let key = self.grouper.key(step.id);
+            let last = step
+                .note
+                .iter()
+                .chain(&step.items)
+                .map(|&index| self.grouper.key(index))
+                .max();
+            rows.push(ViewRow {
+                key: RowKey::Step(key),
+                fingerprint: hasher.finish(),
+                anchor: Some(key),
+                last,
+                has_diagram,
+                kind: RowKind::Step(group.clone(), position),
+            });
+        }
+    }
+
+    /// Whether a row shows the diagram that finished rendering.
+    fn shows_diagram(&self, row: &ViewRow, ready: &DiagramReady) -> bool {
+        let entries: &[usize] = match &row.kind {
+            RowKind::Entry(index) => std::slice::from_ref(index),
+            RowKind::Step(group, position) => &group.steps[*position].note,
+            _ => &[],
+        };
+        entries.iter().any(|&index| {
+            self.messages
+                .get(&self.grouper.key(index))
+                .is_some_and(|message| {
+                    message.segments.iter().any(|segment| {
+                        matches!(segment, Segment::Diagram { kind, source }
+                            if *kind == ready.kind && *source == ready.source)
+                    })
+                })
+        })
+    }
+
     /// Splits each new or changed assistant entry into segments and updates its text states.
     fn update_messages(&mut self, cx: &mut Context<Self>) {
-        let mut live: HashSet<u64> = HashSet::new();
-        for entry in &self.entries {
+        if self.grouper.shifted() {
+            let live: HashSet<u64> = self
+                .entries
+                .iter()
+                .filter(|entry| item_type(entry) == "assistant_message")
+                .map(entry_key)
+                .collect();
+            self.messages.retain(|key, _| live.contains(key));
+        }
+        for &index in self.grouper.changed() {
+            let entry = &self.entries[index];
             if item_type(entry) != "assistant_message" {
                 continue;
             }
             let key = entry_key(entry);
-            live.insert(key);
             let seq_end = entry["seqEnd"].as_u64().unwrap_or(0);
             if self
                 .messages
@@ -413,7 +519,6 @@ impl TimelineView {
                 },
             );
         }
-        self.messages.retain(|key, _| live.contains(key));
     }
 
     /// Ticks once a second while a turn runs, for its clock and the running step's time.
@@ -430,7 +535,17 @@ impl TimelineView {
             self.clock = Some(cx.spawn(async move |this, cx| {
                 loop {
                     cx.background_executor().timer(Duration::from_secs(1)).await;
-                    if this.update(cx, |_, cx| cx.notify()).is_err() {
+                    // A stream syncs many times a second, and each sync redraws the clock, so a
+                    // tick right after one would draw one more frame with the same text.
+                    let tick = |this: &mut TimelineView, cx: &mut Context<TimelineView>| {
+                        if this
+                            .synced_at
+                            .is_none_or(|at| at.elapsed() >= CLOCK_SKIP_AFTER_SYNC)
+                        {
+                            cx.notify();
+                        }
+                    };
+                    if this.update(cx, tick).is_err() {
                         break;
                     }
                 }
@@ -441,6 +556,11 @@ impl TimelineView {
     fn toggle_diff(&mut self, key: u64, cx: &mut Context<Self>) {
         if !self.hidden_diffs.remove(&key) {
             self.hidden_diffs.insert(key);
+        }
+        // Only the edit's hash changes; the rows rebuild from the cached hashes.
+        if let Some(index) = (0..self.entries.len()).find(|&index| self.grouper.key(index) == key) {
+            self.entry_hashes[index] = self.hash_entry(index);
+            self.rows_stale = true;
         }
         self.version = None;
         self.sync(cx);
@@ -686,7 +806,11 @@ impl TimelineView {
             .steps
             .iter()
             .flat_map(|step| step.edits.iter())
-            .map(|&edit| diff::stats(&diff::entry_lines(&self.entries[edit])))
+            .map(|&edit| {
+                self.diffs
+                    .get(&self.grouper.key(edit))
+                    .map_or((0, 0), |diff| diff.stats)
+            })
             .fold((0, 0), |sum, stats| (sum.0 + stats.0, sum.1 + stats.1));
 
         let title = if group.is_loading {
@@ -905,8 +1029,8 @@ impl TimelineView {
         let entry = &self.entries[index];
         let key = entry_key(entry);
         let path = grouping::edited_file_path(entry).unwrap_or("").to_string();
-        let lines = diff::entry_lines(entry);
-        let (additions, deletions) = diff::stats(&lines);
+        let diff = self.diffs.get(&key).cloned().unwrap_or_default();
+        let (additions, deletions) = diff.stats;
         let hidden = self.hidden_diffs.contains(&key);
         let file_row = h_flex()
             .id(("edit-file", key))
@@ -953,7 +1077,7 @@ impl TimelineView {
                 .py_1()
                 .text_xs()
                 .font_family(mono)
-                .children(lines.into_iter().map(move |line| {
+                .children(diff.lines.iter().map(move |line| {
                     let (sign, bg, color) = match line.kind {
                         LineKind::Add => ("+", added, foreground),
                         LineKind::Remove => ("-", removed, foreground),
@@ -965,7 +1089,7 @@ impl TimelineView {
                         .bg(bg)
                         .text_color(color)
                         .child(div().w(px(12.)).flex_none().child(sign))
-                        .child(div().flex_1().min_w_0().child(line.text))
+                        .child(div().flex_1().min_w_0().child(line.text.clone()))
                 }))
         });
         v_flex()
@@ -1136,23 +1260,19 @@ impl Render for TimelineView {
     }
 }
 
-/// The client's entries, reusing the copies of entries that did not change.
-fn reuse_entries(old: Vec<Value>, current: &[Value]) -> Vec<Value> {
-    let identity = |entry: &Value| {
-        (
-            entry_key(entry),
-            entry["seqEnd"].as_u64(),
-            entry["timestamp"].as_str().map(str::to_string),
-        )
-    };
-    let mut kept: HashMap<_, Value> = old.into_iter().map(|e| (identity(&e), e)).collect();
-    current
-        .iter()
-        .map(|entry| {
-            kept.remove(&identity(entry))
-                .unwrap_or_else(|| entry.clone())
-        })
-        .collect()
+/// Copies the client's entries into `copies`, keeping each copy whose position, `seqStart`, and
+/// `seqEnd` did not change: the client changes an entry only with its `seqEnd`.
+fn copy_changed(copies: &mut Vec<Value>, current: &[Value]) {
+    copies.truncate(current.len());
+    for (index, entry) in current.iter().enumerate() {
+        match copies.get_mut(index) {
+            Some(copy)
+                if entry_key(copy) == entry_key(entry)
+                    && copy["seqEnd"].as_u64() == entry["seqEnd"].as_u64() => {}
+            Some(copy) => *copy = entry.clone(),
+            None => copies.push(entry.clone()),
+        }
+    }
 }
 
 fn label_name(label: TurnLabel) -> &'static str {
