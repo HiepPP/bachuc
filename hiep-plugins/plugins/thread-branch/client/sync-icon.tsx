@@ -1,4 +1,4 @@
-import type { PluginButtonIconProps } from "@getpaseo/plugin/client";
+import type { PluginButtonIcon, PluginButtonIconProps } from "@getpaseo/plugin/client";
 import * as nativeUi from "@getpaseo/plugin/client/react-native";
 import type { ComponentType } from "react";
 
@@ -18,8 +18,9 @@ function tinted(
   };
 }
 
-export const syncIcons: Record<SyncState, ComponentType<PluginButtonIconProps>> = {
-  synced: tinted("CircleCheck", (colors) => colors.statusSuccess),
-  ahead: tinted("CloudUpload", (colors) => colors.accent),
-  behind: tinted("CloudDownload", (colors) => colors.statusWarning),
+/** The branch pill icon: host-muted when in sync, tinted when commits wait to push or pull. */
+export const branchIcons: Record<SyncState, PluginButtonIcon> = {
+  synced: "GitBranch",
+  ahead: tinted("GitBranch", (colors) => colors.accent),
+  behind: tinted("GitBranch", (colors) => colors.statusWarning),
 };

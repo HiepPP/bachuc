@@ -10,8 +10,6 @@ import {
   describeChangesPill,
   describePrPill,
   describeRefsPill,
-  describeRepoPill,
-  describeSyncPill,
 } from "./buttons";
 import { openUrl } from "./open";
 import { extractGitRefs, type GitRef } from "./refs";
@@ -74,9 +72,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
     string,
     {
       branch: PluginButtonRegistration;
-      sync: PluginButtonRegistration;
       pr: PluginButtonRegistration;
-      repo: PluginButtonRegistration;
       refs: PluginButtonRegistration;
       changes: PluginButtonRegistration;
       signature: string;
@@ -121,9 +117,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
       const next = signature(info) + JSON.stringify(agentRefs);
       const actions = actionsFor(cwd);
       const branch = describeBranchPill(info, actions);
-      const sync = describeSyncPill(info, actions.fetch);
       const pr = describePrPill(info, actions.openPr);
-      const repo = describeRepoPill(info, actions.openRepo);
       const refs = describeRefsPill(info, agentRefs, open);
       const changes = describeChangesPill(info, actions.refresh);
       const existing = pills.get(agentId);
@@ -132,9 +126,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
         if (existing.signature === next) continue;
         try {
           existing.branch.update(branch);
-          existing.sync.update(sync);
           existing.pr.update(pr);
-          existing.repo.update(repo);
           existing.refs.update(refs);
           existing.changes.update(changes);
           existing.signature = next;
@@ -157,9 +149,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
       try {
         pills.set(agentId, {
           branch: add("thread-branch", branch),
-          sync: add("thread-branch-sync", sync),
           pr: add("thread-branch-pr", pr),
-          repo: add("thread-branch-repo", repo),
           refs: add("thread-branch-refs", refs),
           changes: add("thread-branch-changes", changes),
           signature: next,
@@ -227,9 +217,7 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
   function untrack(agentId: string, keepAgent = false) {
     const existing = pills.get(agentId);
     existing?.branch.remove();
-    existing?.sync.remove();
     existing?.pr.remove();
-    existing?.repo.remove();
     existing?.refs.remove();
     existing?.changes.remove();
     pills.delete(agentId);
@@ -291,11 +279,9 @@ export function installBranchPills(client: Client, deps: PillDeps = {}) {
     clearTimeout(timer);
     unsubscribe();
     void observation?.release().catch(() => {});
-    for (const { branch, sync, pr, repo, refs, changes } of pills.values()) {
+    for (const { branch, pr, refs, changes } of pills.values()) {
       branch.remove();
-      sync.remove();
       pr.remove();
-      repo.remove();
       refs.remove();
       changes.remove();
     }
