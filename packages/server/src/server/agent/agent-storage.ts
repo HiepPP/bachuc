@@ -99,7 +99,7 @@ export function parseStoredAgentRecord(value: unknown): StoredAgentRecord {
 export const AGENT_RECORD_WRITE_WINDOW_MS = 250;
 
 interface ScheduledRecordWrite {
-  timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout> | null;
   promise: Promise<void>;
   resolve: () => void;
   reject: (error: unknown) => void;
@@ -120,10 +120,12 @@ export class AgentStorage {
   private baseDir: string;
   private loadPromise: Promise<StoredAgentRecord[]> | null = null;
   private logger: Logger;
+  private writeWindowMs: number;
 
-  constructor(baseDir: string, logger: Logger) {
+  constructor(baseDir: string, logger: Logger, options?: { writeWindowMs?: number }) {
     this.baseDir = baseDir;
     this.logger = logger.child({ module: "agent", component: "agent-storage" });
+    this.writeWindowMs = options?.writeWindowMs ?? AGENT_RECORD_WRITE_WINDOW_MS;
   }
 
   async initialize(): Promise<void> {
@@ -197,8 +199,13 @@ export class AgentStorage {
       resolve = res;
       reject = rej;
     });
-    const timer = setTimeout(() => this.startRecordWrite(agentId), AGENT_RECORD_WRITE_WINDOW_MS);
+    // A zero window skips the timer: even a 0 ms timeout costs a macrotask per write.
+    const timer =
+      this.writeWindowMs > 0
+        ? setTimeout(() => this.startRecordWrite(agentId), this.writeWindowMs)
+        : null;
     this.scheduledWrites.set(agentId, { timer, promise, resolve, reject });
+    if (!timer) queueMicrotask(() => this.startRecordWrite(agentId));
     return promise;
   }
 
@@ -207,7 +214,7 @@ export class AgentStorage {
     if (!scheduled) {
       return;
     }
-    clearTimeout(scheduled.timer);
+    if (scheduled.timer) clearTimeout(scheduled.timer);
     this.scheduledWrites.delete(agentId);
 
     const prev = this.pendingWrites.get(agentId) ?? Promise.resolve();
@@ -239,7 +246,7 @@ export class AgentStorage {
     if (!scheduled) {
       return;
     }
-    clearTimeout(scheduled.timer);
+    if (scheduled.timer) clearTimeout(scheduled.timer);
     this.scheduledWrites.delete(agentId);
     scheduled.resolve();
   }

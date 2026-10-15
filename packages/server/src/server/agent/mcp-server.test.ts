@@ -23,8 +23,12 @@ import type {
   AgentRunResult,
   AgentSession,
   AgentStreamEvent,
+  AgentTimelineItem,
   ProviderSnapshotEntry,
 } from "./agent-sdk-types.js";
+import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
+import type { AgentTimelineFetchOptions } from "./agent-timeline-store-types.js";
+import { openTimelineCacheStore } from "./sqlite-timeline-store.js";
 import type { ProviderSnapshotManager } from "./provider-snapshot-manager.js";
 import { createProviderSnapshotManagerStub } from "../test-utils/session-stubs.js";
 import {
@@ -223,6 +227,7 @@ interface TestDeps {
 }
 
 function buildAgentManagerSpies() {
+  const getTimeline = vi.fn().mockReturnValue([]);
   return {
     createAgent: vi.fn(),
     waitForAgentEvent: vi.fn().mockResolvedValue({
@@ -241,7 +246,17 @@ function buildAgentManagerSpies() {
     notifyAgentState: vi.fn(),
     getAgent: vi.fn(),
     listAgents: vi.fn().mockReturnValue([]),
-    getTimeline: vi.fn().mockReturnValue([]),
+    getTimeline,
+    // Serves the items a test gives getTimeline through a real in-memory store.
+    fetchTimeline: vi.fn((agentId: string, options?: AgentTimelineFetchOptions) => {
+      const store = new InMemoryAgentTimelineStore();
+      const items: AgentTimelineItem[] = getTimeline(agentId);
+      store.initialize(agentId, {
+        epoch: "test",
+        rows: items.map((item, index) => ({ seq: index + 1, timestamp: "", item })),
+      });
+      return store.fetch(agentId, options);
+    }),
     resumeAgentFromPersistence: vi.fn(),
     hydrateTimelineFromProvider: vi.fn().mockResolvedValue(undefined),
     appendTimelineItem: vi.fn().mockResolvedValue(undefined),
@@ -6257,5 +6272,67 @@ describe("agent snapshot MCP serialization", () => {
     expect(content).not.toContain("[User] u2");
     expect(content).not.toContain("second answer");
     expect(content).not.toContain("first answer");
+  });
+
+  it("get_agent_activity reads activity below the 1,000-row memory tail from the cache", async () => {
+    const testLogger = createTestLogger();
+    const home = await mkdtemp(join(tmpdir(), "mcp-activity-tail-"));
+    const store = await openTimelineCacheStore(home, testLogger);
+    if (!store) throw new Error("node:sqlite is unavailable");
+    // A zero write window keeps 1,501 awaited appends fast.
+    const storage = new AgentStorage(join(home, "agents"), testLogger, { writeWindowMs: 0 });
+    const agentManager = new AgentManager({
+      clients: createTestAgentClients(),
+      registry: storage,
+      durableTimelineStore: store,
+      logger: testLogger,
+    });
+    try {
+      const agent = await agentManager.createAgent(
+        { provider: "claude", cwd: process.cwd() },
+        undefined,
+        { workspaceId: undefined },
+      );
+      await agentManager.appendTimelineItem(agent.id, {
+        type: "user_message",
+        text: "first prompt",
+      });
+      for (let index = 0; index < 1_500; index++) {
+        await agentManager.appendTimelineItem(agent.id, {
+          type: "assistant_message",
+          text: `row ${index}`,
+          messageId: `message-${index}`,
+        });
+      }
+      store.flush();
+      expect(await agentManager.getTimelineRows(agent.id)).toHaveLength(1_000);
+
+      const server = await createAgentMcpServer({
+        agentManager,
+        agentStorage: storage,
+        logger: testLogger,
+        providerSnapshotManager: createClaudeOnlyManager(),
+      });
+      const tool = registeredTool(server, "get_agent_activity");
+
+      const all = await tool.handler({ agentId: agent.id });
+      const allContent = String(all.structuredContent.content);
+      expect(all.structuredContent.updateCount).toBe(1_501);
+      expect(allContent).toMatch(/^Showing all \d+ activities/);
+      expect(allContent).toContain("first prompt");
+      expect(allContent).toContain("row 0");
+      expect(allContent).toContain("row 1499");
+
+      const limited = await tool.handler({ agentId: agent.id, limit: 2 });
+      const limitedContent = String(limited.structuredContent.content);
+      expect(limited.structuredContent.updateCount).toBe(1_501);
+      expect(limitedContent).toMatch(/^Showing the last 2 activities \(limited to 2\)/);
+      expect(limitedContent).not.toContain("first prompt");
+    } finally {
+      await agentManager.flush();
+      await storage.flush();
+      store.close();
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });

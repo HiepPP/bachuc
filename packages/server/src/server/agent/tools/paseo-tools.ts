@@ -22,7 +22,6 @@ import {
   toAgentPayload,
 } from "../agent-projections.js";
 import { curateAgentActivity } from "../activity-curator.js";
-import { selectItemsByProjectedLimit } from "../timeline-projection.js";
 import type { AgentStorage } from "../agent-storage.js";
 import { ensureAgentLoaded } from "../agent-loading.js";
 import { isStoredAgentProviderAvailable } from "../../persistence-hooks.js";
@@ -3111,30 +3110,27 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         agentStorage,
         logger: childLogger,
       });
-      const timeline = agentManager.getTimeline(agentId);
+      // Memory holds only a bounded tail; fetchTimeline reads older rows from the timeline cache.
+      const page = agentManager.fetchTimeline(agentId, { direction: "tail", limit: limit ?? 0 });
       const snapshot = agentManager.getAgent(agentId);
 
-      const selection = selectItemsByProjectedLimit({
-        items: timeline,
-        direction: "tail",
-        limit: limit ?? 0,
-      });
-      const curatedContent = curateAgentActivity(selection.items);
-      const { totalProjected, shownProjected } = selection;
-
-      const noun = totalProjected === 1 ? "activity" : "activities";
-      const countHeader =
-        limit && shownProjected < totalProjected
-          ? `Showing ${shownProjected} of ${totalProjected} ${noun} (limited to ${limit})`
-          : `Showing all ${totalProjected} ${noun}`;
+      const curatedContent = curateAgentActivity(page.rows.map((row) => row.item));
+      const shown = page.rows.length;
+      const noun = shown === 1 ? "activity" : "activities";
+      // Counting every projected item would read the whole timeline, so a limited page says only
+      // that older activity exists.
+      const countHeader = page.hasOlder
+        ? `Showing the last ${shown} ${noun} (limited to ${limit})`
+        : `Showing all ${shown} ${noun}`;
 
       const contentWithCount = `${countHeader}\n\n${curatedContent}`;
+      const { minSeq, maxSeq } = page.window;
 
       return {
         content: [],
         structuredContent: ensureValidJson({
           agentId,
-          updateCount: timeline.length,
+          updateCount: maxSeq >= minSeq && maxSeq > 0 ? maxSeq - minSeq + 1 : 0,
           currentModeId: snapshot?.currentModeId ?? null,
           content: contentWithCount,
         }),

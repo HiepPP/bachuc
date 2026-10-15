@@ -121,7 +121,7 @@ async function startDaemon(
 ): Promise<Daemon> {
   const store = await openTimelineCacheStore(home, logger);
   if (!store) throw new Error("node:sqlite is unavailable");
-  const registry = new AgentStorage(join(home, "agents"), logger);
+  const registry = new AgentStorage(join(home, "agents"), logger, { writeWindowMs: 0 });
   const clients = createTestAgentClients();
   const manager = new AgentManager({
     clients,
@@ -538,7 +538,7 @@ describe("AgentManager durable timeline", () => {
   test("without a cache, timelines stay whole in memory", async () => {
     const manager = new AgentManager({
       clients: createTestAgentClients(),
-      registry: new AgentStorage(join(home, "agents"), logger),
+      registry: new AgentStorage(join(home, "agents"), logger, { writeWindowMs: 0 }),
       logger,
       timelineTailRows: 5,
     });
