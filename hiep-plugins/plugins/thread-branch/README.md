@@ -12,12 +12,6 @@ A changes pill `3 files +14 -3` appears only when the work tree has uncommitted 
 tracked files from `git status` (untracked files are not counted, matching the dirty check) and
 staged plus unstaged lines against `HEAD`. A click refreshes it.
 
-A links pill `3 links` lists the PRs (`#42`), commits (7–40 hex chars), and branches named in the
-agent's last reply and opens each on the `origin` remote (GitHub or GitLab routes). Branches count
-only as inline code after the word "branch", with a prefix like `feat/`, or as `main`/`master`/
-`develop`. The reply is re-read when a turn ends. Refs always resolve against this workspace's
-`origin`, so a ref from another repository opens the wrong page.
-
 The branch pill menu offers **Copy branch name**, **Open bachuc on GitHub** (the `origin` web page
 of GitHub, GitLab, or any http/ssh remote, named after the repository), **Fetch** (runs
 `git fetch` then recounts, shown when the branch has an upstream), and **Refresh**.

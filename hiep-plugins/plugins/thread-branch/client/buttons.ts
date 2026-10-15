@@ -1,7 +1,6 @@
 import type { PluginButton } from "@getpaseo/plugin/client";
 import type { BranchInfo } from "../shared/branch";
 import { pillLabel, pillTitle } from "./label";
-import { refTitle, refUrl, type GitRef } from "./refs";
 import { branchIcons, type SyncState } from "./sync-icon";
 
 /** Last path segment of the `origin` web URL, such as `bachuc`. */
@@ -87,37 +86,6 @@ export function describePrPill(info: BranchInfo, openPr: () => Promise<void>): P
     label: pr ? `#${pr.number}` : "PR",
     visible: info.repo && pr !== null,
     behavior: { kind: "action", onPress: openPr },
-  };
-}
-
-const refIcons = { pr: "GitPullRequest", commit: "GitCommitHorizontal", branch: "GitBranch" };
-
-/** Menu of PRs, commits, and branches named in the agent's last reply; hidden when there are none. */
-export function describeRefsPill(
-  info: BranchInfo,
-  refs: readonly GitRef[],
-  open: (url: string) => Promise<void>,
-): PluginButton {
-  const remote = info.remoteUrl;
-  return {
-    title: "Git links in the last reply",
-    icon: "Link",
-    label: `${refs.length} ${refs.length === 1 ? "link" : "links"}`,
-    visible: info.repo && remote !== null && refs.length > 0,
-    behavior: {
-      kind: "menu",
-      // Host ids allow only `[a-z][a-z0-9-]*`, so ref values like `feat/x` cannot be ids.
-      items: refs.map((ref, index) => ({
-        kind: "item" as const,
-        id: `ref-${index}`,
-        title: refTitle(ref),
-        icon: refIcons[ref.kind],
-        behavior: {
-          kind: "action" as const,
-          onPress: () => (remote ? open(refUrl(remote, ref)) : Promise.resolve()),
-        },
-      })),
-    },
   };
 }
 
