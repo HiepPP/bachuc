@@ -15,7 +15,7 @@ header_pattern: ^(feat|fix|docs|refactor|test|chore|perf)(\([a-z0-9-]+\))?: .+
 ## Repo Rules
 
 - Never restart or stop the release daemon on port 6767. Never run `scripts/paseo-release.sh` or `npm run build:desktop`.
-- Do not start, stop, or restart the live daemon or the live Electron app (owner answer, 2026-10-12). If live is down, write each live check as `UNVERIFIED (unattended)`.
+- Do not start, stop, or restart the live daemon or the live Electron app (owner answer, 2026-10-12). If live is down, write each live check as `UNVERIFIED (unattended)`. Exception: the lead may restart live for the Q-045 and Q-046 checks (owner answer, 2026-10-15).
 - Run one test file at a time with `npx vitest run <file> --bail=1`. Never run a full suite.
 - Run GitNexus `impact` before you edit a symbol. Run `detect_changes` before each commit, per the root `CLAUDE.md`.
 - The gate has no `formatter` line. Format changed source files with `npm run format:files -- <files>` and `watchtower/` markdown the same way before you stage; the lefthook pre-commit hook checks staged files.
@@ -37,4 +37,4 @@ header_pattern: ^(feat|fix|docs|refactor|test|chore|perf)(\([a-z0-9-]+\))?: .+
 
 ## Known Failures
 
-- `packages/server/src/server/mcp-server.test.ts`: 7 cases fail with a TypeError that reads `size` of `backgroundProcesses` at `agent-projections.ts:149`, without this run's changes (build E, 2026-10-15). Confirm by: `npx vitest run packages/server/src/server/mcp-server.test.ts` -> the same TypeError.
+- `packages/server/src/server/agent/mcp-server.test.ts`: 7 cases fail with a TypeError that reads `size` of `backgroundProcesses` at `agent-projections.ts:149`, without this run's changes (build E, 2026-10-15). Confirm by: `npx vitest run packages/server/src/server/agent/mcp-server.test.ts` -> the same TypeError.

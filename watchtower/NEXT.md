@@ -4,23 +4,23 @@
 
 - Title: SQLite-backed RAM and CPU cuts
 - Slug: 20261015-sqlite-ram-cpu-cuts
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-15
 
 ## Tracker
 
 One row per TASK. Group ties together items that write the same files.
 
-| Order | TASK                                          | Group | Status  | Spec                                                                                                                                   | Deps                                                                 | Context                                        | Notes                                         |
-| ----- | --------------------------------------------- | ----- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------- |
-| 1     | TASK-126 App replica budget from stored sizes | A     | DONE    | [watchtower/tasks/TASK-126-app-replica-budget-from-stored-sizes.md](watchtower/tasks/TASK-126-app-replica-budget-from-stored-sizes.md) | -                                                                    | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Drops the in-memory copy of all cache rows.   |
-| 2     | TASK-127 App keeps 8 recent thread streams    | B     | BLOCKED | [watchtower/tasks/TASK-127-app-keeps-8-recent-thread-streams.md](watchtower/tasks/TASK-127-app-keeps-8-recent-thread-streams.md)       | -                                                                    | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Frees streams of threads left long ago.       |
-| 3     | TASK-128 Daemon FTS5 search and prompt index  | D     | DONE    | [watchtower/tasks/TASK-128-daemon-fts5-search-and-prompt-index.md](watchtower/tasks/TASK-128-daemon-fts5-search-and-prompt-index.md)   | -                                                                    | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Moves full-timeline readers to SQL first.     |
-| 4     | TASK-129 Daemon bounded tail with SQL pages   | D     | BLOCKED | [watchtower/tasks/TASK-129-daemon-bounded-tail-with-sql-pages.md](watchtower/tasks/TASK-129-daemon-bounded-tail-with-sql-pages.md)     | TASK-128                                                             | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares files with TASK-128; follows ADR-0032. |
-| 5     | TASK-130 Daemon transcript fingerprint        | D     | DONE    | [watchtower/tasks/TASK-130-daemon-transcript-fingerprint.md](watchtower/tasks/TASK-130-daemon-transcript-fingerprint.md)               | TASK-129                                                             | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares files with TASK-128 and TASK-129.      |
-| 6     | TASK-131 Coalesce agent record writes         | E     | BLOCKED | [watchtower/tasks/TASK-131-coalesce-agent-record-writes.md](watchtower/tasks/TASK-131-coalesce-agent-record-writes.md)                 | -                                                                    | -                                              | Records stay JSON.                            |
-| 7     | TASK-132 Expire old agent request receipts    | F     | DONE    | [watchtower/tasks/TASK-132-expire-old-agent-request-receipts.md](watchtower/tasks/TASK-132-expire-old-agent-request-receipts.md)       | -                                                                    | -                                              | 7-day TTL.                                    |
-| 8     | TASK-133 Docs for the SQLite cuts             | G     | TODO    | [watchtower/tasks/TASK-133-docs-for-the-sqlite-cuts.md](watchtower/tasks/TASK-133-docs-for-the-sqlite-cuts.md)                         | TASK-126, TASK-127, TASK-128, TASK-129, TASK-130, TASK-131, TASK-132 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Runs last.                                    |
+| Order | TASK                                          | Group | Status | Spec                                                                                                                                   | Deps                                                                 | Context                                        | Notes                                         |
+| ----- | --------------------------------------------- | ----- | ------ | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------- |
+| 1     | TASK-126 App replica budget from stored sizes | A     | DONE   | [watchtower/tasks/TASK-126-app-replica-budget-from-stored-sizes.md](watchtower/tasks/TASK-126-app-replica-budget-from-stored-sizes.md) | -                                                                    | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Drops the in-memory copy of all cache rows.   |
+| 2     | TASK-127 App keeps 8 recent thread streams    | B     | DONE   | [watchtower/tasks/TASK-127-app-keeps-8-recent-thread-streams.md](watchtower/tasks/TASK-127-app-keeps-8-recent-thread-streams.md)       | -                                                                    | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Frees streams of threads left long ago.       |
+| 3     | TASK-128 Daemon FTS5 search and prompt index  | D     | DONE   | [watchtower/tasks/TASK-128-daemon-fts5-search-and-prompt-index.md](watchtower/tasks/TASK-128-daemon-fts5-search-and-prompt-index.md)   | -                                                                    | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Moves full-timeline readers to SQL first.     |
+| 4     | TASK-129 Daemon bounded tail with SQL pages   | D     | DONE   | [watchtower/tasks/TASK-129-daemon-bounded-tail-with-sql-pages.md](watchtower/tasks/TASK-129-daemon-bounded-tail-with-sql-pages.md)     | TASK-128                                                             | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares files with TASK-128; follows ADR-0032. |
+| 5     | TASK-130 Daemon transcript fingerprint        | D     | DONE   | [watchtower/tasks/TASK-130-daemon-transcript-fingerprint.md](watchtower/tasks/TASK-130-daemon-transcript-fingerprint.md)               | TASK-129                                                             | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares files with TASK-128 and TASK-129.      |
+| 6     | TASK-131 Coalesce agent record writes         | E     | DONE   | [watchtower/tasks/TASK-131-coalesce-agent-record-writes.md](watchtower/tasks/TASK-131-coalesce-agent-record-writes.md)                 | -                                                                    | -                                              | Records stay JSON.                            |
+| 7     | TASK-132 Expire old agent request receipts    | F     | DONE   | [watchtower/tasks/TASK-132-expire-old-agent-request-receipts.md](watchtower/tasks/TASK-132-expire-old-agent-request-receipts.md)       | -                                                                    | -                                              | 7-day TTL.                                    |
+| 8     | TASK-133 Docs for the SQLite cuts             | G     | DONE   | [watchtower/tasks/TASK-133-docs-for-the-sqlite-cuts.md](watchtower/tasks/TASK-133-docs-for-the-sqlite-cuts.md)                         | TASK-126, TASK-127, TASK-128, TASK-129, TASK-130, TASK-131, TASK-132 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Runs last.                                    |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
@@ -35,11 +35,10 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Wave 1 ran on `feat/sqlite-ram-cpu-cuts` on 2026-10-15. Commits: A `e6758a7c8`, B `1c5c4d2d3`, D `1c4210462`, F `8d040740b`. Nothing was pushed.
-- TASK-131 is parked in stash `watchtower E BLOCKED` and waits on Q-043.
-- TASK-127 and TASK-129 are built and committed. They wait on the owner live checks Q-045 and Q-046.
-- TASK-133 waits on Q-043, Q-045, and Q-046.
-- Next action: answer the `OPEN` rows in [watchtower/QUESTIONS.md](watchtower/QUESTIONS.md), then run `watchtower implement` again on `feat/sqlite-ram-cpu-cuts`.
+- All 8 TASKs are DONE on `feat/sqlite-ram-cpu-cuts` (2026-10-15). Commits: A `e6758a7c8`, B `1c5c4d2d3`, D `1c4210462`, F `8d040740b`, E `3af0405c7`, G `3124a2191`. Nothing was pushed.
+- Plan Verify passed: typecheck, lint, each changed test file, and the dependency grep. The live check ran on live 6768: 12 threads opened in turn, search returned 25 hits, 4 prompts ran on a mock thread, and `eventLoopDelay.maxMs` stayed at 39.9 ms or below.
+- Follow-up: since TASK-129, some full-timeline callers see only the 1,000-row memory tail: MCP `get_agent_activity` without a limit, the session `timelineSize` counts, `import-sessions`, and plugin `publishAgentStream`. See the TASK-129 outcome.
+- Next action: review and merge `feat/sqlite-ram-cpu-cuts`, then run `watchtower archive`.
 
 ## Archive
 

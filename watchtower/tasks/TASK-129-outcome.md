@@ -2,9 +2,7 @@
 
 ## Status
 
-BLOCKED. Every automated spec check passes, and the code is committed in `1c4210462`. The live anti-goal checkpoints after the change are UNVERIFIED (unattended): live runs code from before this TASK, and AUTORUN forbids a restart.
-
-Blocked: BUILT, UNVERIFIED (Q-046)
+DONE. Every spec check passes, and the code is committed in `1c4210462`. The lead ran the live anti-goal check after the owner allowed a live restart (Q-046).
 
 ## Changed
 
@@ -34,11 +32,11 @@ Blocked: BUILT, UNVERIFIED (Q-046)
 
 `eventLoopDelay.maxMs` in `ws_runtime_metrics` stays at or below 100 ms while paging a 5,000-row thread to its start on live.
 
-| Checkpoint              | Value                   | Source                                                                                                    | Time                    |
-| ----------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------- |
-| Before the change       | maxMs 46                | `.dev/paseo-home/daemon.log`, last `ws_runtime_metrics`; live worker 5344 started 03:52 local on old code | 2026-10-15 11:18:03 +07 |
-| After the SQL page path | UNVERIFIED (unattended) | live not restarted, per AUTORUN                                                                           | -                       |
-| Completion              | UNVERIFIED (unattended) | live not restarted, per AUTORUN                                                                           | -                       |
+| Checkpoint              | Value                            | Source                                                                                                                                                                                                                   | Time                    |
+| ----------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| Before the change       | maxMs 46                         | `.dev/paseo-home/daemon.log`, last `ws_runtime_metrics`; live worker 5344 started 03:52 local on old code                                                                                                                | 2026-10-15 11:18:03 +07 |
+| After the SQL page path | maxMs 19.1, 21.5 (before paging) | live worker 65079 on `3af0405c7`, restarted 11:55 +07, metrics windows at 12:03:24 and 12:03:54 +07                                                                                                                      | 2026-10-15 12:03 +07    |
+| Completion              | maxMs 29.4, 39.9, 37.3           | live worker 65079 on `3af0405c7`; 21 runs of `fetch_agent_timeline` from tail to seq 1 on a 3,701-row mock thread, 88 items each, no duplicates, slowest page 36 ms; the 3 metrics windows from 12:04:24 to 12:05:24 +07 | 2026-10-15 12:05 +07    |
 
 ## Lessons
 

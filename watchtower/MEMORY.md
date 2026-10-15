@@ -217,3 +217,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: a coalesced write whose promise waits for the file commit makes every awaited persist slower, and it hangs fake-timer tests that await a persist before they advance the clock.
 - Source: TASK-131 outcome; Q-043.
 - Use next time: when a spec debounces a write, say whether callers await the commit or only the cache update, and list the tests that await it.
+- Learned: the formatter ignores `docs/`, so `npm run format:check:files -- docs/<file>` exits 2 with "Expected at least one target file".
+- Source: TASK-133 outcome.
+- Use next time: do not put a format check for `docs/` files in a Verify line.
+- Learned: many source rows can project to few items: a 3,701-row mock thread gave 88 items, which fit in the first app page, so a UI scroll sent no older-page request. Page it through `fetch_agent_timeline` with the CLI client (`connectToDaemon` from `packages/cli/src/utils/client.ts`) to test SQL pages on live. The mock `five-minute-stream` model gives about 3,700 source rows.
+- Source: Q-046 check on 2026-10-15.
+- Use next time: plan a live paging check as an RPC script, not a UI scroll.

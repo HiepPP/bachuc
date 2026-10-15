@@ -2,9 +2,7 @@
 
 ## Status
 
-BLOCKED. Every automated spec check passes, and the code is committed in `1c5c4d2d3`. The human live check is UNVERIFIED (unattended), because AUTORUN forbids starting the live app.
-
-Blocked: BUILT, UNVERIFIED (Q-045)
+DONE. Every spec check passes, and the code is committed in `1c5c4d2d3`. The lead ran the live check after the owner allowed a live restart (Q-045).
 
 ## Changed
 
@@ -34,7 +32,7 @@ Blocked: BUILT, UNVERIFIED (Q-045)
 - `npm run typecheck` -> exit 0 (2026-10-15T04:03Z). An earlier run failed only in `packages/server/src/server/agent/agent-manager.ts` (another group's file), and the re-run passed.
 - `rtk proxy npm run lint -- <4 changed files>` -> 0 warnings, 0 errors.
 - `npm run format:check:files -- <4 changed files>` -> all files use the correct format.
-- Live check, human (10 threads, reopen the first, no blank and no jump): UNVERIFIED (unattended).
+- Live check, lead run (2026-10-15 12:02 +07): the live web app on `localhost:8081` (Metro of `npm run dev:desktop`) against live 6768 on `3af0405c7`, in a headless browser. The lead opened thread `faa8f035`, then 11 other threads in turn through in-app navigation, then reopened the first. A 50 ms probe found the last row visible from the first sample (271 ms) and the list pinned to the bottom while it grew (2502 to 2836 px). Screenshots at 250 ms and 5 s match. No blank and no jump -> PASS. Limit: the Electron window was not driven; it renders the same web bundle.
 
 ## Anti-goal
 
