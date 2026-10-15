@@ -525,14 +525,23 @@ function createMemoryReplicaRowStore(): ReplicaRowStore {
           (!acceptedIds || acceptedIds.has(row.id)),
       );
     },
-    readAll: async () => {
-      const hosts = new Map<string, ReplicaRow[]>();
+    readKeys: async (serverId, kinds) =>
+      [...rows.values()]
+        .filter((row) => row.serverId === serverId && kinds.includes(row.kind))
+        .map(({ serverId: rowServerId, kind, id }) => ({ serverId: rowServerId, kind, id })),
+    readHostStats: async (serverIds) => {
+      const hosts = new Map<string, { serverId: string; bytes: number; lastWrittenAt: number }>();
       for (const row of rows.values()) {
-        const hostRows = hosts.get(row.serverId) ?? [];
-        hostRows.push(row);
-        hosts.set(row.serverId, hostRows);
+        if (serverIds && !serverIds.includes(row.serverId)) continue;
+        const stats = hosts.get(row.serverId) ?? {
+          serverId: row.serverId,
+          bytes: 0,
+          lastWrittenAt: 0,
+        };
+        stats.bytes += row.payload.length;
+        hosts.set(row.serverId, stats);
       }
-      return [...hosts].map(([serverId, hostRows]) => ({ serverId, rows: hostRows }));
+      return [...hosts.values()];
     },
     apply: async (changes) => {
       for (const key of changes.deletes) rows.delete(keyOf(key));

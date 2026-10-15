@@ -1,8 +1,14 @@
-import type { ReplicaHostRows, ReplicaRow, ReplicaRowChanges, ReplicaRowStore } from "./row-store";
-import { REPLICA_ROW_STORE_SCHEMA_VERSION } from "./row-store-schema";
+import type {
+  ReplicaHostStats,
+  ReplicaRow,
+  ReplicaRowChanges,
+  ReplicaRowKey,
+  ReplicaRowStore,
+} from "./row-store";
+import { REPLICA_ROW_STORE_SCHEMA_VERSION, replicaPayloadBytes } from "./row-store-schema";
 
 export type {
-  ReplicaHostRows,
+  ReplicaHostStats,
   ReplicaRow,
   ReplicaRowChanges,
   ReplicaRowKey,
@@ -12,9 +18,17 @@ export type {
 export { REPLICA_ROW_STORE_SCHEMA_VERSION, REPLICA_SINGLETON_ROW_ID } from "./row-store-schema";
 
 const DATABASE_NAME = "paseo-replica-row-store";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const ROWS_STORE = "rows";
 const META_STORE = "meta";
+const STATS_STORE = "host_stats";
+const ROWS_AND_STATS = [ROWS_STORE, STATS_STORE];
+
+// Per-host totals kept in the same transaction as the row writes, so reading them never loads a
+// payload. `rows` lets an emptied host drop its record.
+interface StoredHostStats extends ReplicaHostStats {
+  rows: number;
+}
 const SCHEMA_VERSION_KEY = "schema_version";
 
 interface IndexedDbReplicaRowStoreOptions {
@@ -74,6 +88,9 @@ async function openDatabase(databaseName: string): Promise<IDBDatabase> {
       if (!request.result.objectStoreNames.contains(META_STORE)) {
         request.result.createObjectStore(META_STORE);
       }
+      if (!request.result.objectStoreNames.contains(STATS_STORE)) {
+        request.result.createObjectStore(STATS_STORE, { keyPath: "serverId" });
+      }
     });
     request.addEventListener("success", () => resolve(request.result));
     request.addEventListener("error", () =>
@@ -100,12 +117,13 @@ export function createIndexedDbReplicaRowStore(
   async function open(): Promise<void> {
     opening ??= (async () => {
       const openedDatabase = await openDatabase(options.databaseName);
-      await runTransaction(openedDatabase, [ROWS_STORE, META_STORE], async (transaction) => {
+      await runTransaction(openedDatabase, [...ROWS_AND_STATS, META_STORE], async (transaction) => {
         const storedVersion = await requestResult(
           transaction.objectStore(META_STORE).get(SCHEMA_VERSION_KEY),
         );
         if (storedVersion !== options.schemaVersion) {
           await requestResult(transaction.objectStore(ROWS_STORE).clear());
+          await requestResult(transaction.objectStore(STATS_STORE).clear());
           await requestResult(
             transaction.objectStore(META_STORE).put(options.schemaVersion, SCHEMA_VERSION_KEY),
           );
@@ -122,18 +140,79 @@ export function createIndexedDbReplicaRowStore(
     }
   }
 
-  async function readAll(): Promise<ReplicaHostRows[]> {
+  async function readKeys(
+    serverId: string,
+    kinds: readonly ReplicaRow["kind"][],
+  ): Promise<ReplicaRowKey[]> {
+    if (kinds.length === 0) return [];
     const transaction = getDatabase().transaction(ROWS_STORE, "readonly");
     const completion = transactionComplete(transaction);
-    const rows = await requestResult<ReplicaRow[]>(transaction.objectStore(ROWS_STORE).getAll());
+    const store = transaction.objectStore(ROWS_STORE);
+    const keys = await Promise.all(
+      kinds.map((kind) =>
+        requestResult<IDBValidKey[]>(
+          store.getAllKeys(IDBKeyRange.bound([serverId, kind], [serverId, kind, []])),
+        ),
+      ),
+    );
     await completion;
-    const hosts = new Map<string, ReplicaRow[]>();
-    for (const row of rows) {
-      const hostRows = hosts.get(row.serverId) ?? [];
-      hostRows.push(row);
-      hosts.set(row.serverId, hostRows);
+    return keys
+      .flat()
+      .map((key) => {
+        const [keyServerId, keyKind, keyId] = key as [string, ReplicaRow["kind"], string];
+        return { serverId: keyServerId, kind: keyKind, id: keyId };
+      })
+      .sort((left, right) =>
+        left.kind === right.kind
+          ? left.id.localeCompare(right.id)
+          : left.kind.localeCompare(right.kind),
+      );
+  }
+
+  async function readHostStats(serverIds?: readonly string[]): Promise<ReplicaHostStats[]> {
+    if (serverIds?.length === 0) return [];
+    const transaction = getDatabase().transaction(STATS_STORE, "readonly");
+    const completion = transactionComplete(transaction);
+    const store = transaction.objectStore(STATS_STORE);
+    const stored = serverIds
+      ? (
+          await Promise.all(
+            serverIds.map((serverId) =>
+              requestResult<StoredHostStats | undefined>(store.get(serverId)),
+            ),
+          )
+        ).filter((stats): stats is StoredHostStats => stats !== undefined)
+      : await requestResult<StoredHostStats[]>(store.getAll());
+    await completion;
+    return stored
+      .map(({ serverId, bytes, lastWrittenAt }) => ({ serverId, bytes, lastWrittenAt }))
+      .sort((left, right) => (left.serverId < right.serverId ? -1 : 1));
+  }
+
+  /** Loads and saves host stats inside the caller's transaction. */
+  function createStatsTracker(transaction: IDBTransaction) {
+    const store = transaction.objectStore(STATS_STORE);
+    const hosts = new Map<string, StoredHostStats>();
+    async function load(serverId: string): Promise<StoredHostStats> {
+      let stats = hosts.get(serverId);
+      if (!stats) {
+        stats = (await requestResult<StoredHostStats | undefined>(store.get(serverId))) ?? {
+          serverId,
+          bytes: 0,
+          rows: 0,
+          lastWrittenAt: 0,
+        };
+        hosts.set(serverId, stats);
+      }
+      return stats;
     }
-    return Array.from(hosts, ([serverId, hostRows]) => ({ serverId, rows: hostRows }));
+    async function save(): Promise<void> {
+      for (const stats of hosts.values()) {
+        if (stats.rows <= 0) await requestResult(store.delete(stats.serverId));
+        else await requestResult(store.put(stats));
+      }
+    }
+    return { load, save };
   }
 
   async function read(
@@ -169,45 +248,81 @@ export function createIndexedDbReplicaRowStore(
   }
 
   async function apply(changes: ReplicaRowChanges): Promise<void> {
-    await runTransaction(getDatabase(), ROWS_STORE, async (transaction) => {
+    await runTransaction(getDatabase(), ROWS_AND_STATS, async (transaction) => {
       const rows = transaction.objectStore(ROWS_STORE);
+      const stats = createStatsTracker(transaction);
+      const writtenAt = Date.now();
+      // The previous row is read inside the store only to learn its size; it is never retained.
       for (const key of changes.deletes) {
+        const previous = await requestResult<ReplicaRow | undefined>(
+          rows.get([key.serverId, key.kind, key.id]),
+        );
+        if (!previous) continue;
+        const host = await stats.load(key.serverId);
+        host.bytes -= replicaPayloadBytes(previous.payload);
+        host.rows -= 1;
         await requestResult(rows.delete([key.serverId, key.kind, key.id]));
       }
       for (const row of changes.upserts) {
+        const previous = await requestResult<ReplicaRow | undefined>(
+          rows.get([row.serverId, row.kind, row.id]),
+        );
+        const host = await stats.load(row.serverId);
+        host.bytes +=
+          replicaPayloadBytes(row.payload) - replicaPayloadBytes(previous?.payload ?? "");
+        if (!previous) host.rows += 1;
+        host.lastWrittenAt = writtenAt;
         await requestResult(rows.put(row));
       }
+      await stats.save();
     });
   }
 
   async function deleteHost(serverId: string): Promise<void> {
-    await runTransaction(getDatabase(), ROWS_STORE, async (transaction) => {
+    await runTransaction(getDatabase(), ROWS_AND_STATS, async (transaction) => {
       const rows = transaction.objectStore(ROWS_STORE);
       const range = IDBKeyRange.bound([serverId], [serverId, []]);
       await requestResult(rows.delete(range));
+      await requestResult(transaction.objectStore(STATS_STORE).delete(serverId));
     });
   }
 
   async function renameHost(oldServerId: string, newServerId: string): Promise<void> {
     if (oldServerId === newServerId) return;
-    await runTransaction(getDatabase(), ROWS_STORE, async (transaction) => {
+    await runTransaction(getDatabase(), ROWS_AND_STATS, async (transaction) => {
       const rows = transaction.objectStore(ROWS_STORE);
+      const stats = createStatsTracker(transaction);
       const range = IDBKeyRange.bound([oldServerId], [oldServerId, []]);
       const oldRows = await requestResult<ReplicaRow[]>(rows.getAll(range));
+      const oldStats = await stats.load(oldServerId);
+      const newStats = await stats.load(newServerId);
       for (const row of oldRows) {
+        const collision = await requestResult<ReplicaRow | undefined>(
+          rows.get([newServerId, row.kind, row.id]),
+        );
+        newStats.bytes +=
+          replicaPayloadBytes(row.payload) - replicaPayloadBytes(collision?.payload ?? "");
+        if (!collision) newStats.rows += 1;
         await requestResult(rows.put({ ...row, serverId: newServerId }));
         await requestResult(rows.delete([row.serverId, row.kind, row.id]));
       }
+      if (oldRows.length > 0) {
+        newStats.lastWrittenAt = Math.max(newStats.lastWrittenAt, oldStats.lastWrittenAt);
+      }
+      oldStats.bytes = 0;
+      oldStats.rows = 0;
+      await stats.save();
     });
   }
 
   async function clear(): Promise<void> {
-    await runTransaction(getDatabase(), ROWS_STORE, async (transaction) => {
+    await runTransaction(getDatabase(), ROWS_AND_STATS, async (transaction) => {
       await requestResult(transaction.objectStore(ROWS_STORE).clear());
+      await requestResult(transaction.objectStore(STATS_STORE).clear());
     });
   }
 
-  return { open, read, readAll, apply, deleteHost, renameHost, clear };
+  return { open, read, readKeys, readHostStats, apply, deleteHost, renameHost, clear };
 }
 
 export function createReplicaRowStore(): ReplicaRowStore {

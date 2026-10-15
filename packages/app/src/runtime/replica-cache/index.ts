@@ -789,33 +789,20 @@ function pendingRowKey(key: ReplicaRowKey): string {
   return `${key.serverId}\u0000${rowKey(key)}`;
 }
 
-// Budget accounting runs over every stored row of a touched host on each persist. Rows are
-// immutable once stored, so their size is computed once. The count itself avoids the JS Buffer
-// polyfill, which materialises the whole byte array just to measure it.
-const rowBytesCache = new WeakMap<ReplicaRow, number>();
-
-function utf8ByteLength(text: string): number {
-  let bytes = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    const code = text.charCodeAt(index);
-    if (code < 0x80) bytes += 1;
-    else if (code < 0x800) bytes += 2;
-    else if (code >= 0xd800 && code <= 0xdbff) {
-      bytes += 4;
-      index += 1;
-    } else bytes += 3;
-  }
-  return bytes;
+function touchedServerIds(changes: ReplicaRowChanges): string[] {
+  const serverIds = new Set<string>();
+  for (const key of changes.deletes) serverIds.add(key.serverId);
+  for (const row of changes.upserts) serverIds.add(row.serverId);
+  return [...serverIds];
 }
 
-function rowBytes(row: ReplicaRow): number {
-  let bytes = rowBytesCache.get(row);
-  if (bytes === undefined) {
-    bytes = utf8ByteLength(row.payload);
-    rowBytesCache.set(row, bytes);
-  }
-  return bytes;
-}
+// Kinds a baseline replaces; timelines are kept across a baseline.
+const BASELINE_REPLACED_KINDS: readonly ReplicaRowKind[] = [
+  "agent",
+  "workspace",
+  "project",
+  "checkpoint",
+];
 
 function parseJsonPayload(payload: string): unknown {
   return JSON.parse(payload);
@@ -885,7 +872,7 @@ function directoryEntityForRow(row: ReplicaRow): keyof DirectoryCheckpoint | und
 export class ReplicaCache {
   private readonly activeServerIds = new Set<string>();
   private readonly hostRevisions = new Map<string, number>();
-  private readonly storedRows = new Map<string, Map<string, ReplicaRow>>();
+  // Budget state is totals only. The row store owns the sizes, so no payload stays in memory.
   private readonly hostBytes = new Map<string, number>();
   private readonly hostWriteOrder = new Map<string, true>();
   private pendingUpserts = new Map<string, StructuredReplicaUpsert>();
@@ -1022,8 +1009,7 @@ export class ReplicaCache {
     if (!invalidEntity) {
       const changes = { upserts: [], deletes: [row] } satisfies ReplicaRowChanges;
       await this.queueOperation(async () => {
-        await this.rowStore.apply(changes);
-        this.applyStoredChanges(changes);
+        await this.applyAndRefresh(changes);
       });
       return;
     }
@@ -1056,8 +1042,7 @@ export class ReplicaCache {
           : [],
     };
     await this.queueOperation(async () => {
-      await this.rowStore.apply(changes);
-      this.applyStoredChanges(changes);
+      await this.applyAndRefresh(changes);
     });
   }
 
@@ -1082,8 +1067,7 @@ export class ReplicaCache {
           : [],
     };
     await this.queueOperation(async () => {
-      await this.rowStore.apply(changes);
-      this.applyStoredChanges(changes);
+      await this.applyAndRefresh(changes);
     });
   }
 
@@ -1175,24 +1159,13 @@ export class ReplicaCache {
   reconcileServerId(oldServerId: string, newServerId: string): void {
     this.advanceHostRevision(oldServerId);
     this.advanceHostRevision(newServerId);
-    const rows = this.storedRows.get(oldServerId);
-    if (rows) {
-      const newRows = this.storedRows.get(newServerId) ?? new Map<string, ReplicaRow>();
-      this.totalBytes -=
-        (this.hostBytes.get(oldServerId) ?? 0) + (this.hostBytes.get(newServerId) ?? 0);
-      this.storedRows.delete(oldServerId);
-      for (const [key, row] of rows) newRows.set(key, { ...row, serverId: newServerId });
-      this.storedRows.set(newServerId, newRows);
-      const bytes = [...newRows.values()].reduce((sum, row) => sum + rowBytes(row), 0);
-      this.hostBytes.delete(oldServerId);
-      this.hostBytes.set(newServerId, bytes);
-      this.totalBytes += bytes;
-      this.hostWriteOrder.delete(oldServerId);
-      this.touchHost(newServerId);
-    }
     this.renamePendingHostChanges(oldServerId, newServerId);
     if (this.activeServerIds.delete(oldServerId)) this.activeServerIds.add(newServerId);
-    this.queueOperation(() => this.rowStore.renameHost(oldServerId, newServerId));
+    this.queueOperation(async () => {
+      await this.rowStore.renameHost(oldServerId, newServerId);
+      // A moved row can replace a target row, so only the store knows the merged total.
+      await this.refreshHostStats([oldServerId, newServerId], [newServerId]);
+    });
   }
 
   async flush(): Promise<void> {
@@ -1223,12 +1196,11 @@ export class ReplicaCache {
         try {
           await this.prepareStore();
           await this.ensureStoredIndex();
-          const changes = this.materializePendingChanges(pending);
-          const { changes: boundedChanges, evicted } = await this.fitChangesToBudget(changes);
-          if (boundedChanges.upserts.length > 0 || boundedChanges.deletes.length > 0) {
-            await this.rowStore.apply(boundedChanges);
-            this.applyStoredChanges(boundedChanges);
+          const changes = await this.materializePendingChanges(pending);
+          if (changes.upserts.length > 0 || changes.deletes.length > 0) {
+            await this.rowStore.apply(changes);
           }
+          const evicted = await this.fitBudget(changes);
           for (const serverId of pending.baselines) {
             if (!evicted.has(serverId)) this.invalidatedHosts.delete(serverId);
           }
@@ -1304,7 +1276,9 @@ export class ReplicaCache {
     return changes;
   }
 
-  private materializePendingChanges(pending: PendingReplicaChanges): ReplicaRowChanges {
+  private async materializePendingChanges(
+    pending: PendingReplicaChanges,
+  ): Promise<ReplicaRowChanges> {
     const deletes = new Map(pending.deletes.map((row) => [pendingRowKey(row), row]));
     const upserts: ReplicaRow[] = [];
     for (const upsert of pending.upserts) {
@@ -1316,10 +1290,8 @@ export class ReplicaCache {
       const replacementKeys = new Set(
         upserts.filter((row) => row.serverId === serverId && row.kind !== "timeline").map(rowKey),
       );
-      for (const row of this.storedRows.get(serverId)?.values() ?? []) {
-        if (row.kind !== "timeline" && !replacementKeys.has(rowKey(row))) {
-          deletes.set(pendingRowKey(row), row);
-        }
+      for (const key of await this.rowStore.readKeys(serverId, BASELINE_REPLACED_KINDS)) {
+        if (!replacementKeys.has(rowKey(key))) deletes.set(pendingRowKey(key), key);
       }
     }
     return { upserts, deletes: [...deletes.values()] };
@@ -1379,38 +1351,34 @@ export class ReplicaCache {
     }
   }
 
-  private applyStoredChanges(changes: ReplicaRowChanges): void {
-    const touchedServerIds = new Set<string>();
-    for (const key of changes.deletes) {
-      const rows = this.storedRows.get(key.serverId);
-      const previous = rows?.get(rowKey(key));
-      if (previous) {
-        rows?.delete(rowKey(key));
-        this.adjustHostBytes(key.serverId, -rowBytes(previous));
-      }
-      touchedServerIds.add(key.serverId);
-    }
-    for (const row of changes.upserts) {
-      const rows = this.storedRows.get(row.serverId) ?? new Map<string, ReplicaRow>();
-      const previous = rows.get(rowKey(row));
-      const previousBytes = previous ? rowBytes(previous) : 0;
-      rows.set(rowKey(row), row);
-      this.storedRows.set(row.serverId, rows);
-      this.adjustHostBytes(row.serverId, rowBytes(row) - previousBytes);
-      touchedServerIds.add(row.serverId);
-    }
-    for (const serverId of touchedServerIds) {
-      if ((this.storedRows.get(serverId)?.size ?? 0) === 0) {
+  private async applyAndRefresh(changes: ReplicaRowChanges): Promise<void> {
+    await this.rowStore.apply(changes);
+    const touched = touchedServerIds(changes);
+    await this.refreshHostStats(touched, touched);
+  }
+
+  /** Reads the store's totals for these hosts; `touched` hosts become the most recently written. */
+  private async refreshHostStats(
+    serverIds: readonly string[],
+    touched: readonly string[],
+  ): Promise<void> {
+    // Before the first persist the index is not loaded, and loading it reads every total anyway.
+    if (!this.storedIndexPromise) return;
+    const stats = new Map(
+      (await this.rowStore.readHostStats(serverIds)).map((host) => [host.serverId, host.bytes]),
+    );
+    for (const serverId of serverIds) {
+      const bytes = stats.get(serverId);
+      if (bytes === undefined) {
         this.removeStoredHost(serverId);
-      } else {
+        continue;
+      }
+      this.totalBytes += bytes - (this.hostBytes.get(serverId) ?? 0);
+      this.hostBytes.set(serverId, bytes);
+      if (touched.includes(serverId) || !this.hostWriteOrder.has(serverId)) {
         this.touchHost(serverId);
       }
     }
-  }
-
-  private adjustHostBytes(serverId: string, delta: number): void {
-    this.hostBytes.set(serverId, (this.hostBytes.get(serverId) ?? 0) + delta);
-    this.totalBytes += delta;
   }
 
   private touchHost(serverId: string): void {
@@ -1418,61 +1386,26 @@ export class ReplicaCache {
     this.hostWriteOrder.set(serverId, true);
   }
 
-  private async fitChangesToBudget(
-    changes: ReplicaRowChanges,
-  ): Promise<{ changes: ReplicaRowChanges; evicted: Set<string> }> {
-    const touchedServerIds = new Set<string>();
-    for (const key of changes.deletes) touchedServerIds.add(key.serverId);
-    for (const row of changes.upserts) touchedServerIds.add(row.serverId);
+  /** Refreshes the touched hosts' totals, then evicts whole hosts, least recently written first. */
+  private async fitBudget(changes: ReplicaRowChanges): Promise<Set<string>> {
+    const touched = touchedServerIds(changes);
+    if (touched.length > 0) await this.refreshHostStats(touched, touched);
 
-    const projectedRows = new Map<string, Map<string, ReplicaRow>>();
-    const projectedBytes = new Map(this.hostBytes);
-    for (const serverId of touchedServerIds) {
-      projectedRows.set(serverId, new Map(this.storedRows.get(serverId)));
-    }
-    for (const key of changes.deletes) {
-      projectedRows.get(key.serverId)?.delete(rowKey(key));
-    }
-    for (const row of changes.upserts) {
-      projectedRows.get(row.serverId)?.set(rowKey(row), row);
-    }
-    for (const [serverId, rows] of projectedRows) {
-      projectedBytes.set(
-        serverId,
-        [...rows.values()].reduce((sum, row) => sum + rowBytes(row), 0),
-      );
-    }
-
-    const writeOrder = [...this.hostWriteOrder.keys()].filter(
-      (serverId) => !touchedServerIds.has(serverId),
-    );
-    writeOrder.push(...touchedServerIds);
-    let projectedTotal = [...projectedBytes.values()].reduce((sum, bytes) => sum + bytes, 0);
+    const writeOrder = [...this.hostWriteOrder.keys()];
     const evicted = new Set<string>();
-    while (projectedTotal > this.maxBytes) {
+    while (this.totalBytes > this.maxBytes) {
       const serverId = writeOrder.shift();
       if (serverId === undefined) break;
-      const bytes = projectedBytes.get(serverId) ?? 0;
-      projectedTotal -= bytes;
-      projectedBytes.delete(serverId);
       evicted.add(serverId);
       this.invalidatedHosts.add(serverId);
-      if (this.storedRows.has(serverId)) await this.rowStore.deleteHost(serverId);
+      await this.rowStore.deleteHost(serverId);
       this.removeStoredHost(serverId);
     }
-
-    return {
-      changes: {
-        upserts: changes.upserts.filter((row) => !evicted.has(row.serverId)),
-        deletes: changes.deletes.filter((key) => !evicted.has(key.serverId)),
-      },
-      evicted,
-    };
+    return evicted;
   }
 
   private removeStoredHost(serverId: string): void {
     this.totalBytes -= this.hostBytes.get(serverId) ?? 0;
-    this.storedRows.delete(serverId);
     this.hostBytes.delete(serverId);
     this.hostWriteOrder.delete(serverId);
   }
@@ -1511,21 +1444,21 @@ export class ReplicaCache {
   }
 
   private ensureStoredIndex(): Promise<void> {
-    this.storedIndexPromise ??= this.rowStore.readAll().then(async (hosts) => {
-      this.storedRows.clear();
+    this.storedIndexPromise ??= this.rowStore.readHostStats().then(async (hosts) => {
       this.hostBytes.clear();
       this.hostWriteOrder.clear();
       this.totalBytes = 0;
-      for (const host of hosts) {
+      // The store's write times restore the eviction order across launches.
+      const oldestFirst = [...hosts].sort(
+        (left, right) => left.lastWrittenAt - right.lastWrittenAt,
+      );
+      for (const host of oldestFirst) {
         if (!this.activeServerIds.has(host.serverId)) {
           await this.rowStore.deleteHost(host.serverId);
           continue;
         }
-        const rows = new Map(host.rows.map((row) => [rowKey(row), row]));
-        const bytes = host.rows.reduce((sum, row) => sum + rowBytes(row), 0);
-        this.storedRows.set(host.serverId, rows);
-        this.hostBytes.set(host.serverId, bytes);
-        this.totalBytes += bytes;
+        this.hostBytes.set(host.serverId, host.bytes);
+        this.totalBytes += host.bytes;
         this.touchHost(host.serverId);
       }
       return undefined;
