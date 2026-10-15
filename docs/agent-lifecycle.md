@@ -16,9 +16,10 @@ Each live agent in `AgentManager` carries a `lastStatus` of `initializing`, `idl
 
 An unarchived agent may be `closed` without being deleted or archived. Closing releases its provider
 processes and subscriptions while retaining its Paseo identity, persistence handle, timeline,
-workspace, labels, title, usage, attention, timestamps, and parent relationship. Opening or prompting
-the agent runs through `ensureAgentLoaded()`, which resumes the durable provider session under the
-same Paseo agent ID. Provider history is not appended again when the canonical timeline is already
+workspace, labels, title, usage, attention, timestamps, and parent relationship. Prompting the agent
+runs through `ensureAgentLoaded()`, which resumes the durable provider session under the same Paseo
+agent ID. Reads do not resume: opening a closed agent serves its timeline from the
+[timeline cache](timeline-sync.md#timeline-cache-and-reads), and clearing attention updates the stored record. Provider history is not appended again when the canonical timeline is already
 primed.
 
 Reload releases the old runtime before resuming its durable session: an idle provider process can

@@ -50,7 +50,6 @@ npm run test:ui                     # Vitest UI at localhost:51204
 
 ```bash
 npm run build:server                         # Rebuild server stack
-npm run db:query -- "SELECT ..."             # Run arbitrary SQL
 npm run cli -- ls -a -g                      # List agents
 npm run cli -- daemon status                 # Check daemon status
 ```
@@ -180,7 +179,6 @@ Daemon logs: `$PASEO_HOME/daemon.log`
 tail -f $PASEO_HOME/daemon.log      # Daemon logs
 npm run test:ui                     # Vitest browser UI at localhost:51204
 npm run cli -- inspect <agent-id>   # Detailed agent info
-npm run db:query -- "SELECT * FROM agent_timeline_rows..."
 ```
 
 ---

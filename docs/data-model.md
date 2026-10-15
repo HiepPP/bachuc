@@ -34,6 +34,8 @@ Paseo uses **file-based JSON persistence** instead of a traditional database. Al
 
 All server-side stores live under `$PASEO_HOME` (defaults to `~/.paseo`).
 
+`timeline-cache.sqlite` is the one SQLite file, and it is a cache, not a store. A file with another `user_version` or a corrupt file is rebuilt empty, and there are no migrations. See [timeline sync](timeline-sync.md#timeline-cache-and-reads).
+
 ## Store Surface Rules
 
 Store APIs own persistence atomicity and should not make services coordinate raw reads and writes. A good store method maps cleanly to one SQL statement or one SQL transaction, even when the current implementation is JSON files. If a caller needs a queue, lock, read-merge-write loop, or uniqueness race workaround, that behavior belongs behind the store surface.
@@ -50,6 +52,7 @@ $PASEO_HOME/
 ├── paseo.pid                            # Daemon PID lock file
 ├── local-credential                     # Per-run local client credential (mode 0600)
 ├── daemon.log                           # Default log file (path configurable)
+├── timeline-cache.sqlite                # Rebuildable timeline cache; safe to delete
 ├── agents/
 │   └── {sanitized-cwd}/
 │       └── {agentId}.json               # One file per agent

@@ -333,6 +333,9 @@ existing agent-context instances, but it cannot create an agent panel without an
 Command Center callbacks use the selected host's existing `PaseoApi` for normal Paseo operations.
 They use typed plugin RPC only for plugin-specific backend work. Surface and panel navigation
 belongs to the app; plugins do not receive Expo Router or workspace-layout store access.
+`navigation.prefetchAgent` warms a thread before `openAgent`; the host dedupes and throttles it, so
+call it on hover intent or press-in without your own guard
+([details](timeline-sync.md#prefetch)).
 See the public [navigation fields](../public-docs/plugins/reference.md#surfaces-and-sidebar-items)
 and [external links and workspace browsers](../public-docs/plugins/reference.md#external-links-and-workspace-browsers)
 for the author-facing contract.

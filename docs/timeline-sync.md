@@ -7,8 +7,8 @@ Agent chat delivery has two paths:
 
 The daemon retains projected items in memory. Each source event advances the stream sequence,
 then replaces the previous tool state or merges into the current text item. Intermediate payloads
-are never retained for history or catch-up. Provider history is the durable transcript authority
-and rebuilds the projection when an agent resumes.
+are never retained for history or catch-up. Provider history is the transcript authority and
+rebuilds the projection when the timeline cache has no copy.
 
 The invariants are:
 
@@ -20,6 +20,40 @@ Tool output is bounded before it enters either delivery path. Canonical shell to
 to 64 KiB, and the same bounded item is used for runtime timeline rows and live stream events.
 Provider history hydration applies the same rule so reopening an agent cannot restore an oversized
 tool payload.
+
+## Timeline cache and reads
+
+Source rows mirror into `$PASEO_HOME/timeline-cache.sqlite` (writes batch on a short timer). A
+timeline read never resumes the agent. `ensureAgentTimelineReadable` serves, in order: the live
+agent, the in-memory timeline, a complete cache entry, then a backfill from provider history
+without registering a runtime. If the backfill cannot run, it falls back to `ensureAgentLoaded`.
+
+- An entry is trusted only when marked complete. A live runtime clears the mark and closing the
+  runtime sets it, so a crash or a failed cache write leaves the entry unused and the next read
+  backfills.
+- A cache failure never fails the agent operation. The cache is rebuildable; see
+  [data model](data-model.md#store-surface-rules) for the file.
+- Non-live timelines in memory are capped at 64; evicted ones reload from the cache under the same
+  epoch. Backfills run two at a time per daemon.
+- **Stale after external edits.** The cache is not re-read from the provider while it is complete.
+  If you run `claude --resume` outside Paseo, the thread shows the old copy until you press Reload
+  agent. Before the cache, a daemon restart picked such edits up.
+
+## Prefetch
+
+Hovering a Board card, or pressing it, warms the thread before it opens: the plugin calls
+`navigation.prefetchAgent` after 120 ms of hover or at once on press-in. The host fetches the
+directory row, the replica cache, and one tail page, and skips agents the viewed-timeline sync
+already keeps current. It dedupes for 30 s and queues at most 3 per host, one running at a time.
+Prefetch never shows UI.
+
+## Latest-prompt open
+
+Opening on the latest prompt (`anchor: "latest-prompt"`) sets `includeLatestPrompt` on the tail
+request, gated on `server_info.features.timelineLatestPromptTail`. The daemon widens the tail to the
+last user message, up to 200 projected items, so the jump needs no second fetch. The request ends
+when the jump lands, the reader scrolls, another open replaces it, or the timeline has no prompt;
+30 s is only a cap for an agent that never becomes ready.
 
 ## Presence is not delivery
 
@@ -178,12 +212,12 @@ The app chooses one delivery policy from `server_info.features.selectiveAgentTim
   ends, independently of mounted or retained React views: switching workspaces, evicting a retained
   view, app backgrounding, and reconnect all preserve the demand. There is no recent-agent limit.
   Restored workspace layout is a release signal, never a source. It carries a tab for every chat the
-  user has ever opened on the host, and a catch-up fetch resumes its agent on the daemon, so
-  subscribing from layout spawns a provider session per historical tab at every launch and stamps
-  every one of those workspaces as just used (see
-  [agent lifecycle](agent-lifecycle.md#workspace-activity)). Visible chats get the first catch-up
+  user has ever opened on the host, and subscribing from layout makes the daemon read every
+  historical tab at every launch, with a backfill from provider history for each one that has no
+  cache entry (see [agent lifecycle](agent-lifecycle.md#workspace-activity)). Visible chats get the first catch-up
   attempt; the rest follow when those attempts settle, including failures, so a failed visible chat
-  does not starve background recovery. Split panes catch up together. Hidden chats update the
+  does not starve background recovery. At most two hidden catch-ups run at once; gap recovery and
+  manual retries skip that cap. Split panes catch up together. Hidden chats update the
   replica; on web their retained presentation stays suspended until revealed, on native it keeps
   rendering. Revealing a chat reads the current store and preserves its local UI state.
 - Legacy daemons keep globally streaming agent timelines. Visibility still triggers the existing
