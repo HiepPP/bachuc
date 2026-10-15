@@ -1,0 +1,23 @@
+[package]
+name = "bachuc-timeline"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bachuc-client = { path = "../client" }
+bachuc-diagram = { path = "../diagram" }
+bachuc-theme = { path = "../theme" }
+# gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot; keep the same pin in every crate.
+# The tree-sitter features highlight fenced code in the markdown answer.
+gpui-kit = { version = "=0.7.3", features = [
+    "tree-sitter-bash",
+    "tree-sitter-javascript",
+    "tree-sitter-python",
+    "tree-sitter-rust",
+    "tree-sitter-tsx",
+    "tree-sitter-typescript",
+] }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+serde_json = "1"
+similar = "2"
