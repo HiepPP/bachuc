@@ -4086,6 +4086,8 @@ describe("send_agent_prompt MCP tool", () => {
       );
     } finally {
       vi.useRealTimers();
+      // A record write scheduled on the fake clock never fires now; flush starts it.
+      await storage.flush();
       await removeAgentStateDir(agentManager, storage, workdir);
     }
   });

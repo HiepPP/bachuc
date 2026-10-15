@@ -94,10 +94,24 @@ export function parseStoredAgentRecord(value: unknown): StoredAgentRecord {
   return STORED_AGENT_SCHEMA.parse(value);
 }
 
+// Busy agents change state many times per second; each record write is a full
+// atomic rewrite. Writes wait at most this long after the first unsaved update.
+export const AGENT_RECORD_WRITE_WINDOW_MS = 250;
+
+interface ScheduledRecordWrite {
+  timer: ReturnType<typeof setTimeout>;
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+}
+
 export class AgentStorage {
   private cache: Map<string, StoredAgentRecord> = new Map();
   private pathById: Map<string, string> = new Map();
   private pathsById: Map<string, Set<string>> = new Map();
+  // Records changed in the cache but not yet handed to the write chain.
+  private scheduledWrites: Map<string, ScheduledRecordWrite> = new Map();
+  // Per-agent chain of file writes in flight, which keeps the write order.
   private pendingWrites: Map<string, Promise<void>> = new Map();
   private deleting: Set<string> = new Set();
   private daemonAgentIdsByExecution: Map<string, string> = new Map();
@@ -152,36 +166,82 @@ export class AgentStorage {
 
   async upsert(record: StoredAgentRecord): Promise<void> {
     await this.load();
-    await this.queueRecordWrite(record);
+    await this.applyRecordMutation(record.id, () => record);
   }
 
-  private queueRecordWrite(record: StoredAgentRecord): Promise<void> {
-    return this.queueRecordMutation(record.id, () => record);
-  }
-
-  private queueRecordMutation(
+  /**
+   * Puts the mutated record in the cache at once, so readers see it, and
+   * resolves when a file write that holds it commits.
+   */
+  private applyRecordMutation(
     agentId: string,
     mutate: (existing: StoredAgentRecord | null) => StoredAgentRecord,
   ): Promise<void> {
-    const prev = this.pendingWrites.get(agentId) ?? Promise.resolve();
-    const next = prev.then(async () => {
-      if (this.deleting.has(agentId)) {
-        return undefined;
-      }
+    if (this.deleting.has(agentId)) {
+      return Promise.resolve();
+    }
+    const record = mutate(this.cache.get(agentId) ?? null);
+    this.cache.set(agentId, record);
+    this.indexOwner(record);
+    return this.scheduleRecordWrite(agentId);
+  }
 
-      const record = mutate(this.cache.get(agentId) ?? null);
-      await this.writeRecord(record);
-      return undefined;
+  private scheduleRecordWrite(agentId: string): Promise<void> {
+    const scheduled = this.scheduledWrites.get(agentId);
+    if (scheduled) {
+      return scheduled.promise;
+    }
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
     });
+    const timer = setTimeout(() => this.startRecordWrite(agentId), AGENT_RECORD_WRITE_WINDOW_MS);
+    this.scheduledWrites.set(agentId, { timer, promise, resolve, reject });
+    return promise;
+  }
+
+  private startRecordWrite(agentId: string): void {
+    const scheduled = this.scheduledWrites.get(agentId);
+    if (!scheduled) {
+      return;
+    }
+    clearTimeout(scheduled.timer);
+    this.scheduledWrites.delete(agentId);
+
+    const prev = this.pendingWrites.get(agentId) ?? Promise.resolve();
+    const next = prev
+      .catch(() => undefined)
+      .then(async () => {
+        if (this.deleting.has(agentId)) {
+          return undefined;
+        }
+        // The cache holds the newest record when the write starts.
+        const record = this.cache.get(agentId);
+        if (record) {
+          await this.writeRecord(record);
+        }
+        return undefined;
+      });
 
     const tracked = next.finally(() => {
       if (this.pendingWrites.get(agentId) === tracked) {
         this.pendingWrites.delete(agentId);
       }
     });
-
     this.pendingWrites.set(agentId, tracked);
-    return tracked;
+    tracked.then(scheduled.resolve, scheduled.reject);
+  }
+
+  private cancelScheduledWrite(agentId: string): void {
+    const scheduled = this.scheduledWrites.get(agentId);
+    if (!scheduled) {
+      return;
+    }
+    clearTimeout(scheduled.timer);
+    this.scheduledWrites.delete(agentId);
+    scheduled.resolve();
   }
 
   private async writeRecord(record: StoredAgentRecord): Promise<void> {
@@ -201,19 +261,18 @@ export class AgentStorage {
       this.removeIndexedPath(agentId, previousPath);
     }
 
-    this.cache.set(agentId, record);
-    this.indexOwner(record);
     this.pathById.set(agentId, nextPath);
   }
 
   beginDelete(agentId: string): void {
     this.deleting.add(agentId);
+    this.cancelScheduledWrite(agentId);
   }
 
   async remove(agentId: string): Promise<void> {
     await this.load();
     this.beginDelete(agentId);
-    await (this.pendingWrites.get(agentId) ?? Promise.resolve());
+    await (this.pendingWrites.get(agentId) ?? Promise.resolve()).catch(() => undefined);
     const paths = Array.from(this.pathsById.get(agentId) ?? []);
     await Promise.all(
       paths.map(async (filePath) => {
@@ -246,7 +305,7 @@ export class AgentStorage {
       options !== undefined && Object.prototype.hasOwnProperty.call(options, "title");
     const hasInternalOverride =
       options !== undefined && Object.prototype.hasOwnProperty.call(options, "internal");
-    await this.queueRecordMutation(agent.id, (existing) => {
+    await this.applyRecordMutation(agent.id, (existing) => {
       const record = toStoredAgentRecord(agent, {
         title: hasTitleOverride ? (options?.title ?? null) : (existing?.title ?? null),
         createdAt: existing?.createdAt,
@@ -254,8 +313,8 @@ export class AgentStorage {
       });
 
       // Preserve soft-delete/archive status across snapshot flushes. The
-      // projection runs inside the per-agent write queue so it cannot commit a
-      // stale pre-archive record after the archive mutation.
+      // projection reads the cache, which already holds every earlier mutation,
+      // so it cannot commit a stale pre-archive record after the archive.
       if (existing && existing.archivedAt !== undefined) {
         record.archivedAt = existing.archivedAt;
       }
@@ -264,8 +323,6 @@ export class AgentStorage {
   }
 
   async setTitle(agentId: string, title: string): Promise<void> {
-    await this.load();
-    await this.waitForPendingWrite(agentId);
     const record = await this.get(agentId);
     if (!record) {
       throw new Error(`Agent ${agentId} not found`);
@@ -273,10 +330,15 @@ export class AgentStorage {
     await this.upsert({ ...record, title });
   }
 
+  /** Writes every scheduled record now and waits for all writes in flight. */
   async flush(): Promise<void> {
     await this.load().catch(() => undefined);
-    const writes = Array.from(this.pendingWrites.values());
-    await Promise.allSettled(writes);
+    while (this.scheduledWrites.size > 0 || this.pendingWrites.size > 0) {
+      for (const agentId of Array.from(this.scheduledWrites.keys())) {
+        this.startRecordWrite(agentId);
+      }
+      await Promise.allSettled(Array.from(this.pendingWrites.values()));
+    }
   }
 
   private async load(): Promise<StoredAgentRecord[]> {
@@ -420,10 +482,6 @@ export class AgentStorage {
       this.daemonAgentIdsByExecution.delete(key);
     }
     this.daemonExecutionKeysByAgentId.delete(agentId);
-  }
-
-  private async waitForPendingWrite(agentId: string): Promise<void> {
-    await (this.pendingWrites.get(agentId) ?? Promise.resolve()).catch(() => undefined);
   }
 }
 

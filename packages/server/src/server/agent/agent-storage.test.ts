@@ -1,11 +1,17 @@
-import { describe, expect, test, beforeEach, afterEach } from "vitest";
+import { describe, expect, test, beforeEach, afterEach, vi } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import { mkdtempSync, readdirSync, rmSync, type Dirent } from "node:fs";
 import { promises as fs } from "node:fs";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
-import { AgentStorage } from "./agent-storage.js";
+import { writeJsonFileAtomic } from "../atomic-file.js";
+import {
+  AGENT_RECORD_WRITE_WINDOW_MS,
+  AgentStorage,
+  parseStoredAgentRecord,
+  type StoredAgentRecord,
+} from "./agent-storage.js";
 import { buildConfigOverrides, buildSessionConfig } from "../persistence-hooks.js";
 import type { ManagedAgent } from "./agent-manager.js";
 import type {
@@ -14,6 +20,12 @@ import type {
   AgentSession,
   AgentSessionConfig,
 } from "./agent-sdk-types.js";
+
+// Wraps the real atomic write so tests can count file writes.
+vi.mock("../atomic-file.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../atomic-file.js")>();
+  return { ...actual, writeJsonFileAtomic: vi.fn(actual.writeJsonFileAtomic) };
+});
 
 type ManagedAgentOverrides = Omit<
   Partial<ManagedAgent>,
@@ -591,5 +603,121 @@ describe("AgentStorage", () => {
     const afterReload = new AgentStorage(storagePath, logger);
     const after = await afterReload.list();
     expect(after.some((r) => r.id === agentId)).toBe(false);
+  });
+});
+
+describe("AgentStorage write coalescing", () => {
+  let tmpDir: string;
+  let storagePath: string;
+  let storage: AgentStorage;
+  const logger = createTestLogger();
+  const writeMock = vi.mocked(writeJsonFileAtomic);
+
+  function buildRecord(id: string, title: string): StoredAgentRecord {
+    return parseStoredAgentRecord({
+      id,
+      provider: "codex",
+      cwd: "/tmp/coalesce-project",
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+      title,
+    });
+  }
+
+  function writesFor(agentId: string): number {
+    return writeMock.mock.calls.filter(([filePath]) => filePath.endsWith(`${agentId}.json`)).length;
+  }
+
+  async function readRecordFile(agentId: string): Promise<StoredAgentRecord | null> {
+    const filePath = path.join(storagePath, "tmp-coalesce-project", `${agentId}.json`);
+    try {
+      return parseStoredAgentRecord(JSON.parse(await fs.readFile(filePath, "utf8")));
+    } catch {
+      return null;
+    }
+  }
+
+  beforeEach(async () => {
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), "agent-registry-coalesce-"));
+    storagePath = path.join(tmpDir, "agents");
+    storage = new AgentStorage(storagePath, logger);
+    await storage.initialize();
+    writeMock.mockClear();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test("10 updates within 100 ms produce 1 file write with the last record", async () => {
+    const writes: Promise<void>[] = [];
+    for (let i = 0; i < 10; i += 1) {
+      writes.push(storage.upsert(buildRecord("agent-busy", `title ${i}`)));
+      await vi.advanceTimersByTimeAsync(10);
+    }
+    expect(writesFor("agent-busy")).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(AGENT_RECORD_WRITE_WINDOW_MS);
+    await Promise.all(writes);
+
+    expect(writesFor("agent-busy")).toBe(1);
+    expect((await readRecordFile("agent-busy"))?.title).toBe("title 9");
+  });
+
+  test("a busy agent writes within the window of its first unsaved update", async () => {
+    for (let elapsed = 0; elapsed < AGENT_RECORD_WRITE_WINDOW_MS; elapsed += 50) {
+      void storage.upsert(buildRecord("agent-steady", `at ${elapsed}`));
+      await vi.advanceTimersByTimeAsync(50);
+    }
+    await vi.waitFor(() => expect(writesFor("agent-steady")).toBe(1));
+  });
+
+  test("flush writes scheduled records at once", async () => {
+    const write = storage.upsert(buildRecord("agent-flush", "flushed"));
+    await storage.flush();
+    await write;
+
+    expect(writesFor("agent-flush")).toBe(1);
+    expect((await readRecordFile("agent-flush"))?.title).toBe("flushed");
+  });
+
+  test("remove cancels a scheduled write", async () => {
+    const write = storage.upsert(buildRecord("agent-gone", "never written"));
+    await storage.remove("agent-gone");
+    await write;
+    await vi.advanceTimersByTimeAsync(AGENT_RECORD_WRITE_WINDOW_MS * 2);
+
+    expect(writesFor("agent-gone")).toBe(0);
+    expect(await readRecordFile("agent-gone")).toBeNull();
+    expect(await storage.get("agent-gone")).toBeNull();
+  });
+
+  test("list and get return the newest record before its file write", async () => {
+    void storage.upsert(buildRecord("agent-read", "saved"));
+    await storage.flush();
+    void storage.upsert(buildRecord("agent-read", "newest"));
+
+    expect((await storage.get("agent-read"))?.title).toBe("newest");
+    expect((await storage.list()).find((record) => record.id === "agent-read")?.title).toBe(
+      "newest",
+    );
+    expect((await readRecordFile("agent-read"))?.title).toBe("saved");
+  });
+
+  test("shutdown flush leaves every pending record on disk", async () => {
+    const agentIds = ["agent-a", "agent-b", "agent-c"];
+    for (const agentId of agentIds) {
+      void storage.upsert(buildRecord(agentId, "first"));
+      void storage.upsert(buildRecord(agentId, `last ${agentId}`));
+    }
+    await storage.flush();
+
+    const reloaded = new AgentStorage(storagePath, logger);
+    const titles = new Map((await reloaded.list()).map((record) => [record.id, record.title]));
+    for (const agentId of agentIds) {
+      expect(titles.get(agentId)).toBe(`last ${agentId}`);
+    }
   });
 });
