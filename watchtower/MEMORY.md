@@ -241,3 +241,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: GPUI stops drawing while its window is covered, so `cua_repl` screenshots show stale frames, scroll events land only on a raised window, and `measure.sh` reads come out low. A 60 fps GPUI scroll costs about 9.6% CPU with no content.
 - Source: TASK-137 outcome; Q-058.
 - Use next time: raise the window before each screenshot or read, and set scroll CPU limits against a no-content control run.
+- Learned: one `cua_repl` `getApp` call right after a bundle launch hung for 54 minutes and held the shared screen lock for 3 hours. A raise alone often left a GPUI window unpainted; a raise plus a title-bar click painted it.
+- Source: TASK-139 and TASK-138 outcomes.
+- Use next time: wrap each `cua_repl` step in `Promise.race` with a timeout, wait a few seconds after launch, and click the title bar after a raise.
+- Learned: a GPUI list item that holds a whole 50-step turn cost about 74% CPU on the mock stream; one item per header and per step cost about 4%.
+- Source: TASK-138 outcome.
+- Use next time: keep GPUI list items small, one per visual row group.
+- Learned: the gpui-kit `test-support` dev feature and the tree-sitter `css`, `html`, `toml`, and `yaml` features break workspace resolution on `cocoa` (=0.26.0 against the locked 0.26.1).
+- Source: TASK-139 and TASK-138 outcomes; Q-063.
+- Use next time: test GPUI view crates through plain functions, and do not enable those features.

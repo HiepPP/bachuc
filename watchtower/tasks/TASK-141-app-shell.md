@@ -19,6 +19,14 @@ Boundaries:
 - The dock badge shows the sum of `pending_permissions` over all agents, and clears at zero. GPUI has no dock badge API, so set `NSDockTile` `badgeLabel` through `objc2-app-kit`.
 - Light and dark follow the system appearance through `bachuc_theme::init`.
 - Shortcuts: Cmd+N new agent, Cmd+T new terminal tab, Cmd+W close tab, Cmd+1 to Cmd+9 switch tabs.
+- Lead notes from TASK-138 to TASK-140 (read their outcomes for detail):
+  - Create each view inside `cx.new`, and keep a strong `Entity<Client>` in the app state.
+  - Create a `TerminalView` only after `ClientEvent::Connected`, and for a new terminal only after the workspace list loads (`AgentsChanged`); follow `Shell::open` in `crates/terminal/examples/terminal.rs`.
+  - Closing a window leaves the daemon terminal running; wire tab close and host switch to `TerminalView::close`.
+  - The daemon subscribes terminals only by full id, not the 8-character prefix from `terminal ls`.
+  - `create_terminal` needs a daemon workspace folder; use the agent's `cwd`, and `/tmp/gpui-bench` in checks.
+  - `Composer` emits `ComposerEvent::Sent`; its Stop button stays visible and disabled while idle (Q-062).
+  - The timeline example read 9.5% CPU on a long mock turn (Q-064). Keep every list item small; never put a whole turn in one item.
 - No daemon start, stop, update, CLI install, or deep links (see [watchtower/CONTEXT.md](watchtower/CONTEXT.md)).
 - Give the sidebar rows, tabs, dialogs, and the host switcher a role and a label.
 
