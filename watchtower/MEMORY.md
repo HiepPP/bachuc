@@ -235,3 +235,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: `git diff --exit-code` on a new untracked file always passes. Compare `shasum` of two runs instead.
 - Source: TASK-135 outcome.
 - Use next time: do not use `git diff` as an idempotence check for a file the TASK creates.
+- Learned: GPUI holds a `cx.subscribe` emitter weakly. Dropping the last `Entity<Client>` stops the `bachuc-client` socket thread at once.
+- Source: TASK-136 outcome.
+- Use next time: keep a strong `Entity<Client>` in the view or app state that owns it.
+- Learned: GPUI stops drawing while its window is covered, so `cua_repl` screenshots show stale frames, scroll events land only on a raised window, and `measure.sh` reads come out low. A 60 fps GPUI scroll costs about 9.6% CPU with no content.
+- Source: TASK-137 outcome; Q-058.
+- Use next time: raise the window before each screenshot or read, and set scroll CPU limits against a no-content control run.

@@ -49,4 +49,4 @@ Anti-goal: the example stays within 10% CPU and 250 MB phys_footprint, WebKit he
 - `packages/desktop-gpui/cargo.sh test -p bachuc-diagram` -> cache and failure tests pass
 - Agent check: `packages/desktop-gpui/bundle.sh example diagrams BachucDiagrams io.github.hieppp.bachuc-diagrams`, open it, scroll with `cua_repl`, and take screenshots -> diagrams show their node labels and formulas show math symbols; they scroll and clip inside the list; no WebView shows over the content
 - Agent check: `cua_repl` `getAXState` on the example -> each diagram image has a label with its kind
-- Anti-goal: `measure.sh 60 diag="BachucDiagrams.app" wk="pids:<WebKit pids>"` while scrolling -> CPU at most 10.0 and footprint sum at most 250
+- Anti-goal: `measure.sh 60 diag="BachucDiagrams.app" wk="pids:<WebKit pids>"` while scrolling -> footprint sum at most 250, and CPU at most 1.0 point above a control run of the same scroll with each image replaced by an empty box. Lead change in the run of 2026-10-15 (Q-058): the old "CPU at most 10.0" line was UNSATISFIABLE, because the 60 fps scroll without any image used 9.6%. The 10% limit stays on the stream scenario of TASK-141.

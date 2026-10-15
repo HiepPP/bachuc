@@ -16,6 +16,7 @@ Boundaries:
 - Keep 10000 lines of scrollback (the alacritty default). The mouse wheel scrolls it. New output returns to the bottom only when the view is at the bottom.
 - Mouse drag selects text; Cmd+C copies; Cmd+V pastes with bracketed paste when the app asks for it.
 - Keys: printable keys, Enter, Backspace, Tab, Escape, arrows, Home, End, Page Up and Down, and Ctrl+letter. Option sends Escape plus the key.
+- Lead note from TASK-136 (Q-059): the client subscribes with no restore mode, so the first frame is the `0x04` JSON grid as `TerminalFrame::Snapshot`. A `Snapshot` also arrives after each reconnect; reset the emulator on every one. A `create_terminal` folder must be a daemon workspace: `/tmp` fails with "workspaceId is required", `/tmp/gpui-bench` works.
 - Draw cells with one text run per color span per line, as the prototype does, and cache unchanged lines.
 - Give the pane a role and a label with the terminal name.
 
