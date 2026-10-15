@@ -205,3 +205,15 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: react-native-web gives `onLayout` a width from `offsetWidth`, rounded to a whole pixel. Pixel cells sized from it can overflow a row by less than 1 px and wrap. The wrap changes the height, the scroll bar toggles, and the layout flips without end.
 - Source: Board flashing fix on 2026-10-15, ADR-0033.
 - Use next time: on web, size cells that share a row with percent or flex values. Use a measured width only for a breakpoint choice.
+
+### 2026-10-15 - Plan 20261015-sqlite-ram-cpu-cuts
+
+- Learned: Vitest resolves `./row-store` in the replica cache to `row-store.native.ts`, and `host-runtime.test.ts` has its own fake `ReplicaRowStore`.
+- Source: TASK-126 outcome.
+- Use next time: import runtime values from `row-store-schema.ts`, and list `host-runtime.test.ts` in `Files:` when the row store interface changes.
+- Learned: FTS5 `unicode61 remove_diacritics 2` does not fold `đ`, and it matches only whole words or word prefixes.
+- Source: TASK-128 outcome; Q-048.
+- Use next time: fold `đ` to `d` on both sides, and do not promise a mid-word match from the cache path.
+- Learned: a coalesced write whose promise waits for the file commit makes every awaited persist slower, and it hangs fake-timer tests that await a persist before they advance the clock.
+- Source: TASK-131 outcome; Q-043.
+- Use next time: when a spec debounces a write, say whether callers await the commit or only the cache update, and list the tests that await it.

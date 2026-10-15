@@ -37,4 +37,4 @@ header_pattern: ^(feat|fix|docs|refactor|test|chore|perf)(\([a-z0-9-]+\))?: .+
 
 ## Known Failures
 
-- None.
+- `packages/server/src/server/mcp-server.test.ts`: 7 cases fail with a TypeError that reads `size` of `backgroundProcesses` at `agent-projections.ts:149`, without this run's changes (build E, 2026-10-15). Confirm by: `npx vitest run packages/server/src/server/mcp-server.test.ts` -> the same TypeError.
