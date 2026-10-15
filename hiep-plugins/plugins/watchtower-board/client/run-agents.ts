@@ -31,6 +31,8 @@ export function useRunAgents(hostId: string, workspaceId: string): BuilderCandid
     queryKey: ["watchtower-run-agents", hostId, workspaceId],
     queryFn: find,
     refetchInterval: REFRESH_MS,
+    // An empty ID (a New workspace draft) has no agents to list.
+    enabled: workspaceId !== "",
     retry: false,
   });
   return data ?? NO_AGENTS;

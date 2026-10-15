@@ -52,3 +52,18 @@ test("blocking questions add a count", () => {
     "Watchtower 5/10, 2 questions",
   );
 });
+
+test("TASKs with a running builder add a count before the questions", () => {
+  const statuses = ["DONE", "DONE", "BLOCKED", "TODO"];
+  const live = new Set(["TASK-003", "TASK-004"]);
+  assert.equal(
+    pillLabel(board(statuses, [question("Q-008")]), live),
+    "Watchtower 2/4, 2 running, 1 question",
+  );
+  assert.equal(pillLabel(board(statuses), new Set(["TASK-003"])), "Watchtower 2/4, 1 running");
+});
+
+test("a done TASK and an unknown ID do not count as running", () => {
+  const statuses = ["DONE", "TODO"];
+  assert.equal(pillLabel(board(statuses), new Set(["TASK-001", "TASK-099"])), "Watchtower 1/2");
+});

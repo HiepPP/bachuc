@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type BuilderCandidate, matchBuilders } from "../client/builders";
+import { type BuilderCandidate, liveTaskIds, matchBuilders } from "../client/builders";
 
 const NOW = Date.parse("2026-10-14T12:00:00.000Z");
 const TASKS = [
@@ -32,6 +32,19 @@ test("a TASK ID label maps to every TASK of its group", () => {
   const { byTask } = matchBuilders([builder("b1", "TASK-089")], TASKS, NOW);
   assert.deepEqual(Object.keys(byTask).sort(), ["TASK-089", "TASK-090"]);
   assert.equal(byTask["TASK-090"]?.id, "b1");
+});
+
+test("live TASKs are those whose builder runs or waits, sorted", () => {
+  const match = matchBuilders(
+    [
+      builder("b1", "TASK-091", { status: "running" }),
+      builder("b2", "TASK-089", { status: "running", pendingPermissions: [{} as never] }),
+      builder("b3", "TASK-092", { status: "idle" }),
+    ],
+    TASKS,
+    NOW,
+  );
+  assert.deepEqual(liveTaskIds(match), ["TASK-089", "TASK-090", "TASK-091"]);
 });
 
 test("a TASK ID label of a TASK without a group maps to that TASK only", () => {

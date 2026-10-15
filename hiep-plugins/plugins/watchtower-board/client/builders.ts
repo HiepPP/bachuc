@@ -67,6 +67,14 @@ function tasksOf(label: string, tasks: readonly BuilderTask[]): string[] {
   return tasks.filter((task) => task.group === label).map((task) => task.id);
 }
 
+/** IDs of the TASKs whose builder runs or waits for a permission, sorted. */
+export function liveTaskIds(match: Pick<BuilderMatch, "byTask">): string[] {
+  return Object.entries(match.byTask)
+    .filter(([, builder]) => builder.state === "running" || builder.state === "waiting")
+    .map(([taskId]) => taskId)
+    .sort();
+}
+
 export function matchBuilders(
   agents: readonly BuilderCandidate[],
   tasks: readonly BuilderTask[],

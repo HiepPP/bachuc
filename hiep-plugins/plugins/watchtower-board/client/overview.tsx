@@ -6,7 +6,7 @@ import { Pressable, type ScrollView as NativeScrollView, Text, View } from "reac
 import { readBoardRpc } from "../shared/board";
 import { readOverviewRpc } from "../shared/overview";
 import { useAgentSender } from "./agent-target";
-import { matchBuilders } from "./builders";
+import { liveTaskIds, matchBuilders } from "./builders";
 import { dashboardSummary, withLiveStatus } from "./dashboard";
 import { type DecisionTarget, DecisionModal } from "./decision-modal";
 import { lifecyclePhases, needsYou } from "./lifecycle";
@@ -124,11 +124,7 @@ export function WatchtowerOverview({
   const runAgents = useRunAgents(host.id, workspaceId);
   const builders = useMemo(() => matchBuilders(runAgents, data?.tasks ?? []), [runAgents, data]);
   // A string key, so the 15 s agent refresh rebuilds the tree only when the set changes.
-  const liveKey = Object.entries(builders.byTask)
-    .filter(([, builder]) => builder.state === "running" || builder.state === "waiting")
-    .map(([taskId]) => taskId)
-    .sort()
-    .join(",");
+  const liveKey = liveTaskIds(builders).join(",");
   const live = useMemo(() => new Set(liveKey ? liveKey.split(",") : []), [liveKey]);
   // The rail reads the same live status as the plan tree.
   const liveBoard = useMemo(
