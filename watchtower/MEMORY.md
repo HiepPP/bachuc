@@ -51,6 +51,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a three.js Fleet map tab in the app, and a hidden tab that keeps `three` in the bundle, while `three` loads at app start and the agent tree lives as 2D UI on the Watchtower page. Reason: [ADR-0028](watchtower/decisions/ADR-0028-no-fleet-map-tab-over-three-js-fleet-map.md).
 - Avoid a branch timeline, Running now, or Up next on the Watchtower page, and a second tab or a side-by-side timeline for the plan tree, while the owner chose the tree after comparing mockups. Reason: [ADR-0029](watchtower/decisions/ADR-0029-plan-tree-over-branch-timeline.md).
 - Avoid `glm-acp-agent` as the main GLM path, a config-entry-only GLM setup, and a GLM provider that shares `~/.claude`, while the Claude path passed the live probe and the owner's hooks and plugins live in `~/.claude`. Reason: [ADR-0030](watchtower/decisions/ADR-0030-built-in-glm-on-claude-client-over-acp-and-config.md).
+- Avoid memory-only timelines, JSONL timeline files, better-sqlite3, Drizzle, and a database for agent records, while `node:sqlite` runs in the Electron daemon runtime and agent listing stays fast in memory. Reason: [ADR-0031](watchtower/decisions/ADR-0031-node-sqlite-timeline-cache-over-json-and-better-sqlite3.md).
 
 ## Learnings
 
