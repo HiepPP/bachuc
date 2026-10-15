@@ -263,3 +263,6 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: Paseo `create_agent` on release failed with "Too many orchestrator sessions; reload the plugin". The `jev-orchestrator` bridge keeps bound leases across reloads (`hiep-plugins/plugins/jev-orchestrator/server/bridge.ts`), so a reload did not help. The run used native builder subagents instead.
 - Source: implement run of 2026-10-15.
 - Use next time: check that `create_agent` works before a run that needs Paseo builders.
+- Learned: `bachuc-timeline` sync was O(entries) per 50 ms flush (full regroup, full hash, header fingerprint over every step), so app CPU grew with the turn: 11.3% at 15 minutes. `grouping::TurnGrouper` regroups only changed turns and gave 8.9%. A GPUI window can also get stuck drawing only part of its area (Q-069).
+- Source: TASK-144 outcome.
+- Use next time: keep per-flush work in proportion to the change, and check a screenshot for a cut window before each CPU read.
