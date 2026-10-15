@@ -681,7 +681,10 @@ export class VoiceAssistantWebSocketServer {
     this.orchestrationSkills = orchestrationSkills;
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
-    this.messageReceipts = new MessageReceipts(join(paseoHome, "agent-requests"));
+    const receiptsLogger = this.logger.child({ module: "message-receipts" });
+    this.messageReceipts = new MessageReceipts(join(paseoHome, "agent-requests"), {
+      onError: (err) => receiptsLogger.warn({ err }, "Agent request receipt sweep failed"),
+    });
     this.agentMessageQueue = new AgentMessageQueue({
       directory: join(paseoHome, "agent-queues"),
       agentManager,
@@ -1067,6 +1070,7 @@ export class VoiceAssistantWebSocketServer {
   public beginAcceptingConnections(): void {
     if (this.connectionLifecycle === "starting") {
       this.connectionLifecycle = "accepting";
+      this.messageReceipts.startSweeping();
     }
   }
 
@@ -1078,6 +1082,7 @@ export class VoiceAssistantWebSocketServer {
     this.unsubscribeDaemonConfigChange = null;
     this.unsubscribeTerminalActivity?.();
     this.unsubscribeTerminalActivity = null;
+    this.messageReceipts.stopSweeping();
     if (this.runtimeMetricsInterval) {
       clearInterval(this.runtimeMetricsInterval);
       this.runtimeMetricsInterval = null;

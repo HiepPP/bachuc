@@ -1,8 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, test } from "vitest";
-import { MessageReceipts } from "./index.js";
+import { afterEach, expect, test, vi } from "vitest";
+import { MessageReceipts, RECEIPT_MAX_AGE_MS } from "./index.js";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -74,4 +74,70 @@ test("failed local message preparation does not leave an ambiguous receipt", asy
   available = false;
   await requests.send(input);
   expect(sends).toBe(1);
+});
+
+const NOW = Date.parse("2026-10-15T00:00:00Z");
+async function receiptFile(directory: string, name: string, ageMs: number): Promise<string> {
+  const file = path.join(directory, name);
+  await writeFile(file, "{}");
+  const time = new Date(NOW - ageMs);
+  await utimes(file, time, time);
+  return file;
+}
+
+test("sweep deletes receipts older than the age limit and keeps newer ones", async () => {
+  const { directory } = await fixture();
+  await receiptFile(directory, "old.json", RECEIPT_MAX_AGE_MS + 1000);
+  await receiptFile(directory, "new.json", RECEIPT_MAX_AGE_MS - 60_000);
+  const requests = new MessageReceipts(directory, { now: () => NOW });
+  expect(await requests.sweep()).toBe(1);
+  expect(await readdir(directory)).toEqual(["new.json"]);
+});
+
+test("sweep skips a file it cannot delete and reports the error", async () => {
+  const { directory } = await fixture();
+  // A directory named like a receipt fails to unlink, and sorts before the real files.
+  await mkdir(path.join(directory, "a-stuck.json"));
+  const stuck = new Date(NOW - RECEIPT_MAX_AGE_MS - 1000);
+  await utimes(path.join(directory, "a-stuck.json"), stuck, stuck);
+  await receiptFile(directory, "b-old.json", RECEIPT_MAX_AGE_MS + 1000);
+  const errors: unknown[] = [];
+  const requests = new MessageReceipts(directory, {
+    now: () => NOW,
+    onError: (error) => errors.push(error),
+  });
+  expect(await requests.sweep()).toBe(1);
+  expect(errors).toHaveLength(1);
+  expect(await readdir(directory)).toEqual(["a-stuck.json"]);
+});
+
+test("a retried request inside the age limit still finds its receipt after a sweep", async () => {
+  const { directory } = await fixture();
+  let deliveries = 0;
+  const input = {
+    agentId: "agent",
+    messageId: "arrival",
+    request: {},
+    send: async () => {
+      deliveries++;
+    },
+  };
+  await new MessageReceipts(directory).send(input);
+  const requests = new MessageReceipts(directory);
+  await requests.sweep();
+  await requests.send(input);
+  expect(deliveries).toBe(1);
+});
+
+test("startSweeping returns before it deletes anything, then sweeps in the background", async () => {
+  const { directory } = await fixture();
+  await receiptFile(directory, "old.json", RECEIPT_MAX_AGE_MS + 1000);
+  const requests = new MessageReceipts(directory, { now: () => NOW });
+  requests.startSweeping();
+  try {
+    expect(await readdir(directory)).toEqual(["old.json"]);
+    await vi.waitFor(async () => expect(await readdir(directory)).toEqual([]));
+  } finally {
+    requests.stopSweeping();
+  }
 });
