@@ -1,6 +1,6 @@
 # ADR-0038 Native data kinds and WebView panes over all-WebView or full rewrite
 
-Status: accepted
+Status: superseded by ADR-0045
 Date: 2026-10-16
 Supersedes: -
 Scope: `packages/desktop-gpui/**`, `hiep-plugins/plugins/*/index.client.tsx`, `packages/plugin/src/client/**`

@@ -17,7 +17,9 @@ max_builders: 2
 
 - Never restart or stop the release daemon on port 6767. Never run `scripts/paseo-release.sh` or `npm run build:desktop`.
 - Do not start, stop, or restart the live daemon or the live Electron app (owner answer, 2026-10-12). Live was down at run start, so each live check is `UNVERIFIED (unattended)`.
-- Proof is code tests only (owner, 2026-10-16): unit tests, crate tests, and fake-daemon tests. Open no app window and run no UI checker, screenshot, `cua_repl`, AX read, or `measure.sh` check. Record such a line as `UNVERIFIED (unattended): code tests only`.
+- Builders run code tests only: unit tests, crate tests, and fake-daemon tests. A builder opens no app window and returns each `UI check:` line as `DEFERRED (UI checker)`.
+- TASK-157 to TASK-167 had no UI checker (owner, 2026-10-16). For TASK-168 to TASK-195 one UI checker runs the `UI check:` lines (owner, 2026-10-16): it opens the GPUI bundle and the Electron reference with `open -g`, never brings an app to the front, never moves the pointer, and takes window screenshots only. A stale or blank frame (Q-069) is `UNVERIFIED (unattended): background frame`. A line that needs the pointer or the front is `UNVERIFIED (unattended): needs pointer` or `needs foreground`.
+- The UI checker quits every app it opens, and never runs `measure.sh`.
 - Memory: at most 2 builders at once. Every cargo command runs with `CARGO_BUILD_JOBS=4`, one at a time, scoped with `-p <crate>` (owner answer, 2026-10-16).
 - Builders share `packages/desktop-gpui/target`, so the cargo lock runs one build at a time. Do not set `CARGO_TARGET_DIR`.
 - Use only `packages/desktop-gpui/cargo.sh` for cargo, so the rustup toolchain runs.
@@ -36,6 +38,9 @@ max_builders: 2
 
 - Start: none. Stop: none.
 - Run-start fixtures: none.
+- GPUI bundle for UI checks: `CARGO_BUILD_JOBS=4 packages/desktop-gpui/bundle.sh bin bachuc-desktop "Bachuc GPUI" io.github.hieppp.bachuc-desktop`, then `open -g "packages/desktop-gpui/target/bundles/Bachuc GPUI.app"`. It connects to live (6768); if live is down, each UI check that needs daemon data is `UNVERIFIED (unattended): live down`.
+- Electron reference: `open -g packages/desktop/release/mac-arm64/Bachuc.app` (built 2026-10-15; its own daemon on 6770, home `~/.paseo-dev`). Never rebuild it.
+- UI timeouts: pass `timeout_ms` to every `cua_repl` call and wrap each step in `Promise.race` with a 60-second limit.
 - Destructive database steps: never.
 
 ## Known Failures
