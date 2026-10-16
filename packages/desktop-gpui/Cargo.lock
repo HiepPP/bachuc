@@ -769,6 +769,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bachuc-plugin-prompt-translate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "bachuc-theme",
+ "chrono",
+ "gpui-kit",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bachuc-plugin-skill-pins"
 version = "0.1.0"
 dependencies = [
