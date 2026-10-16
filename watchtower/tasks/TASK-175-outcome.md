@@ -2,7 +2,9 @@
 
 ## Status
 
-DONE
+BLOCKED
+
+Blocked: BUILT, UNVERIFIED (Q-109). The code and its tests pass; the swipe gesture and the slide need the owner's hand check on screen.
 
 ## Changed
 
