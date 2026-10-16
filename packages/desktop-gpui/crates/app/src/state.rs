@@ -6,6 +6,7 @@ use bachuc_client::{AgentSummary, ClientEvent, HostConfig, ProjectNode, Workspac
 use bachuc_command::{CommandItem, Shortcut};
 use bachuc_icons::IconName;
 use bachuc_theme::ThemeChoice;
+use gpui_kit::Hsla;
 use std::path::Path;
 
 /// The host to open on. `preferred` is a host name (the `BACHUC_HOST` variable); without it
@@ -83,6 +84,50 @@ pub fn file_key(cwd: &str, path: &str) -> String {
 
 pub fn diff_key(cwd: &str, path: &str) -> String {
     format!("diff:{}", absolute_path(cwd, path))
+}
+
+/// One all-files diff tab per folder: a second Changes click shows the open tab.
+pub fn all_diffs_key(cwd: &str) -> String {
+    format!("diffs:{}", cwd.trim_end_matches('/'))
+}
+
+/// One diff tab per file of a commit.
+pub fn commit_diff_key(cwd: &str, sha: &str, path: &str) -> String {
+    format!("commit:{sha}:{}", absolute_path(cwd, path))
+}
+
+/// The tab title of a commit diff: the file name and the short sha.
+pub fn commit_diff_title(sha: &str, path: &str) -> String {
+    format!(
+        "{} ({})",
+        file_name(path),
+        sha.chars().take(7).collect::<String>()
+    )
+}
+
+/// The absolute path of a file pane key.
+pub fn file_of_key(key: &str) -> Option<&str> {
+    key.strip_prefix("file:")
+}
+
+/// The tab icon of an agent when it has no provider logo.
+pub fn agent_icon(provider: Option<&str>) -> IconName {
+    provider.map_or(IconName::Bot, bachuc_icons::provider_fallback_icon)
+}
+
+/// The color the provider logos are drawn in. The logos are rebuilt when it changes, not when
+/// another theme setting (font, size, syntax) writes the theme.
+pub struct LogoFill(Hsla);
+
+impl LogoFill {
+    pub fn new(fill: Hsla) -> Self {
+        Self(fill)
+    }
+
+    /// Records `fill` and tells whether the logos need a rebuild.
+    pub fn changed(&mut self, fill: Hsla) -> bool {
+        std::mem::replace(&mut self.0, fill) != fill
+    }
 }
 
 // ----- workspaces -----
@@ -675,5 +720,64 @@ mod tests {
         assert_eq!(agent_from_tag("permission-a1"), Some("a1"));
         assert_eq!(agent_from_tag("finished-a1"), Some("a1"));
         assert_eq!(agent_from_tag("other-a1"), None);
+    }
+
+    #[test]
+    fn diff_tabs_have_stable_identities() {
+        assert_eq!(all_diffs_key("/w/"), all_diffs_key("/w"));
+        assert_ne!(all_diffs_key("/w"), all_diffs_key("/x"));
+        let commit = commit_diff_key("/w", "abc1234ff", "src/a.rs");
+        assert_eq!(commit, commit_diff_key("/w/", "abc1234ff", "./src/a.rs"));
+        assert_eq!(commit, commit_diff_key("/x", "abc1234ff", "/w/src/a.rs"));
+        assert_ne!(commit, commit_diff_key("/w", "def5678aa", "src/a.rs"));
+        assert_ne!(commit, commit_diff_key("/w", "abc1234ff", "src/b.rs"));
+        // The kinds never collide with each other or with the one-file diff and the file tab.
+        let keys = [
+            all_diffs_key("/w"),
+            commit,
+            diff_key("/w", "src/a.rs"),
+            file_key("/w", "src/a.rs"),
+        ];
+        for (at, key) in keys.iter().enumerate() {
+            assert!(keys[at + 1..].iter().all(|other| other != key));
+        }
+        assert_eq!(commit_diff_title("abc1234ff", "src/a.rs"), "a.rs (abc1234)");
+        assert_eq!(file_of_key(&file_key("/w", "a.rs")), Some("/w/a.rs"));
+        assert_eq!(file_of_key(&diff_key("/w", "a.rs")), None);
+    }
+
+    #[test]
+    fn an_agent_tab_without_a_logo_shows_the_provider_fallback_icon() {
+        assert_eq!(agent_icon(None), IconName::Bot);
+        assert_eq!(agent_icon(Some("claude")), IconName::Bot);
+        assert_eq!(agent_icon(Some("kiro")), IconName::PackagePlus);
+    }
+
+    #[test]
+    fn the_logos_rebuild_only_when_the_fill_changes() {
+        let light = gpui_kit::hsla(0., 0., 0.1, 1.);
+        let dark = gpui_kit::hsla(0., 0., 0.9, 1.);
+        let mut fill = LogoFill::new(light);
+        // A font, size, or syntax change writes the theme but leaves the fill.
+        assert!(!fill.changed(light));
+        assert!(fill.changed(dark));
+        assert!(!fill.changed(dark));
+        assert!(fill.changed(light));
+    }
+
+    #[test]
+    fn the_shell_refreshes_logos_only_from_the_theme_observer() {
+        let shell = include_str!("shell.rs");
+        // One call site, in the `Theme` observer; the client event handler returns early on
+        // `TimelineChanged` before anything else, so a timeline update never rebuilds a logo.
+        assert_eq!(shell.matches(".refresh_logos(").count(), 1);
+        let observer = shell.find("observe_global::<Theme>").expect("observer");
+        let call = shell.find(".refresh_logos(").expect("call");
+        assert!(call > observer && call - observer < 200);
+        let handler = shell.find("fn on_client_event").expect("handler");
+        let early = shell[handler..]
+            .find("ClientEvent::TimelineChanged { .. }")
+            .expect("early return");
+        assert!(!shell[handler..handler + early].contains("logo"));
     }
 }

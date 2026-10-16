@@ -7,6 +7,8 @@
 
 use crate::state::JUMP_TO_TAB;
 use bachuc_command::{Shortcut, gpui_keystrokes};
+use bachuc_workspace::KEY_CONTEXT as WORKSPACE_CONTEXT;
+use bachuc_workspace::actions::OpenTabMenu;
 use gpui_kit::{Action, KeyBinding, Unbind, actions};
 
 /// Runs a shortcut action by its `bachuc_command` action id, for example
@@ -121,6 +123,9 @@ pub fn fixed_bindings() -> Vec<KeyBinding> {
             RunAction("settings.toggle".into()),
             Some(SETTINGS_CONTEXT),
         ),
+        // The keyboard route to the context menu of the active tab.
+        KeyBinding::new("menu", OpenTabMenu, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new("shift-f10", OpenTabMenu, Some(WORKSPACE_CONTEXT)),
     ]
 }
 
@@ -225,6 +230,24 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn the_menu_key_and_shift_f10_open_the_tab_menu_inside_the_workspace() {
+        let workspace = KeyContext::try_from(WORKSPACE_CONTEXT).unwrap();
+        let shell = KeyContext::try_from(SHELL_CONTEXT).unwrap();
+        for keys in ["menu", "shift-f10"] {
+            let binding = fixed_bindings()
+                .into_iter()
+                .find(|binding| {
+                    binding.match_keystrokes(&[Keystroke::parse(keys).unwrap()]) == Some(false)
+                        && binding.action().partial_eq(&OpenTabMenu)
+                })
+                .unwrap_or_else(|| panic!("{keys} is bound to OpenTabMenu"));
+            let predicate = binding.predicate().expect("scoped");
+            assert!(predicate.eval(std::slice::from_ref(&workspace)));
+            assert!(!predicate.eval(std::slice::from_ref(&shell)));
         }
     }
 

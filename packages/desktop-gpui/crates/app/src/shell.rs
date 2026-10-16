@@ -13,8 +13,9 @@ use crate::panes::{
     AgentPane, Launch, LaunchItem, LazyAgentPane, NewTabPane, PaneFrame, launch_hints,
 };
 use crate::state::{
-    Connection, LayoutPrefs, absolute_path, agent_key, agent_of_key, agent_title, badge_count,
-    badge_label, command_items, diff_key, explorer_width, file_key, file_name, find_workspace,
+    Connection, LayoutPrefs, LogoFill, absolute_path, agent_icon, agent_key, agent_of_key,
+    agent_title, all_diffs_key, badge_count, badge_label, command_items, commit_diff_key,
+    commit_diff_title, diff_key, explorer_width, file_key, file_name, file_of_key, find_workspace,
     initial_host, next_mode, next_theme, notification_for, step_index, step_workspace,
     workspace_agents, workspace_order,
 };
@@ -22,16 +23,18 @@ use bachuc_client::{Client, ClientEvent, DirectoryEvent, HostConfig, load_hosts}
 use bachuc_command::{CommandCenter, CommandEvent, Shortcut, data_dir, load_shortcuts};
 use bachuc_composer::ComposerEvent;
 use bachuc_diagram::DiagramRenderer;
-use bachuc_explorer::{DiffView, Explorer, ExplorerEvent, ExplorerTab, FileView};
-use bachuc_icons::IconName;
+use bachuc_explorer::{
+    DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerTab, FileView,
+};
+use bachuc_icons::{IconName, provider_logo};
 use bachuc_settings::{Settings, SettingsEvent};
 use bachuc_sidebar::model::archive_prompt;
 use bachuc_sidebar::{Sidebar, SidebarEvent};
-use bachuc_terminal::TerminalView;
+use bachuc_terminal::{TerminalEvent, TerminalView};
 use bachuc_theme::tokens;
 use bachuc_timeline::TimelineEvent;
 use bachuc_workspace::model::Rect;
-use bachuc_workspace::{PaneEvent, PaneItem, SplitAxis, Workspace};
+use bachuc_workspace::{PaneEvent, PaneItem, SplitAxis, TabKind, TabMenuEvent, Workspace};
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState};
@@ -85,6 +88,25 @@ impl PaneContent {
         )
     }
 
+    /// What the tab shows, which decides its context menu.
+    fn kind(&self, identity: Option<&str>, cx: &App) -> TabKind {
+        match self {
+            PaneContent::Agent(_) | PaneContent::LazyAgent(_) => identity
+                .and_then(agent_of_key)
+                .map_or(TabKind::Other, |id| TabKind::Agent { id: id.to_string() }),
+            // The daemon id arrives with `TerminalEvent::Opened`, which sets the kind again.
+            PaneContent::Terminal(view) => TabKind::Terminal {
+                id: view
+                    .read(cx)
+                    .terminal_id()
+                    .map(str::to_string)
+                    .unwrap_or_default(),
+            },
+            PaneContent::File(_) => TabKind::File,
+            _ => TabKind::Other,
+        }
+    }
+
     /// Kills a terminal's daemon terminal; other panes need nothing.
     fn release(self, cx: &mut App) {
         if let PaneContent::Terminal(view) = self {
@@ -102,6 +124,9 @@ pub(crate) struct Pane {
     /// The focus target when the content has none (`PaneContent::owns_focus`).
     frame: Option<Entity<PaneFrame>>,
     title: SharedString,
+    /// The provider of an agent tab whose logo is set; `None` while the agent is not in the
+    /// list yet, so `complete_logos` can set it once.
+    provider: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -109,7 +134,7 @@ pub(crate) struct OpenWorkspace {
     cwd: Option<String>,
     view: Entity<Workspace>,
     panes: HashMap<String, Pane>,
-    _subscription: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 pub struct Shell {
@@ -120,6 +145,7 @@ pub struct Shell {
     diagrams: Entity<DiagramRenderer>,
     pub(crate) connection: Connection,
     badge: usize,
+    logo_fill: LogoFill,
     shortcuts: Vec<Shortcut>,
     bindings: Vec<BindingSpec>,
     pub(crate) sidebar: Entity<Sidebar>,
@@ -157,9 +183,14 @@ impl Shell {
         window.focus(&focus, cx);
         Self::open_agent_on_notification(window, cx);
         let subscriptions = vec![
-            // set_theme and set_font_scale write this global; the chrome reads tokens.
-            cx.observe_global::<Theme>(|_, cx| cx.notify()),
+            // set_theme and the font and syntax setters write this global; the chrome reads
+            // tokens. The logos follow only a change of their fill.
+            cx.observe_global::<Theme>(|this, cx| {
+                this.refresh_logos(cx);
+                cx.notify()
+            }),
         ];
+        let logo_fill = LogoFill::new(tokens(cx).foreground);
         let mut shell = Shell {
             hosts,
             host_index,
@@ -168,6 +199,7 @@ impl Shell {
             diagrams,
             connection: Connection::Connecting,
             badge: 0,
+            logo_fill,
             shortcuts,
             bindings,
             sidebar,
@@ -303,6 +335,7 @@ impl Shell {
         for (workspace_id, key, title) in titles {
             self.retitle(&workspace_id, &key, title, cx);
         }
+        self.complete_logos(cx);
     }
 
     fn agent_tab_title(&self, agent_id: &str, cx: &App) -> String {
@@ -455,20 +488,30 @@ impl Shell {
     ) {
         let view = cx.new(|cx| Workspace::new(window, cx));
         let workspace_id = id.clone();
-        let subscription = cx.subscribe_in(
-            &view,
-            window,
-            move |this: &mut Shell, _, event: &PaneEvent, window, cx| {
-                this.on_pane_event(&workspace_id, event, window, cx)
-            },
-        );
+        let menu_workspace_id = id.clone();
+        let subscriptions = vec![
+            cx.subscribe_in(
+                &view,
+                window,
+                move |this: &mut Shell, _, event: &PaneEvent, window, cx| {
+                    this.on_pane_event(&workspace_id, event, window, cx)
+                },
+            ),
+            cx.subscribe_in(
+                &view,
+                window,
+                move |this: &mut Shell, _, event: &TabMenuEvent, window, cx| {
+                    this.on_tab_menu(&menu_workspace_id, event, window, cx)
+                },
+            ),
+        ];
         self.workspaces.insert(
             id,
             OpenWorkspace {
                 cwd,
                 view,
                 panes: HashMap::new(),
-                _subscription: subscription,
+                _subscriptions: subscriptions,
             },
         );
     }
@@ -569,7 +612,20 @@ impl Shell {
                         }
                     },
                 );
+                let diff_subscription = cx.subscribe_in(
+                    &explorer,
+                    window,
+                    |this: &mut Shell, _, event: &ExplorerDiffEvent, window, cx| match event {
+                        ExplorerDiffEvent::OpenAllDiffs { cwd, focus_path } => {
+                            this.open_all_diffs(cwd, focus_path.clone(), window, cx)
+                        }
+                        ExplorerDiffEvent::OpenCommitDiff { cwd, sha, path } => {
+                            this.open_commit_diff(cwd, sha, path, window, cx)
+                        }
+                    },
+                );
                 self.host_subscriptions.push(subscription);
+                self.host_subscriptions.push(diff_subscription);
                 self.explorer = Some(explorer);
             }
             (None, _) => {}
@@ -741,6 +797,14 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let kind = content.kind(identity.as_deref(), cx);
+        let provider = identity
+            .as_deref()
+            .and_then(agent_of_key)
+            .and_then(|agent_id| self.agent_provider(agent_id, cx));
+        let logo = provider
+            .as_deref()
+            .and_then(|provider| provider_logo(provider, tokens(cx).foreground));
         let Some(open) = self.workspaces.get_mut(workspace_id) else {
             content.release(cx);
             return;
@@ -755,12 +819,13 @@ impl Shell {
             view: frame.clone().map_or_else(|| content.view(), AnyView::from),
         };
         let old = open.panes.insert(
-            key,
+            key.clone(),
             Pane {
                 identity,
                 content,
                 frame,
                 title,
+                provider,
                 _subscriptions: subscriptions,
             },
         );
@@ -768,8 +833,140 @@ impl Shell {
         if let Some(old) = old {
             old.content.release(cx);
         }
-        view.update(cx, |workspace, cx| workspace.open(item, window, cx));
+        view.update(cx, |workspace, cx| {
+            workspace.open(item, window, cx);
+            workspace.set_item_kind(&key, kind, cx);
+            workspace.set_item_logo(&key, logo, cx);
+        });
         cx.notify();
+    }
+
+    fn agent_provider(&self, agent_id: &str, cx: &App) -> Option<String> {
+        self.client
+            .read(cx)
+            .agents()
+            .iter()
+            .find(|agent| agent.id == agent_id)
+            .map(|agent| agent.provider.clone())
+    }
+
+    /// Rebuilds the logo of each agent tab when the theme changed its fill.
+    fn refresh_logos(&mut self, cx: &mut Context<Self>) {
+        let fill = tokens(cx).foreground;
+        if !self.logo_fill.changed(fill) {
+            return;
+        }
+        for open in self.workspaces.values() {
+            for (key, pane) in &open.panes {
+                let Some(provider) = &pane.provider else {
+                    continue;
+                };
+                let logo = provider_logo(provider, fill);
+                open.view
+                    .update(cx, |workspace, cx| workspace.set_item_logo(key, logo, cx));
+            }
+        }
+    }
+
+    /// Sets the logo of an agent tab that opened before its agent was in the list.
+    fn complete_logos(&mut self, cx: &mut Context<Self>) {
+        let fill = tokens(cx).foreground;
+        let pending: Vec<(String, String, String)> = self
+            .workspaces
+            .iter()
+            .flat_map(|(workspace_id, open)| {
+                open.panes.iter().filter_map(|(key, pane)| {
+                    if pane.provider.is_some() {
+                        return None;
+                    }
+                    let agent_id = agent_of_key(pane.identity.as_deref()?)?;
+                    let provider = self.agent_provider(agent_id, cx)?;
+                    Some((workspace_id.clone(), key.clone(), provider))
+                })
+            })
+            .collect();
+        for (workspace_id, key, provider) in pending {
+            let Some(open) = self.workspaces.get_mut(&workspace_id) else {
+                continue;
+            };
+            if let Some(pane) = open.panes.get_mut(&key) {
+                pane.provider = Some(provider.clone());
+            }
+            let logo = provider_logo(&provider, fill);
+            open.view
+                .update(cx, |workspace, cx| workspace.set_item_logo(&key, logo, cx));
+        }
+    }
+
+    fn pane(&self, workspace_id: &str, key: &str) -> Option<&Pane> {
+        self.workspaces.get(workspace_id)?.panes.get(key)
+    }
+
+    fn set_pane_kind(&mut self, workspace_id: &str, key: &str, kind: TabKind, cx: &mut App) {
+        if let Some(open) = self.workspaces.get(workspace_id) {
+            open.view
+                .update(cx, |workspace, cx| workspace.set_item_kind(key, kind, cx));
+        }
+    }
+
+    /// A tab context menu item that the workspace leaves to the app.
+    fn on_tab_menu(
+        &mut self,
+        workspace_id: &str,
+        event: &TabMenuEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            TabMenuEvent::CopyAgentId { key } => {
+                let agent_id = self
+                    .pane(workspace_id, key)
+                    .and_then(|pane| agent_of_key(pane.identity.as_deref()?))
+                    .map(str::to_string);
+                if let Some(agent_id) = agent_id {
+                    copy_text(agent_id, "Agent id copied", window, cx);
+                }
+            }
+            TabMenuEvent::CopyTerminalId { key } => {
+                let id = match self.pane(workspace_id, key).map(|pane| &pane.content) {
+                    Some(PaneContent::Terminal(view)) => {
+                        view.read(cx).terminal_id().map(str::to_string)
+                    }
+                    _ => None,
+                };
+                match id {
+                    Some(id) => copy_text(id, "Terminal id copied", window, cx),
+                    None => window.push_notification("The terminal is not open yet", cx),
+                }
+            }
+            TabMenuEvent::CopyFilePath { key } => {
+                let path = self
+                    .pane(workspace_id, key)
+                    .and_then(|pane| file_of_key(pane.identity.as_deref()?))
+                    .map(str::to_string);
+                if let Some(path) = path {
+                    copy_text(path, "File path copied", window, cx);
+                }
+            }
+            TabMenuEvent::Rename { key } => {
+                let agent_id = self
+                    .pane(workspace_id, key)
+                    .and_then(|pane| agent_of_key(pane.identity.as_deref()?))
+                    .map(str::to_string);
+                match agent_id {
+                    Some(agent_id) => self.rename_agent(agent_id, window, cx),
+                    // The client has no terminal rename request.
+                    None => window.push_notification("This tab cannot be renamed yet", cx),
+                }
+            }
+            // The client holds no provider session id and has no refresh request.
+            TabMenuEvent::CopyResumeCommand { .. } => {
+                window.push_notification("The resume command is not available yet", cx)
+            }
+            TabMenuEvent::ReloadAgent { .. } => {
+                window.push_notification("Reloading an agent is not available yet", cx)
+            }
+        }
     }
 
     fn open_new_tab(
@@ -902,12 +1099,13 @@ impl Shell {
             }),
         ];
         let title = self.agent_tab_title(agent_id, cx);
+        let icon = agent_icon(self.agent_provider(agent_id, cx).as_deref());
         self.put_pane(
             workspace_id,
             key,
             Some(agent_key(agent_id)),
             title.into(),
-            IconName::Bot,
+            icon,
             PaneContent::Agent(view.clone()),
             subscriptions,
             window,
@@ -927,12 +1125,13 @@ impl Shell {
         let key = self.next_key();
         let title = self.agent_tab_title(agent_id, cx);
         let view = cx.new(|_| LazyAgentPane);
+        let icon = agent_icon(self.agent_provider(agent_id, cx).as_deref());
         self.put_pane(
             workspace_id,
             key,
             Some(agent_key(agent_id)),
             title.into(),
-            IconName::Bot,
+            icon,
             PaneContent::LazyAgent(view),
             Vec::new(),
             window,
@@ -982,6 +1181,22 @@ impl Shell {
             terminal.set_name(name, cx);
             terminal
         });
+        let workspace = workspace_id.to_string();
+        let pane_key = key.clone();
+        let subscription = cx.subscribe_in(
+            &view,
+            window,
+            move |this: &mut Shell, _, event: &TerminalEvent, _, cx| {
+                if let TerminalEvent::Opened { id } = event {
+                    this.set_pane_kind(
+                        &workspace,
+                        &pane_key,
+                        TabKind::Terminal { id: id.clone() },
+                        cx,
+                    );
+                }
+            },
+        );
         self.put_pane(
             workspace_id,
             key,
@@ -989,7 +1204,7 @@ impl Shell {
             title.into(),
             IconName::SquareTerminal,
             PaneContent::Terminal(view),
-            Vec::new(),
+            vec![subscription],
             window,
             cx,
         );
@@ -1038,23 +1253,82 @@ impl Shell {
     }
 
     fn open_diff(&mut self, cwd: &str, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let (cwd, path) = (cwd.to_string(), path.to_string());
+        let title = file_name(&absolute_path(&cwd, &path));
+        self.open_diff_tab(
+            diff_key(&cwd, &path),
+            title,
+            IconName::FileDiff,
+            move |client, window, cx| DiffView::new(client, cwd, path, window, cx),
+            window,
+            cx,
+        );
+    }
+
+    /// Opens the all-files diff of a folder, or shows its open tab.
+    fn open_all_diffs(
+        &mut self,
+        cwd: &str,
+        focus_path: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let cwd = cwd.to_string();
+        self.open_diff_tab(
+            all_diffs_key(&cwd),
+            "Changes".to_string(),
+            IconName::FileDiff,
+            move |client, window, cx| DiffView::new_all(client, cwd, focus_path, window, cx),
+            window,
+            cx,
+        );
+    }
+
+    /// Opens one file of a commit, or shows its open tab.
+    fn open_commit_diff(
+        &mut self,
+        cwd: &str,
+        sha: &str,
+        path: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let identity = commit_diff_key(cwd, sha, path);
+        let title = commit_diff_title(sha, path);
+        let (cwd, sha, path) = (cwd.to_string(), sha.to_string(), path.to_string());
+        self.open_diff_tab(
+            identity,
+            title,
+            IconName::GitCommitHorizontal,
+            move |client, window, cx| DiffView::new_commit(client, cwd, sha, path, window, cx),
+            window,
+            cx,
+        );
+    }
+
+    fn open_diff_tab(
+        &mut self,
+        identity: String,
+        title: String,
+        icon: IconName,
+        build: impl FnOnce(Entity<Client>, &mut Window, &mut Context<DiffView>) -> DiffView,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let workspace_id = self.selected.clone();
-        let identity = diff_key(cwd, path);
         if let Some(key) = self.find_identity(&workspace_id, &identity) {
             self.activate_key(&workspace_id, &key, window, cx);
             return;
         }
         let key = self.next_key();
         let client = self.client.clone();
-        let (cwd, path) = (cwd.to_string(), path.to_string());
-        let title = file_name(&absolute_path(&cwd, &path));
-        let view = cx.new(|cx| DiffView::new(client, cwd, path, window, cx));
+        let view = cx.new(|cx| build(client, window, cx));
         self.put_pane(
             &workspace_id,
             key,
             Some(identity),
             title.into(),
-            IconName::FileDiff,
+            icon,
             PaneContent::Diff(view),
             Vec::new(),
             window,
@@ -1355,6 +1629,12 @@ impl Shell {
                 }
             }
             "workspace.archive" => self.archive_workspace(window, cx),
+            "workspace.pane.maximize" => self.with_workspace(
+                &selected,
+                cx,
+                |workspace, window, cx| workspace.toggle_maximize(window, cx),
+                window,
+            ),
             "workspace.tab.menu.open" => self.open_new_tab(&selected, None, window, cx),
             "workspace.tab.target.agent" => self.open_draft(&selected, None, window, cx),
             "workspace.terminal.new" => self.open_terminal(&selected, None, window, cx),
@@ -1542,6 +1822,11 @@ impl Shell {
             None => div().into_any_element(),
         }
     }
+}
+
+fn copy_text(text: String, notice: &'static str, window: &mut Window, cx: &mut App) {
+    cx.write_to_clipboard(ClipboardItem::new_string(text));
+    window.push_notification(notice, cx);
 }
 
 /// The active key of the group next to the focused one in `direction` (`left`, `right`, `up`,
