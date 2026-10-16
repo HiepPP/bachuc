@@ -26,6 +26,8 @@ actions!(bachuc, [FindInTimeline]);
 pub const SHELL_CONTEXT: &str = "BachucShell";
 /// Key context of an agent pane: find, interrupt, and the mode cycle apply only there.
 pub const AGENT_CONTEXT: &str = "BachucAgent";
+/// Added to the root view while Settings shows, so Escape leaves Settings as in Electron.
+pub const SETTINGS_CONTEXT: &str = "BachucSettings";
 
 /// Actions bound in the agent pane only. Escape and Shift+Tab mean something else in a
 /// terminal or a text field, so they never bind on the whole window.
@@ -109,13 +111,22 @@ pub fn binding_specs(shortcuts: &[Shortcut]) -> Vec<BindingSpec> {
     specs
 }
 
-/// Bindings that never change: Cmd+F finds in an agent pane, as in Electron.
+/// Bindings that never change, as in Electron: Cmd+F finds in an agent pane, and Escape
+/// leaves Settings. A dialog renders outside the root view, so it keeps its own Escape.
 pub fn fixed_bindings() -> Vec<KeyBinding> {
-    vec![KeyBinding::new(
-        "cmd-f",
-        FindInTimeline,
-        Some(AGENT_CONTEXT),
-    )]
+    vec![
+        KeyBinding::new("cmd-f", FindInTimeline, Some(AGENT_CONTEXT)),
+        KeyBinding::new(
+            "escape",
+            RunAction("settings.toggle".into()),
+            Some(SETTINGS_CONTEXT),
+        ),
+    ]
+}
+
+/// The root view's key context while Settings shows: the shell shortcuts still apply.
+pub fn settings_key_context() -> String {
+    format!("{SHELL_CONTEXT} {SETTINGS_CONTEXT}")
 }
 
 /// The bindings that replace `old` with `new`: markers for the old ones, then the new ones.
@@ -130,6 +141,7 @@ pub fn rebind(old: &[BindingSpec], new: &[BindingSpec]) -> Vec<KeyBinding> {
 mod tests {
     use super::*;
     use bachuc_command::default_shortcuts;
+    use gpui_kit::{KeyContext, Keystroke};
 
     #[test]
     fn every_assigned_shortcut_binds_and_digits_bind_nine_tabs() {
@@ -157,6 +169,63 @@ mod tests {
             .find(|spec| spec.action == Bound::Run("agent.interrupt".into()))
             .expect("bound");
         assert_eq!(interrupt.context, AGENT_CONTEXT);
+    }
+
+    #[test]
+    fn escape_and_the_settings_shortcut_leave_settings_only_while_it_shows() {
+        let escape = fixed_bindings()
+            .into_iter()
+            .find(|binding| {
+                binding.match_keystrokes(&[Keystroke::parse("escape").unwrap()]) == Some(false)
+            })
+            .expect("escape is bound");
+        assert!(
+            escape
+                .action()
+                .partial_eq(&RunAction("settings.toggle".into()))
+        );
+        let predicate = escape.predicate().expect("scoped");
+        let settings = KeyContext::try_from(settings_key_context().as_str()).unwrap();
+        let shell = KeyContext::try_from(SHELL_CONTEXT).unwrap();
+        assert!(predicate.eval(std::slice::from_ref(&settings)));
+        assert!(!predicate.eval(std::slice::from_ref(&shell)));
+
+        // Cmd+, keeps working while Settings shows.
+        let toggle = binding_specs(&default_shortcuts())
+            .into_iter()
+            .find(|spec| spec.action == Bound::Run("settings.toggle".into()))
+            .expect("bound")
+            .binding();
+        assert!(toggle.predicate().expect("scoped").eval(&[settings]));
+    }
+
+    #[test]
+    fn every_focus_target_in_this_crate_has_a_role() {
+        // GPUI logs "has no accessibility node" when a focused element has an id but no role.
+        for (name, source) in [
+            ("shell.rs", include_str!("shell.rs")),
+            ("panes.rs", include_str!("panes.rs")),
+            ("chrome.rs", include_str!("chrome.rs")),
+            ("new_agent.rs", include_str!("new_agent.rs")),
+            ("dock.rs", include_str!("dock.rs")),
+            ("main.rs", include_str!("main.rs")),
+            ("state.rs", include_str!("state.rs")),
+        ] {
+            let mut element = String::new();
+            for line in source.lines() {
+                let line = line.trim();
+                if line.contains("div()") {
+                    element.clear();
+                }
+                element.push_str(line);
+                if line.contains(".track_focus(") {
+                    assert!(
+                        element.contains(".id(") && element.contains(".role("),
+                        "{name}: a .track_focus element lacks .id() or .role(): {line}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

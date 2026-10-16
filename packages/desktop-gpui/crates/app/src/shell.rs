@@ -3,7 +3,9 @@
 //! `Workspace` view lives per opened workspace; the sidebar picks which one shows. The command
 //! center and the settings screen open over it.
 
-use crate::actions::{BindingSpec, JumpToTab, RunAction, SHELL_CONTEXT, binding_specs, rebind};
+use crate::actions::{
+    BindingSpec, JumpToTab, RunAction, SHELL_CONTEXT, binding_specs, rebind, settings_key_context,
+};
 use crate::chrome::{ExplorerResize, HANDLE_WIDTH, NoPreview};
 use crate::dock;
 use crate::new_agent::{Created, DraftPane};
@@ -1288,6 +1290,9 @@ impl Shell {
         );
         self.settings = Some((settings, subscription));
         self.command = None;
+        // The focused pane leaves the tree with the workspace. Without this, key dispatch
+        // starts at the window root, outside the shell context, and Cmd+, and Escape do nothing.
+        window.focus(&self.focus, cx);
         cx.notify();
     }
 
@@ -1581,7 +1586,7 @@ impl Render for Shell {
                 .id("shell")
                 .role(Role::Group)
                 .aria_label("Bachuc")
-                .key_context(SHELL_CONTEXT)
+                .key_context(settings_key_context().as_str())
                 .track_focus(&self.focus)
                 .on_action(cx.listener(|this, action: &RunAction, window, cx| {
                     this.run_action(&action.0, window, cx)
