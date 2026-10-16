@@ -5,6 +5,7 @@
 // Generated, so rustfmt must not rewrap it: a second generator run would then change the file.
 #[rustfmt::skip]
 mod names;
+mod providers;
 
 use bachuc_theme::metrics::ICON_MD;
 use gpui_kit::component::{Icon, Sizable as _};
@@ -12,6 +13,7 @@ use gpui_kit::{AssetSource, Result, SharedString, px};
 use std::borrow::Cow;
 
 pub use names::IconName;
+pub use providers::{provider_fallback_icon, provider_logo, provider_logo_svg};
 
 /// The asset source for the app: it serves the generated SVGs and falls through to the gpui-kit
 /// assets, so gpui-kit components keep their own icons (menu, select, dialog close).
