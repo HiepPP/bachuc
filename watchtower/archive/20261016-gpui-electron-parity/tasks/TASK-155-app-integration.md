@@ -1,4 +1,4 @@
-# TASK-155 App integration and Electron window chrome
+# TASK-155 App shell integration with the Electron look
 
 Group: K (writes `crates/app`)
 Class: risky
