@@ -464,6 +464,21 @@ impl TurnGrouper {
     pub fn key(&self, index: usize) -> u64 {
         self.facts[index].identity.0
     }
+
+    /// Whether an entry is a user message, without reading the entry.
+    pub fn is_user(&self, index: usize) -> bool {
+        self.facts[index].kind == Kind::User
+    }
+
+    /// Whether an entry is an assistant message, without reading the entry.
+    pub fn is_assistant(&self, index: usize) -> bool {
+        self.facts[index].kind == Kind::Assistant
+    }
+
+    /// The `timestamp_ms` of an entry, without reading the entry.
+    pub fn at(&self, index: usize) -> i64 {
+        self.facts[index].at
+    }
 }
 
 struct StepDraft {

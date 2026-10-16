@@ -32,14 +32,16 @@ use bachuc_diagram::{DiagramReady, DiagramRenderer, image_size};
 use bachuc_explorer::syntax::Run;
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_CODE, FONT_CONTENT, ICON_MD, ICON_XS, MAX_CONTENT_WIDTH, RADIUS_2XL,
-    RADIUS_BASE, RADIUS_LG, RADIUS_MD, RADIUS_SM, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
+    FONT_2XL, FONT_BASE, FONT_CODE, FONT_CONTENT, FONT_LG, FONT_XL, ICON_MD, ICON_SM, ICON_XS,
+    MAX_CONTENT_WIDTH, RADIUS_2XL, RADIUS_BASE, RADIUS_LG, RADIUS_MD, RADIUS_SM, SPACE_1, SPACE_2,
+    SPACE_3, SPACE_4, SPACE_6, SPACE_8,
 };
 use bachuc_theme::{
     TurnLabel, code_font_size, mono_font_family, scheme, tokens, turn_label_colors, ui_font_size,
 };
+use gpui_kit::base::text::{TextView as RichText, TextViewStyle as RichTextStyle};
 use gpui_kit::component::text::{TextView, TextViewState};
-use gpui_kit::component::{Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::Value;
@@ -93,14 +95,27 @@ const RULE_TOP: f32 = 22.;
 const RULE_BOTTOM: f32 = 18.;
 /// The user bubble's line height, as `fontSize.content * 1.4`.
 const USER_LINE_HEIGHT: f32 = 1.4;
-/// `STREAM_METADATA_FONT_SIZE`, the compaction marker text.
+/// `STREAM_METADATA_FONT_SIZE`, the compaction marker and turn footer text.
 const METADATA_SIZE: f32 = 13.;
+/// The `FONT_SIZE` tiers `3xl` and `4xl` of the h2 and h1 markdown headings; no metric has them.
+const FONT_3XL: f32 = 22.;
+const FONT_4XL: f32 = 26.;
+/// `contentHeadingLineHeight`: a heading's line height over its size.
+const HEADING_LINE_HEIGHT: f32 = 1.3;
+/// The completed turn footer of `turn-footer.tsx`: `spacing[2] + 5` above, 24 high,
+/// `TURN_FOOTER_BOTTOM_SPACING` below.
+const FOOTER_TOP: f32 = SPACE_2 + 5.;
+const FOOTER_HEIGHT: f32 = 24.;
+/// How long the turn copy button shows its check, as `TurnCopyButton`.
+const COPIED_FOR: Duration = Duration::from_millis(1500);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum RowKey {
     Entry(u64),
     Turn(u64),
     Step(u64),
+    /// The footer of the response that ends at this entry.
+    Footer(u64),
     Permission(String),
 }
 
@@ -110,7 +125,20 @@ enum RowKind {
     TurnHeader(Rc<TurnGroup>),
     /// A turn and the index of one of its steps.
     Step(Rc<TurnGroup>, usize),
+    /// A finished response: its user message, if loaded, and its last entry.
+    Footer {
+        start: Option<usize>,
+        end: usize,
+    },
     Permission(Value),
+}
+
+/// The response the row loop of a sync is in: everything after one user message.
+#[derive(Default)]
+struct Response {
+    start: Option<usize>,
+    end: Option<usize>,
+    has_answer: bool,
 }
 
 #[derive(Clone)]
@@ -192,6 +220,11 @@ pub struct TimelineView {
     finder: Option<FindState>,
     /// Syntax runs of open code sections, by text.
     syntax_cache: RefCell<HashMap<u64, LineRuns>>,
+    /// The markdown style of the message text, made on the first draw after a theme change.
+    markdown_style: RefCell<Option<RichTextStyle>>,
+    /// The footer whose copy button shows its check, by the response's last entry, and the
+    /// timer that clears it.
+    copied: Option<(u64, Task<()>)>,
     clock: Option<Task<()>>,
     /// When the last sync redrew the view.
     synced_at: Option<Instant>,
@@ -215,7 +248,9 @@ impl TimelineView {
         cx: &mut Context<TimelineView>,
     ) -> TimelineView {
         let _ = window;
-        let list = ListState::new(0, ListAlignment::Bottom, px(800.));
+        // Top alignment with tail follow, as the app's stream: a short timeline starts at the top,
+        // and once it fills the pane the list keeps the newest row in view.
+        let list = ListState::new(0, ListAlignment::Top, px(800.));
         list.set_follow_mode(FollowMode::Tail);
         let view = cx.entity().downgrade();
         list.set_scroll_handler(move |event, _, cx| {
@@ -253,6 +288,7 @@ impl TimelineView {
             cx.observe_global::<gpui_kit::component::theme::Theme>(|this, cx| {
                 // Syntax colors follow the scheme, and font sizes change row heights.
                 this.syntax_cache.borrow_mut().clear();
+                this.markdown_style.borrow_mut().take();
                 this.list.remeasure();
                 cx.notify();
             }),
@@ -294,6 +330,8 @@ impl TimelineView {
             lightbox: None,
             finder: None,
             syntax_cache: RefCell::new(HashMap::new()),
+            markdown_style: RefCell::new(None),
+            copied: None,
             clock: None,
             synced_at: None,
             _subscriptions: subscriptions,
@@ -366,16 +404,40 @@ impl TimelineView {
         };
         self.rows_stale = false;
         let mut rows: Vec<ViewRow> = Vec::new();
+        // A footer closes each response with an answer, as `layout.ts` places them; the facts
+        // the loop reads are cached by the grouper, so a flush reads no entry for it.
+        let mut response = Response::default();
         for row in self.grouper.rows() {
             match row {
-                SharedRow::Item(index) => rows.push(self.entry_row(*index)),
-                SharedRow::Turn(group) => match old_turns.get(&Rc::as_ptr(group)) {
-                    Some(&header) => {
-                        rows.extend_from_slice(&self.rows[header..=header + group.steps.len()])
+                SharedRow::Item(index) => {
+                    if self.grouper.is_user(*index) {
+                        self.push_footer(&response, &mut rows);
+                        response = Response {
+                            start: Some(*index),
+                            ..Response::default()
+                        };
+                    } else {
+                        response.end = Some(*index);
+                        response.has_answer |= self.grouper.is_assistant(*index);
                     }
-                    None => self.push_turn_rows(group, &mut rows),
-                },
+                    rows.push(self.entry_row(*index));
+                }
+                SharedRow::Turn(group) => {
+                    response.end = group.run.items.last().copied();
+                    response.has_answer =
+                        response.has_answer || group.steps.iter().any(|step| !step.note.is_empty());
+                    match old_turns.get(&Rc::as_ptr(group)) {
+                        Some(&header) => {
+                            rows.extend_from_slice(&self.rows[header..=header + group.steps.len()])
+                        }
+                        None => self.push_turn_rows(group, &mut rows),
+                    }
+                }
             }
+        }
+        // The response still running gets no completed footer.
+        if !turn_active {
+            self.push_footer(&response, &mut rows);
         }
         rows.extend(permissions.into_iter().map(|request| {
             let id = request["id"].as_str().unwrap_or("").to_string();
@@ -591,6 +653,68 @@ impl TimelineView {
         }
     }
 
+    /// Closes a response with its footer when it holds an assistant message.
+    fn push_footer(&self, response: &Response, rows: &mut Vec<ViewRow>) {
+        let Some(end) = response.end.filter(|_| response.has_answer) else {
+            return;
+        };
+        let key = self.grouper.key(end);
+        let mut hasher = DefaultHasher::new();
+        response
+            .start
+            .map(|start| self.grouper.at(start))
+            .hash(&mut hasher);
+        self.grouper.at(end).hash(&mut hasher);
+        self.copied
+            .as_ref()
+            .is_some_and(|(copied, _)| *copied == key)
+            .hash(&mut hasher);
+        rows.push(ViewRow {
+            key: RowKey::Footer(key),
+            fingerprint: hasher.finish(),
+            anchor: None,
+            last: None,
+            has_diagram: false,
+            kind: RowKind::Footer {
+                start: response.start,
+                end,
+            },
+        });
+    }
+
+    /// Copies every assistant message of a response, as `collectAssistantResponseContent`:
+    /// messages joined by a blank line, the parts of one message joined as they are.
+    fn copy_turn(&mut self, start: Option<usize>, end: usize, cx: &mut Context<Self>) {
+        let first = start.map_or(0, |start| start + 1);
+        let mut text = String::new();
+        let mut message: Option<String> = None;
+        for entry in self.entries.get(first..=end).unwrap_or(&[]) {
+            if item_type(entry) != "assistant_message" {
+                continue;
+            }
+            let key = grouping::message_key(entry);
+            if message.is_some() && message.as_ref() != Some(&key) {
+                text.push_str("\n\n");
+            }
+            text.push_str(entry["item"]["text"].as_str().unwrap_or(""));
+            message = Some(key);
+        }
+        if text.is_empty() {
+            return;
+        }
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        let key = self.grouper.key(end);
+        let timer = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(COPIED_FOR).await;
+            let _ = this.update(cx, |this, cx| {
+                this.copied = None;
+                this.refresh(cx);
+            });
+        });
+        self.copied = Some((key, timer));
+        self.refresh(cx);
+    }
+
     /// Whether a row shows the diagram that finished rendering.
     fn shows_diagram(&self, row: &ViewRow, ready: &DiagramReady) -> bool {
         let entries: &[usize] = match &row.kind {
@@ -780,6 +904,7 @@ impl TimelineView {
             RowKind::Entry(entry) => this.render_entry(*entry, cx),
             RowKind::TurnHeader(group) => this.render_turn_header(index, group, cx),
             RowKind::Step(group, position) => this.render_step(*position, group, cx),
+            RowKind::Footer { start, end } => this.render_footer(*start, *end, cx),
             RowKind::Permission(request) => this.render_permission(request, cx),
         };
         // `streamItemWrapper`: the content column, at most 820 wide, centered.
@@ -995,6 +1120,8 @@ impl TimelineView {
         let t = tokens(cx);
         let size = ui_font_size(FONT_CONTENT, cx);
         let view = cx.weak_entity();
+        let style = self.markdown_style(cx);
+        let copy_color = t.foreground_muted;
         blocks
             .into_iter()
             .enumerate()
@@ -1002,15 +1129,36 @@ impl TimelineView {
                 Block::Markdown(_) => match &message.states[position] {
                     Some(state) => {
                         let view = view.clone();
-                        div()
-                            .text_size(size)
-                            .child(TextView::new(state).selectable(true).on_link_click(
-                                move |href, _, _, cx| {
-                                    let href = href.to_string();
-                                    let _ = view.update(cx, |this, cx| this.open_link(&href, cx));
-                                },
-                            ))
-                            .into_any_element()
+                        let text = RichText::new(state)
+                            .style(style.clone())
+                            .selectable(true)
+                            .on_link_click(move |href, _, _, cx| {
+                                let href = href.to_string();
+                                let _ = view.update(cx, |this, cx| this.open_link(&href, cx));
+                            })
+                            // `HighlightedCodeBlock` shows no language, only a copy button
+                            // on hover; an action in the corner takes the language's place.
+                            .code_block_actions(move |block, _, _| {
+                                let code = block.code();
+                                div()
+                                    .id("copy-code")
+                                    .role(Role::Button)
+                                    .aria_label("Copy code")
+                                    .p(px(SPACE_1))
+                                    .cursor_pointer()
+                                    .opacity(0.)
+                                    .hover(|button| button.opacity(1.))
+                                    .child(
+                                        icon(IconName::Copy)
+                                            .with_size(px(ICON_SM))
+                                            .text_color(copy_color),
+                                    )
+                                    .on_click(move |_, _, cx| {
+                                        let code = code.trim_end_matches('\n').to_string();
+                                        cx.write_to_clipboard(ClipboardItem::new_string(code));
+                                    })
+                            });
+                        div().text_size(size).child(text).into_any_element()
                     }
                     None => div().into_any_element(),
                 },
@@ -1056,6 +1204,104 @@ impl TimelineView {
                     .into_any_element(),
             })
             .collect()
+    }
+
+    /// The theme's rich text style with the headings of `markdown-styles.ts`. Setting a style
+    /// replaces the installed default, so the default's colors are made again here, as
+    /// gpui-kit's `base_text_view_style` makes them.
+    fn markdown_style(&self, cx: &App) -> RichTextStyle {
+        if let Some(style) = self.markdown_style.borrow().as_ref() {
+            return style.clone();
+        }
+        let theme = cx.theme();
+        let radius = theme.semantic_tokens().radius.md;
+        let mut code_block = StyleRefinement::default();
+        code_block.corner_radii.top_left = Some(radius.into());
+        code_block.corner_radii.top_right = Some(radius.into());
+        code_block.corner_radii.bottom_left = Some(radius.into());
+        code_block.corner_radii.bottom_right = Some(radius.into());
+        let table = code_block.clone();
+        let table_head = StyleRefinement::default()
+            .bg(theme.table_head)
+            .text_color(theme.table_head_foreground);
+        let content = ui_font_size(FONT_CONTENT, cx);
+        let border = tokens(cx).border;
+        let style = RichTextStyle::default()
+            .with_foreground(theme.foreground)
+            .with_muted_foreground(theme.muted_foreground)
+            .with_link(theme.link)
+            .with_selection(theme.selection)
+            .with_code_background(theme.muted)
+            .with_border(theme.border)
+            .with_code_block(code_block)
+            .with_table(table)
+            .with_table_head(table_head)
+            .with_inline_code(HighlightStyle {
+                background_color: Some(theme.accent),
+                ..Default::default()
+            })
+            .with_dark(theme.is_dark())
+            .with_heading(move |level| heading_style(level, content, border));
+        *self.markdown_style.borrow_mut() = Some(style.clone());
+        style
+    }
+
+    /// `AssistantTurnFooter`: the copy button and "Worked for N". Fork is out of scope (rewind
+    /// and fork), and the end time needs the user message, so a response whose user message
+    /// is on an older page shows only the copy button.
+    fn render_footer(
+        &self,
+        start: Option<usize>,
+        end: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let t = tokens(cx);
+        let key = self.grouper.key(end);
+        let copied = self
+            .copied
+            .as_ref()
+            .is_some_and(|(copied, _)| *copied == key);
+        let label = start.map(|start| {
+            format!(
+                "Worked for {}",
+                format_elapsed(self.grouper.at(end) - self.grouper.at(start))
+            )
+        });
+        h_flex()
+            .id(("footer", key))
+            .role(Role::Group)
+            .aria_label("Turn actions")
+            .mt(px(FOOTER_TOP))
+            .pb(px(SPACE_8))
+            .h(px(FOOTER_HEIGHT + SPACE_8))
+            .gap(px(SPACE_2))
+            .items_center()
+            .child(
+                div()
+                    .id(("copy-turn", key))
+                    .role(Role::Button)
+                    .aria_label(if copied { "Copied" } else { "Copy turn" })
+                    .p(px(SPACE_1))
+                    .ml(px(-SPACE_1))
+                    .cursor_pointer()
+                    .child(
+                        icon(if copied {
+                            IconName::Check
+                        } else {
+                            IconName::Copy
+                        })
+                        .with_size(px(ICON_SM))
+                        .text_color(t.foreground_muted),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.copy_turn(start, end, cx))),
+            )
+            .children(label.map(|label| {
+                div()
+                    .text_size(ui_font_size(METADATA_SIZE, cx))
+                    .text_color(t.foreground_muted)
+                    .child(label)
+            }))
+            .into_any_element()
     }
 
     fn render_turn_header(
@@ -1606,6 +1852,54 @@ fn format_duration(ms: i64) -> String {
     }
 }
 
+/// One heading level of `markdown-styles.ts`: its `FONT_SIZE` tier over the base size, scaled
+/// to the content size and rounded, bold for h1 and h2 with a rule under them, semibold below.
+/// The top margin becomes padding, so it replaces the text view's own section gap.
+fn heading_style(level: u8, content: Pixels, border: Hsla) -> StyleRefinement {
+    let (tier, top, bottom) = match level {
+        1 => (FONT_4XL, SPACE_6, SPACE_3),
+        2 => (FONT_3XL, SPACE_6, SPACE_3),
+        3 => (FONT_2XL, SPACE_4, SPACE_2),
+        4 => (FONT_XL, SPACE_4, SPACE_2),
+        _ => (FONT_LG, SPACE_3, SPACE_1),
+    };
+    let size = (content * (tier / FONT_BASE)).round();
+    let style = StyleRefinement::default()
+        .text_size(size)
+        .line_height((size * HEADING_LINE_HEIGHT).round())
+        .pt(px(top));
+    if level <= 2 {
+        style
+            .font_weight(FontWeight::BOLD)
+            .pb(px(SPACE_2))
+            .mb(px(bottom))
+            .border_b_1()
+            .border_color(border)
+    } else {
+        style.font_weight(FontWeight::SEMIBOLD).pb(px(bottom))
+    }
+}
+
+/// `formatDuration` of `utils/time.ts`, the turn footer's duration: "47s", "2m 12s", "1h 5m".
+fn format_elapsed(ms: i64) -> String {
+    let seconds = (ms / 1000).max(0);
+    let minutes = seconds / 60;
+    let join = |big: i64, big_unit: &str, small: i64, small_unit: &str| {
+        if small == 0 {
+            format!("{big}{big_unit}")
+        } else {
+            format!("{big}{big_unit} {small}{small_unit}")
+        }
+    };
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if minutes < 60 {
+        join(minutes, "m", seconds % 60, "s")
+    } else {
+        join(minutes / 60, "h", minutes % 60, "m")
+    }
+}
+
 fn short_path(path: &str) -> String {
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
     parts[parts.len().saturating_sub(2)..].join("/")
@@ -1624,7 +1918,10 @@ fn preview(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob brings its own `test` attribute.
-    use super::{StepCounts, counts_text, format_clock, format_duration};
+    use super::{
+        StepCounts, counts_text, format_clock, format_duration, format_elapsed, heading_style,
+    };
+    use gpui_kit::{AbsoluteLength, FontWeight, hsla, px};
 
     #[test]
     fn clock_and_duration_match_the_app() {
@@ -1632,6 +1929,34 @@ mod tests {
         assert_eq!(format_duration(4_000), "4s");
         assert_eq!(format_duration(65_000), "1m 05s");
         assert_eq!(format_duration(3_720_000), "1h 02m");
+    }
+
+    #[test]
+    fn footer_duration_matches_format_duration() {
+        assert_eq!(format_elapsed(7_400), "7s");
+        assert_eq!(format_elapsed(120_000), "2m");
+        assert_eq!(format_elapsed(132_000), "2m 12s");
+        assert_eq!(format_elapsed(3_900_000), "1h 5m");
+        assert_eq!(format_elapsed(-5), "0s");
+    }
+
+    #[test]
+    fn headings_match_markdown_styles() {
+        let border = hsla(0., 0., 0.5, 1.);
+        // Content 15: h1 28, h2 24, h3 21, h4 19, h5 and h6 17.
+        let sizes: Vec<_> = (1..=6)
+            .map(|level| heading_style(level, px(15.), border).text.font_size)
+            .collect();
+        let expected = [28., 24., 21., 19., 17., 17.];
+        for (size, want) in sizes.iter().zip(expected) {
+            assert_eq!(*size, Some(AbsoluteLength::Pixels(px(want))));
+        }
+        let h2 = heading_style(2, px(15.), border);
+        assert_eq!(h2.text.font_weight, Some(FontWeight::BOLD));
+        assert_eq!(h2.border_color, Some(border));
+        let h3 = heading_style(3, px(15.), border);
+        assert_eq!(h3.text.font_weight, Some(FontWeight::SEMIBOLD));
+        assert_eq!(h3.border_color, None);
     }
 
     #[test]
