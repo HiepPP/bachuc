@@ -18,6 +18,7 @@ Boundaries:
 - Add each crate as a path dependency, for example `bachuc-plugin-board = { path = "../../plugins/board" }`. Add no `features` key to any dependency; one more feature set makes a second GPUI build (CLAUDE.md).
 - Change no plugin crate and no other app file, except one call site: the shell calls `CommandCenter::set_plugin_context` (TASK-176) with the active workspace and agent ids whenever they change (lead, from the spec check). If a plugin crate fails to build, stop and report which one; do not patch it from this TASK.
 - Also wire, in the same call site, every app-side call that TASK-175 to TASK-178 and TASK-184 name as "the app calls"; list each one in the outcome.
+- From TASK-177 (lead): call `bachuc_settings::watch_plugin_themes(cx)` after `bachuc_plugin_host::init`, and call `Settings::open_plugin_screen` on `PluginHostEvent::OpenSettings` (read [TASK-177-outcome.md](watchtower/tasks/TASK-177-outcome.md)). From TASK-178: read [TASK-178-outcome.md](watchtower/tasks/TASK-178-outcome.md) for `TimelineView::reveal_passage`.
 - A test checks the list against the plugin source: every registered id has a folder in `hiep-plugins/plugins`, and each `plugin().id()` equals the id of its crate name.
 
 Files:
