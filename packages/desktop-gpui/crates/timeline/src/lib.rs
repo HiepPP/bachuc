@@ -1697,6 +1697,8 @@ impl Render for TimelineView {
         let t = tokens(cx);
         let base = div()
             .id("timeline")
+            .role(Role::Group)
+            .aria_label("Timeline")
             .key_context("Timeline")
             .track_focus(&self.focus)
             .relative()

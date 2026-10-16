@@ -988,6 +988,8 @@ impl Render for Workspace {
         let tree = self.render_node(self.layout.root(), &t, font, cx);
         div()
             .id("workspace")
+            .role(Role::Group)
+            .aria_label("Workspace tabs")
             .key_context(KEY_CONTEXT)
             .track_focus(&self.focus_handle)
             .relative()
