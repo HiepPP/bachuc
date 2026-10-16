@@ -41,11 +41,11 @@ use bachuc_plugin_host::{
 };
 use bachuc_settings::{Settings, SettingsEvent};
 use bachuc_sidebar::model::archive_prompt;
-use bachuc_sidebar::{Sidebar, SidebarEvent};
+use bachuc_sidebar::{Sidebar, SidebarEvent, SidebarPluginEvent};
 use bachuc_terminal::{TerminalEvent, TerminalView};
 use bachuc_theme::metrics::TRAFFIC_LIGHT_WIDTH;
 use bachuc_theme::tokens;
-use bachuc_timeline::TimelineEvent;
+use bachuc_timeline::{TimelineEvent, TimelineView};
 use bachuc_workspace::model::Rect;
 use bachuc_workspace::{PaneEvent, PaneItem, SplitAxis, TabKind, TabMenuEvent, Workspace};
 use gpui_kit::component::button::ButtonVariant;
@@ -57,7 +57,7 @@ use gpui_kit::component::{WindowExt as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::cell::Cell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -237,6 +237,8 @@ impl Shell {
         if let Some(host) = &plugin_host {
             host.update(cx, |host, cx| host.set_client(client.clone(), cx));
             subscriptions.push(cx.subscribe_in(host, window, Self::on_plugin_event));
+            // Plugin themes join the picker and the theme registry once the host lists them.
+            bachuc_settings::watch_plugin_themes(cx);
         }
         let logo_fill = LogoFill::new(tokens(cx).foreground);
         let mut shell = Shell {
@@ -299,6 +301,27 @@ impl Shell {
                     }
                     SidebarEvent::OpenSettings => this.open_settings(window, cx),
                     SidebarEvent::OpenCommandCenter => this.open_command_center(window, cx),
+                },
+            ),
+            cx.subscribe_in(
+                &self.sidebar,
+                window,
+                |this: &mut Shell, _, event: &SidebarPluginEvent, window, cx| match event {
+                    SidebarPluginEvent::OpenSurface {
+                        plugin_id,
+                        surface_id,
+                    } => this.open_surface(
+                        OpenSurface {
+                            plugin_id: plugin_id.clone(),
+                            surface_id: surface_id.clone(),
+                            presentation: SurfacePresentation::Page,
+                            params: BTreeMap::new(),
+                        },
+                        window,
+                        cx,
+                    ),
+                    // The project list follows the daemon; the filters already ran.
+                    SidebarPluginEvent::ProjectAdded { .. } => {}
                 },
             ),
         ];
@@ -486,7 +509,7 @@ impl Shell {
         let client = Client::connect(self.hosts[self.host_index].clone(), cx);
         self.retired = Some(std::mem::replace(&mut self.client, client.clone()));
         // Plugins follow the new host: the host deactivates them and lists the new host's.
-        self.surface = None;
+        self.set_surface(None, cx);
         if let Some(host) = self.plugin_host.clone() {
             host.update(cx, |host, cx| host.set_client(client.clone(), cx));
         }
@@ -655,6 +678,12 @@ impl Shell {
             return;
         }
         self.plugin_active = active.clone();
+        if let Some(center) = self.command.as_ref().map(|(center, _)| center.clone()) {
+            let (workspace, agent) = active.clone();
+            center.update(cx, |center, cx| {
+                center.set_plugin_context(workspace, agent, cx)
+            });
+        }
         if let Some(host) = self.plugin_host.clone() {
             host.update(cx, |host, cx| host.set_active(active.0, active.1, cx));
         }
@@ -1409,26 +1438,35 @@ impl Shell {
                 surface_id,
                 presentation,
                 params,
-            } => {
-                self.settings = None;
-                self.surface = Some(OpenSurface {
+            } => self.open_surface(
+                OpenSurface {
                     plugin_id: plugin_id.clone(),
                     surface_id: surface_id.clone(),
                     presentation: *presentation,
                     params: params.clone(),
-                });
-                window.focus(&self.focus, cx);
-                cx.notify();
-            }
+                },
+                window,
+                cx,
+            ),
             PluginHostEvent::OpenPanel {
                 plugin_id,
                 panel_id,
                 target,
             } => self.open_plugin_panel(plugin_id, panel_id, target, window, cx),
-            // Settings has no plugin page here yet; both open Settings on its current page.
-            PluginHostEvent::OpenSettings { .. } | PluginHostEvent::OpenPluginsPage => {
-                self.open_settings(window, cx)
+            PluginHostEvent::OpenSettings {
+                plugin_id,
+                settings_id,
+            } => {
+                self.open_settings(window, cx);
+                if let Some(settings) = self.settings.as_ref().map(|(settings, _)| settings.clone())
+                {
+                    settings.update(cx, |settings, cx| {
+                        settings.open_plugin_screen(plugin_id, settings_id, window, cx)
+                    });
+                }
             }
+            // Settings has no plugins page, so this opens Settings on its current page.
+            PluginHostEvent::OpenPluginsPage => self.open_settings(window, cx),
             PluginHostEvent::OpenNewWorkspace(request) => {
                 let preset = NewWorkspacePreset {
                     cwd: Some(request.cwd.clone()),
@@ -1444,12 +1482,56 @@ impl Shell {
             PluginHostEvent::OpenWorkspace { workspace_id } => {
                 self.open_workspace(workspace_id.clone(), window, cx)
             }
-            // The timeline scrolls to the passage; the app opens the agent tab.
+            // The app opens the agent tab; its timeline scrolls to the passage.
             PluginHostEvent::RevealTimelinePassage(passage) => {
-                self.open_agent(&passage.agent_id, window, cx)
+                self.open_agent(&passage.agent_id, window, cx);
+                if let Some(timeline) = self.agent_timeline(&passage.agent_id, cx) {
+                    timeline.update(cx, |timeline, cx| {
+                        timeline.reveal_passage(
+                            &passage.message_id,
+                            passage.text.as_deref(),
+                            window,
+                            cx,
+                        )
+                    });
+                }
             }
             _ => {}
         }
+    }
+
+    /// Shows a plugin surface and marks its sidebar row.
+    fn open_surface(&mut self, surface: OpenSurface, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings = None;
+        self.set_surface(Some(surface), cx);
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    /// Sets the open surface. The sidebar marks the row of a page surface, as Electron marks the
+    /// row whose route is open; an overlay is not a route.
+    fn set_surface(&mut self, surface: Option<OpenSurface>, cx: &mut Context<Self>) {
+        let active = surface
+            .as_ref()
+            .filter(|open| open.presentation == SurfacePresentation::Page)
+            .map(|open| (open.plugin_id.clone(), open.surface_id.clone()));
+        self.surface = surface;
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.set_active_surface(active, cx));
+    }
+
+    /// The timeline of the open tab for an agent, in any workspace.
+    fn agent_timeline(&self, agent_id: &str, cx: &App) -> Option<Entity<TimelineView>> {
+        let identity = agent_key(agent_id);
+        self.workspaces
+            .values()
+            .flat_map(|open| open.panes.values())
+            .find_map(|pane| match &pane.content {
+                PaneContent::Agent(view) if pane.identity.as_deref() == Some(identity.as_str()) => {
+                    Some(view.read(cx).timeline.clone())
+                }
+                _ => None,
+            })
     }
 
     /// `openPanel`: a workspace tab with the panel identity, focused when already open. The
@@ -1518,7 +1600,8 @@ impl Shell {
     }
 
     fn close_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.surface.take().is_some() {
+        if self.surface.is_some() {
+            self.set_surface(None, cx);
             self.refocus(window, cx);
             cx.notify();
         }
@@ -2128,6 +2211,10 @@ impl Shell {
             command_items(&self.shortcuts, client.projects(), client.agents())
         };
         let center = cx.new(|cx| CommandCenter::new(items, window, cx));
+        let (workspace, agent) = self.plugin_active.clone();
+        center.update(cx, |center, cx| {
+            center.set_plugin_context(workspace, agent, cx)
+        });
         let subscription = cx.subscribe_in(
             &center,
             window,

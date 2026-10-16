@@ -5,10 +5,39 @@
 use bachuc_command::{Shortcut, gpui_keystrokes};
 use bachuc_plugin_host::{HeaderSubtitleInput, NativePlugin, PanelContext, PanelLocation};
 
+/// The plugin id of each linked crate `bachuc-plugin-<id>` and its `plugin()`. The order is the
+/// daemon catalog order (sorted by id), which decides every "first wins" rule of the host.
+const PLUGINS: [(&str, fn() -> Box<dyn NativePlugin>); 15] = [
+    ("assistant-cite", bachuc_plugin_assistant_cite::plugin),
+    ("board", bachuc_plugin_board::plugin),
+    ("claude-look", bachuc_plugin_claude_look::plugin),
+    ("edit-diffs", bachuc_plugin_edit_diffs::plugin),
+    (
+        "idle-runtime-closer",
+        bachuc_plugin_idle_runtime_closer::plugin,
+    ),
+    ("jev-orchestrator", bachuc_plugin_jev_orchestrator::plugin),
+    (
+        "next-prompt-actions",
+        bachuc_plugin_next_prompt_actions::plugin,
+    ),
+    ("plugins-nav", bachuc_plugin_plugins_nav::plugin),
+    ("prompt-translate", bachuc_plugin_prompt_translate::plugin),
+    ("skill-pins", bachuc_plugin_skill_pins::plugin),
+    ("stop-orb", bachuc_plugin_stop_orb::plugin),
+    ("thread-branch", bachuc_plugin_thread_branch::plugin),
+    (
+        "thread-context-attach",
+        bachuc_plugin_thread_context_attach::plugin,
+    ),
+    ("watchtower-board", bachuc_plugin_watchtower_board::plugin),
+    ("workspace-spaces", bachuc_plugin_workspace_spaces::plugin),
+];
+
 /// Every plugin crate the app links, in registration order. Each exports
 /// `pub fn plugin() -> Box<dyn bachuc_plugin_host::NativePlugin>`.
 pub fn registered_plugins() -> Vec<Box<dyn NativePlugin>> {
-    Vec::new()
+    PLUGINS.iter().map(|(_, plugin)| plugin()).collect()
 }
 
 /// `resolvePluginPanelOpenLocation`: the requested location, else `Workspace` when listed, else
@@ -145,10 +174,58 @@ mod tests {
     };
     use bachuc_command::{default_shortcuts, gpui_keystrokes};
     use bachuc_plugin_host::{PanelContext, PanelLocation};
+    use std::path::Path;
+
+    const IDS: [&str; 15] = [
+        "assistant-cite",
+        "board",
+        "claude-look",
+        "edit-diffs",
+        "idle-runtime-closer",
+        "jev-orchestrator",
+        "next-prompt-actions",
+        "plugins-nav",
+        "prompt-translate",
+        "skill-pins",
+        "stop-orb",
+        "thread-branch",
+        "thread-context-attach",
+        "watchtower-board",
+        "workspace-spaces",
+    ];
 
     #[test]
-    fn no_plugin_is_registered_yet() {
-        assert!(registered_plugins().is_empty());
+    fn the_registered_ids_are_the_fifteen_in_catalog_order() {
+        let ids: Vec<&str> = registered_plugins()
+            .iter()
+            .map(|plugin| plugin.id())
+            .collect();
+        assert_eq!(ids, IDS);
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, ids, "the daemon lists plugins sorted by id");
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len(), "ids are unique");
+    }
+
+    #[test]
+    fn every_plugin_id_is_its_crate_id_and_has_a_server_folder() {
+        let app = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let server_plugins = app.join("../../../../hiep-plugins/plugins");
+        for (id, plugin) in super::PLUGINS {
+            assert_eq!(plugin().id(), id);
+            assert!(
+                server_plugins.join(id).is_dir(),
+                "no folder hiep-plugins/plugins/{id}"
+            );
+            let manifest =
+                std::fs::read_to_string(app.join("../../plugins").join(id).join("Cargo.toml"))
+                    .expect("plugin crate manifest");
+            assert!(
+                manifest.contains(&format!("name = \"bachuc-plugin-{id}\"")),
+                "crate of {id} is not bachuc-plugin-{id}"
+            );
+        }
     }
 
     #[test]
