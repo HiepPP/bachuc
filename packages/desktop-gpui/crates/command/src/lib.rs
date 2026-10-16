@@ -2,11 +2,13 @@
 //!
 //! `Shortcut`, `default_shortcuts`, `load_shortcuts`, and `save_overrides` hold the macOS key
 //! bindings of `keyboard-shortcuts.ts` and the stored overrides of them. `CommandCenter` is the
-//! palette view: the app passes `CommandItem`s and runs the id of `CommandEvent::Run`.
+//! palette view: the app passes `CommandItem`s and runs the id of `CommandEvent::Run`. The view
+//! adds the active plugins' items itself and runs them; the app ignores a `plugin:` id.
 //! `gpui_keystrokes` turns a chord into the strings that `KeyBinding::new` takes.
 
 mod center;
 mod chord;
+mod plugin_rows;
 pub mod search;
 mod shortcuts;
 

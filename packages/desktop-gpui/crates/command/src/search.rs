@@ -28,7 +28,9 @@ const TIER_SUBSEQUENCE: u32 = 5;
 /// Every token matched the visible title.
 const VISIBLE_FIELD_RANK: u8 = 0;
 /// At least one token needed the group name.
-const KEYWORD_FIELD_RANK: u8 = 1;
+const GROUP_FIELD_RANK: u8 = 1;
+/// At least one token needed a hidden keyword. Below every title and group match.
+const KEYWORD_FIELD_RANK: u8 = 2;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Match {
@@ -152,10 +154,11 @@ fn score_fields(tokens: &[&str], fields: &[&str]) -> Option<Match> {
     Some(total)
 }
 
-/// One searchable item: its lowercase title and the index of its group.
+/// One searchable item: its lowercase title, the index of its group, and its hidden keywords.
 struct Entry {
     title: String,
     group: usize,
+    keywords: Vec<String>,
 }
 
 /// The searchable form of the items. Lowercasing happens once here, not per keystroke.
@@ -201,10 +204,22 @@ pub struct Layout {
 impl SearchIndex {
     /// Builds the index from `(title, group)` pairs.
     pub fn new<'a>(items: impl IntoIterator<Item = (&'a str, &'a str)>) -> SearchIndex {
+        Self::with_keywords(
+            items
+                .into_iter()
+                .map(|(title, group)| (title, group, Vec::new())),
+        )
+    }
+
+    /// Builds the index from `(title, group, keywords)`. A keyword is never drawn: a row that
+    /// matches only through a keyword ranks below every title or group match.
+    pub fn with_keywords<'a>(
+        items: impl IntoIterator<Item = (&'a str, &'a str, Vec<&'a str>)>,
+    ) -> SearchIndex {
         let mut groups: Vec<String> = Vec::new();
         let entries = items
             .into_iter()
-            .map(|(title, group)| {
+            .map(|(title, group, keywords)| {
                 let group = match groups.iter().position(|name| name == group) {
                     Some(index) => index,
                     None => {
@@ -215,6 +230,7 @@ impl SearchIndex {
                 Entry {
                     title: title.to_lowercase(),
                     group,
+                    keywords: keywords.into_iter().map(str::to_lowercase).collect(),
                 }
             })
             .collect();
@@ -242,10 +258,23 @@ impl SearchIndex {
             });
         }
         let group = &self.groups_lower[entry.group];
-        if group.is_empty() {
+        if !group.is_empty() {
+            if let Some(found) = score_fields(tokens, &[&entry.title, group]) {
+                return Some(Score {
+                    field_rank: GROUP_FIELD_RANK,
+                    found,
+                });
+            }
+        }
+        if entry.keywords.is_empty() {
             return None;
         }
-        score_fields(tokens, &[&entry.title, group]).map(|found| Score {
+        let mut fields: Vec<&str> = vec![&entry.title];
+        if !group.is_empty() {
+            fields.push(group);
+        }
+        fields.extend(entry.keywords.iter().map(String::as_str));
+        score_fields(tokens, &fields).map(|found| Score {
             field_rank: KEYWORD_FIELD_RANK,
             found,
         })
@@ -418,6 +447,54 @@ mod tests {
         let index = index(&[(list[0], "Misc"), (list[1], "Tabs")]);
         let layout = index.layout("tabs");
         assert_eq!(titles(&layout, &list), ["Alpha tabs", "Zed"]);
+    }
+
+    fn keyword_index(items: &[(&'static str, &'static str, &[&'static str])]) -> SearchIndex {
+        SearchIndex::with_keywords(items.iter().map(|(t, g, k)| (*t, *g, k.to_vec())))
+    }
+
+    #[test]
+    fn keyword_match_ranks_below_title_and_group_matches() {
+        let list = ["Zed keyword", "Zed group", "Zed title diff"];
+        let index = keyword_index(&[
+            (list[0], "Keyword section", &["diff"]),
+            (list[1], "Diff", &[]),
+            (list[2], "Title section", &[]),
+        ]);
+        assert_eq!(
+            titles(&index.layout("diff"), &list),
+            [list[2], list[1], list[0]]
+        );
+    }
+
+    #[test]
+    fn keyword_ranks_below_a_weak_title_match() {
+        // "diff" is only a subsequence of the first title, yet that still beats a keyword hit.
+        let list = ["Dxixfxf", "Open", "Compare"];
+        let index = keyword_index(&[
+            (list[0], "", &[]),
+            (list[1], "", &["diff"]),
+            (list[2], "", &["diff"]),
+        ]);
+        assert_eq!(
+            titles(&index.layout("diff"), &list),
+            [list[0], list[1], list[2]]
+        );
+    }
+
+    #[test]
+    fn keyword_alone_matches_and_equal_scores_keep_index_order() {
+        let list = ["B", "A"];
+        let index = keyword_index(&[(list[0], "P", &["review"]), (list[1], "P", &["review"])]);
+        assert_eq!(titles(&index.layout("review"), &list), ["B", "A"]);
+        assert!(index.layout("nothing").order.is_empty());
+    }
+
+    #[test]
+    fn keywords_do_not_change_the_empty_query() {
+        let list = ["B", "A"];
+        let index = keyword_index(&[(list[0], "P", &["x"]), (list[1], "P", &[])]);
+        assert_eq!(titles(&index.layout(""), &list), ["B", "A"]);
     }
 
     #[test]

@@ -3,10 +3,17 @@
 //! The view knows no app internals. The app passes `CommandItem`s, shows the view above its
 //! content, and handles `CommandEvent`: `Run` carries the picked id, `Dismissed` means Escape or a
 //! click outside. The app removes the view after either event; the view never closes itself.
+//!
+//! The view also lists the Command Center items of the active plugins, read from the plugin host
+//! global, before the app's items. It runs a plugin row itself and then emits `Run` with an id
+//! that starts with `plugin:`, which the app ignores. The app calls `set_plugin_context` to tell
+//! the view which workspace and agent are open.
 
 use crate::chord::display_combos;
+use crate::plugin_rows::{self, PluginRow};
 use crate::search::{Layout, Row, SearchIndex, step};
 use bachuc_icons::{IconName, icon};
+use bachuc_plugin_host::{CommandInput, PluginHost, PluginHostEvent};
 use bachuc_theme::metrics::{
     BORDER_WIDTH_1, FONT_BASE, FONT_SM, ICON_MD, RADIUS_LG, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_2,
     SPACE_3, SPACE_4, SPACE_6,
@@ -55,7 +62,15 @@ pub enum CommandEvent {
 }
 
 pub struct CommandCenter {
+    /// The rows that the app passed.
+    app_items: Vec<CommandItem>,
+    /// The plugin rows. They are the first `plugin_rows.len()` entries of `items`, and carry the
+    /// hidden keywords and the handlers.
+    plugin_rows: Vec<PluginRow>,
+    /// The plugin rows, then `app_items`: what the layout indexes into.
     items: Vec<CommandItem>,
+    workspace_id: Option<String>,
+    agent_id: Option<String>,
     index: SearchIndex,
     layout: Layout,
     query: Entity<InputState>,
@@ -69,8 +84,18 @@ pub struct CommandCenter {
 
 impl EventEmitter<CommandEvent> for CommandCenter {}
 
-fn index_for(items: &[CommandItem]) -> SearchIndex {
-    SearchIndex::new(items.iter().map(|i| (i.title.as_ref(), i.group.as_ref())))
+/// The rows of the active plugins for this context. Before `set_plugin_context`, both ids are
+/// None, so only `Global` items show.
+fn plugin_rows_of(workspace_id: Option<&str>, agent_id: Option<&str>, cx: &App) -> Vec<PluginRow> {
+    let Some(host) = bachuc_plugin_host::host(cx) else {
+        return Vec::new();
+    };
+    plugin_rows::plugin_rows(
+        host.read(cx).index().command_items(),
+        workspace_id,
+        agent_id,
+        |item| item.visible.as_ref().is_none_or(|visible| visible(cx)),
+    )
 }
 
 impl CommandCenter {
@@ -80,17 +105,19 @@ impl CommandCenter {
         cx: &mut Context<CommandCenter>,
     ) -> CommandCenter {
         let query = cx.new(|cx| InputState::new(window, cx).placeholder(PLACEHOLDER));
-        let index = index_for(&items);
+        let rows = plugin_rows_of(None, None, cx);
+        let all = plugin_rows::combine(&rows, &items);
+        let index = plugin_rows::index_for(&rows, &all);
         let layout = index.layout("");
         let list = ListState::new(layout.rows.len(), ListAlignment::Top, px(OVERDRAW));
         let weak = cx.weak_entity();
-        let subscriptions = vec![
+        let mut subscriptions = vec![
             cx.subscribe_in(
                 &query,
                 window,
-                |this: &mut CommandCenter, _, event: &InputEvent, _, cx| match event {
+                |this: &mut CommandCenter, _, event: &InputEvent, window, cx| match event {
                     InputEvent::Change => this.apply_query(cx),
-                    InputEvent::PressEnter { .. } => this.run_active(cx),
+                    InputEvent::PressEnter { .. } => this.run_active(window, cx),
                     _ => {}
                 },
             ),
@@ -110,8 +137,27 @@ impl CommandCenter {
                 }
             }),
         ];
+        // A plugin may become active or change what it shows while the palette is open.
+        if let Some(host) = bachuc_plugin_host::host(cx) {
+            subscriptions.push(cx.subscribe(
+                &host,
+                |this: &mut CommandCenter, _: Entity<PluginHost>, event: &PluginHostEvent, cx| {
+                    if matches!(
+                        event,
+                        PluginHostEvent::ContributionsChanged
+                            | PluginHostEvent::PluginStateChanged { .. }
+                    ) {
+                        this.refresh_plugin_rows(cx);
+                    }
+                },
+            ));
+        }
         let mut center = CommandCenter {
-            items,
+            app_items: items,
+            plugin_rows: rows,
+            items: all,
+            workspace_id: None,
+            agent_id: None,
             index,
             layout,
             query,
@@ -128,9 +174,59 @@ impl CommandCenter {
     /// Replaces the rows, for example when agents come and go while the palette is open. The
     /// query stays and the highlight returns to the first row.
     pub fn set_items(&mut self, items: Vec<CommandItem>, cx: &mut Context<Self>) {
-        self.index = index_for(&items);
-        self.items = items;
+        self.app_items = items;
+        self.rebuild_items();
         self.relayout(cx);
+    }
+
+    /// Tells the view which workspace and agent are open, which gates the plugin items. Call it
+    /// after `new`; before that, only `Global` items show.
+    pub fn set_plugin_context(
+        &mut self,
+        workspace_id: Option<String>,
+        agent_id: Option<String>,
+        cx: &mut Context<CommandCenter>,
+    ) {
+        if self.workspace_id == workspace_id && self.agent_id == agent_id {
+            return;
+        }
+        self.workspace_id = workspace_id;
+        self.agent_id = agent_id;
+        self.refresh_plugin_rows(cx);
+    }
+
+    /// Reads the plugin rows again. The query and the selected row stay; the layout resets only
+    /// when a row changed what it draws or matches.
+    fn refresh_plugin_rows(&mut self, cx: &mut Context<Self>) {
+        let rows = plugin_rows_of(self.workspace_id.as_deref(), self.agent_id.as_deref(), cx);
+        let changed = !plugin_rows::same_rows(&self.plugin_rows, &rows);
+        // A handler may change without a visible change, so the rows are always replaced.
+        self.plugin_rows = rows;
+        if !changed {
+            return;
+        }
+        self.rebuild_items();
+        let selected = self
+            .active
+            .and_then(|position| self.layout.order.get(position))
+            .and_then(|item| self.items.get(*item))
+            .map(|item| item.id.clone());
+        self.applied = self.query.read(cx).value().to_string();
+        let (layout, active) = plugin_rows::layout_keeping(
+            &self.index,
+            &self.items,
+            &self.applied,
+            selected.as_deref(),
+        );
+        self.layout = layout;
+        self.list.reset(self.layout.rows.len());
+        self.active = active;
+        cx.notify();
+    }
+
+    fn rebuild_items(&mut self) {
+        self.items = plugin_rows::combine(&self.plugin_rows, &self.app_items);
+        self.index = plugin_rows::index_for(&self.plugin_rows, &self.items);
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
@@ -185,24 +281,38 @@ impl CommandCenter {
         }
     }
 
-    fn run_active(&mut self, cx: &mut Context<Self>) {
+    fn run_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(position) = self.active {
-            self.run(position, cx);
+            self.run(position, window, cx);
         }
     }
 
-    fn run(&mut self, position: usize, cx: &mut Context<Self>) {
-        let Some(item) = self
-            .layout
-            .order
-            .get(position)
-            .and_then(|i| self.items.get(*i))
-        else {
+    fn run(&mut self, position: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(&index) = self.layout.order.get(position) else {
             return;
         };
-        cx.emit(CommandEvent::Run {
+        let Some(item) = self.items.get(index) else {
+            return;
+        };
+        let event = CommandEvent::Run {
             id: item.id.clone(),
-        });
+        };
+        // The plugin rows are the first entries of `items`.
+        let Some(row) = self.plugin_rows.get(index) else {
+            cx.emit(event);
+            return;
+        };
+        let handler = row.on_select.clone();
+        let input = CommandInput {
+            workspace_id: self.workspace_id.clone(),
+            agent_id: self.agent_id.clone(),
+        };
+        plugin_rows::run_row(
+            cx,
+            event,
+            |cx| handler(input, window, cx),
+            |cx, event| cx.emit(event),
+        );
     }
 
     fn render_row(&mut self, row: usize, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -263,9 +373,9 @@ impl CommandCenter {
             .cursor_pointer()
             .when(active, |this| this.bg(colors.surface1))
             .hover(|style| style.bg(colors.surface1))
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, _, window, cx| {
                 if let Some(position) = position {
-                    this.run(position, cx);
+                    this.run(position, window, cx);
                 }
             }))
             .child(

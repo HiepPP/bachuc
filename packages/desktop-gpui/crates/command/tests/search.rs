@@ -94,6 +94,58 @@ fn query_keeps_sections_and_rows_consistent() {
     assert!(sections.all(|divider| divider));
 }
 
+/// Anti-goal of TASK-176: 500 app items plus 100 plugin items that carry keywords. Half the
+/// typed queries match only through a keyword, which takes the slowest scoring path.
+#[test]
+fn search_600_items_with_keywords_stays_under_16_ms_per_keystroke() {
+    let items = sample(500);
+    let plugin: Vec<(String, String, Vec<String>)> = (0..100)
+        .map(|n| {
+            (
+                format!("Plugin action {n}"),
+                format!("plugin-{}", n % 4),
+                vec![
+                    format!("diff{n}"),
+                    "review".to_string(),
+                    "compare".to_string(),
+                ],
+            )
+        })
+        .collect();
+    let index = SearchIndex::with_keywords(
+        plugin
+            .iter()
+            .map(|(t, g, k)| {
+                (
+                    t.as_str(),
+                    g.as_str(),
+                    k.iter().map(String::as_str).collect(),
+                )
+            })
+            .chain(
+                items
+                    .iter()
+                    .map(|(t, g)| (t.as_str(), g.as_str(), Vec::new())),
+            ),
+    );
+    let mut worst = Duration::ZERO;
+    for typed in ["toggle sidebar 4", "compare review", "zzzz nothing"] {
+        for _ in 0..5 {
+            for end in 1..=typed.len() {
+                let started = Instant::now();
+                let layout = index.layout(&typed[..end]);
+                worst = worst.max(started.elapsed());
+                std::hint::black_box(layout);
+            }
+        }
+    }
+    println!("worst keystroke over 600 items with keywords: {worst:?}");
+    assert!(
+        worst < Duration::from_millis(16),
+        "worst keystroke took {worst:?}"
+    );
+}
+
 /// Anti-goal of TASK-152: a keystroke over 500 items takes at most 16 ms. This runs unoptimized,
 /// the slower case. The test keeps the worst of many keystrokes of a typed query.
 #[test]

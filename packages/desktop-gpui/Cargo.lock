@@ -572,6 +572,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bachuc-icons",
+ "bachuc-plugin-host",
  "bachuc-theme",
  "gpui-kit",
  "log",
