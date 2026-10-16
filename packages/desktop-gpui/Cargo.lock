@@ -662,6 +662,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bachuc-plugin-board"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "bachuc-theme",
+ "chrono",
+ "gpui-kit",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bachuc-plugin-claude-look"
 version = "0.1.0"
 dependencies = [
