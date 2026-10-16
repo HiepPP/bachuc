@@ -10,7 +10,7 @@ branch_prefix: feat/
 forbidden_paths: .env* */.env* .dev/* */.dev.vars
 max_line: 100
 header_pattern: ^(feat|fix|docs|refactor|test|chore|perf)(\([a-z0-9-]+\))?: .+
-max_builders: 6
+max_builders: 2
 build_dir_env: CARGO_TARGET_DIR
 ```
 
@@ -20,7 +20,8 @@ build_dir_env: CARGO_TARGET_DIR
 - Do not start, stop, or restart the live daemon or the live Electron app (owner answer, 2026-10-12). If live is down, write each live check as `UNVERIFIED (unattended)`.
 - Never send prompts to or create agents on release (6767) in a check. Live checks use port 6768 only.
 - Run one test file at a time with `npx vitest run <file> --bail=1`. Never run a full suite.
-- Run GitNexus `impact` before you edit an existing TypeScript symbol. Run `detect_changes` before each commit, per the root `CLAUDE.md`.
+- Run GitNexus `impact` before you edit an existing TypeScript symbol. The lead runs `detect_changes` only before a commit that edits an existing symbol (owner answer, 2026-10-16).
+- Memory: the machine ran out of RAM and swap and panicked on 2026-10-16 at 11:16, with 6 builders and a UI checker running. Run at most 2 builders at once. Every cargo command runs with `CARGO_BUILD_JOBS=4`, one at a time (owner answer, 2026-10-16).
 - The gate has no `formatter` line. Format changed JS, TS, JSON, and markdown files with `npm run format:files -- <file> <file>`, one argument per file, before you stage; the lefthook pre-commit hook checks staged files. Format Rust with `packages/desktop-gpui/cargo.sh fmt`.
 - Use only `packages/desktop-gpui/cargo.sh` for cargo, so the rustup toolchain runs. A per-builder build folder goes under `packages/desktop-gpui/target/groups/<groupId>` through `CARGO_TARGET_DIR`, and only when the disk rule in the watchtower skill allows it (free disk was 14 GB and `target` was 22 GB on 2026-10-16, so builders share `target` until the owner frees disk).
 - Builders run Claude with `bypassPermissions`, because nobody answers a permission. They still obey every rule in this file.

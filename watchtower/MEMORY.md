@@ -271,3 +271,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: `bachuc-timeline` sync was O(entries) per 50 ms flush (full regroup, full hash, header fingerprint over every step), so app CPU grew with the turn: 11.3% at 15 minutes. `grouping::TurnGrouper` regroups only changed turns and gave 8.9%. A GPUI window can also get stuck drawing only part of its area (Q-069).
 - Source: TASK-144 outcome.
 - Use next time: keep per-flush work in proportion to the change, and check a screenshot for a cut window before each CPU read.
+
+### 2026-10-16 - Implement run memory limit
+
+- Learned: 6 Claude Code builders plus a UI checker, each with cargo builds on one shared `target`, used all 24 GB of RAM and the swap. macOS then hit a watchdog panic and rebooted. The reboot also cleared the builder rules files in `/tmp`. GitNexus `detect-changes` peaked at 730 MB, so it was not the main load.
+- Source: owner crash report and the `gpui-electron-parity` run.
+- Use next time: on this machine, run at most 2 builders with `CARGO_BUILD_JOBS=4`. Keep run files that must survive a reboot outside `/tmp`.
