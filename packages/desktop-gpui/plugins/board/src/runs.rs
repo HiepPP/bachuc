@@ -181,14 +181,13 @@ impl BoardPage {
     ) -> AnyElement {
         let s = |value: f32| px(value * scale);
         let t = bachuc_theme::tokens(cx);
-        let (connection, host, fetching, palette_error, has_data) = {
+        let (connection, host, fetching, has_data) = {
             let store = store.read(cx);
             self.runs.sync(store, scale);
             (
                 store.connection(now),
                 store.host_label(cx),
                 store.fetching(),
-                store.palette_error(cx),
                 store.snapshot().is_some(),
             )
         };
@@ -197,7 +196,7 @@ impl BoardPage {
         let running = &self.runs.columns[0].trees;
         let finished = &self.runs.columns[1].trees;
         let figures = has_data.then(|| (total(running), total(finished)));
-        let rail = self.rail(&host, connection, figures, scale, cx);
+        let rail = self.rail(&host, connection, figures, None, scale, cx);
 
         let weak = store.downgrade();
         let retry = move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
@@ -250,21 +249,7 @@ impl BoardPage {
                 )
         };
 
-        let weak = store.downgrade();
-        let palette = palette_error.then(|| {
-            div()
-                .id("board-palette-error")
-                .role(Role::Button)
-                .aria_label("Could not save project colors. Tap to retry.")
-                .cursor_pointer()
-                .text_size(s(12.5))
-                .line_height(s(17.))
-                .text_color(t.status_warning)
-                .on_click(move |_, _, cx| {
-                    weak.update(cx, |store, cx| store.retry_palette(cx)).ok();
-                })
-                .child("Could not save project colors. Tap to retry.")
-        });
+        let palette = Self::palette_notice(store, scale, cx);
 
         let body = match connection {
             ConnectionState::Connecting => h_flex()
@@ -332,12 +317,14 @@ impl BoardPage {
             .into_any_element()
     }
 
-    /// The host rail: device, name, connection, a hairline, then the lane's counts.
-    fn rail(
+    /// The host rail: device, name, connection, a hairline, then the lane's counts or, without
+    /// counts, its plain `meta`.
+    pub(crate) fn rail(
         &self,
         host: &str,
         connection: ConnectionState,
         figures: Option<(usize, usize)>,
+        meta_text: Option<&'static str>,
         scale: f32,
         cx: &App,
     ) -> AnyElement {
@@ -413,7 +400,36 @@ impl BoardPage {
                         "{running} running{SEPARATOR}{finished} finished"
                     )))
             }))
+            .when_some(meta_text.filter(|_| figures.is_none()), |rail, text| {
+                rail.child(meta(text.to_string()).flex_shrink(1.).truncate())
+            })
             .into_any_element()
+    }
+
+    /// "Could not save project colors. Tap to retry."
+    pub(crate) fn palette_notice(
+        store: &Entity<BoardStore>,
+        scale: f32,
+        cx: &App,
+    ) -> Option<AnyElement> {
+        let s = |value: f32| px(value * scale);
+        let t = bachuc_theme::tokens(cx);
+        let weak = store.downgrade();
+        store.read(cx).palette_error(cx).then(|| {
+            div()
+                .id("board-palette-error")
+                .role(Role::Button)
+                .aria_label("Could not save project colors. Tap to retry.")
+                .cursor_pointer()
+                .text_size(s(12.5))
+                .line_height(s(17.))
+                .text_color(t.status_warning)
+                .on_click(move |_, _, cx| {
+                    weak.update(cx, |store, cx| store.retry_palette(cx)).ok();
+                })
+                .child("Could not save project colors. Tap to retry.")
+                .into_any_element()
+        })
     }
 
     /// One status column: its title with counts, then the lazy card list.

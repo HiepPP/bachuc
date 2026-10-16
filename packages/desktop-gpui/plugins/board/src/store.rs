@@ -155,14 +155,17 @@ impl BoardStore {
     }
 
     /// The saved orb settings; the defaults until they load.
-    #[allow(dead_code)] // TASK-193's orb reads it.
     pub(crate) fn orb(&self) -> OrbSettings {
         self.orb
     }
 
-    #[allow(dead_code)] // TASK-193's settings screen edits it.
     pub(crate) fn orb_settings(&self) -> Entity<PluginSettings> {
         self.orb_settings.clone()
+    }
+
+    /// The plugin context, for the views' own RPCs and navigation.
+    pub(crate) fn context(&self) -> PluginContext {
+        self.ctx.clone()
     }
 
     /// The active host's name, as the lane rail shows it.
@@ -465,12 +468,16 @@ impl BoardStore {
 
     /// Opens Watchtower at the run's TASK on its workspace (`hosts.ts:19-26`).
     pub(crate) fn open_task(&self, run: &Run, cx: &mut App) {
-        let Some(workspace_id) = run.workspace_id.clone() else {
-            return;
-        };
-        let mut params = BTreeMap::from([("workspaceId".to_string(), workspace_id)]);
-        if let Some(task) = &run.task_id {
-            params.insert("task".into(), task.clone());
+        if let Some(workspace_id) = &run.workspace_id {
+            self.open_watchtower(workspace_id, run.task_id.as_deref(), cx);
+        }
+    }
+
+    /// Opens Watchtower on a workspace, at `task` when given.
+    pub(crate) fn open_watchtower(&self, workspace_id: &str, task: Option<&str>, cx: &mut App) {
+        let mut params = BTreeMap::from([("workspaceId".to_string(), workspace_id.to_string())]);
+        if let Some(task) = task {
+            params.insert("task".into(), task.to_string());
         }
         self.ctx.open_surface(
             WATCHTOWER_SURFACE,

@@ -38,8 +38,12 @@ pub(crate) fn avatar_index(agent_id: &str) -> usize {
     hash as usize % BOTS.len()
 }
 
+pub(crate) fn avatar_image(agent_id: &str) -> Arc<Image> {
+    AVATARS[avatar_index(agent_id)].clone()
+}
+
 pub(crate) fn agent_avatar(agent_id: &str, size: Pixels) -> AnyElement {
-    img(AVATARS[avatar_index(agent_id)].clone())
+    img(avatar_image(agent_id))
         .flex_none()
         .size(size)
         .rounded(size * 0.22)

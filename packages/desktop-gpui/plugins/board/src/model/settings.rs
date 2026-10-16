@@ -28,18 +28,49 @@ pub(crate) enum OrbState {
 }
 
 impl OrbState {
-    fn from_id(id: &str) -> Option<Self> {
-        Some(match id {
-            "solving" => Self::Solving,
-            "working" => Self::Working,
-            "searching" => Self::Searching,
-            "listening" => Self::Listening,
-            "weaving" => Self::Weaving,
-            "composing" => Self::Composing,
-            "connecting" => Self::Connecting,
-            _ => return None,
-        })
+    /// `ORB_STATES`, in the order of the Animation select.
+    pub(crate) const ALL: [Self; 7] = [
+        Self::Solving,
+        Self::Working,
+        Self::Searching,
+        Self::Listening,
+        Self::Weaving,
+        Self::Composing,
+        Self::Connecting,
+    ];
+
+    pub(crate) fn id(self) -> &'static str {
+        match self {
+            Self::Solving => "solving",
+            Self::Working => "working",
+            Self::Searching => "searching",
+            Self::Listening => "listening",
+            Self::Weaving => "weaving",
+            Self::Composing => "composing",
+            Self::Connecting => "connecting",
+        }
     }
+
+    fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|state| state.id() == id)
+    }
+
+    /// `ORB_SPHERE`: the silhouette diameter as a fraction of the canvas, from each mode's
+    /// `R = (size / 2) * k`.
+    fn sphere(self) -> f32 {
+        match self {
+            Self::Solving | Self::Working | Self::Searching => 0.82,
+            Self::Listening => 0.874,
+            Self::Weaving => 0.76,
+            Self::Composing => 0.78,
+            Self::Connecting => 0.8,
+        }
+    }
+}
+
+/// The canvas size whose orb silhouette has the given diameter.
+pub(crate) fn sphere_canvas(diameter: f32, state: OrbState) -> f32 {
+    diameter / state.sphere()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,7 +107,6 @@ pub(crate) fn orb_settings(values: &Value) -> OrbSettings {
 }
 
 /// thinking-orbs ships tuned designs at 20, 32, and 64 px; other sizes scale the nearest.
-#[allow(dead_code)] // TASK-193's orb sizes with it.
 pub(crate) fn orb_preset(target: f32) -> (u16, f32) {
     let size = [20u16, 32, 64]
         .into_iter()
@@ -310,5 +340,35 @@ mod tests {
         assert_eq!(orb_preset(72.), (64, 72. / 64.));
         assert_eq!(orb_preset(26.).0, 20);
         assert_eq!(orb_preset(50.).0, 64);
+    }
+
+    #[test]
+    fn the_sphere_canvas_fits_the_silhouette_to_the_diameter() {
+        assert_eq!(orb_preset(16.), (20, 0.8));
+        assert_eq!(sphere_canvas(32., OrbState::Weaving), 32. / 0.76);
+        assert!((sphere_canvas(41., OrbState::Solving) - 50.).abs() < 1e-4);
+        assert!((sphere_canvas(36., OrbState::Solving) * 0.82 - 36.).abs() < 1e-4);
+        assert!((sphere_canvas(38., OrbState::Weaving) - 50.).abs() < 1e-4);
+        assert!((sphere_canvas(43.7, OrbState::Listening) - 50.).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_orb_states_are_the_seven_round_ones() {
+        let ids: Vec<&str> = OrbState::ALL.iter().map(|state| state.id()).collect();
+        assert_eq!(
+            ids,
+            [
+                "solving",
+                "working",
+                "searching",
+                "listening",
+                "weaving",
+                "composing",
+                "connecting"
+            ]
+        );
+        assert_eq!(OrbState::from_id("breathing"), None);
+        assert_eq!(OrbState::from_id("shaping"), None);
+        assert_eq!(OrbState::from_id("weaving"), Some(OrbState::Weaving));
     }
 }

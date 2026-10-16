@@ -6,8 +6,10 @@ use crate::model::settings::{
     BOARD_SIZE_DEFAULT, BOARD_SIZE_MAX, BOARD_SIZE_MIN, BOARD_SIZE_STEP, board_scale,
 };
 use crate::model::text::now_ms;
+use crate::recaps::RecapsState;
 use crate::runs::RunsState;
 use crate::store::BoardStore;
+use crate::timeline::TimelineState;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -36,6 +38,8 @@ pub(crate) struct BoardPage {
     pub(crate) store: WeakEntity<BoardStore>,
     view: BoardView,
     pub(crate) runs: RunsState,
+    pub(crate) timeline: TimelineState,
+    pub(crate) recaps: RecapsState,
     _observe: Subscription,
 }
 
@@ -45,8 +49,14 @@ impl BoardPage {
             store: store.downgrade(),
             view: BoardView::Runs,
             runs: RunsState::new(),
+            timeline: TimelineState::new(),
+            recaps: RecapsState::new(),
             _observe: cx.observe(store, |_, _, cx| cx.notify()),
         }
+    }
+
+    pub(crate) fn view(&self) -> BoardView {
+        self.view
     }
 
     pub(crate) fn shows_runs(&self) -> bool {
@@ -323,16 +333,8 @@ impl Render for BoardPage {
         let now = now_ms();
         let body = match self.view {
             BoardView::Runs => self.render_runs(&store, scale, now, cx),
-            // TASK-193 fills these two views.
-            BoardView::Timeline | BoardView::Recaps => div()
-                .id("board-view-loading")
-                .role(Role::ProgressIndicator)
-                .aria_label("Loading")
-                .text_size(s(13.))
-                .line_height(s(18.))
-                .text_color(t.foreground_muted)
-                .child("Loading…")
-                .into_any_element(),
+            BoardView::Timeline => self.render_timeline(&store, scale, cx),
+            BoardView::Recaps => self.render_recaps(&store, scale, cx),
         };
         v_flex()
             .id("board-page")

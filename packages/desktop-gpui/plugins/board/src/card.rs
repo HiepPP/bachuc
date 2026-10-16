@@ -169,15 +169,18 @@ pub(crate) fn spinner(color: Hsla, size: Pixels) -> AnyElement {
         .into_any_element()
 }
 
-/// The avatar of a running card. This part shows the running spinner over the avatar;
-/// TASK-193 replaces the body with the thinking orb.
+/// The avatar of a running card that does not need input: the thinking orb when it is on,
+/// else the running spinner over the avatar.
 pub(crate) fn running_avatar(
     agent_id: &str,
     size: Pixels,
-    _orb: &OrbSettings,
+    orb: &OrbSettings,
     _window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    if orb.enabled {
+        return crate::orb_view::orb_avatar(agent_id, size, orb, cx);
+    }
     let accent = bachuc_theme::tokens(cx).accent;
     div()
         .relative()
