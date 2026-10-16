@@ -8,11 +8,14 @@
 use crate::code::{code_font, code_text, gutter_width};
 use crate::diff::{LineKind, NoDiff, no_diff_reason, parse};
 use crate::diff_doc::{DiffDoc, DiffRow, FileBody, Latest};
+use crate::diff_prefs::{DiffPrefs, FocusTracker, clamp_offset, uniform_row_height};
 use crate::syntax::{Run, ThemeSyntax, highlight, language_for};
-use crate::ui::{centered_text, change_icon, chevron, diff_stat};
-use bachuc_client::{Client, ClientEvent, DirectoryEvent, FileDiff, FileDiffStatus};
+use crate::ui::{
+    centered_text, change_icon, chevron, diff_mode_menu, diff_stat, read_prefs, update_prefs,
+};
+use bachuc_client::{Client, ClientEvent, DiffCompare, DirectoryEvent, FileDiff, FileDiffStatus};
 use bachuc_icons::{IconName, icon};
-use bachuc_theme::metrics::{FONT_BASE, FONT_SM, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3};
+use bachuc_theme::metrics::{FONT_BASE, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3};
 use bachuc_theme::{syntax_colors, tokens, ui_font_size};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Sizable as _, h_flex};
@@ -68,8 +71,16 @@ pub struct DiffView {
     gutter: f32,
     list: ListState,
     requests: Latest,
-    /// The first answer scrolls to the focus file; later reloads keep the scroll.
-    scrolled: bool,
+    /// The focus file to scroll to: the one the view opened with, then each later Changes click.
+    focus: FocusTracker,
+    /// The request of the diff on screen or in flight, for an all-files view.
+    compare: Option<DiffCompare>,
+    /// Long lines wrap instead of scrolling sideways.
+    wrap: bool,
+    /// The sideways offset of each file's code, in pixels.
+    offsets: Vec<f32>,
+    /// The advance width of one code character, measured at the last render.
+    advance: f32,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -139,7 +150,13 @@ impl DiffView {
                 },
             ),
             cx.observe_global::<Theme>(|this, cx| this.theme_changed(cx)),
+            cx.observe_global::<DiffPrefs>(|this, cx| this.prefs_changed(cx)),
         ];
+        let initial_focus = match &source {
+            Source::All { focus_path } => focus_path.clone(),
+            _ => None,
+        };
+        let (revision, wrap) = read_prefs(cx, |prefs| (prefs.focus_revision(), prefs.wrap_lines));
         let mut view = DiffView {
             client,
             cwd,
@@ -151,7 +168,11 @@ impl DiffView {
             gutter: 0.,
             list: ListState::new(0, ListAlignment::Top, px(OVERDRAW)),
             requests: Latest::default(),
-            scrolled: false,
+            focus: FocusTracker::new(revision, initial_focus),
+            compare: None,
+            wrap,
+            offsets: Vec::new(),
+            advance: 0.,
             _subscriptions: subscriptions,
         };
         view.reload(cx);
@@ -183,10 +204,13 @@ impl DiffView {
                     .update(cx, |client, cx| client.file_diff(&cwd, &path, cx));
                 Pending::File(path, task)
             }
-            Source::All { .. } => Pending::All(
-                self.client
-                    .update(cx, |client, cx| client.checkout_diff(&cwd, cx)),
-            ),
+            Source::All { .. } => {
+                let compare = read_prefs(cx, |prefs| prefs.compare(&cwd));
+                self.compare = Some(compare.clone());
+                Pending::All(self.client.update(cx, |client, cx| {
+                    client.checkout_diff_with(&cwd, compare, cx)
+                }))
+            }
             Source::Commit { sha, path } => {
                 Pending::Commit(self.client.update(cx, |client, cx| {
                     client.commit_file_diff(&cwd, &sha, &path, cx)
@@ -229,34 +253,125 @@ impl DiffView {
                 } else {
                     State::Ready
                 };
+                self.offsets.resize(self.doc.files().len(), 0.);
                 self.reset_list();
+                self.apply_focus();
                 self.start_highlight(cx);
             }
         }
         cx.notify();
     }
 
-    /// Gives the list the new row count. The first answer scrolls to the focus file; a reload
-    /// keeps the top row where it was.
+    /// Gives the list the new row count and keeps the top row where it was.
     fn reset_list(&mut self) {
         let keep = self.list.logical_scroll_top();
-        self.list
-            .reset_with_uniform_height(self.doc.rows().len(), px(LINE_HEIGHT));
-        if !self.scrolled {
-            self.scrolled = true;
-            let focus = match &self.source {
-                Source::All { focus_path } => focus_path.as_deref(),
-                _ => None,
-            };
-            if let Some(row) = focus.and_then(|path| self.doc.header_row(path)) {
-                self.list.scroll_to(ListOffset {
-                    item_ix: row,
-                    offset_in_item: px(0.),
-                });
-            }
-        } else {
-            self.list.scroll_to(keep);
+        self.reset_rows();
+        self.list.scroll_to(keep);
+    }
+
+    /// Resets the list to the row model: one height while lines scroll sideways, measured rows
+    /// while they wrap.
+    fn reset_rows(&mut self) {
+        let count = self.doc.rows().len();
+        match uniform_row_height(self.wrap, LINE_HEIGHT) {
+            Some(height) => self.list.reset_with_uniform_height(count, px(height)),
+            None => self.list.reset(count),
         }
+    }
+
+    /// Scrolls to the pending focus file once a diff is on screen, opening it when collapsed. A
+    /// path the diff does not have is dropped without a scroll.
+    fn apply_focus(&mut self) {
+        let Some(path) = self.focus.take(matches!(self.state, State::Ready)) else {
+            return;
+        };
+        let rows = self.doc.rows().len();
+        let Some(row) = self.doc.reveal(&path) else {
+            return;
+        };
+        if self.doc.rows().len() != rows {
+            self.reset_rows();
+        }
+        self.list.scroll_to(ListOffset {
+            item_ix: row,
+            offset_in_item: px(0.),
+        });
+    }
+
+    /// Follows the shared choices: the wrap toggle, and for an all-files view the mode, the
+    /// whitespace toggle, and the focus requests for its folder.
+    fn prefs_changed(&mut self, cx: &mut Context<DiffView>) {
+        let (wrap, compare, request) = read_prefs(cx, |prefs| {
+            (
+                prefs.wrap_lines,
+                prefs.compare(&self.cwd),
+                prefs.focus().cloned(),
+            )
+        });
+        if wrap != self.wrap {
+            self.wrap = wrap;
+            self.reset_list();
+        }
+        if matches!(self.source, Source::All { .. }) {
+            if self.compare.as_ref() != Some(&compare) {
+                self.reload(cx);
+            }
+            if self.focus.observe(request.as_ref(), &self.cwd) {
+                self.apply_focus();
+            }
+        }
+        cx.notify();
+    }
+
+    /// The width of a file's code with its paddings, and the width the pane leaves for code.
+    fn code_widths(&self, file: usize) -> (f32, f32) {
+        let content =
+            CODE_LEFT_PADDING + self.doc.longest_columns(file) as f32 * self.advance + SPACE_3;
+        let pane: f32 = self.list.viewport_bounds().size.width.into();
+        (content, pane - self.gutter)
+    }
+
+    /// A horizontal trackpad or shift-wheel delta over a file's lines moves only that file.
+    fn scroll_sideways(
+        &mut self,
+        file: usize,
+        event: &ScrollWheelEvent,
+        cx: &mut Context<DiffView>,
+    ) {
+        let delta = event.delta.pixel_delta(px(LINE_HEIGHT));
+        let shift_wheel = event.modifiers.shift && delta.x == px(0.);
+        let delta: f32 = if shift_wheel { delta.y } else { delta.x }.into();
+        if delta == 0. {
+            return;
+        }
+        if shift_wheel {
+            // The list would scroll the same delta vertically.
+            cx.stop_propagation();
+        }
+        let (content, code) = self.code_widths(file);
+        let Some(offset) = self.offsets.get_mut(file) else {
+            return;
+        };
+        // A positive delta moves the content right, toward the line start.
+        let next = clamp_offset(*offset, -delta, content, code);
+        if next != *offset {
+            *offset = next;
+            cx.notify();
+        }
+    }
+
+    fn toggle_wrap(&mut self, cx: &mut Context<DiffView>) {
+        update_prefs(cx, |prefs| {
+            prefs.wrap_lines = !prefs.wrap_lines;
+            true
+        });
+    }
+
+    fn toggle_whitespace(&mut self, cx: &mut Context<DiffView>) {
+        update_prefs(cx, |prefs| {
+            prefs.hide_whitespace = !prefs.hide_whitespace;
+            true
+        });
     }
 
     fn theme_changed(&mut self, cx: &mut Context<DiffView>) {
@@ -335,8 +450,7 @@ impl DiffView {
     fn toggle_file(&mut self, file: usize, cx: &mut Context<DiffView>) {
         let keep = self.list.logical_scroll_top();
         self.doc.toggle_file(file);
-        self.list
-            .reset_with_uniform_height(self.doc.rows().len(), px(LINE_HEIGHT));
+        self.reset_rows();
         // Keep the clicked header in place.
         if let Some(row) = self
             .doc
@@ -359,8 +473,7 @@ impl DiffView {
     fn toggle_all(&mut self, cx: &mut Context<DiffView>) {
         let collapse = !self.doc.all_collapsed();
         self.doc.set_all_collapsed(collapse);
-        self.list
-            .reset_with_uniform_height(self.doc.rows().len(), px(LINE_HEIGHT));
+        self.reset_rows();
         cx.notify();
     }
 
@@ -391,9 +504,9 @@ impl DiffView {
             )
     }
 
-    /// The toolbar of the all-files view: the diff mode with the total count, then collapse all
-    /// and refresh. The other Electron diff options (mode menu, split layout, whitespace, wrap)
-    /// need client modes or renderers the GPUI client does not have yet.
+    /// The toolbar of the all-files view: the diff mode menu with the total count, then collapse
+    /// all, the whitespace and wrap toggles, and refresh. The split layout needs a paired-row
+    /// renderer the view does not have.
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let colors = tokens(cx);
         let (added, removed) = self.doc.totals();
@@ -402,6 +515,17 @@ impl DiffView {
             ("Expand all files", IconName::ListChevronsUpDown)
         } else {
             ("Collapse all files", IconName::ListChevronsDownUp)
+        };
+        let hide_whitespace = read_prefs(cx, |prefs| prefs.hide_whitespace);
+        let whitespace_label = if hide_whitespace {
+            "Show whitespace"
+        } else {
+            "Hide whitespace"
+        };
+        let wrap_label = if self.wrap {
+            "Scroll long lines"
+        } else {
+            "Wrap long lines"
         };
         h_flex()
             .id("diff-view-toolbar")
@@ -420,16 +544,7 @@ impl DiffView {
                     .flex_1()
                     .min_w_0()
                     .gap(px(SPACE_1))
-                    .child(
-                        div()
-                            .id("diff-view-mode")
-                            .role(Role::Label)
-                            .aria_label("Uncommitted")
-                            .p(px(SPACE_1))
-                            .text_size(ui_font_size(FONT_SM, cx))
-                            .text_color(colors.foreground_muted)
-                            .child("Uncommitted"),
-                    )
+                    .child(diff_mode_menu("diff-view-mode", &self.cwd, cx))
                     .when(matches!(self.state, State::Ready), |this| {
                         this.child(diff_stat(added, removed, cx))
                     }),
@@ -445,6 +560,30 @@ impl DiffView {
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_all(cx))),
                 )
             })
+            .child(
+                self.toolbar_button(
+                    "changes-toggle-whitespace",
+                    whitespace_label,
+                    IconName::Pilcrow,
+                    cx,
+                )
+                .aria_selected(hide_whitespace)
+                .when(hide_whitespace, |this| {
+                    this.bg(colors.interaction_highlight)
+                })
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_whitespace(cx))),
+            )
+            .child(
+                self.toolbar_button(
+                    "changes-toggle-wrap-lines",
+                    wrap_label,
+                    IconName::WrapText,
+                    cx,
+                )
+                .aria_selected(self.wrap)
+                .when(self.wrap, |this| this.bg(colors.interaction_highlight))
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_wrap(cx))),
+            )
             .child(
                 self.toolbar_button("diff-view-refresh", "Refresh", IconName::RotateCw, cx)
                     .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
@@ -612,6 +751,31 @@ impl DiffView {
             LineKind::Context => "unchanged",
         };
         let label: String = line_data.text.chars().take(200).collect();
+        let wrap = self.wrap;
+        // Clamped again here, because the pane may have grown since the last scroll.
+        let offset = if wrap {
+            0.
+        } else {
+            let (content, code) = self.code_widths(file);
+            clamp_offset(
+                self.offsets.get(file).copied().unwrap_or(0.),
+                0.,
+                content,
+                code,
+            )
+        };
+        let code = div()
+            .pl(px(CODE_LEFT_PADDING))
+            .pr(px(SPACE_3))
+            .child(code_text(&line_data.text, runs));
+        let code = if wrap {
+            code.flex_1().min_w_0().whitespace_normal()
+        } else {
+            code.flex_shrink_0()
+                .relative()
+                .left(px(-offset))
+                .whitespace_nowrap()
+        };
         h_flex()
             .id(("diff-line", index))
             .role(Role::Code)
@@ -620,17 +784,28 @@ impl DiffView {
                 line_data.number.unwrap_or(0)
             ))
             .w_full()
-            .h(px(LINE_HEIGHT))
+            .map(|row| {
+                if wrap {
+                    row.min_h(px(LINE_HEIGHT)).items_stretch()
+                } else {
+                    row.h(px(LINE_HEIGHT))
+                }
+            })
             .overflow_hidden()
             .font_family(family)
             .text_size(size)
             .line_height(px(LINE_HEIGHT))
             .bg(background)
             .text_color(text_color)
+            .when(!wrap, |row| {
+                row.on_scroll_wheel(
+                    cx.listener(move |this, event, _, cx| this.scroll_sideways(file, event, cx)),
+                )
+            })
             .child(
                 div()
                     .w(px(self.gutter))
-                    .h_full()
+                    .when(!wrap, |gutter| gutter.h_full())
                     .flex_shrink_0()
                     .pr(px(NUMBER_RIGHT))
                     .text_right()
@@ -640,11 +815,13 @@ impl DiffView {
                     .children(line_data.number.map(|number| number.to_string())),
             )
             .child(
+                // The gutter stays; only the code moves under it.
                 div()
-                    .pl(px(CODE_LEFT_PADDING))
-                    .pr(px(SPACE_3))
-                    .whitespace_nowrap()
-                    .child(code_text(&line_data.text, runs)),
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .flex()
+                    .child(code),
             )
             .into_any_element()
     }
@@ -687,8 +864,14 @@ fn one_file(path: String, result: anyhow::Result<String>) -> anyhow::Result<Vec<
 }
 
 impl Render for DiffView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = tokens(cx);
+        let (code_size, family) = code_font(cx);
+        let font_id = window.text_system().resolve_font(&font(family));
+        self.advance = window
+            .text_system()
+            .em_advance(font_id, code_size)
+            .map_or(0., f32::from);
         let root = div()
             .id("diff-view")
             .role(Role::Pane)

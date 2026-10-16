@@ -397,6 +397,10 @@ fn languages_resolve_for_the_enabled_grammars_only() {
     assert_eq!(language_for("a/b.TSX"), Some("tsx"));
     assert_eq!(language_for("run.sh"), Some("bash"));
     assert_eq!(language_for("data.json"), Some("json"));
+    // The workspace enables the gpui-kit `tree-sitter-markdown` feature.
+    assert_eq!(language_for("README.md"), Some("markdown"));
+    assert_eq!(language_for("docs/guide.markdown"), Some("markdown"));
+    assert_eq!(language_for("page.MDX"), Some("markdown"));
     assert_eq!(language_for("style.css"), None);
     assert_eq!(language_for("Makefile"), None);
 }

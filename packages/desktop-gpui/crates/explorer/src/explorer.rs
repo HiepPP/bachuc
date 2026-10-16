@@ -8,12 +8,14 @@
 use crate::changes::{ChangeRow, CheckoutView};
 use crate::commits::{CommitRow, CommitsState, commit_rows, time_ago};
 use crate::diff_doc::Latest;
+use crate::diff_prefs::DiffPrefs;
 use crate::tree::{FileTree, RootState, SortBy, Toggled, TreeRow};
 use crate::ui::{
     CHANGE_ROW_HEIGHT, FILE_ROW_HEIGHT, TRAILING_RAIL, TREE_ICON_GAP, centered_text, change_icon,
-    chevron, diff_stat, file_icon_element, loading_marker, state_message, tree_padding_left,
+    chevron, diff_mode_menu, diff_stat, file_icon_element, loading_marker, read_prefs,
+    state_message, tree_padding_left, update_prefs,
 };
-use bachuc_client::{Client, ClientEvent, CommitSummary, DirectoryEvent};
+use bachuc_client::{Client, ClientEvent, CommitSummary, DiffCompare, DirectoryEvent};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3, SPACE_4, TAB_BAR_HEIGHT,
@@ -121,6 +123,9 @@ pub struct Explorer {
     changes_scroll: UniformListScrollHandle,
     /// The status request in flight or last applied; an older answer is dropped.
     status_request: Latest,
+    /// The `Base` diff that lists the Committed files, and its request.
+    tree_compare: Option<DiffCompare>,
+    base_request: Latest,
     /// The Commits footer starts closed, as Electron's does, and loads when it opens.
     commits_open: bool,
     commits: CommitsState,
@@ -168,6 +173,7 @@ impl Explorer {
             ),
             // set_theme and set_font_scale write this global.
             cx.observe_global::<Theme>(|_, cx| cx.notify()),
+            cx.observe_global::<DiffPrefs>(|this, cx| this.prefs_changed(cx)),
             cx.on_release(|this, cx| {
                 if this.watching {
                     let cwd = this.cwd.clone();
@@ -195,6 +201,8 @@ impl Explorer {
             selected_change: None,
             changes_scroll: UniformListScrollHandle::new(),
             status_request: Latest::default(),
+            tree_compare: None,
+            base_request: Latest::default(),
             commits_open: false,
             commits: CommitsState::Loading,
             commits_request: Latest::default(),
@@ -406,10 +414,28 @@ impl Explorer {
         result: anyhow::Result<bachuc_client::CheckoutDetails>,
         cx: &mut Context<Explorer>,
     ) {
+        if let Ok(details) = &result
+            && details.is_git
+        {
+            let (cwd, dirty, branch) = (
+                self.cwd.clone(),
+                !details.files.is_empty(),
+                details.branch.clone(),
+            );
+            update_prefs(cx, |prefs| prefs.set_status(&cwd, dirty, branch));
+        }
+        self.tree_compare = read_prefs(cx, |prefs| prefs.tree_compare(&self.cwd));
+        // A base answer still in flight is for the mode or request before this one.
+        self.base_request.begin();
         self.changes = match result {
             Err(error) => {
                 log::warn!("checkout_details: {error:#}");
                 ChangesState::Failed(format!("{error:#}"))
+            }
+            Ok(details) if details.is_git && self.tree_compare.is_some() => {
+                // Committed: the tree lists the files of the base diff instead.
+                self.request_base_files(details.branch, cx);
+                return;
             }
             Ok(details) => match CheckoutView::new(details) {
                 Some(view) => ChangesState::Ready(view),
@@ -420,6 +446,53 @@ impl Explorer {
         cx.notify();
     }
 
+    /// Lists the Committed files with the `Base` diff of `tree_compare`. The shown tree stays
+    /// until the answer arrives.
+    fn request_base_files(&mut self, branch: Option<String>, cx: &mut Context<Explorer>) {
+        let Some(compare) = self.tree_compare.clone() else {
+            return;
+        };
+        let request = self.base_request.begin();
+        let generation = self.generation;
+        let cwd = self.cwd.clone();
+        let task = self.client.update(cx, |client, cx| {
+            client.checkout_diff_with(&cwd, compare, cx)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.generation != generation || !this.base_request.is_current(request) {
+                    return;
+                }
+                this.changes = match result {
+                    Ok(diffs) => ChangesState::Ready(CheckoutView::from_diffs(branch, &diffs)),
+                    Err(error) => {
+                        log::warn!("checkout_diff: {error:#}");
+                        ChangesState::Failed(format!("{error:#}"))
+                    }
+                };
+                this.rebuild_change_rows();
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// A mode pick, a whitespace toggle, or a new base ref changes what the tree lists.
+    fn prefs_changed(&mut self, cx: &mut Context<Explorer>) {
+        let wanted = read_prefs(cx, |prefs| prefs.tree_compare(&self.cwd));
+        if self.watching
+            && matches!(
+                self.changes,
+                ChangesState::Ready(_) | ChangesState::Failed(_)
+            )
+            && wanted != self.tree_compare
+        {
+            self.request_status(cx);
+        }
+        cx.notify();
+    }
+
     fn rebuild_change_rows(&mut self) {
         self.change_rows = match &self.changes {
             ChangesState::Ready(view) => view.tree.rows(&self.collapsed),
@@ -427,7 +500,16 @@ impl Explorer {
         };
     }
 
+    /// The app only activates an open diff tab, so a focus request also goes to the shared
+    /// prefs, which the open all-files view of this folder follows.
     fn open_all_diffs(&mut self, focus_path: Option<String>, cx: &mut Context<Explorer>) {
+        if let Some(path) = &focus_path {
+            let cwd = self.cwd.clone();
+            update_prefs(cx, |prefs| {
+                prefs.request_focus(&cwd, path);
+                true
+            });
+        }
         cx.emit(ExplorerDiffEvent::OpenAllDiffs {
             cwd: self.cwd.clone(),
             focus_path,
@@ -461,8 +543,12 @@ impl Explorer {
                 if this.generation != generation || !this.commits_request.is_current(request) {
                     return;
                 }
-                if let Err(error) = &result {
-                    log::warn!("commits: {error:#}");
+                match &result {
+                    Err(error) => log::warn!("commits: {error:#}"),
+                    Ok(list) => {
+                        let (cwd, base_ref) = (this.cwd.clone(), list.base_ref.clone());
+                        update_prefs(cx, |prefs| prefs.set_base_ref(&cwd, base_ref));
+                    }
                 }
                 this.commits = CommitsState::from_result(result);
                 cx.notify();
@@ -1146,9 +1232,9 @@ impl Explorer {
     }
 
     /// The two toolbar rows over the Changes tree (`ChangesRepositoryToolbar` and
-    /// `ChangesComparisonToolbar`): the branch, then the diff mode with the total count, the
-    /// Open Diff tab button, and the refresh button. Branch switching and the other diff mode
-    /// are out of scope, so the branch and the mode show as passive labels without a menu.
+    /// `ChangesComparisonToolbar`): the branch, then the diff mode menu with the total count,
+    /// the Open Diff tab button, and the refresh button. Branch switching is out of scope, so
+    /// the branch shows as a passive label.
     fn render_changes_header(
         &self,
         branch: String,
@@ -1199,7 +1285,7 @@ impl Explorer {
                             .flex_1()
                             .min_w_0()
                             .gap(px(SPACE_1))
-                            .child(label("changes-diff-mode", "Uncommitted".into()))
+                            .child(diff_mode_menu("changes-diff-mode", &self.cwd, cx))
                             .child(diff_stat(added, removed, cx)),
                     )
                     .when(has_files, |this| {

@@ -10,6 +10,7 @@ mod code;
 pub mod commits;
 pub mod diff;
 pub mod diff_doc;
+pub mod diff_prefs;
 mod diff_view;
 mod explorer;
 mod file_icon_data;

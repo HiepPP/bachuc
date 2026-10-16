@@ -2,8 +2,26 @@
 //! and flattened into rows. A port of `packages/app/src/git/diff-tree.ts`, which owns the order
 //! and the compression; keep them in step.
 
-use bachuc_client::{ChangedFile, ChangedFileDetails, CheckoutDetails};
+use bachuc_client::{ChangedFile, ChangedFileDetails, CheckoutDetails, FileDiff, FileDiffStatus};
 use std::collections::HashSet;
+
+/// A diff file as a Changes row file, with the `status` names of the wire.
+pub fn changed_file_of(diff: &FileDiff) -> ChangedFileDetails {
+    ChangedFileDetails {
+        path: diff.path.clone(),
+        old_path: diff.old_path.clone().filter(|old| !old.is_empty()),
+        is_new: diff.is_new,
+        is_deleted: diff.is_deleted,
+        status: match diff.status {
+            FileDiffStatus::Ok => "ok",
+            FileDiffStatus::TooLarge => "too_large",
+            FileDiffStatus::Binary => "binary",
+        }
+        .to_string(),
+        additions: diff.additions,
+        deletions: diff.deletions,
+    }
+}
 
 /// How a changed file differs, as `FileChangeIcon` marks it. A rename is a modified file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +78,17 @@ impl CheckoutView {
             tree: ChangeTree::build(&plain),
             files: details.files,
         })
+    }
+
+    /// The Committed tree: the files of a `Base` diff under the branch of the status answer.
+    pub fn from_diffs(branch: Option<String>, diffs: &[FileDiff]) -> CheckoutView {
+        let files: Vec<ChangedFileDetails> = diffs.iter().map(changed_file_of).collect();
+        let plain: Vec<ChangedFile> = files.iter().cloned().map(Into::into).collect();
+        CheckoutView {
+            branch: branch.unwrap_or_else(|| UNKNOWN_BRANCH.to_string()),
+            tree: ChangeTree::build(&plain),
+            files,
+        }
     }
 
     pub fn change(&self, index: usize) -> Change {

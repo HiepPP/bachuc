@@ -26,6 +26,8 @@ pub fn language_for(path: &str) -> Option<&'static str> {
         "py" => "python",
         "sh" | "bash" | "zsh" => "bash",
         "json" | "jsonc" => "json",
+        // The workspace enables `tree-sitter-markdown` and its inline grammar.
+        "md" | "markdown" | "mdx" => "markdown",
         _ => return None,
     })
 }

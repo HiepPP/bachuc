@@ -3,13 +3,16 @@
 
 pub use crate::changes::Change;
 use crate::changes::format_count;
+use crate::diff_prefs::DiffPrefs;
 use crate::file_icons::file_icon;
+use bachuc_client::DiffMode;
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_SM, ICON_MD, ICON_SM, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
+    FONT_BASE, FONT_SM, ICON_MD, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
 use bachuc_theme::{Tokens, tokens, ui_font_size};
-use gpui_kit::component::{Sizable as _, h_flex};
+use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
+use gpui_kit::component::{Selectable, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -196,3 +199,151 @@ pub fn change_icon(change: Change, colors: &Tokens) -> impl IntoElement + use<> 
 
 /// The padding that every pane uses at the right edge: `WORKSPACE_PANE_TRAILING_GLYPH_RAIL`.
 pub const TRAILING_RAIL: f32 = SPACE_2;
+
+/// The shared diff choices; the defaults until a view writes them.
+pub fn read_prefs<R>(cx: &App, read: impl FnOnce(&DiffPrefs) -> R) -> R {
+    match cx.try_global::<DiffPrefs>() {
+        Some(prefs) => read(prefs),
+        None => read(&DiffPrefs::default()),
+    }
+}
+
+/// Changes the shared diff choices. Observers hear of it only when `change` returns true, so a
+/// status answer that changes nothing does not reload every diff.
+pub fn update_prefs(cx: &mut App, change: impl FnOnce(&mut DiffPrefs) -> bool) {
+    let mut next = read_prefs(cx, DiffPrefs::clone);
+    if change(&mut next) {
+        cx.set_global(next);
+    }
+}
+
+/// The width of the `DiffModeMenu` popover.
+const MODE_MENU_WIDTH: f32 = 260.;
+/// The height of a toolbar label trigger.
+const MODE_TRIGGER_HEIGHT: f32 = 24.;
+
+/// A toolbar label that opens a dropdown menu, filled while the menu is open.
+#[derive(IntoElement)]
+struct MenuTrigger {
+    base: Stateful<Div>,
+    open: bool,
+    fill: Hsla,
+}
+
+impl Selectable for MenuTrigger {
+    fn selected(mut self, selected: bool) -> Self {
+        self.open = selected;
+        self
+    }
+
+    fn is_selected(&self) -> bool {
+        self.open
+    }
+}
+
+impl Styled for MenuTrigger {
+    fn style(&mut self) -> &mut StyleRefinement {
+        self.base.style()
+    }
+}
+
+impl InteractiveElement for MenuTrigger {
+    fn interactivity(&mut self) -> &mut Interactivity {
+        self.base.interactivity()
+    }
+}
+
+impl DropdownMenu for MenuTrigger {}
+
+impl RenderOnce for MenuTrigger {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let fill = self.fill;
+        self.base.when(self.open, |button| button.bg(fill))
+    }
+}
+
+/// `DiffModeMenu` for the folder `cwd`: the current mode with a chevron, opening "Uncommitted",
+/// a separator, and "Committed" with its `<branch> -> <base>` description. A pick writes the
+/// shared `DiffPrefs`; every view of the folder follows it.
+pub fn diff_mode_menu(id: &'static str, cwd: &str, cx: &App) -> impl IntoElement + use<> {
+    let colors = tokens(cx);
+    let (mode, description) = read_prefs(cx, |prefs| {
+        (prefs.mode(cwd), prefs.committed_description(cwd))
+    });
+    let label = match mode {
+        DiffMode::Uncommitted => "Uncommitted",
+        DiffMode::Base => "Committed",
+    };
+    let base = h_flex()
+        .id(id)
+        .role(Role::Button)
+        .aria_label("Diff mode")
+        .flex_shrink_0()
+        .h(px(MODE_TRIGGER_HEIGHT))
+        .px(px(SPACE_1))
+        .gap(px(SPACE_1))
+        .rounded(px(RADIUS_MD))
+        .cursor_pointer()
+        .hover(|style| style.bg(colors.interaction_highlight))
+        .child(
+            div()
+                .text_size(ui_font_size(FONT_SM, cx))
+                .text_color(colors.foreground_muted)
+                .child(label),
+        )
+        .child(
+            icon(IconName::ChevronDown)
+                .with_size(px(12.))
+                .text_color(colors.foreground_extra_muted),
+        );
+    let cwd = cwd.to_string();
+    let muted = colors.foreground_muted;
+    let size = ui_font_size(FONT_SM, cx);
+    MenuTrigger {
+        base,
+        open: false,
+        fill: colors.interaction_highlight,
+    }
+    .dropdown_menu(move |menu, _, _| {
+        let pick = |mode: DiffMode| {
+            let cwd = cwd.clone();
+            move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                update_prefs(cx, |prefs| {
+                    prefs.select_mode(&cwd, mode);
+                    true
+                });
+            }
+        };
+        let description = description.clone();
+        let committed = if let Some(description) = description {
+            PopupMenuItem::element(move |_, _| {
+                // The menu labels only plain items, so this row names itself.
+                v_flex()
+                    .id("diff-mode-committed")
+                    .role(Role::Label)
+                    .aria_label(format!("Committed, {description}"))
+                    .child("Committed")
+                    .child(
+                        div()
+                            .text_size(size)
+                            .text_color(muted)
+                            .child(description.clone()),
+                    )
+            })
+        } else {
+            PopupMenuItem::new("Committed")
+        };
+        menu.min_w(px(MODE_MENU_WIDTH))
+            .item(
+                PopupMenuItem::new("Uncommitted")
+                    .checked(mode == DiffMode::Uncommitted)
+                    .on_click(pick(DiffMode::Uncommitted)),
+            )
+            .separator()
+            .item(
+                committed
+                    .checked(mode == DiffMode::Base)
+                    .on_click(pick(DiffMode::Base)),
+            )
+    })
+}

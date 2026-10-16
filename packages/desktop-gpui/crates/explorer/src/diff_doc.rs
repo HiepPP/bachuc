@@ -6,6 +6,7 @@
 //! one parse and one row list here.
 
 use crate::changes::Change;
+use crate::code::display_columns;
 use crate::diff::{NoDiff, ParsedDiff, parse};
 use bachuc_client::{FileDiff, FileDiffStatus};
 
@@ -78,6 +79,8 @@ pub struct DiffDoc {
     rows: Vec<DiffRow>,
     max_number: u32,
     longest: usize,
+    /// Per file, the drawn column count of its widest code line (hunk headers included).
+    columns: Vec<usize>,
 }
 
 impl DiffDoc {
@@ -85,11 +88,13 @@ impl DiffDoc {
         let files: Vec<DiffFile> = diffs.into_iter().map(DiffFile::from_diff).collect();
         let mut max_number = 0;
         let mut longest = 0;
-        for file in &files {
-            if let FileBody::Lines(parsed) = &file.body {
+        let mut columns = vec![0; files.len()];
+        for (file, entry) in files.iter().enumerate() {
+            if let FileBody::Lines(parsed) = &entry.body {
                 for line in &parsed.lines {
                     max_number = max_number.max(line.number.unwrap_or(0));
                     longest = longest.max(line.text.len());
+                    columns[file] = columns[file].max(display_columns(&line.text));
                 }
             }
         }
@@ -99,6 +104,7 @@ impl DiffDoc {
             rows: Vec::new(),
             max_number,
             longest,
+            columns,
         };
         doc.rebuild();
         doc
@@ -145,6 +151,25 @@ impl DiffDoc {
         self.rows
             .iter()
             .position(|row| matches!(row, DiffRow::Header { file: index } if *index == file))
+    }
+
+    /// The header row of the file at `path` for a focus request; a collapsed file opens first.
+    /// None, with nothing changed, when the diff has no such file.
+    pub fn reveal(&mut self, path: &str) -> Option<usize> {
+        let file = self
+            .files
+            .iter()
+            .position(|file| file.path == path || file.old_path.as_deref() == Some(path))?;
+        if self.collapsed[file] {
+            self.collapsed[file] = false;
+            self.rebuild();
+        }
+        self.header_row(path)
+    }
+
+    /// The drawn column count of the widest line of file `file`, which sizes its sideways scroll.
+    pub fn longest_columns(&self, file: usize) -> usize {
+        self.columns.get(file).copied().unwrap_or(0)
     }
 
     pub fn is_collapsed(&self, file: usize) -> bool {

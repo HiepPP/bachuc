@@ -2,8 +2,8 @@
 //! the Files toolbar order, and the theme syntax colors.
 
 use bachuc_client::{
-    ChangedFileDetails, CheckoutDetails, CommitFile, CommitList, CommitSummary, FileDiff,
-    FileDiffStatus, FileEntry,
+    ChangedFileDetails, CheckoutDetails, CommitFile, CommitList, CommitSummary, DiffCompare,
+    DiffMode, FileDiff, FileDiffStatus, FileEntry,
 };
 use bachuc_explorer::ExplorerDiffEvent;
 use bachuc_explorer::changes::{Change, ChangeRow, CheckoutView, UNKNOWN_BRANCH};
@@ -12,6 +12,10 @@ use bachuc_explorer::commits::{
 };
 use bachuc_explorer::diff::NoDiff;
 use bachuc_explorer::diff_doc::{DiffDoc, DiffRow, FileBody, Latest};
+use bachuc_explorer::diff_prefs::{
+    DiffPrefs, FocusTracker, ModeOverride, clamp_offset, committed_description, compare_for,
+    resolve_mode, uniform_row_height,
+};
 use bachuc_explorer::syntax::{ThemeSyntax, highlight};
 use bachuc_explorer::tree::{FileTree, ROOT, SortBy};
 use bachuc_theme::{Scheme, SyntaxThemeId, syntax_colors_for};
@@ -483,5 +487,278 @@ fn diff_colors_follow_the_selected_syntax_theme() {
     assert_eq!(
         one.style("type").and_then(|style| style.color),
         Some(one.0.r#type)
+    );
+}
+
+#[test]
+fn a_markdown_heading_takes_the_heading_color() {
+    let one = ThemeSyntax(syntax_colors_for(SyntaxThemeId::One, Scheme::Dark));
+    let lines = highlight("markdown", "# Title\n\ntext\n", &one);
+    assert!(
+        lines[0]
+            .iter()
+            .any(|(_, style)| style.color == Some(one.0.heading)),
+        "the heading takes the heading color: {:?}",
+        lines[0]
+    );
+}
+
+// ---- focus requests ----
+
+#[test]
+fn a_new_focus_revision_scrolls_once_and_a_seen_one_does_not() {
+    let mut prefs = DiffPrefs::default();
+    let mut tracker = FocusTracker::new(prefs.focus_revision(), None);
+    assert!(!tracker.observe(prefs.focus(), "/repo"));
+    prefs.request_focus("/repo", "b.rs");
+    assert!(tracker.observe(prefs.focus(), "/repo"));
+    assert_eq!(tracker.take(true).as_deref(), Some("b.rs"));
+    // The same revision again is seen: no second scroll.
+    assert!(!tracker.observe(prefs.focus(), "/repo"));
+    assert_eq!(tracker.take(true), None);
+    // A request for another folder is not for this view.
+    prefs.request_focus("/other", "c.rs");
+    assert!(!tracker.observe(prefs.focus(), "/repo"));
+    assert_eq!(tracker.take(true), None);
+}
+
+#[test]
+fn a_view_created_by_a_click_takes_its_revision_and_scrolls_by_its_own_path() {
+    let mut prefs = DiffPrefs::default();
+    prefs.request_focus("/repo", "a.rs");
+    let mut tracker = FocusTracker::new(prefs.focus_revision(), Some("a.rs".into()));
+    assert!(!tracker.observe(prefs.focus(), "/repo"));
+    assert_eq!(tracker.take(true).as_deref(), Some("a.rs"));
+    assert_eq!(tracker.take(true), None);
+}
+
+#[test]
+fn a_focus_request_before_the_first_answer_applies_after_it() {
+    let mut prefs = DiffPrefs::default();
+    let mut tracker = FocusTracker::new(prefs.focus_revision(), None);
+    prefs.request_focus("/repo", "b.rs");
+    assert!(tracker.observe(prefs.focus(), "/repo"));
+    assert_eq!(tracker.take(false), None);
+    assert_eq!(tracker.take(true).as_deref(), Some("b.rs"));
+}
+
+#[test]
+fn a_focus_request_for_a_collapsed_file_expands_it_then_finds_its_header() {
+    let mut doc = DiffDoc::new(vec![ok_diff("a.rs", HUNK), ok_diff("b.rs", HUNK)]);
+    doc.toggle_file(1);
+    assert!(doc.is_collapsed(1));
+    assert_eq!(doc.reveal("b.rs"), Some(5));
+    assert!(!doc.is_collapsed(1));
+    assert_eq!(doc.rows().len(), 10);
+    assert_eq!(doc.rows()[5], DiffRow::Header { file: 1 });
+}
+
+#[test]
+fn a_focus_request_for_a_path_not_in_the_diff_changes_nothing() {
+    let mut doc = DiffDoc::new(vec![ok_diff("a.rs", HUNK)]);
+    doc.toggle_file(0);
+    let rows = doc.rows().to_vec();
+    assert_eq!(doc.reveal("gone.rs"), None);
+    assert_eq!(doc.rows(), rows);
+    assert!(doc.is_collapsed(0));
+    assert_eq!(DiffDoc::default().reveal("a.rs"), None);
+}
+
+// ---- long lines ----
+
+#[test]
+fn sideways_offsets_clamp_to_the_code_that_does_not_fit() {
+    // Longest line 1,000 px, code area 600 px.
+    assert_eq!(clamp_offset(0., 250., 1000., 600.), 250.);
+    assert_eq!(clamp_offset(250., 500., 1000., 600.), 400.);
+    assert_eq!(clamp_offset(400., -1000., 1000., 600.), 0.);
+    // A file with no long line never moves.
+    assert_eq!(clamp_offset(0., 300., 500., 600.), 0.);
+    assert_eq!(clamp_offset(0., -300., 500., 600.), 0.);
+}
+
+#[test]
+fn each_file_is_sized_by_its_own_longest_drawn_line() {
+    let long = "x".repeat(400);
+    let text = format!("--- a/x\n+++ b/x\n@@ -1,1 +1,2 @@\n ctx\n+{long}\n");
+    let doc = DiffDoc::new(vec![
+        ok_diff("long.rs", &text),
+        ok_diff("tabs.rs", "@@ -1,1 +1,1 @@\n+\tab\n"),
+    ]);
+    assert_eq!(doc.longest_columns(0), 400);
+    // A tab fills to the next 4-column stop; the hunk header is the widest line here.
+    assert_eq!(doc.longest_columns(1), "@@ -1,1 +1,1 @@".len());
+    assert_eq!(doc.longest_columns(2), 0);
+    let tabs = DiffDoc::new(vec![ok_diff(
+        "t.rs",
+        "@@ -1 +1 @@\n+\t\tlong_tabbed_line\n",
+    )]);
+    assert_eq!(tabs.longest_columns(0), 8 + "long_tabbed_line".len());
+}
+
+#[test]
+fn rows_keep_one_height_while_scrolling_and_measure_while_wrapping() {
+    assert!(!DiffPrefs::default().wrap_lines);
+    assert_eq!(uniform_row_height(false, 22.), Some(22.));
+    assert_eq!(uniform_row_height(true, 22.), None);
+}
+
+#[test]
+fn sideways_scroll_leaves_the_row_model_unchanged() {
+    let long = "y".repeat(1000);
+    let doc = DiffDoc::new(vec![ok_diff("a.rs", &format!("@@ -1 +1 @@\n+{long}\n"))]);
+    let rows = doc.rows().to_vec();
+    let mut offsets = vec![0.; doc.files().len()];
+    offsets[0] = clamp_offset(offsets[0], 80., 8. + 1000. * 7.5 + 12., 600.);
+    assert_eq!(offsets[0], 80.);
+    assert_eq!(doc.rows(), rows);
+}
+
+// ---- diff mode ----
+
+#[test]
+fn the_mode_defaults_by_the_dirty_state_and_an_override_expires_when_it_changes() {
+    let mut prefs = DiffPrefs::default();
+    // No status yet: the uncommitted diff, as before modes.
+    assert_eq!(prefs.mode("/repo"), DiffMode::Uncommitted);
+    prefs.set_status("/repo", false, Some("feature".into()));
+    assert_eq!(prefs.mode("/repo"), DiffMode::Base);
+    prefs.set_status("/repo", true, Some("feature".into()));
+    assert_eq!(prefs.mode("/repo"), DiffMode::Uncommitted);
+    // Base picked while dirty holds while the tree stays dirty.
+    prefs.select_mode("/repo", DiffMode::Base);
+    assert_eq!(prefs.mode("/repo"), DiffMode::Base);
+    assert!(!prefs.set_status("/repo", true, Some("feature".into())));
+    assert_eq!(prefs.mode("/repo"), DiffMode::Base);
+    // The tree goes clean: the override is gone and the clean default applies.
+    assert!(prefs.set_status("/repo", false, Some("feature".into())));
+    assert_eq!(prefs.checkout("/repo").mode_override, None);
+    assert_eq!(prefs.mode("/repo"), DiffMode::Base);
+    // Uncommitted picked while clean ends when the tree goes dirty, then clean again.
+    prefs.select_mode("/repo", DiffMode::Uncommitted);
+    assert_eq!(prefs.mode("/repo"), DiffMode::Uncommitted);
+    prefs.set_status("/repo", true, Some("feature".into()));
+    prefs.set_status("/repo", false, Some("feature".into()));
+    assert_eq!(prefs.mode("/repo"), DiffMode::Base);
+    // Each folder keeps its own mode.
+    assert_eq!(prefs.mode("/other"), DiffMode::Uncommitted);
+}
+
+#[test]
+fn a_stale_override_is_masked_even_before_it_expires() {
+    let chosen = ModeOverride {
+        mode: DiffMode::Uncommitted,
+        dirty_at_selection: false,
+    };
+    assert_eq!(resolve_mode(Some(chosen), false), DiffMode::Uncommitted);
+    assert_eq!(resolve_mode(Some(chosen), true), DiffMode::Uncommitted);
+    let base = ModeOverride {
+        mode: DiffMode::Base,
+        dirty_at_selection: false,
+    };
+    assert_eq!(resolve_mode(Some(base), true), DiffMode::Uncommitted);
+    assert_eq!(resolve_mode(None, false), DiffMode::Base);
+}
+
+#[test]
+fn base_sends_the_loaded_base_ref_and_uncommitted_sends_none() {
+    assert_eq!(
+        compare_for(DiffMode::Base, Some("origin/main"), false),
+        DiffCompare {
+            mode: DiffMode::Base,
+            base_ref: Some("origin/main".into()),
+            ignore_whitespace: false,
+        }
+    );
+    assert_eq!(compare_for(DiffMode::Base, None, false).base_ref, None);
+    assert_eq!(
+        compare_for(DiffMode::Base, Some("  "), false).base_ref,
+        None
+    );
+    assert_eq!(
+        compare_for(DiffMode::Uncommitted, Some("origin/main"), false).base_ref,
+        None
+    );
+}
+
+#[test]
+fn committed_picked_before_the_commit_list_loads_asks_without_a_base_ref() {
+    let mut prefs = DiffPrefs::default();
+    prefs.set_status("/repo", true, Some("feature".into()));
+    prefs.select_mode("/repo", DiffMode::Base);
+    let before = prefs.compare("/repo");
+    assert_eq!((before.mode, before.base_ref), (DiffMode::Base, None));
+    assert_eq!(prefs.tree_compare("/repo"), Some(prefs.compare("/repo")));
+    assert!(prefs.set_base_ref("/repo", Some("origin/main".into())));
+    assert!(!prefs.set_base_ref("/repo", Some("origin/main".into())));
+    assert_eq!(
+        prefs.compare("/repo").base_ref.as_deref(),
+        Some("origin/main")
+    );
+    // Uncommitted lists the status files, so the tree needs no diff.
+    prefs.select_mode("/repo", DiffMode::Uncommitted);
+    assert_eq!(prefs.tree_compare("/repo"), None);
+}
+
+#[test]
+fn an_answer_for_the_mode_before_a_pick_is_dropped() {
+    let mut prefs = DiffPrefs::default();
+    prefs.set_status("/repo", true, None);
+    let mut requests = Latest::default();
+    let uncommitted = (requests.begin(), prefs.compare("/repo"));
+    prefs.select_mode("/repo", DiffMode::Base);
+    let base = (requests.begin(), prefs.compare("/repo"));
+    assert_ne!(uncommitted.1, base.1);
+    assert!(!requests.is_current(uncommitted.0));
+    assert!(requests.is_current(base.0));
+}
+
+#[test]
+fn the_hide_whitespace_toggle_sets_ignore_whitespace_on_the_next_request() {
+    let mut prefs = DiffPrefs::default();
+    assert!(!prefs.hide_whitespace);
+    assert!(!prefs.compare("/repo").ignore_whitespace);
+    prefs.hide_whitespace = true;
+    assert!(prefs.compare("/repo").ignore_whitespace);
+    prefs.set_status("/repo", false, None);
+    let base = prefs.compare("/repo");
+    assert_eq!((base.mode, base.ignore_whitespace), (DiffMode::Base, true));
+}
+
+#[test]
+fn the_committed_description_drops_ref_prefixes_and_skips_equal_or_missing_names() {
+    assert_eq!(
+        committed_description(Some("feature"), Some("refs/remotes/origin/main")).as_deref(),
+        Some("feature -> main")
+    );
+    assert_eq!(
+        committed_description(Some("refs/heads/feature"), Some("origin/main")).as_deref(),
+        Some("feature -> main")
+    );
+    assert_eq!(
+        committed_description(Some("main"), Some("origin/main")),
+        None
+    );
+    assert_eq!(committed_description(None, Some("main")), None);
+    assert_eq!(committed_description(Some("feature"), None), None);
+    assert_eq!(committed_description(Some("feature"), Some(" ")), None);
+}
+
+#[test]
+fn the_committed_tree_lists_the_base_diff_files() {
+    let mut renamed = ok_diff("src/new.rs", HUNK);
+    renamed.old_path = Some("src/old.rs".into());
+    let view = CheckoutView::from_diffs(
+        Some("feature".into()),
+        &[renamed, no_text("logo.png", FileDiffStatus::Binary)],
+    );
+    assert_eq!(view.branch, "feature");
+    assert_eq!(view.files.len(), 2);
+    assert_eq!(view.files[0].old_path.as_deref(), Some("src/old.rs"));
+    assert_eq!(view.files[1].status, "binary");
+    assert_eq!(view.label(0), "src/old.rs -> src/new.rs, Modified, +1, -1");
+    assert_eq!(
+        CheckoutView::from_diffs(None, &[]).branch,
+        UNKNOWN_BRANCH.to_string()
     );
 }
