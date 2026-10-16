@@ -50,3 +50,4 @@ build_dir_env: CARGO_TARGET_DIR
 ## Known Failures
 
 - `bachuc-command` test `search_500_items_stays_under_16_ms_per_keystroke`: a timing test that fails under a high load average (41 ms at load 5.5). Confirm by: `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-command --test search` alone -> pass.
+- GPUI log "has no accessibility node ... it has an id but no role" for a focused gpui-kit Input or Textarea: an upstream gap in gpui-base 0.7.3 (Q-087). Confirm by: `grep -n 'id("input-state")' -A2 ~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gpui-base-0.7.3/src/input/base/state.rs` -> no `.role(` after the id.
