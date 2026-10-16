@@ -12,8 +12,12 @@ use bachuc_theme::metrics::{
     FONT_BASE, FONT_CODE, FONT_SM, ICON_SM, ICON_XS, RADIUS_BASE, RADIUS_LG, RADIUS_MD, SPACE_1,
     SPACE_2, SPACE_3, SPACE_4,
 };
-use bachuc_theme::{Tokens, code_font_size, mono_font_family, scheme, tokens, ui_font_size};
-use gpui_kit::component::{Sizable as _, h_flex, v_flex};
+use bachuc_theme::{
+    Scheme, Tokens, code_font_size, mono_font_family, scheme, tokens, ui_font_size,
+};
+use gpui_kit::base::input::HighlightStyleResolver;
+use gpui_kit::component::highlighter::SyntaxHighlighter;
+use gpui_kit::component::{Rope, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::Value;
@@ -81,6 +85,92 @@ pub fn display_path(path: &str, cwd: &str) -> String {
         .map_or_else(|| path.to_string(), str::to_string)
 }
 
+/// The tree-sitter language of a fence info string such as `rust` or `ts {1,3}`, with the
+/// aliases of `highlighted-code-block.tsx`.
+pub(crate) fn fence_language(info: &str) -> Option<&'static str> {
+    let first = info.split_whitespace().next()?.trim_start_matches('.');
+    let first = first.to_lowercase();
+    let extension = match first.as_str() {
+        "typescript" => "ts",
+        "javascript" => "js",
+        "python" => "py",
+        "rust" => "rs",
+        "shell" => "sh",
+        other => other,
+    };
+    syntax::language_for(&format!("fence.{extension}"))
+}
+
+/// `oneLight` and `oneDark` of `packages/highlight/src/themes.ts`: the app colors code with the
+/// "one" theme unless the user picks another (`use-settings/storage.ts`).
+pub(crate) fn one_colors(scheme: Scheme) -> SyntaxColors {
+    let c = |hex| Hsla::from(rgb(hex));
+    // base, keyword, comment, string, number, function, type, tag, attribute, operator.
+    let [
+        base,
+        keyword,
+        comment,
+        string,
+        number,
+        function,
+        type_,
+        tag,
+        attribute,
+        operator,
+    ] = match scheme {
+        Scheme::Light => [
+            0x383a42, 0xa626a4, 0xa0a1a7, 0x50a14f, 0x986801, 0x4078f2, 0xc18401, 0xe45649,
+            0x986801, 0x0184bc,
+        ],
+        Scheme::Dark => [
+            0xabb2bf, 0xc678dd, 0x5c6370, 0x98c379, 0xd19a66, 0x61afef, 0xe5c07b, 0xe06c75,
+            0xd19a66, 0x56b6c2,
+        ],
+    }
+    .map(c);
+    // `expandRolePalette`.
+    SyntaxColors {
+        keyword,
+        comment,
+        string,
+        number,
+        literal: number,
+        function,
+        class: type_,
+        type_,
+        tag,
+        attribute,
+        property: attribute,
+        variable: base,
+        operator,
+        punctuation: base,
+        regexp: string,
+        escape: number,
+        meta: comment,
+        heading: function,
+        link: string,
+    }
+}
+
+/// The app's lezer grammars give a macro name no role, so `println!` keeps the text color.
+struct OneColors(SyntaxColors);
+
+impl HighlightStyleResolver for OneColors {
+    fn style(&self, name: &str) -> Option<HighlightStyle> {
+        if name == "function.macro" || name.starts_with("function.macro.") {
+            return None;
+        }
+        self.0.style(name)
+    }
+}
+
+/// Colored ranges of `text` parsed as `language`, in the "one" colors.
+pub(crate) fn code_styles(language: &str, text: &str, scheme: Scheme) -> Vec<Run> {
+    let mut highlighter = SyntaxHighlighter::new(language);
+    highlighter.update(None, &Rope::from_str(text), None);
+    highlighter.styles(&(0..text.len()), &OneColors(one_colors(scheme)))
+}
+
 /// A small square icon button with a role and a label.
 pub(crate) fn icon_button(
     id: impl Into<ElementId>,
@@ -124,10 +214,9 @@ impl TimelineView {
         if cache.len() > 64 {
             cache.clear();
         }
-        let runs = Rc::new(syntax::highlight(
-            language,
+        let runs = Rc::new(syntax::split_lines(
             text,
-            &SyntaxColors::for_scheme(scheme),
+            &code_styles(language, text, scheme),
         ));
         cache.insert(key, runs.clone());
         Some(runs)
@@ -226,8 +315,21 @@ impl TimelineView {
         })
         .with_size(px(ICON_SM))
         .text_color(t.foreground);
-        // The tool icon turns into the chevron on hover or while open.
+        // The tool icon turns into the chevron on hover or while open. Hover swaps visibility
+        // of two stacked layers, never `display`: GPUI hit-tests hover in prepaint against the
+        // last frame's hitbox ids and again in paint against this frame's, and a div whose
+        // display turns on between the two paints children it never prepainted, which panics
+        // with "must call prepaint before paint".
+        let layer = || {
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+        };
         let icon_slot = div()
+            .relative()
             .size(px(ICON_SLOT))
             .flex_none()
             .mr(px(SPACE_1))
@@ -241,14 +343,14 @@ impl TimelineView {
                     slot.child(chevron)
                 } else {
                     slot.child(
-                        div()
-                            .group_hover(group.clone(), |s| s.hidden())
+                        layer()
+                            .group_hover(group.clone(), |s| s.invisible())
                             .child(tool_icon),
                     )
                     .child(
-                        div()
-                            .hidden()
-                            .group_hover(group.clone(), |s| s.flex())
+                        layer()
+                            .invisible()
+                            .group_hover(group.clone(), |s| s.visible())
                             .child(chevron),
                     )
                 }

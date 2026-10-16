@@ -39,7 +39,7 @@ use bachuc_theme::metrics::{
 use bachuc_theme::{
     TurnLabel, code_font_size, mono_font_family, scheme, tokens, turn_label_colors, ui_font_size,
 };
-use gpui_kit::base::text::{TextView as RichText, TextViewStyle as RichTextStyle};
+use gpui_kit::base::text::{CodeBlock, TextView as RichText, TextViewStyle as RichTextStyle};
 use gpui_kit::component::text::{TextView, TextViewState};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -95,6 +95,17 @@ const RULE_TOP: f32 = 22.;
 const RULE_BOTTOM: f32 = 18.;
 /// The user bubble's line height, as `fontSize.content * 1.4`.
 const USER_LINE_HEIGHT: f32 = 1.4;
+/// The web stream's empty slot above the first row, where older history loads
+/// (`HISTORY_START_SLOT_HEIGHT_PX`), under the 16 px content padding.
+const HISTORY_START_SLOT: f32 = 32.;
+/// The user message's trailing row under the bubble: 8 above, 24 high. It holds the time and
+/// copy button, which show on hover; the space stays when they are hidden.
+const USER_TRAILING_ROW: f32 = SPACE_2 + 24.;
+/// The space between two markdown blocks: the paragraph's `marginBottom: 12` and the block
+/// container's 12.
+const BLOCK_GAP: f32 = SPACE_6;
+/// A fence's line height over its size, as `splitFenceStyle`.
+const FENCE_LINE_HEIGHT: f32 = 1.45;
 /// `STREAM_METADATA_FONT_SIZE`, the compaction marker and turn footer text.
 const METADATA_SIZE: f32 = 13.;
 /// The `FONT_SIZE` tiers `3xl` and `4xl` of the h2 and h1 markdown headings; no metric has them.
@@ -133,6 +144,17 @@ enum RowKind {
     Permission(Value),
 }
 
+/// The row under a message row, for the space between them.
+enum Below {
+    Nothing,
+    Footer,
+    User,
+    Assistant,
+    /// Tool calls, thoughts, tasks, or a turn.
+    Tools,
+    Other,
+}
+
 /// The response the row loop of a sync is in: everything after one user message.
 #[derive(Default)]
 struct Response {
@@ -162,8 +184,11 @@ struct Message {
     states: Vec<Option<Entity<TextViewState>>>,
 }
 
-/// Syntax runs per line, as `bachuc_explorer::syntax::highlight` returns them.
+/// Syntax runs per line, as `bachuc_explorer::syntax::split_lines` returns them.
 type LineRuns = Rc<Vec<Vec<Run>>>;
+
+/// The colored ranges of a markdown fence.
+type CodeHighlighter = Arc<dyn Fn(&CodeBlock) -> Vec<Run> + Send + Sync>;
 
 /// The diff lines of one edit or write call and their added and removed counts.
 #[derive(Default)]
@@ -220,8 +245,9 @@ pub struct TimelineView {
     finder: Option<FindState>,
     /// Syntax runs of open code sections, by text.
     syntax_cache: RefCell<HashMap<u64, LineRuns>>,
-    /// The markdown style of the message text, made on the first draw after a theme change.
-    markdown_style: RefCell<Option<RichTextStyle>>,
+    /// The markdown style of the message text and its fence highlighter, made on the first draw
+    /// after a theme change.
+    markdown_style: RefCell<Option<(RichTextStyle, CodeHighlighter)>>,
     /// The footer whose copy button shows its check, by the response's last entry, and the
     /// timer that clears it.
     copied: Option<(u64, Task<()>)>,
@@ -452,6 +478,15 @@ impl TimelineView {
                 kind: RowKind::Permission(request),
             }
         }));
+        // A message row's height follows the row below it, so a new row under it redraws it.
+        for index in 0..rows.len() {
+            if let Some(space) = self.space_below(&rows[index], rows.get(index + 1)) {
+                let mut hasher = DefaultHasher::new();
+                rows[index].fingerprint.hash(&mut hasher);
+                space.to_bits().hash(&mut hasher);
+                rows[index].fingerprint = hasher.finish();
+            }
+        }
         self.apply_rows(rows);
         self.update_clock(cx);
         self.synced_at = Some(Instant::now());
@@ -835,18 +870,14 @@ impl TimelineView {
     }
 
     fn toggle_diff(&mut self, key: u64, cx: &mut Context<Self>) {
-        if !self.hidden_diffs.remove(&key) {
-            self.hidden_diffs.insert(key);
-        }
+        toggle(&mut self.hidden_diffs, key);
         // Only the edit's hash changes; the rows rebuild from the cached hashes.
         self.rehash_keys(&[key]);
         self.refresh(cx);
     }
 
     fn toggle_expanded(&mut self, key: u64, cx: &mut Context<Self>) {
-        if !self.expanded.remove(&key) {
-            self.expanded.insert(key);
-        }
+        toggle(&mut self.expanded, key);
         self.rehash_keys(&[key]);
         self.refresh(cx);
     }
@@ -907,6 +938,7 @@ impl TimelineView {
             RowKind::Footer { start, end } => this.render_footer(*start, *end, cx),
             RowKind::Permission(request) => this.render_permission(request, cx),
         };
+        let space = this.space_below(row, this.rows.get(index + 1));
         // `streamItemWrapper`: the content column, at most 820 wide, centered.
         div()
             .id(("row", index))
@@ -919,9 +951,53 @@ impl TimelineView {
                     .w_full()
                     .max_w(px(MAX_CONTENT_WIDTH))
                     .px(px(SPACE_2))
+                    .when_some(space, |column, space| column.pb(px(space)))
                     .child(content),
             )
             .into_any_element()
+    }
+
+    /// The space under a message row, which depends on the row below it, as the web stream
+    /// lays it out. A user message gets `getGapBetweenStreamItems`. An assistant message also
+    /// keeps its last block's `marginBottom: 12` and its own `paddingBottom: 12`, which it drops
+    /// above a footer (`compactBottom`). None for the other rows.
+    fn space_below(&self, row: &ViewRow, next: Option<&ViewRow>) -> Option<f32> {
+        let RowKind::Entry(index) = row.kind else {
+            return None;
+        };
+        let is_user = self.grouper.is_user(index);
+        if !is_user && !self.grouper.is_assistant(index) {
+            return None;
+        }
+        let below = match next.map(|next| &next.kind) {
+            None => Below::Nothing,
+            Some(RowKind::Footer { .. }) => Below::Footer,
+            Some(RowKind::Entry(next)) if self.grouper.is_user(*next) => Below::User,
+            Some(RowKind::Entry(next)) if self.grouper.is_assistant(*next) => Below::Assistant,
+            Some(RowKind::Entry(next))
+                if matches!(
+                    item_type(&self.entries[*next]),
+                    "tool_call" | "reasoning" | "todo"
+                ) =>
+            {
+                Below::Tools
+            }
+            Some(RowKind::TurnHeader(_)) => Below::Tools,
+            Some(_) => Below::Other,
+        };
+        if is_user {
+            return Some(match below {
+                Below::Nothing | Below::Assistant => 0.,
+                Below::User => SPACE_1,
+                _ => SPACE_4,
+            });
+        }
+        Some(match below {
+            Below::Footer => SPACE_3,
+            Below::Nothing => SPACE_3 * 2.,
+            Below::Tools => SPACE_3 * 2. + SPACE_1,
+            _ => SPACE_3 * 2. + SPACE_4,
+        })
     }
 
     fn render_entry(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -953,9 +1029,11 @@ impl TimelineView {
                         )
                     })
                     .collect();
+                // The web stream gives a user message no outer margin; the row's gap below
+                // comes from `space_below`.
                 h_flex()
                     .justify_end()
-                    .py(px(SPACE_4))
+                    .pb(px(USER_TRAILING_ROW))
                     .child(
                         div()
                             .id(("user", key))
@@ -981,7 +1059,7 @@ impl TimelineView {
                     .id(("message", key))
                     .role(Role::Article)
                     .aria_label(format!("Assistant message: {}", preview(text)))
-                    .py(px(SPACE_3))
+                    .pt(px(SPACE_3))
                     .gap(px(SPACE_2))
                     .children(self.render_markdown(key, cx))
                     .into_any_element()
@@ -1120,7 +1198,7 @@ impl TimelineView {
         let t = tokens(cx);
         let size = ui_font_size(FONT_CONTENT, cx);
         let view = cx.weak_entity();
-        let style = self.markdown_style(cx);
+        let (style, highlighter) = self.markdown_style(cx);
         let copy_color = t.foreground_muted;
         blocks
             .into_iter()
@@ -1131,6 +1209,7 @@ impl TimelineView {
                         let view = view.clone();
                         let text = RichText::new(state)
                             .style(style.clone())
+                            .shared_code_block_highlighter(highlighter.clone())
                             .selectable(true)
                             .on_link_click(move |href, _, _, cx| {
                                 let href = href.to_string();
@@ -1209,32 +1288,47 @@ impl TimelineView {
     /// The theme's rich text style with the headings of `markdown-styles.ts`. Setting a style
     /// replaces the installed default, so the default's colors are made again here, as
     /// gpui-kit's `base_text_view_style` makes them.
-    fn markdown_style(&self, cx: &App) -> RichTextStyle {
+    ///
+    /// Spacing follows the app's block model: a message splits into blocks at blank lines, a
+    /// paragraph keeps `marginBottom: 12` and each block 12 more (`message.tsx`), so blocks sit
+    /// 24 apart. A fence adds `marginVertical: 12`, padding 12, and a 1.45 line height
+    /// (`highlighted-code-block.tsx`). Also returns the fence highlighter, one `Arc` per theme,
+    /// so a code block highlights once rather than on every frame.
+    fn markdown_style(&self, cx: &App) -> (RichTextStyle, CodeHighlighter) {
         if let Some(style) = self.markdown_style.borrow().as_ref() {
             return style.clone();
         }
         let theme = cx.theme();
+        let t = tokens(cx);
         let radius = theme.semantic_tokens().radius.md;
-        let mut code_block = StyleRefinement::default();
-        code_block.corner_radii.top_left = Some(radius.into());
-        code_block.corner_radii.top_right = Some(radius.into());
-        code_block.corner_radii.bottom_left = Some(radius.into());
-        code_block.corner_radii.bottom_right = Some(radius.into());
-        let table = code_block.clone();
+        let mut corners = StyleRefinement::default();
+        corners.corner_radii.top_left = Some(radius.into());
+        corners.corner_radii.top_right = Some(radius.into());
+        corners.corner_radii.bottom_left = Some(radius.into());
+        corners.corner_radii.bottom_right = Some(radius.into());
+        let code = code_font_size(FONT_CODE, cx);
+        let code_block = corners
+            .clone()
+            .mt(px(SPACE_3))
+            .p(px(SPACE_3))
+            .font_family(mono_font_family(cx))
+            .text_size(code)
+            .line_height((code * FENCE_LINE_HEIGHT).round());
         let table_head = StyleRefinement::default()
             .bg(theme.table_head)
             .text_color(theme.table_head_foreground);
         let content = ui_font_size(FONT_CONTENT, cx);
-        let border = tokens(cx).border;
+        let border = t.border;
         let style = RichTextStyle::default()
             .with_foreground(theme.foreground)
             .with_muted_foreground(theme.muted_foreground)
             .with_link(theme.link)
             .with_selection(theme.selection)
-            .with_code_background(theme.muted)
+            .with_code_background(t.surface2)
             .with_border(theme.border)
+            .with_paragraph_gap(rems(BLOCK_GAP / FONT_BASE))
             .with_code_block(code_block)
-            .with_table(table)
+            .with_table(corners)
             .with_table_head(table_head)
             .with_inline_code(HighlightStyle {
                 background_color: Some(theme.accent),
@@ -1242,6 +1336,15 @@ impl TimelineView {
             })
             .with_dark(theme.is_dark())
             .with_heading(move |level| heading_style(level, content, border));
+        let scheme = scheme(cx);
+        let highlighter: CodeHighlighter = Arc::new(move |block: &CodeBlock| {
+            block
+                .lang()
+                .and_then(|info| tool_view::fence_language(&info))
+                .map(|language| tool_view::code_styles(language, &block.code(), scheme))
+                .unwrap_or_default()
+        });
+        let style = (style, highlighter);
         *self.markdown_style.borrow_mut() = Some(style.clone());
         style
     }
@@ -1738,7 +1841,8 @@ impl Render for TimelineView {
                 .child(
                     list(self.list.clone(), cx.processor(Self::render_row))
                         .size_full()
-                        .py(px(SPACE_4)),
+                        .pt(px(SPACE_4 + HISTORY_START_SLOT))
+                        .pb(px(SPACE_4)),
                 )
                 .into_any_element()
         };
@@ -1816,6 +1920,13 @@ fn label_name(label: TurnLabel) -> &'static str {
     }
 }
 
+/// Adds `key` to `set`, or removes it when it is there.
+fn toggle(set: &mut HashSet<u64>, key: u64) {
+    if !set.remove(&key) {
+        set.insert(key);
+    }
+}
+
 fn plural(count: usize, one: &str, other: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { other })
 }
@@ -1856,8 +1967,10 @@ fn format_duration(ms: i64) -> String {
 
 /// One heading level of `markdown-styles.ts`: its `FONT_SIZE` tier over the base size, scaled
 /// to the content size and rounded, bold for h1 and h2 with a rule under them, semibold below.
-/// The top margin becomes padding, so it replaces the text view's own section gap.
+/// The top margin becomes padding, so it replaces the text view's own section gap. A heading
+/// gets no paragraph gap below it, so its bottom also holds the block container's 12.
 fn heading_style(level: u8, content: Pixels, border: Hsla) -> StyleRefinement {
+    let block = BLOCK_GAP - SPACE_3;
     let (tier, top, bottom) = match level {
         1 => (FONT_4XL, SPACE_6, SPACE_3),
         2 => (FONT_3XL, SPACE_6, SPACE_3),
@@ -1874,11 +1987,13 @@ fn heading_style(level: u8, content: Pixels, border: Hsla) -> StyleRefinement {
         style
             .font_weight(FontWeight::BOLD)
             .pb(px(SPACE_2))
-            .mb(px(bottom))
+            .mb(px(bottom + block))
             .border_b_1()
             .border_color(border)
     } else {
-        style.font_weight(FontWeight::SEMIBOLD).pb(px(bottom))
+        style
+            .font_weight(FontWeight::SEMIBOLD)
+            .pb(px(bottom + block))
     }
 }
 
@@ -1920,10 +2035,62 @@ fn preview(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob brings its own `test` attribute.
+    use super::tool_view::{code_styles, fence_language};
     use super::{
         StepCounts, counts_text, format_clock, format_duration, format_elapsed, heading_style,
+        toggle,
     };
-    use gpui_kit::{AbsoluteLength, FontWeight, hsla, px};
+    use bachuc_theme::Scheme;
+    use gpui_kit::{AbsoluteLength, FontWeight, Hsla, Length, hsla, px, rgb};
+    use std::collections::HashSet;
+
+    /// Expanding a tool badge flips its key; the crash fix keeps this state path and changes only
+    /// how the badge's icon slot hides its layers (see `render_badge`).
+    #[test]
+    fn toggle_opens_and_closes_a_key() {
+        let mut expanded = HashSet::new();
+        toggle(&mut expanded, 7);
+        assert!(expanded.contains(&7));
+        toggle(&mut expanded, 7);
+        assert!(expanded.is_empty());
+    }
+
+    #[test]
+    fn fence_languages_follow_the_app_aliases() {
+        assert_eq!(fence_language("rust"), Some("rust"));
+        assert_eq!(fence_language("rs"), Some("rust"));
+        assert_eq!(fence_language("ts {1,3}"), Some("typescript"));
+        assert_eq!(fence_language("Python"), Some("python"));
+        assert_eq!(fence_language("text"), None);
+    }
+
+    #[test]
+    fn fence_colors_follow_the_one_theme() {
+        let code = r#"fn main() { println!("hi"); }"#;
+        let styles = code_styles("rust", code, Scheme::Light);
+        let color_at = |at: usize| {
+            styles
+                .iter()
+                .find(|(range, _)| range.contains(&at))
+                .and_then(|(_, style)| style.color)
+        };
+        let one = |hex| Some(Hsla::from(rgb(hex)));
+        assert_eq!(color_at(0), one(0xa626a4), "fn is a keyword");
+        assert_eq!(color_at(3), one(0x4078f2), "main is a function");
+        assert_eq!(color_at(21), one(0x50a14f), "\"hi\" is a string");
+        // The app's grammar gives a macro name no role, so it keeps the text color.
+        assert_eq!(color_at(12), None, "println has no color");
+    }
+
+    #[test]
+    fn headings_hold_the_block_gap_below() {
+        let border = hsla(0., 0., 0.5, 1.);
+        // h2: `marginBottom: 12` plus the block's 12; h3: `marginBottom: 8` plus 12.
+        let h2 = heading_style(2, px(15.), border);
+        assert_eq!(h2.margin.bottom, Some(Length::Definite(px(24.).into())));
+        let h3 = heading_style(3, px(15.), border);
+        assert_eq!(h3.padding.bottom, Some(px(20.).into()));
+    }
 
     #[test]
     fn clock_and_duration_match_the_app() {
