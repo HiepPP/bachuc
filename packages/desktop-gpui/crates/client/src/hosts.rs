@@ -64,6 +64,20 @@ pub(crate) fn load_hosts_from(dir: &Path) -> Vec<HostConfig> {
     hosts
 }
 
+/// Writes the hosts to `hosts.json`, replacing the file in one rename.
+pub fn save_hosts(hosts: &[HostConfig]) -> anyhow::Result<()> {
+    save_hosts_to(&data_dir(), hosts)
+}
+
+pub(crate) fn save_hosts_to(dir: &Path, hosts: &[HostConfig]) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(HOSTS_FILE);
+    let temp = dir.join(format!("{HOSTS_FILE}.tmp"));
+    std::fs::write(&temp, serde_json::to_string_pretty(hosts)?)?;
+    std::fs::rename(&temp, &path)?;
+    Ok(())
+}
+
 /// The UUID this installation sends as `clientId`, created on first use.
 pub fn client_id() -> String {
     client_id_in(&data_dir())
@@ -115,6 +129,27 @@ mod tests {
         let hosts = load_hosts_from(&dir);
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0].password.as_deref(), Some("pw"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn saved_hosts_add_edit_and_remove() {
+        let dir = temp_dir("hosts-save");
+        let mut hosts = load_hosts_from(&dir);
+        hosts.push(HostConfig {
+            name: "macmini".into(),
+            url: "ws://127.0.0.1:6769/ws".into(),
+            password: Some("pw".into()),
+        });
+        save_hosts_to(&dir, &hosts).unwrap();
+        assert_eq!(load_hosts_from(&dir), hosts);
+        hosts[2].url = "ws://127.0.0.1:6770/ws".into();
+        hosts.remove(0);
+        save_hosts_to(&dir, &hosts).unwrap();
+        let saved = load_hosts_from(&dir);
+        assert_eq!(saved, hosts);
+        assert_eq!(saved.len(), 2);
+        assert!(!dir.join(format!("{HOSTS_FILE}.tmp")).exists());
         let _ = std::fs::remove_dir_all(dir);
     }
 

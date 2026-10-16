@@ -245,3 +245,225 @@ fn live_terminal_attach_gets_a_snapshot_first() {
     viewer.core.kill_terminal(&attached.id);
     viewer.pump_for(Duration::from_millis(500));
 }
+
+/// A 1x1 PNG.
+const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .expect("git runs");
+    assert!(status.success(), "git {args:?}");
+}
+
+/// A temporary git folder with one committed and changed text file and an image.
+struct TempRepo(PathBuf);
+
+impl TempRepo {
+    fn new() -> Self {
+        let dir = std::env::temp_dir().join(format!("gpui-146-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // `temp_dir` can be a symlink; the daemon answers with the real path.
+        let dir = dir.canonicalize().unwrap();
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        git(&dir, &["init", "-q", "-b", "main"]);
+        git(&dir, &["add", "."]);
+        git(&dir, &["commit", "-q", "-m", "init"]);
+        std::fs::write(dir.join("a.txt"), "one\nchanged\n").unwrap();
+        use base64::Engine as _;
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(PNG)
+            .unwrap();
+        std::fs::write(dir.join("img.png"), png).unwrap();
+        Self(dir)
+    }
+
+    fn path(&self) -> &str {
+        self.0.to_str().unwrap()
+    }
+}
+
+impl Drop for TempRepo {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+#[ignore]
+fn live_projects_files_and_checkout() {
+    let mut client = Harness::connect(LIVE, None);
+    assert!(client.connected(), "live daemon on 6768");
+    assert!(
+        client.pump_until(WAIT, |h| h
+            .core
+            .projects()
+            .iter()
+            .any(|p| !p.workspaces.is_empty())),
+        "projects load"
+    );
+    assert!(
+        client.core.typed_server_info().is_some(),
+        "server_info decodes"
+    );
+
+    let repo = TempRepo::new();
+    let reply = client.core.list_directory(repo.path(), ".");
+    let entries = client.wait(reply, WAIT).expect("directory lists");
+    let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+    assert!(
+        names.contains(&"a.txt") && names.contains(&"img.png"),
+        "{names:?}"
+    );
+
+    let reply = client.core.read_file(repo.path(), "a.txt");
+    let text = client.wait(reply, WAIT).expect("text file reads");
+    assert_eq!(text.kind, bachuc_client::FileKind::Text);
+    assert_eq!(text.text.as_deref(), Some("one\nchanged\n"));
+
+    let reply = client.core.read_file(repo.path(), "img.png");
+    let image = client.wait(reply, WAIT).expect("image reads");
+    assert_eq!(image.kind, bachuc_client::FileKind::Image);
+    assert_eq!(image.mime_type.as_deref(), Some("image/png"));
+    let png = std::fs::read(repo.0.join("img.png")).unwrap();
+    assert_eq!(image.bytes.as_deref(), Some(png.as_slice()));
+
+    let reply = client.core.checkout_status(repo.path());
+    let status = client.wait(reply, WAIT).expect("checkout status");
+    assert_eq!(status.branch.as_deref(), Some("main"));
+    let changed = status
+        .files
+        .iter()
+        .find(|f| f.path == "a.txt")
+        .expect("a.txt changed");
+    assert_eq!(
+        (changed.status.as_str(), changed.added, changed.removed),
+        ("ok", 1, 1)
+    );
+
+    let reply = client.core.file_diff(repo.path(), "a.txt");
+    let diff = client.wait(reply, WAIT).expect("file diff");
+    assert!(diff.contains("-two\n+changed\n"), "{diff}");
+
+    let plain = std::env::temp_dir().join(format!("gpui-146-plain-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&plain).unwrap();
+    let reply = client.core.checkout_status(plain.to_str().unwrap());
+    let status = client.wait(reply, WAIT);
+    let _ = std::fs::remove_dir_all(&plain);
+    assert_eq!(
+        status.expect("non-git status"),
+        bachuc_client::CheckoutStatus {
+            branch: None,
+            files: vec![]
+        }
+    );
+
+    let changed = bachuc_client::DirectoryEvent::CheckoutChanged {
+        cwd: repo.path().to_string(),
+    };
+    client.core.watch_checkout(repo.path());
+    assert!(
+        client.pump_until(WAIT, |h| h.directory_events.contains(&changed)),
+        "watch starts"
+    );
+    client.directory_events.clear();
+    std::fs::write(repo.0.join("b.txt"), "new file\n").unwrap();
+    std::fs::write(repo.0.join("a.txt"), "one\nchanged again\n").unwrap();
+    assert!(
+        client.pump_until(WAIT, |h| h.directory_events.contains(&changed)),
+        "a change on disk emits CheckoutChanged"
+    );
+    client.core.unwatch_checkout(repo.path());
+    client.pump_for(Duration::from_millis(300));
+}
+
+#[test]
+#[ignore]
+fn live_agent_commands_thinking_and_queue() {
+    let mut client = Harness::connect(LIVE, None);
+    assert!(client.connected(), "live daemon on 6768");
+    assert!(client.core.supports_queue(), "live has agentMessageQueue");
+    // `five-minute-stream` has thinking options and runs long enough to queue behind.
+    let reply = client
+        .core
+        .create_agent("mock", Some("five-minute-stream"), BENCH, "start bench");
+    let agent_id = wait_reply(&mut client, reply);
+    let _cleanup = AgentCleanup(agent_id.clone());
+    let running = client.pump_until(WAIT, |h| {
+        h.core
+            .agents()
+            .iter()
+            .any(|a| a.id == agent_id && a.status == "running")
+    });
+    let status = client
+        .core
+        .agents()
+        .iter()
+        .find(|a| a.id == agent_id)
+        .map(|a| a.status.clone());
+    assert!(running, "agent runs, status {status:?}");
+
+    // The mock provider lists no commands; an idle Claude agent with no prompt runs no turn.
+    let reply = client.core.list_commands(&agent_id);
+    let error = client.wait(reply, WAIT).expect_err("mock has no commands");
+    assert!(error.to_string().contains("does not support"), "{error}");
+    let reply = client.core.create_agent("claude", None, BENCH, "");
+    let claude_id = wait_reply(&mut client, reply);
+    let _claude_cleanup = AgentCleanup(claude_id.clone());
+    let reply = client.core.list_commands(&claude_id);
+    let commands = client
+        .wait(reply, Duration::from_secs(60))
+        .expect("claude lists commands");
+    assert!(!commands.is_empty(), "claude has slash commands");
+
+    assert!(
+        client.pump_until(WAIT, |h| h.core.agent_thinking(&agent_id).is_some()),
+        "thinking"
+    );
+    let thinking = client.core.agent_thinking(&agent_id).unwrap();
+    let other = thinking
+        .options
+        .iter()
+        .map(|(id, _)| id.clone())
+        .find(|id| Some(id) != thinking.current.as_ref())
+        .expect("a second thinking option");
+    client.core.set_thinking(&agent_id, &other);
+    assert!(
+        client.pump_until(WAIT, |h| {
+            h.core.agent_thinking(&agent_id).and_then(|t| t.current) == Some(other.clone())
+        }),
+        "thinking changes to {other}"
+    );
+
+    client
+        .core
+        .enqueue_prompt(&agent_id, "queued while running".into(), vec![]);
+    assert!(
+        client.pump_until(WAIT, |h| h
+            .core
+            .queued_prompts(&agent_id)
+            .iter()
+            .any(|q| q.text == "queued while running")),
+        "prompt is queued"
+    );
+    let queued = client.core.queued_prompts(&agent_id);
+    let item = queued
+        .iter()
+        .find(|q| q.text == "queued while running")
+        .unwrap();
+    client.core.cancel_queued(&agent_id, &item.id);
+    assert!(
+        client.pump_until(WAIT, |h| h.core.queued_prompts(&agent_id).is_empty()),
+        "queued prompt is cancelled"
+    );
+}

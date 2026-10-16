@@ -2,19 +2,54 @@
 //! `Client` wraps it in a GPUI entity; tests drive it directly.
 
 use crate::connection::{Connection, ConnectionConfig, WorkerEvent, session_frame};
+use crate::files::{self, TransferFrame};
 use crate::model::{
-    AgentControls, AgentSummary, ClientEvent, ProviderSummary, WorkspaceSummary, provider_label,
+    AgentControls, AgentSummary, CheckoutStatus, ClientEvent, DirectoryEvent, FileContent,
+    FileEntry, ProjectNode, ProviderSummary, QueuedPrompt, SlashCommand, ThinkingControls,
+    TurnBehavior, WorkspaceNode, WorkspaceSummary, provider_label,
 };
 use crate::terminal::{self, TerminalFrame, TerminalHandle};
 use crate::timeline::{FetchPlan, LiveRow, TimelineState, TimelineSync};
 use anyhow::anyhow;
+use bachuc_protocol::ServerInfo;
 use futures::channel::{mpsc, oneshot};
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap};
 
 type Reply<T> = oneshot::Sender<anyhow::Result<T>>;
 
+/// The diff the changed files come from, as the app's working diff shows it by default.
+const UNCOMMITTED: &str = "uncommitted";
+
 enum Pending {
+    Projects,
+    FileList(Reply<Vec<FileEntry>>),
+    /// `transfer` holds the `FileBegin` metadata and the chunks so far.
+    ReadFile {
+        path: String,
+        reply: Reply<FileContent>,
+        transfer: Option<Box<(Value, Vec<u8>)>>,
+    },
+    CheckoutStatus(Reply<CheckoutStatus>),
+    CheckoutFiles {
+        branch: Option<String>,
+        reply: Reply<CheckoutStatus>,
+    },
+    CheckoutWatch(String),
+    FileDiff {
+        path: String,
+        reply: Reply<String>,
+    },
+    Commands(Reply<Vec<SlashCommand>>),
+    Queue(String),
+    ReadConfig {
+        root: String,
+        reply: Reply<Value>,
+    },
+    WriteConfig {
+        root: String,
+        reply: Reply<()>,
+    },
     Agents {
         first: bool,
     },
@@ -41,11 +76,62 @@ enum Pending {
     Action(&'static str),
 }
 
+impl Pending {
+    /// Fails the reply this request carries, if any.
+    fn fail(self, error: anyhow::Error) {
+        fn send<T>(reply: Reply<T>, error: anyhow::Error) {
+            let _ = reply.send(Err(error));
+        }
+        match self {
+            Pending::CreateAgent(reply) => send(reply, error),
+            Pending::CreateTerminal(reply) => send(reply, error),
+            Pending::SubscribeTerminal {
+                reply: Some((reply, _)),
+                ..
+            } => send(reply, error),
+            Pending::FileList(reply) => send(reply, error),
+            Pending::ReadFile { reply, .. } => send(reply, error),
+            Pending::CheckoutStatus(reply) | Pending::CheckoutFiles { reply, .. } => {
+                send(reply, error)
+            }
+            Pending::FileDiff { reply, .. } => send(reply, error),
+            Pending::Commands(reply) => send(reply, error),
+            Pending::ReadConfig { reply, .. } => send(reply, error),
+            Pending::WriteConfig { reply, .. } => send(reply, error),
+            _ => {}
+        }
+    }
+}
+
 #[derive(Default)]
 struct AgentExtra {
     modes: Vec<(String, String)>,
     current_mode: Option<String>,
     permissions: Vec<Value>,
+    thinking: Option<String>,
+    queue: Vec<QueuedPrompt>,
+    updated_at: Option<String>,
+}
+
+/// A project as `project.list` or a workspace describes it.
+#[derive(Clone)]
+struct ProjectInfo {
+    id: String,
+    name: String,
+    root: String,
+}
+
+/// The tree fields of a workspace that `WorkspaceSummary` does not hold.
+struct WorkspaceMeta {
+    project: ProjectInfo,
+    branch: Option<String>,
+    pinned: bool,
+}
+
+/// Thinking options of one model, as `(id, label)`, and its default.
+struct ModelThinking {
+    options: Vec<(String, String)>,
+    default: Option<String>,
 }
 
 struct TerminalStream {
@@ -55,7 +141,11 @@ struct TerminalStream {
 
 /// Session events this client subscribes to; with `explicit_event_subscriptions` the daemon
 /// sends them only on request.
-const SESSION_EVENTS: [&str; 2] = ["agent_permission_request", "agent_permission_resolved"];
+const SESSION_EVENTS: [&str; 3] = [
+    "agent_permission_request",
+    "agent_permission_resolved",
+    "project.update",
+];
 
 /// Client state for one host.
 pub struct ClientCore {
@@ -79,6 +169,21 @@ pub struct ClientCore {
     events: Vec<ClientEvent>,
     directory_changed: bool,
     dirty_timelines: BTreeSet<String>,
+    typed_server_info: Option<ServerInfo>,
+    project_list: Vec<ProjectInfo>,
+    /// `emptyProjects` of the workspace list, for a daemon without `project.list`.
+    empty_projects: Vec<ProjectInfo>,
+    workspace_meta: HashMap<String, WorkspaceMeta>,
+    projects: Vec<ProjectNode>,
+    projects_dirty: bool,
+    directory_events: Vec<DirectoryEvent>,
+    /// Keyed by `(provider, model id)`.
+    model_thinking: HashMap<(String, String), ModelThinking>,
+    default_models: HashMap<String, String>,
+    /// Watched folders and their diff subscription, `None` until the daemon answers.
+    checkout_watches: HashMap<String, Option<String>>,
+    /// The revision of the last project config read or written, per repo root.
+    config_revisions: HashMap<String, Value>,
 }
 
 impl ClientCore {
@@ -108,7 +213,72 @@ impl ClientCore {
             events: Vec::new(),
             directory_changed: false,
             dirty_timelines: BTreeSet::new(),
+            typed_server_info: None,
+            project_list: Vec::new(),
+            empty_projects: Vec::new(),
+            workspace_meta: HashMap::new(),
+            projects: Vec::new(),
+            projects_dirty: false,
+            directory_events: Vec::new(),
+            model_thinking: HashMap::new(),
+            default_models: HashMap::new(),
+            checkout_watches: HashMap::new(),
+            config_revisions: HashMap::new(),
         }
+    }
+
+    /// The `server_info` of the current connection as the generated type. `None` before the
+    /// first connection, or when a newer daemon sends a value this build cannot decode.
+    pub fn typed_server_info(&self) -> Option<&ServerInfo> {
+        self.typed_server_info.as_ref()
+    }
+
+    /// Whether the host holds prompts sent during a turn (`features.agentMessageQueue`).
+    pub fn supports_queue(&self) -> bool {
+        self.typed_server_info
+            .as_ref()
+            .and_then(|info| info.features.as_ref())
+            .and_then(|features| features.agent_message_queue)
+            == Some(true)
+    }
+
+    /// Projects with their workspaces, in the daemon's project order.
+    pub fn projects(&self) -> &[ProjectNode] {
+        &self.projects
+    }
+
+    /// Project tree and checkout events since the last call.
+    pub fn take_directory_events(&mut self) -> Vec<DirectoryEvent> {
+        std::mem::take(&mut self.directory_events)
+    }
+
+    pub fn queued_prompts(&self, agent_id: &str) -> Vec<QueuedPrompt> {
+        self.extras
+            .get(agent_id)
+            .map(|extra| extra.queue.clone())
+            .unwrap_or_default()
+    }
+
+    /// The thinking options of the agent's model. `None` when the model has none.
+    pub fn agent_thinking(&self, agent_id: &str) -> Option<ThinkingControls> {
+        let agent = self.agents.iter().find(|agent| agent.id == agent_id)?;
+        let model = agent
+            .model
+            .clone()
+            .or_else(|| self.default_models.get(&agent.provider).cloned())?;
+        let thinking = self.model_thinking.get(&(agent.provider.clone(), model))?;
+        if thinking.options.is_empty() {
+            return None;
+        }
+        let current = self
+            .extras
+            .get(agent_id)
+            .and_then(|extra| extra.thinking.clone())
+            .or_else(|| thinking.default.clone());
+        Some(ThinkingControls {
+            options: thinking.options.clone(),
+            current,
+        })
     }
 
     pub fn is_connected(&self) -> bool {
@@ -138,6 +308,9 @@ impl ClientCore {
 
     /// Events since the last call, with one `AgentsChanged` for any directory change.
     pub fn take_events(&mut self) -> Vec<ClientEvent> {
+        if self.directory_changed || std::mem::take(&mut self.projects_dirty) {
+            self.rebuild_projects();
+        }
         if std::mem::take(&mut self.directory_changed) {
             self.events.push(ClientEvent::AgentsChanged);
         }
@@ -184,6 +357,9 @@ impl ClientCore {
             } => {
                 if self.generation == Some(generation) {
                     self.ready = true;
+                    self.typed_server_info = bachuc_protocol::decode_server_info(&server_info)
+                        .inspect_err(|error| log::warn!("server_info does not decode: {error}"))
+                        .ok();
                     self.server_info = Some(server_info);
                     self.events.push(ClientEvent::Connected);
                 }
@@ -222,6 +398,7 @@ impl ClientCore {
             }),
             Pending::Workspaces { first: true },
         );
+        let _ = self.request(json!({"type": "project.list.request"}), Pending::Projects);
         let _ = self.request(
             json!({"type": "list_available_providers_request"}),
             Pending::Providers,
@@ -243,6 +420,10 @@ impl ClientCore {
         for terminal_id in terminal_ids {
             self.subscribe_terminal(terminal_id, None);
         }
+        let watched: Vec<String> = self.checkout_watches.keys().cloned().collect();
+        for cwd in watched {
+            self.subscribe_checkout(cwd);
+        }
     }
 
     fn closed(&mut self, generation: u64, reason: String) {
@@ -255,23 +436,17 @@ impl ClientCore {
         self.timeline_subscription = None;
         self.latest_timeline_request = None;
         for (_, pending) in self.pending.drain() {
-            let error = || anyhow!("disconnected: {reason}");
-            match pending {
-                Pending::CreateAgent(reply) => {
-                    let _ = reply.send(Err(error()));
-                }
-                Pending::CreateTerminal(reply) => {
-                    let _ = reply.send(Err(error()));
-                }
-                Pending::SubscribeTerminal {
-                    terminal_id,
-                    reply: Some((reply, _)),
-                } => {
-                    self.terminals.remove(&terminal_id);
-                    let _ = reply.send(Err(error()));
-                }
-                _ => {}
+            if let Pending::SubscribeTerminal {
+                terminal_id,
+                reply: Some(_),
+            } = &pending
+            {
+                self.terminals.remove(terminal_id);
             }
+            pending.fail(anyhow!("disconnected: {reason}"));
+        }
+        for subscription in self.checkout_watches.values_mut() {
+            *subscription = None;
         }
         for sync in self.timelines.values_mut() {
             sync.disconnected();
@@ -398,6 +573,27 @@ impl ClientCore {
     }
 
     pub fn send_prompt(&mut self, agent_id: &str, text: String, images: Vec<Value>) {
+        self.send_message(agent_id, text, images, None);
+    }
+
+    /// Sends a prompt with what it does to a running turn.
+    pub fn send_prompt_with(
+        &mut self,
+        agent_id: &str,
+        text: String,
+        images: Vec<Value>,
+        behavior: TurnBehavior,
+    ) {
+        self.send_message(agent_id, text, images, Some(behavior));
+    }
+
+    fn send_message(
+        &mut self,
+        agent_id: &str,
+        text: String,
+        images: Vec<Value>,
+        behavior: Option<TurnBehavior>,
+    ) {
         let mut message = json!({
             "type": "send_agent_message_request",
             "agentId": agent_id,
@@ -407,7 +603,238 @@ impl ClientCore {
         if !images.is_empty() {
             message["images"] = Value::Array(images);
         }
+        if let Some(behavior) = behavior {
+            message["activeTurnBehavior"] = json!(behavior.wire());
+        }
         let _ = self.request(message, Pending::Action("send_agent_message"));
+    }
+
+    /// Queues a prompt behind the running turn. Needs `supports_queue`.
+    pub fn enqueue_prompt(&mut self, agent_id: &str, text: String, images: Vec<Value>) {
+        let mut message =
+            json!({"type": "agent.queue.enqueue.request", "agentId": agent_id, "text": text});
+        if !images.is_empty() {
+            message["images"] = Value::Array(images);
+        }
+        let _ = self.request(message, Pending::Queue(agent_id.to_string()));
+    }
+
+    pub fn cancel_queued(&mut self, agent_id: &str, queued_id: &str) {
+        let _ = self.request(
+            json!({"type": "agent.queue.cancel.request", "agentId": agent_id, "itemId": queued_id}),
+            Pending::Queue(agent_id.to_string()),
+        );
+    }
+
+    pub fn set_thinking(&mut self, agent_id: &str, option_id: &str) {
+        let _ = self.request(
+            json!({
+                "type": "set_agent_thinking_request",
+                "agentId": agent_id,
+                "thinkingOptionId": option_id,
+            }),
+            Pending::Action("set_agent_thinking"),
+        );
+    }
+
+    pub fn archive_agent(&mut self, agent_id: &str) {
+        let _ = self.request(
+            json!({"type": "archive_agent_request", "agentId": agent_id}),
+            Pending::Action("archive_agent"),
+        );
+    }
+
+    pub fn rename_agent(&mut self, agent_id: &str, title: &str) {
+        let _ = self.request(
+            json!({"type": "update_agent_request", "agentId": agent_id, "name": title}),
+            Pending::Action("update_agent"),
+        );
+    }
+
+    pub fn rename_workspace(&mut self, workspace_id: &str, title: &str) {
+        let _ = self.request(
+            json!({"type": "workspace.title.set.request", "workspaceId": workspace_id, "title": title}),
+            Pending::Action("workspace.title.set"),
+        );
+    }
+
+    pub fn pin_workspace(&mut self, workspace_id: &str, pinned: bool) {
+        let _ = self.request(
+            json!({"type": "workspace.pin.set.request", "workspaceId": workspace_id, "pinned": pinned}),
+            Pending::Action("workspace.pin.set"),
+        );
+    }
+
+    pub fn archive_workspace(&mut self, workspace_id: &str) {
+        let _ = self.request(
+            json!({"type": "archive_workspace_request", "workspaceId": workspace_id}),
+            Pending::Action("archive_workspace"),
+        );
+    }
+
+    pub fn mark_workspace_unread(&mut self, workspace_id: &str) {
+        let _ = self.request(
+            json!({"type": "workspace.mark_unread.request", "workspaceId": workspace_id}),
+            Pending::Action("workspace.mark_unread"),
+        );
+    }
+
+    /// Answers a permission request with a full `AgentPermissionResponse`: question answers,
+    /// plan approval, or `updatedInput`.
+    pub fn respond_permission_with(&mut self, agent_id: &str, request_id: &str, response: Value) {
+        self.send(json!({
+            "type": "agent_permission_response",
+            "agentId": agent_id,
+            "requestId": request_id,
+            "response": response,
+        }));
+    }
+
+    /// Sends a request whose answer resolves the returned receiver.
+    fn request_reply<T>(
+        &mut self,
+        message: Value,
+        pending: impl FnOnce(Reply<T>) -> Pending,
+    ) -> oneshot::Receiver<anyhow::Result<T>> {
+        let (reply, receiver) = oneshot::channel();
+        if let Err(pending) = self.request(message, pending(reply)) {
+            pending.fail(anyhow!("not connected"));
+        }
+        receiver
+    }
+
+    pub fn list_commands(
+        &mut self,
+        agent_id: &str,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<SlashCommand>>> {
+        self.request_reply(
+            json!({"type": "list_commands_request", "agentId": agent_id}),
+            Pending::Commands,
+        )
+    }
+
+    pub fn list_directory(
+        &mut self,
+        cwd: &str,
+        path: &str,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<FileEntry>>> {
+        self.request_reply(
+            json!({"type": "file_explorer_request", "cwd": cwd, "path": path, "mode": "list"}),
+            Pending::FileList,
+        )
+    }
+
+    /// Reads a file. The daemon streams it as binary frames; an older one answers in JSON.
+    pub fn read_file(
+        &mut self,
+        cwd: &str,
+        path: &str,
+    ) -> oneshot::Receiver<anyhow::Result<FileContent>> {
+        self.request_reply(
+            json!({
+                "type": "file_explorer_request",
+                "cwd": cwd,
+                "path": path,
+                "mode": "file",
+                "acceptBinary": true,
+            }),
+            |reply| Pending::ReadFile {
+                path: path.to_string(),
+                reply,
+                transfer: None,
+            },
+        )
+    }
+
+    /// The branch and the uncommitted changed files of a folder.
+    pub fn checkout_status(
+        &mut self,
+        cwd: &str,
+    ) -> oneshot::Receiver<anyhow::Result<CheckoutStatus>> {
+        self.request_reply(
+            json!({"type": "checkout_status_request", "cwd": cwd}),
+            Pending::CheckoutStatus,
+        )
+    }
+
+    /// The unified diff of one uncommitted file; empty when the file has no change.
+    pub fn file_diff(
+        &mut self,
+        cwd: &str,
+        path: &str,
+    ) -> oneshot::Receiver<anyhow::Result<String>> {
+        self.request_reply(
+            json!({"type": "checkout.diff.get.request", "cwd": cwd, "compare": {"mode": UNCOMMITTED}}),
+            |reply| Pending::FileDiff {
+                path: path.to_string(),
+                reply,
+            },
+        )
+    }
+
+    /// Emits `CheckoutChanged` for `cwd` whenever its changed files change.
+    pub fn watch_checkout(&mut self, cwd: &str) {
+        if self.checkout_watches.contains_key(cwd) {
+            return;
+        }
+        self.checkout_watches.insert(cwd.to_string(), None);
+        self.subscribe_checkout(cwd.to_string());
+    }
+
+    pub fn unwatch_checkout(&mut self, cwd: &str) {
+        if let Some(Some(subscription_id)) = self.checkout_watches.remove(cwd) {
+            self.send(json!({
+                "type": "unsubscribe_checkout_diff_request",
+                "subscriptionId": subscription_id,
+            }));
+        }
+    }
+
+    fn subscribe_checkout(&mut self, cwd: String) {
+        let message = json!({
+            "type": "subscribe_checkout_diff_request",
+            "cwd": cwd,
+            "compare": {"mode": UNCOMMITTED},
+        });
+        let _ = self.request(message, Pending::CheckoutWatch(cwd));
+    }
+
+    /// The project's `paseo.json` (null when it has none). The revision is kept for the next
+    /// write.
+    pub fn read_project_config(&mut self, root: &str) -> oneshot::Receiver<anyhow::Result<Value>> {
+        self.request_reply(
+            json!({"type": "read_project_config_request", "repoRoot": root}),
+            |reply| Pending::ReadConfig {
+                root: root.to_string(),
+                reply,
+            },
+        )
+    }
+
+    /// Writes the project's `paseo.json`. It fails as stale when the file changed after the
+    /// last read or write through this client.
+    pub fn write_project_config(
+        &mut self,
+        root: &str,
+        config: Value,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let revision = self
+            .config_revisions
+            .get(root)
+            .cloned()
+            .unwrap_or(Value::Null);
+        self.request_reply(
+            json!({
+                "type": "write_project_config_request",
+                "repoRoot": root,
+                "config": config,
+                "expectedRevision": revision,
+            }),
+            |reply| Pending::WriteConfig {
+                root: root.to_string(),
+                reply,
+            },
+        )
     }
 
     pub fn cancel_agent(&mut self, agent_id: &str) {
@@ -584,6 +1011,13 @@ impl ClientCore {
     // ---- incoming ----
 
     fn binary(&mut self, bytes: &[u8]) {
+        if bytes
+            .first()
+            .copied()
+            .is_some_and(files::is_transfer_opcode)
+        {
+            return self.transfer(bytes);
+        }
         let Some((slot, frame)) = terminal::parse_frame(bytes) else {
             return;
         };
@@ -599,6 +1033,48 @@ impl ClientCore {
             self.terminals.remove(&terminal_id);
             self.slots.remove(&slot);
             self.send(json!({"type": "unsubscribe_terminal_request", "terminalId": terminal_id}));
+        }
+    }
+
+    /// A file transfer frame of a `read_file` request. `FileEnd` completes the read; the
+    /// daemon sends no JSON response then.
+    fn transfer(&mut self, bytes: &[u8]) {
+        let Some(frame) = files::parse_transfer(bytes) else {
+            return;
+        };
+        match frame {
+            TransferFrame::Begin {
+                request_id,
+                metadata,
+            } => {
+                if let Some(Pending::ReadFile { transfer, .. }) = self.pending.get_mut(&request_id)
+                {
+                    *transfer = Some(Box::new((metadata, Vec::new())));
+                }
+            }
+            TransferFrame::Chunk { request_id, bytes } => {
+                if let Some(Pending::ReadFile {
+                    transfer: Some(transfer),
+                    ..
+                }) = self.pending.get_mut(&request_id)
+                {
+                    transfer.1.extend_from_slice(&bytes);
+                }
+            }
+            TransferFrame::End { request_id } => {
+                if let Some(Pending::ReadFile {
+                    transfer: Some(_), ..
+                }) = self.pending.get(&request_id)
+                    && let Some(Pending::ReadFile {
+                        path,
+                        reply,
+                        transfer: Some(transfer),
+                    }) = self.pending.remove(&request_id)
+                {
+                    let (metadata, buffer) = *transfer;
+                    let _ = reply.send(Ok(files::streamed_file(&path, &metadata, buffer)));
+                }
+            }
         }
     }
 
@@ -635,10 +1111,41 @@ impl ClientCore {
                 Some("remove") => {
                     let id = payload["id"].as_str().unwrap_or_default();
                     self.workspaces.retain(|workspace| workspace.id != id);
+                    self.workspace_meta.remove(id);
                     self.directory_changed = true;
                 }
                 _ => {}
             },
+            "project.update" => match payload["kind"].as_str() {
+                Some("upsert") => {
+                    if let Some(project) = project_info(&payload["project"]) {
+                        match self.project_list.iter_mut().find(|p| p.id == project.id) {
+                            Some(existing) => *existing = project,
+                            None => self.project_list.push(project),
+                        }
+                        self.projects_dirty = true;
+                    }
+                }
+                Some("remove") => {
+                    let id = payload["projectId"].as_str().unwrap_or_default();
+                    self.project_list.retain(|project| project.id != id);
+                    self.empty_projects.retain(|project| project.id != id);
+                    self.projects_dirty = true;
+                }
+                _ => {}
+            },
+            "checkout_diff_update" => {
+                let subscription = payload["subscriptionId"].as_str().unwrap_or_default();
+                let cwd = self
+                    .checkout_watches
+                    .iter()
+                    .find(|(_, id)| id.as_deref() == Some(subscription))
+                    .map(|(cwd, _)| cwd.clone());
+                if let Some(cwd) = cwd {
+                    self.directory_events
+                        .push(DirectoryEvent::CheckoutChanged { cwd });
+                }
+            }
             "agent_stream" => self.stream(payload),
             "agent.timeline.replacement" => {
                 let agent_id = payload["agentId"].as_str().unwrap_or_default().to_string();
@@ -695,6 +1202,37 @@ impl ClientCore {
             Pending::Models(provider) => {
                 if let Some(error) = error {
                     return log::warn!("list_provider_models {provider} failed: {error}");
+                }
+                for model in payload["models"].as_array().into_iter().flatten() {
+                    let Some(id) = model["id"].as_str() else {
+                        continue;
+                    };
+                    if model["isDefault"] == true {
+                        self.default_models.insert(provider.clone(), id.to_string());
+                    }
+                    let options = model["thinkingOptions"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|option| {
+                            let id = option["id"].as_str()?.to_string();
+                            let label = option["label"].as_str().unwrap_or(&id).to_string();
+                            Some((id, label))
+                        })
+                        .collect();
+                    let default = model["defaultThinkingOptionId"]
+                        .as_str()
+                        .or_else(|| {
+                            model["thinkingOptions"]
+                                .as_array()?
+                                .iter()
+                                .find(|option| option["isDefault"] == true)?["id"]
+                                .as_str()
+                        })
+                        .map(str::to_string);
+                    let thinking = ModelThinking { options, default };
+                    self.model_thinking
+                        .insert((provider.clone(), id.to_string()), thinking);
                 }
                 let models: Vec<(String, String)> = payload["models"]
                     .as_array()
@@ -806,6 +1344,191 @@ impl ClientCore {
                     log::warn!("{name} failed: {error}");
                 }
             }
+            pending => self.parity_response(pending, kind, payload, error),
+        }
+    }
+
+    /// Answers of the requests added for the parity views.
+    fn parity_response(
+        &mut self,
+        pending: Pending,
+        kind: &str,
+        payload: &Value,
+        error: Option<String>,
+    ) {
+        // A checkout error is `{code, message}`, which `error` above does not read.
+        let rpc_error = (kind == "rpc_error").then(|| error.clone()).flatten();
+        match pending {
+            Pending::Projects => {
+                if let Some(error) = error {
+                    return log::warn!("project.list failed: {error}");
+                }
+                self.project_list = payload["projects"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(project_info)
+                    .collect();
+                self.projects_dirty = true;
+            }
+            Pending::FileList(reply) => {
+                let result = match (error, payload["directory"].is_object()) {
+                    (Some(error), _) => Err(anyhow!(error)),
+                    (None, true) => Ok(files::directory_entries(&payload["directory"])),
+                    (None, false) => Err(anyhow!("directory listing unavailable")),
+                };
+                let _ = reply.send(result);
+            }
+            Pending::ReadFile { reply, .. } => {
+                let result = match (error, payload["file"].is_object()) {
+                    (Some(error), _) => Err(anyhow!(error)),
+                    (None, true) => files::json_file(&payload["file"]),
+                    (None, false) => Err(anyhow!("file unavailable")),
+                };
+                let _ = reply.send(result);
+            }
+            Pending::CheckoutStatus(reply) => {
+                if let Some(error) = rpc_error {
+                    let _ = reply.send(Err(anyhow!(error)));
+                    return;
+                }
+                if payload["isGit"] != true {
+                    let result = match files::checkout_error(payload) {
+                        Some((code, message)) if code != "NOT_GIT_REPO" => Err(anyhow!(message)),
+                        _ => Ok(CheckoutStatus {
+                            branch: None,
+                            files: Vec::new(),
+                        }),
+                    };
+                    let _ = reply.send(result);
+                    return;
+                }
+                if let Some((_, message)) = files::checkout_error(payload) {
+                    let _ = reply.send(Err(anyhow!(message)));
+                    return;
+                }
+                // A detached HEAD has no branch to show, as in the app.
+                let branch = payload["currentBranch"]
+                    .as_str()
+                    .filter(|branch| *branch != "HEAD")
+                    .map(str::to_string);
+                let cwd = payload["cwd"].as_str().unwrap_or_default();
+                let message = json!({
+                    "type": "checkout.diff.get.request",
+                    "cwd": cwd,
+                    "compare": {"mode": UNCOMMITTED},
+                });
+                if let Err(pending) =
+                    self.request(message, Pending::CheckoutFiles { branch, reply })
+                {
+                    pending.fail(anyhow!("not connected"));
+                }
+            }
+            Pending::CheckoutFiles { branch, reply } => {
+                let result = match (rpc_error, files::checkout_error(payload)) {
+                    (Some(error), _) => Err(anyhow!(error)),
+                    (None, Some((code, message))) if code != "NOT_GIT_REPO" => {
+                        Err(anyhow!(message))
+                    }
+                    (None, error) => Ok(CheckoutStatus {
+                        branch,
+                        files: if error.is_some() {
+                            Vec::new()
+                        } else {
+                            files::changed_files(&payload["files"])
+                        },
+                    }),
+                };
+                let _ = reply.send(result);
+            }
+            Pending::CheckoutWatch(cwd) => {
+                let Some(subscription_id) = payload["subscriptionId"].as_str() else {
+                    let error = rpc_error.or(files::checkout_error(payload).map(|(_, m)| m));
+                    return log::warn!("checkout watch of {cwd} failed: {error:?}");
+                };
+                match self.checkout_watches.get_mut(&cwd) {
+                    Some(slot) => {
+                        *slot = Some(subscription_id.to_string());
+                        self.directory_events
+                            .push(DirectoryEvent::CheckoutChanged { cwd });
+                    }
+                    // Unwatched while the subscription was on its way.
+                    None => {
+                        self.send(json!({
+                            "type": "unsubscribe_checkout_diff_request",
+                            "subscriptionId": subscription_id,
+                        }));
+                    }
+                }
+            }
+            Pending::FileDiff { path, reply } => {
+                let result = match (rpc_error, files::checkout_error(payload)) {
+                    (Some(error), _) => Err(anyhow!(error)),
+                    (None, Some((_, message))) => Err(anyhow!(message)),
+                    (None, None) => {
+                        let file = payload["files"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .find(|file| file["path"] == path.as_str());
+                        match file {
+                            None => Ok(String::new()),
+                            Some(file) => match file["status"].as_str().unwrap_or("ok") {
+                                "ok" => Ok(files::unified_diff(file)),
+                                status => Err(anyhow!("{path} has no diff: {status}")),
+                            },
+                        }
+                    }
+                };
+                let _ = reply.send(result);
+            }
+            Pending::Commands(reply) => {
+                let result = match error {
+                    Some(error) => Err(anyhow!(error)),
+                    None => Ok(payload["commands"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|command| {
+                            Some(SlashCommand {
+                                name: command["name"].as_str()?.to_string(),
+                                description: command["description"]
+                                    .as_str()
+                                    .unwrap_or_default()
+                                    .to_string(),
+                            })
+                        })
+                        .collect()),
+                };
+                let _ = reply.send(result);
+            }
+            Pending::Queue(agent_id) => {
+                if let Some(error) = error {
+                    return log::warn!("queue request for {agent_id} failed: {error}");
+                }
+                if payload["queue"].is_object()
+                    && let Some(extra) = self.extras.get_mut(&agent_id)
+                {
+                    extra.queue = queued_prompts(&payload["queue"]);
+                    self.directory_changed = true;
+                }
+            }
+            Pending::ReadConfig { root, reply } => {
+                let result = config_result(&rpc_error, payload).map(|()| {
+                    self.config_revisions
+                        .insert(root, payload["revision"].clone());
+                    payload["config"].clone()
+                });
+                let _ = reply.send(result);
+            }
+            Pending::WriteConfig { root, reply } => {
+                let result = config_result(&rpc_error, payload).map(|()| {
+                    self.config_revisions
+                        .insert(root, payload["revision"].clone());
+                });
+                let _ = reply.send(result);
+            }
+            other => other.fail(anyhow!("unexpected response {kind}")),
         }
     }
 
@@ -859,6 +1582,18 @@ impl ClientCore {
             self.remove_agent(id);
             return;
         }
+        // The daemon can send an older snapshot after a newer one, for example `idle` after
+        // `running` at agent start. ISO timestamps compare as strings.
+        let updated_at = agent["updatedAt"].as_str().map(str::to_string);
+        let stored = self
+            .extras
+            .get(id)
+            .and_then(|extra| extra.updated_at.as_ref());
+        if let (Some(new), Some(old)) = (&updated_at, stored)
+            && new < old
+        {
+            return;
+        }
         let runtime = &agent["runtimeInfo"];
         let permissions: Vec<Value> = agent["pendingPermissions"]
             .as_array()
@@ -909,6 +1644,12 @@ impl ClientCore {
         let extra = self.extras.entry(id.to_string()).or_default();
         extra.modes = modes;
         extra.current_mode = current_mode;
+        extra.thinking = agent["thinkingOptionId"]
+            .as_str()
+            .or_else(|| runtime["thinkingOptionId"].as_str())
+            .map(str::to_string);
+        extra.queue = queued_prompts(&agent["queue"]);
+        extra.updated_at = updated_at;
         self.set_permissions(id, permissions);
         self.directory_changed = true;
     }
@@ -925,9 +1666,19 @@ impl ClientCore {
     fn workspaces_page(&mut self, payload: &Value, first: bool) {
         if first {
             self.workspaces.clear();
+            self.workspace_meta.clear();
         }
         for workspace in payload["entries"].as_array().into_iter().flatten() {
             self.upsert_workspace(workspace);
+        }
+        // Projects with no active workspace come only on the first page.
+        if first {
+            self.empty_projects = payload["emptyProjects"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(project_info)
+                .collect();
         }
         self.directory_changed = true;
         if payload["pageInfo"]["hasMore"] == true
@@ -956,6 +1707,16 @@ impl ClientCore {
                 .unwrap_or_default()
                 .to_string(),
         };
+        if let Some(project) = project_info(workspace) {
+            let meta = WorkspaceMeta {
+                project,
+                branch: workspace["gitRuntime"]["currentBranch"]
+                    .as_str()
+                    .map(str::to_string),
+                pinned: workspace["pinnedAt"].is_string(),
+            };
+            self.workspace_meta.insert(id.to_string(), meta);
+        }
         match self
             .workspaces
             .iter_mut()
@@ -1080,4 +1841,107 @@ impl ClientCore {
         }
         self.directory_changed = true;
     }
+
+    // ---- project tree ----
+
+    /// Rebuilds the tree in O(projects + workspaces + agents) and reports a change.
+    fn rebuild_projects(&mut self) {
+        let mut agents_by_workspace: HashMap<&str, Vec<String>> = HashMap::new();
+        for agent in &self.agents {
+            if let Some(workspace_id) = &agent.workspace_id {
+                agents_by_workspace
+                    .entry(workspace_id)
+                    .or_default()
+                    .push(agent.id.clone());
+            }
+        }
+        let mut order: Vec<ProjectInfo> = self.project_list.clone();
+        for project in &self.empty_projects {
+            if !order.iter().any(|listed| listed.id == project.id) {
+                order.push(project.clone());
+            }
+        }
+        let mut workspaces_by_project: HashMap<String, Vec<WorkspaceNode>> = HashMap::new();
+        for workspace in &self.workspaces {
+            let Some(meta) = self.workspace_meta.get(&workspace.id) else {
+                continue;
+            };
+            // A workspace whose project is not listed yet still shows, under its own project.
+            if !order.iter().any(|project| project.id == meta.project.id) {
+                order.push(meta.project.clone());
+            }
+            workspaces_by_project
+                .entry(meta.project.id.clone())
+                .or_default()
+                .push(WorkspaceNode {
+                    id: workspace.id.clone(),
+                    name: workspace.name.clone(),
+                    cwd: workspace.cwd.clone(),
+                    branch: meta.branch.clone(),
+                    pinned: meta.pinned,
+                    agent_ids: agents_by_workspace
+                        .remove(workspace.id.as_str())
+                        .unwrap_or_default(),
+                });
+        }
+        let projects: Vec<ProjectNode> = order
+            .into_iter()
+            .map(|project| ProjectNode {
+                workspaces: workspaces_by_project
+                    .remove(&project.id)
+                    .unwrap_or_default(),
+                id: project.id,
+                name: project.name,
+                root: project.root,
+            })
+            .collect();
+        if projects != self.projects {
+            self.projects = projects;
+            self.directory_events.push(DirectoryEvent::ProjectsChanged);
+        }
+    }
+}
+
+/// A project from a project or workspace descriptor; both carry the same project fields.
+fn project_info(descriptor: &Value) -> Option<ProjectInfo> {
+    Some(ProjectInfo {
+        id: descriptor["projectId"].as_str()?.to_string(),
+        name: descriptor["projectDisplayName"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        root: descriptor["projectRootPath"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+    })
+}
+
+fn queued_prompts(queue: &Value) -> Vec<QueuedPrompt> {
+    queue["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            Some(QueuedPrompt {
+                id: item["id"].as_str()?.to_string(),
+                text: item["text"].as_str().unwrap_or_default().to_string(),
+            })
+        })
+        .collect()
+}
+
+/// The outcome of a project config response: `ok` or an error code such as
+/// `stale_project_config`.
+fn config_result(rpc_error: &Option<String>, payload: &Value) -> anyhow::Result<()> {
+    if let Some(error) = rpc_error {
+        anyhow::bail!("{error}");
+    }
+    if payload["ok"] == true {
+        return Ok(());
+    }
+    let code = payload["error"]["code"]
+        .as_str()
+        .unwrap_or("project config request failed");
+    anyhow::bail!("{code}")
 }

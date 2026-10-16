@@ -11,6 +11,9 @@ pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/protocol.rs"));
 }
 
+/// The `server_info` status payload, the daemon's answer to `hello`. The session envelope
+/// types status payloads as an open object; decode this one with `decode_server_info`.
+pub use generated::ServerInfo;
 /// The client to daemon envelope: `ping`, `hello`, `recording_state`, or `session`.
 pub use generated::WsInbound;
 /// The daemon to client envelope: `pong`, `session`, or `hello.rejected`.
@@ -26,6 +29,11 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// Decodes one text frame from the daemon.
 pub fn decode_outbound(text: &str) -> Result<WsOutbound, serde_json::Error> {
     serde_json::from_str(text)
+}
+
+/// Decodes the `payload` of a `status` message whose `status` is `server_info`.
+pub fn decode_server_info(payload: &serde_json::Value) -> Result<ServerInfo, serde_json::Error> {
+    <ServerInfo as serde::Deserialize>::deserialize(payload)
 }
 
 /// Encodes one text frame for the daemon.

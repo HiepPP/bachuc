@@ -73557,6 +73557,301 @@
           ]
         }
       }
+    },
+    "ServerInfo": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "const": "server_info"
+        },
+        "protocolVersion": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "serverId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hostname": {},
+        "version": {},
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "daemon.read",
+              "daemon.manage",
+              "tunnel.manage",
+              "access.manage",
+              "workspace.read",
+              "workspace.write",
+              "workspace.manage",
+              "automation.manage",
+              "hub.execute"
+            ]
+          }
+        },
+        "desktopManaged": {
+          "type": "boolean"
+        },
+        "capabilities": {},
+        "features": {
+          "type": "object",
+          "properties": {
+            "agentRequestReceipts": {
+              "type": "boolean"
+            },
+            "workspaceRequestReceipts": {
+              "type": "boolean"
+            },
+            "creationLifecycle": {
+              "type": "boolean"
+            },
+            "hubAgentRpc": {
+              "type": "boolean"
+            },
+            "providersSnapshot": {
+              "type": "boolean"
+            },
+            "providersSnapshotCwd": {
+              "type": "boolean"
+            },
+            "directorySync": {
+              "type": "boolean"
+            },
+            "workspaceLabels": {
+              "type": "boolean"
+            },
+            "workspaceSetupRun": {
+              "type": "boolean"
+            },
+            "workspaceTerminals": {
+              "type": "boolean"
+            },
+            "checkoutForgeSetAutoMerge": {
+              "type": "boolean"
+            },
+            "checkoutGithubSetAutoMerge": {
+              "type": "boolean"
+            },
+            "githubCheckDetails": {
+              "type": "boolean"
+            },
+            "forgeCheckDetails": {
+              "type": "boolean"
+            },
+            "forgeSearch": {
+              "type": "boolean"
+            },
+            "daemonStatusRpc": {
+              "type": "boolean"
+            },
+            "daemonConfigReload": {
+              "type": "boolean"
+            },
+            "relayConfig": {
+              "type": "boolean"
+            },
+            "pushTokenRevocation": {
+              "type": "boolean"
+            },
+            "plugins": {
+              "type": "boolean"
+            },
+            "pluginManagement": {
+              "type": "boolean"
+            },
+            "pluginLogs": {
+              "type": "boolean"
+            },
+            "pluginGitManagement": {
+              "type": "boolean"
+            },
+            "pluginSourceInstallation": {
+              "type": "boolean"
+            },
+            "pluginSourceUpdates": {
+              "type": "boolean"
+            },
+            "pluginThemes": {
+              "type": "boolean"
+            },
+            "pluginSettings": {
+              "type": "boolean"
+            },
+            "pluginTimelineItems": {
+              "type": "boolean"
+            },
+            "skillManagement": {
+              "type": "boolean"
+            },
+            "terminal-restore-modes": {
+              "type": "boolean"
+            },
+            "terminal-input-mode-replay": {
+              "type": "boolean"
+            },
+            "terminal-size-ownership": {
+              "type": "boolean"
+            },
+            "rewind": {
+              "type": "boolean"
+            },
+            "agentTimelinePromptIndex": {
+              "type": "boolean"
+            },
+            "agentHistorySearch": {
+              "type": "boolean"
+            },
+            "checkoutRefresh": {
+              "type": "boolean"
+            },
+            "workspaceMultiplicity": {
+              "type": "boolean"
+            },
+            "projectRemove": {
+              "type": "boolean"
+            },
+            "projectAdd": {
+              "type": "boolean"
+            },
+            "worktreeRestore": {
+              "type": "boolean"
+            },
+            "workspaceRecovery": {
+              "type": "boolean"
+            },
+            "workspaceFileEditing": {
+              "type": "boolean"
+            },
+            "providerUsageList": {
+              "type": "boolean"
+            },
+            "agentDetach": {
+              "type": "boolean"
+            },
+            "agentRuntimeClose": {
+              "type": "boolean"
+            },
+            "timelineLatestPromptTail": {
+              "type": "boolean"
+            },
+            "agentThinkingUpdate": {
+              "type": "boolean"
+            },
+            "daemonDiagnostics": {
+              "type": "boolean"
+            },
+            "daemonSelfUpdate": {
+              "type": "boolean"
+            },
+            "agentForkContext": {
+              "type": "boolean"
+            },
+            "agentForkContextCursor": {
+              "type": "boolean"
+            },
+            "agentMessageQueue": {
+              "type": "boolean"
+            },
+            "agentBackgroundProcesses": {
+              "type": "boolean"
+            },
+            "providerSubagents": {
+              "type": "boolean"
+            },
+            "projectedSubagentTimeline": {
+              "type": "boolean"
+            },
+            "providerSubagentNesting": {
+              "type": "boolean"
+            },
+            "workspacePinning": {
+              "type": "boolean"
+            },
+            "workspaceMarkUnread": {
+              "type": "boolean"
+            },
+            "hubRelationship": {
+              "type": "boolean"
+            },
+            "projectGithubClone": {
+              "type": "boolean"
+            },
+            "workspaceGithubRepositorySearch": {
+              "type": "boolean"
+            },
+            "projectCreateDirectory": {
+              "type": "boolean"
+            },
+            "projectList": {
+              "type": "boolean"
+            },
+            "commitsList": {
+              "type": "boolean"
+            },
+            "commitBaseClassification": {
+              "type": "boolean"
+            },
+            "providerRemoval": {
+              "type": "boolean"
+            },
+            "importSessionWorkspaceTarget": {
+              "type": "boolean"
+            },
+            "importSessionSearch": {
+              "type": "boolean"
+            },
+            "forgeProviders": {
+              "type": "boolean"
+            },
+            "selectiveAgentTimeline": {
+              "type": "boolean"
+            },
+            "explicitEventSubscriptions": {
+              "type": "boolean"
+            },
+            "ownedSubscriptions": {
+              "type": "boolean"
+            },
+            "canonicalSubmittedPrompts": {
+              "type": "boolean"
+            },
+            "agentTurnIdentity": {
+              "type": "boolean"
+            },
+            "stableProjectIdentity": {
+              "type": "boolean"
+            },
+            "workspaceScriptManagement": {
+              "type": "boolean"
+            },
+            "projectCustomIcon": {
+              "type": "boolean"
+            },
+            "fsEntryOps": {
+              "type": "boolean"
+            },
+            "fsEntryDuplicate": {
+              "type": "boolean"
+            },
+            "checkoutDiscardChanges": {
+              "type": "boolean"
+            },
+            "agentProfiles": {
+              "type": "boolean"
+            },
+            "agentConfigApply": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "required": ["status", "serverId"],
+      "additionalProperties": {}
     }
   }
 }

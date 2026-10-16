@@ -58,6 +58,115 @@ pub struct AgentControls {
     pub running: bool,
 }
 
+/// Project tree and checkout changes. `Client` emits these next to `ClientEvent`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DirectoryEvent {
+    /// `Client::projects` changed.
+    ProjectsChanged,
+    /// The changed files of a watched folder changed.
+    CheckoutChanged { cwd: String },
+}
+
+/// One project of the sidebar tree, in the daemon's project order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectNode {
+    pub id: String,
+    pub name: String,
+    pub root: String,
+    pub workspaces: Vec<WorkspaceNode>,
+}
+
+/// One workspace of a project. `agent_ids` follow the agent list order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceNode {
+    pub id: String,
+    pub name: String,
+    pub cwd: String,
+    pub branch: Option<String>,
+    pub pinned: bool,
+    pub agent_ids: Vec<String>,
+}
+
+/// One entry of a directory listing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileKind {
+    Text,
+    Image,
+    Binary,
+}
+
+/// A read file. `text` is set for `Text`, `bytes` for `Image` and `Binary`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileContent {
+    pub path: String,
+    pub kind: FileKind,
+    pub text: Option<String>,
+    pub bytes: Option<Vec<u8>>,
+    pub mime_type: Option<String>,
+    pub size: u64,
+}
+
+/// The branch and uncommitted changes of a folder. A folder outside git has no branch and no
+/// files.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckoutStatus {
+    pub branch: Option<String>,
+    pub files: Vec<ChangedFile>,
+}
+
+/// One changed file. `status` is `ok`, `too_large`, or `binary`; only `ok` has a diff.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChangedFile {
+    pub path: String,
+    pub status: String,
+    pub added: u32,
+    pub removed: u32,
+}
+
+/// Thinking choices of an agent's model, as `(id, label)`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThinkingControls {
+    pub options: Vec<(String, String)>,
+    pub current: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlashCommand {
+    pub name: String,
+    pub description: String,
+}
+
+/// What a prompt sent during a running turn does to that turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurnBehavior {
+    Interrupt,
+    Steer,
+}
+
+impl TurnBehavior {
+    pub(crate) fn wire(self) -> &'static str {
+        match self {
+            TurnBehavior::Interrupt => "interrupt",
+            TurnBehavior::Steer => "steer",
+        }
+    }
+}
+
+/// A prompt the daemon holds until the running turn ends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueuedPrompt {
+    pub id: String,
+    pub text: String,
+}
+
 /// The display name of a provider id. The provider list RPC has no labels.
 pub(crate) fn provider_label(id: &str) -> String {
     match id {

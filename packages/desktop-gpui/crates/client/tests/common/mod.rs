@@ -3,7 +3,8 @@
 #![allow(dead_code)]
 
 use bachuc_client::timeline::{LiveRow, merge_entry};
-use bachuc_client::{ClientCore, ClientEvent, ConnectionConfig, WorkerEvent};
+use bachuc_client::{ClientCore, ClientEvent, ConnectionConfig, DirectoryEvent, WorkerEvent};
+use futures::channel::oneshot;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::ErrorKind;
@@ -19,9 +20,26 @@ pub struct Harness {
     pub core: ClientCore,
     receiver: Receiver<WorkerEvent>,
     pub events: Vec<ClientEvent>,
+    pub directory_events: Vec<DirectoryEvent>,
 }
 
 impl Harness {
+    /// Pumps until the core answers `reply`, and returns the answer.
+    pub fn wait<T>(
+        &mut self,
+        mut reply: oneshot::Receiver<anyhow::Result<T>>,
+        timeout: Duration,
+    ) -> anyhow::Result<T> {
+        let mut result = None;
+        self.pump_until(timeout, |_| {
+            if let Ok(Some(value)) = reply.try_recv() {
+                result = Some(value);
+            }
+            result.is_some()
+        });
+        result.unwrap_or_else(|| Err(anyhow::anyhow!("no answer in {timeout:?}")))
+    }
+
     pub fn connect(url: &str, password: Option<&str>) -> Self {
         let client_id = format!("bachuc-client-test-{}", uuid::Uuid::new_v4());
         let config = ConnectionConfig::new(url, client_id, password.map(str::to_string));
@@ -31,11 +49,14 @@ impl Harness {
             core,
             receiver,
             events: Vec::new(),
+            directory_events: Vec::new(),
         }
     }
 
     fn collect(&mut self) {
         self.events.extend(self.core.take_events());
+        self.directory_events
+            .extend(self.core.take_directory_events());
         for agent_id in self.core.take_dirty_timelines() {
             self.events.push(ClientEvent::TimelineChanged { agent_id });
         }
@@ -117,8 +138,12 @@ struct Conn {
     kill: bool,
 }
 
+/// Answers one request type in place of the built-in reply.
+pub type Handler = Box<dyn Fn(&Value) -> Vec<Message> + Send>;
+
 #[derive(Default)]
 pub struct State {
+    pub handlers: HashMap<String, Handler>,
     pub password: Option<String>,
     pub server_info_delay: Duration,
     pub page_cap: Option<usize>,
@@ -153,6 +178,21 @@ impl FakeServer {
 
     pub fn with<R>(&self, f: impl FnOnce(&mut State) -> R) -> R {
         f(&mut self.state.lock().unwrap())
+    }
+
+    /// Answers every `kind` request with `handler`, which sees the request.
+    pub fn on(&self, kind: &str, handler: impl Fn(&Value) -> Vec<Message> + Send + 'static) {
+        self.with(|s| s.handlers.insert(kind.to_string(), Box::new(handler)));
+    }
+
+    /// Answers every `kind` request with one `reply_kind` message; the request id is added.
+    pub fn reply(&self, kind: &str, reply_kind: &str, payload: Value) {
+        let reply_kind = reply_kind.to_string();
+        self.on(kind, move |request| {
+            let mut payload = payload.clone();
+            payload["requestId"] = request["requestId"].clone();
+            vec![session(&reply_kind, payload)]
+        });
     }
 
     pub fn log(&self) -> Vec<Log> {
@@ -343,7 +383,8 @@ fn serve(stream: TcpStream, state: Arc<Mutex<State>>) {
             if !conn.lock().unwrap().ready && at.elapsed() >= delay {
                 let info = json!({"type": "session", "message": {"type": "status", "payload": {
                     "status": "server_info", "serverId": "fake", "version": "test",
-                    "features": {"ownedSubscriptions": true, "selectiveAgentTimeline": true}}}});
+                    "features": {"ownedSubscriptions": true, "selectiveAgentTimeline": true,
+                        "agentMessageQueue": true}}}});
                 let _ = socket.write(Message::text(info.to_string()));
                 state.lock().unwrap().log.push(Log::ServerInfoSent);
                 conn.lock().unwrap().ready = true;
@@ -371,7 +412,7 @@ fn flush(socket: &mut WebSocket<TcpStream>) -> Result<(), ()> {
     }
 }
 
-fn session(kind: &str, payload: Value) -> Message {
+pub fn session(kind: &str, payload: Value) -> Message {
     Message::text(
         json!({"type": "session", "message": {"type": kind, "payload": payload}}).to_string(),
     )
@@ -382,6 +423,12 @@ fn respond(state: &mut State, message: &Value) -> Vec<Message> {
     let page_info = json!({"nextCursor": null, "prevCursor": null, "hasMore": false});
     state.next_subscription += 1;
     let subscription_id = format!("sub-{}", state.next_subscription);
+    if let Some(handler) = state
+        .handlers
+        .get(message["type"].as_str().unwrap_or_default())
+    {
+        return handler(message);
+    }
     match message["type"].as_str().unwrap_or_default() {
         "fetch_agents_request" => {
             let entries: Vec<Value> = state.agents.iter().map(|a| json!({"agent": a})).collect();

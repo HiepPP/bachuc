@@ -548,6 +548,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bachuc-protocol",
+ "base64 0.22.1",
  "futures",
  "gpui-kit",
  "log",
@@ -556,6 +557,18 @@ dependencies = [
  "serde_json",
  "tungstenite",
  "uuid",
+]
+
+[[package]]
+name = "bachuc-command"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-icons",
+ "bachuc-theme",
+ "gpui-kit",
+ "log",
+ "serde_json",
 ]
 
 [[package]]
@@ -601,6 +614,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bachuc-icons"
+version = "0.1.0"
+dependencies = [
+ "bachuc-theme",
+ "gpui-kit",
+]
+
+[[package]]
 name = "bachuc-protocol"
 version = "0.1.0"
 dependencies = [
@@ -621,6 +642,7 @@ version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
  "bachuc-client",
+ "bachuc-theme",
  "futures",
  "gpui-kit",
  "log",
@@ -632,6 +654,7 @@ dependencies = [
 name = "bachuc-theme"
 version = "0.1.0"
 dependencies = [
+ "bachuc-icons",
  "gpui-kit",
 ]
 
@@ -646,6 +669,15 @@ dependencies = [
  "gpui-kit",
  "serde_json",
  "similar",
+]
+
+[[package]]
+name = "bachuc-workspace"
+version = "0.1.0"
+dependencies = [
+ "bachuc-icons",
+ "bachuc-theme",
+ "gpui-kit",
 ]
 
 [[package]]

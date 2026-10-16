@@ -2,9 +2,10 @@
 //!
 //! Usage: client_probe [ws url] [agent id or id prefix] [seconds]
 //! Without an agent it stays connected and idle. With seconds it quits after that long.
-//! A password comes from `BACHUC_PASSWORD`.
+//! A password comes from `BACHUC_PASSWORD`. `BACHUC_WATCH_CHECKOUT=<folder>` watches that
+//! folder's changed files. The project tree is always kept.
 
-use bachuc_client::{Client, ClientEvent, HostConfig};
+use bachuc_client::{Client, ClientEvent, DirectoryEvent, HostConfig};
 use gpui_kit::*;
 use serde_json::Value;
 use std::cell::RefCell;
@@ -40,6 +41,13 @@ fn main() {
             on_event(&probe, &wanted, client, event, cx);
         })
         .detach();
+        cx.subscribe(&client, |client, event: &DirectoryEvent, cx| match event {
+            DirectoryEvent::ProjectsChanged => {
+                println!("{} projects", client.read(cx).projects().len())
+            }
+            DirectoryEvent::CheckoutChanged { cwd } => println!("checkout changed: {cwd}"),
+        })
+        .detach();
         if let Some(seconds) = seconds {
             cx.spawn(async move |cx| {
                 cx.background_executor()
@@ -60,7 +68,13 @@ fn on_event(
     cx: &mut App,
 ) {
     match event {
-        ClientEvent::Connected => println!("connected"),
+        ClientEvent::Connected => {
+            println!("connected");
+            if let Ok(cwd) = std::env::var("BACHUC_WATCH_CHECKOUT") {
+                println!("watching checkout {cwd}");
+                client.update(cx, |client, cx| client.watch_checkout(&cwd, cx));
+            }
+        }
         ClientEvent::Disconnected { reason } => println!("disconnected: {reason}"),
         ClientEvent::AgentsChanged => {
             if probe.borrow().listed || client.read(cx).agents().is_empty() {

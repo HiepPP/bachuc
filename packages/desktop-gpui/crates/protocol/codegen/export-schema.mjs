@@ -4,7 +4,11 @@
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { WSInboundMessageSchema, WSOutboundMessageSchema } from "@getpaseo/protocol/messages";
+import {
+  ServerInfoStatusPayloadSchema,
+  WSInboundMessageSchema,
+  WSOutboundMessageSchema,
+} from "@getpaseo/protocol/messages";
 import { z } from "zod";
 
 const OUTPUT = fileURLToPath(new URL("./protocol.schema.json", import.meta.url));
@@ -45,6 +49,9 @@ const anyFallbacks = [];
 const roots = {
   WsInbound: exportSchema("WsInbound", WSInboundMessageSchema, anyFallbacks),
   WsOutbound: exportSchema("WsOutbound", WSOutboundMessageSchema, anyFallbacks),
+  // The session envelope carries `status` payloads as an open object, so `server_info` gets
+  // its own typed root.
+  ServerInfo: exportSchema("ServerInfo", ServerInfoStatusPayloadSchema, anyFallbacks),
 };
 
 const document = {

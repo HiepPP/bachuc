@@ -7,6 +7,7 @@
 
 pub mod connection;
 pub mod core;
+mod files;
 mod hosts;
 mod model;
 mod terminal;
@@ -14,8 +15,12 @@ pub mod timeline;
 
 pub use connection::{ConnectionConfig, WorkerEvent};
 pub use core::ClientCore;
-pub use hosts::{HostConfig, client_id, data_dir, load_hosts};
+pub use hosts::{HostConfig, client_id, data_dir, load_hosts, save_hosts};
 pub use model::{AgentControls, AgentSummary, ClientEvent, ProviderSummary, WorkspaceSummary};
+pub use model::{
+    ChangedFile, CheckoutStatus, DirectoryEvent, FileContent, FileEntry, FileKind, ProjectNode,
+    QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
+};
 pub use terminal::{TerminalFrame, TerminalHandle};
 pub use timeline::TimelineState;
 
@@ -36,6 +41,19 @@ pub struct Client {
 }
 
 impl EventEmitter<ClientEvent> for Client {}
+impl EventEmitter<DirectoryEvent> for Client {}
+
+/// Waits for a core reply on the background executor.
+fn reply_task<T: Send + 'static>(
+    receiver: futures::channel::oneshot::Receiver<anyhow::Result<T>>,
+    cx: &mut Context<Client>,
+) -> Task<anyhow::Result<T>> {
+    cx.background_spawn(async move {
+        receiver
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("client closed")))
+    })
+}
 
 impl Client {
     /// Connects to `host` and keeps reconnecting until the entity is dropped.
@@ -83,8 +101,12 @@ impl Client {
     /// Emits pending events now and schedules the timeline flush.
     fn publish(&mut self, cx: &mut Context<Self>) {
         let events = self.core.take_events();
-        let changed = !events.is_empty();
+        let directory_events = self.core.take_directory_events();
+        let changed = !events.is_empty() || !directory_events.is_empty();
         for event in events {
+            cx.emit(event);
+        }
+        for event in directory_events {
             cx.emit(event);
         }
         if self.core.has_dirty_timelines() && self.flush_task.is_none() {
@@ -262,5 +284,202 @@ impl Client {
     pub fn kill_terminal(&mut self, terminal_id: &str, cx: &mut Context<Client>) {
         self.core.kill_terminal(terminal_id);
         self.publish(cx);
+    }
+
+    // ---- parity requests (TASK-146) ----
+
+    /// The typed `server_info` of the current connection.
+    pub fn server_info(&self) -> Option<&bachuc_protocol::ServerInfo> {
+        self.core.typed_server_info()
+    }
+
+    /// Projects with their workspaces. `DirectoryEvent::ProjectsChanged` marks a change.
+    pub fn projects(&self) -> &[ProjectNode] {
+        self.core.projects()
+    }
+
+    /// Sets the workspace title; an empty title reverts to the derived name.
+    pub fn rename_workspace(&mut self, workspace_id: &str, title: &str, cx: &mut Context<Client>) {
+        self.core.rename_workspace(workspace_id, title);
+        self.publish(cx);
+    }
+
+    pub fn pin_workspace(&mut self, workspace_id: &str, pinned: bool, cx: &mut Context<Client>) {
+        self.core.pin_workspace(workspace_id, pinned);
+        self.publish(cx);
+    }
+
+    pub fn archive_workspace(&mut self, workspace_id: &str, cx: &mut Context<Client>) {
+        self.core.archive_workspace(workspace_id);
+        self.publish(cx);
+    }
+
+    pub fn mark_workspace_unread(&mut self, workspace_id: &str, cx: &mut Context<Client>) {
+        self.core.mark_workspace_unread(workspace_id);
+        self.publish(cx);
+    }
+
+    pub fn archive_agent(&mut self, agent_id: &str, cx: &mut Context<Client>) {
+        self.core.archive_agent(agent_id);
+        self.publish(cx);
+    }
+
+    pub fn rename_agent(&mut self, agent_id: &str, title: &str, cx: &mut Context<Client>) {
+        self.core.rename_agent(agent_id, title);
+        self.publish(cx);
+    }
+
+    /// Lists a folder; `path` is relative to `cwd` (`.` for `cwd` itself).
+    pub fn list_directory(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<FileEntry>>> {
+        let receiver = self.core.list_directory(cwd, path);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn read_file(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<FileContent>> {
+        let receiver = self.core.read_file(cwd, path);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// The branch and the uncommitted changed files of `cwd`. A folder outside git gives no
+    /// branch and no files.
+    pub fn checkout_status(
+        &mut self,
+        cwd: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<CheckoutStatus>> {
+        let receiver = self.core.checkout_status(cwd);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Emits `DirectoryEvent::CheckoutChanged` for `cwd` until `unwatch_checkout`.
+    pub fn watch_checkout(&mut self, cwd: &str, cx: &mut Context<Client>) {
+        self.core.watch_checkout(cwd);
+        self.publish(cx);
+    }
+
+    pub fn unwatch_checkout(&mut self, cwd: &str, cx: &mut Context<Client>) {
+        self.core.unwatch_checkout(cwd);
+        self.publish(cx);
+    }
+
+    /// The unified diff of one uncommitted file. A file with status `too_large` or `binary`
+    /// fails; a file without changes gives an empty string.
+    pub fn file_diff(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<String>> {
+        let receiver = self.core.file_diff(cwd, path);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn agent_thinking(&self, agent_id: &str) -> Option<ThinkingControls> {
+        self.core.agent_thinking(agent_id)
+    }
+
+    pub fn set_thinking(&mut self, agent_id: &str, option_id: &str, cx: &mut Context<Client>) {
+        self.core.set_thinking(agent_id, option_id);
+        self.publish(cx);
+    }
+
+    pub fn list_commands(
+        &mut self,
+        agent_id: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<SlashCommand>>> {
+        let receiver = self.core.list_commands(agent_id);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Sends a prompt; `behavior` says what it does to a running turn. The app sends `Steer`.
+    pub fn send_prompt_with(
+        &mut self,
+        agent_id: &str,
+        text: String,
+        images: Vec<serde_json::Value>,
+        behavior: TurnBehavior,
+        cx: &mut Context<Client>,
+    ) {
+        self.core.send_prompt_with(agent_id, text, images, behavior);
+        self.publish(cx);
+    }
+
+    /// Whether the host queues prompts (`features.agentMessageQueue`).
+    pub fn supports_queue(&self) -> bool {
+        self.core.supports_queue()
+    }
+
+    /// Queues a prompt behind the running turn. `AgentsChanged` follows the queue change.
+    pub fn enqueue_prompt(
+        &mut self,
+        agent_id: &str,
+        text: String,
+        images: Vec<serde_json::Value>,
+        cx: &mut Context<Client>,
+    ) {
+        self.core.enqueue_prompt(agent_id, text, images);
+        self.publish(cx);
+    }
+
+    pub fn queued_prompts(&self, agent_id: &str) -> Vec<QueuedPrompt> {
+        self.core.queued_prompts(agent_id)
+    }
+
+    pub fn cancel_queued(&mut self, agent_id: &str, queued_id: &str, cx: &mut Context<Client>) {
+        self.core.cancel_queued(agent_id, queued_id);
+        self.publish(cx);
+    }
+
+    /// Answers a permission with a full `AgentPermissionResponse` object.
+    pub fn respond_permission_with(
+        &mut self,
+        agent_id: &str,
+        request_id: &str,
+        response: serde_json::Value,
+        cx: &mut Context<Client>,
+    ) {
+        self.core
+            .respond_permission_with(agent_id, request_id, response);
+        self.publish(cx);
+    }
+
+    /// The project's `paseo.json`, null when it has none.
+    pub fn read_project_config(
+        &mut self,
+        root: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<serde_json::Value>> {
+        let receiver = self.core.read_project_config(root);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Writes the project's `paseo.json`. Read it first: the write fails with
+    /// `stale_project_config` when the file changed since this client last read or wrote it.
+    pub fn write_project_config(
+        &mut self,
+        root: &str,
+        config: serde_json::Value,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.write_project_config(root, config);
+        self.publish(cx);
+        reply_task(receiver, cx)
     }
 }

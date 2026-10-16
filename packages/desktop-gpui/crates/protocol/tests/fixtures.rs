@@ -4,7 +4,8 @@ use bachuc_protocol::generated::{
     AgentStreamPayloadEvent, WsInboundHelloCapabilities, WsInboundHelloClientType,
 };
 use bachuc_protocol::{
-    PROTOCOL_VERSION, SessionOutbound, WsInbound, WsOutbound, decode_outbound, encode_inbound,
+    PROTOCOL_VERSION, SessionOutbound, WsInbound, WsOutbound, decode_outbound, decode_server_info,
+    encode_inbound,
 };
 use serde_json::{Value, json};
 
@@ -81,6 +82,33 @@ fn server_info() {
         panic!("expected status, got {message:?}");
     };
     assert_eq!(payload.status, "server_info");
+}
+
+#[test]
+fn server_info_decodes_into_the_typed_struct() {
+    let frame: Value = serde_json::from_str(fixture!("server_info")).unwrap();
+    let payload = &frame["message"]["payload"];
+    let info = decode_server_info(payload).expect("server_info decodes");
+    assert_eq!(info.server_id, "srv_tL9Mmb2a7Vk0");
+    assert_eq!(info.protocol_version, Some(1));
+    assert_eq!(info.version, Some(json!("1.0.0-hiep")));
+    assert!(!info.permissions.is_empty());
+    let features = info.features.as_ref().expect("features");
+    assert_eq!(features.agent_message_queue, Some(true));
+    assert_eq!(features.workspace_pinning, Some(true));
+    // Every recorded field has a typed home or lands in `extra`, and encodes back the same.
+    let encoded = serde_json::to_value(&info).unwrap();
+    if let Some(difference) = first_difference(&normalize(payload.clone()), &normalize(encoded), "")
+    {
+        panic!("round trip changed server_info at {difference}");
+    }
+    let mut newer = payload.clone();
+    newer["features"]["someFutureFeature"] = json!(true);
+    newer["someFutureField"] = json!({"a": 1});
+    assert!(
+        decode_server_info(&newer).is_ok(),
+        "unknown fields are ignored"
+    );
 }
 
 #[test]
