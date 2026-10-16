@@ -15,6 +15,10 @@ use gpui_kit::*;
 /// `theme.fontSize["4xl"]`, the page title size. `bachuc_theme::metrics` stops at `FONT_2XL`.
 const FONT_4XL: f32 = 26.;
 
+/// The browser's `normal` line height, which the Electron settings text uses. GPUI's default
+/// (1.618) makes every text row taller: sidebar rows, card rows, and the page title.
+pub const LINE_HEIGHT_NORMAL: f32 = 1.2;
+
 /// The content column of a pane: centered, 720 px at most, padded 16 px (24 px above).
 pub fn column() -> Div {
     v_flex()

@@ -6,6 +6,7 @@ use crate::pane_hosts::{HostsChanged, HostsPane};
 use crate::pane_projects::ProjectsPane;
 use crate::pane_providers::ProvidersPane;
 use crate::pane_shortcuts::{ShortcutsChanged, ShortcutsPane};
+use crate::ui::LINE_HEIGHT_NORMAL;
 use bachuc_client::Client;
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
@@ -189,6 +190,7 @@ impl Render for Settings {
             .size_full()
             .bg(colors.surface0)
             .text_color(colors.foreground)
+            .line_height(relative(LINE_HEIGHT_NORMAL))
             .child(
                 v_flex()
                     .id("settings-sidebar")

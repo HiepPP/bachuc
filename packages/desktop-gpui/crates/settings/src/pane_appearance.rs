@@ -8,7 +8,7 @@ use crate::ui::{
     card, column, error_text, page_title, row, row_text, scroll_page, section, select_trigger,
 };
 use bachuc_icons::{IconName, icon};
-use bachuc_theme::metrics::{FONT_SM, ICON_MD, SPACE_0_5, SPACE_1};
+use bachuc_theme::metrics::{FONT_BASE, ICON_MD, RADIUS_MD, SPACE_2, SPACE_3};
 use bachuc_theme::{ThemeChoice, tokens, ui_font_size};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
@@ -149,13 +149,26 @@ impl AppearancePane {
                 menu.min_w(px(200.)).check_side(Side::Right),
                 |menu, theme| {
                     let weak = weak.clone();
+                    // An element item: `PopupMenuItem::icon` forces an extra-small icon and the
+                    // menu sets `text_sm`; the Electron rows use a 16 px icon and 14 px text.
                     menu.item(
-                        PopupMenuItem::new(theme_label(theme))
-                            .icon(icon(theme_icon(theme)).with_size(px(ICON_MD)))
-                            .checked(theme == current)
-                            .on_click(move |_, _, cx| {
-                                weak.update(cx, |this, cx| this.set_theme(theme, cx)).ok();
-                            }),
+                        PopupMenuItem::element(move |_, cx| {
+                            h_flex()
+                                .flex_1()
+                                .items_center()
+                                .gap(px(SPACE_2))
+                                .text_size(ui_font_size(FONT_BASE, cx))
+                                .child(
+                                    icon(theme_icon(theme))
+                                        .with_size(px(ICON_MD))
+                                        .text_color(tokens(cx).foreground_muted),
+                                )
+                                .child(theme_label(theme))
+                        })
+                        .checked(theme == current)
+                        .on_click(move |_, _, cx| {
+                            weak.update(cx, |this, cx| this.set_theme(theme, cx)).ok();
+                        }),
                     )
                 },
             )
@@ -173,20 +186,27 @@ impl AppearancePane {
         cx: &App,
     ) -> Div {
         let colors = tokens(cx);
+        // `sizeInput`: 64 x 36, grey fill, right-aligned text. `Styled::h` because the Input's
+        // own `h` sets only the multi-line height.
+        let field = Input::new(input)
+            .accessibility_id(id)
+            .aria_label(label)
+            .px(px(SPACE_3))
+            .rounded(px(RADIUS_MD))
+            .bg(colors.surface2)
+            .border_color(colors.border)
+            .text_size(ui_font_size(FONT_BASE, cx))
+            .text_right();
         row(first, cx)
             .child(row_text(title, Some(hint.into()), cx))
             .child(
                 h_flex()
-                    .gap(px(SPACE_1 + SPACE_0_5))
+                    .gap(px(SPACE_2))
                     .items_center()
+                    .child(div().w(px(64.)).child(Styled::h(field, px(36.))))
                     .child(
                         div()
-                            .w(px(72.))
-                            .child(Input::new(input).accessibility_id(id).aria_label(label)),
-                    )
-                    .child(
-                        div()
-                            .text_size(ui_font_size(FONT_SM, cx))
+                            .text_size(ui_font_size(FONT_BASE, cx))
                             .text_color(colors.foreground_muted)
                             .child("px"),
                     ),
