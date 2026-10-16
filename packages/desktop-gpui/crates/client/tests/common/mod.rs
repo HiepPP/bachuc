@@ -383,6 +383,8 @@ fn serve(stream: TcpStream, state: Arc<Mutex<State>>) {
             if !conn.lock().unwrap().ready && at.elapsed() >= delay {
                 let info = json!({"type": "session", "message": {"type": "status", "payload": {
                     "status": "server_info", "serverId": "fake", "version": "test",
+                    // `agent.future` stands for a permission from a newer daemon.
+                    "permissions": ["daemon.read", "agent.future", "workspace.write"],
                     "features": {"ownedSubscriptions": true, "selectiveAgentTimeline": true,
                         "agentMessageQueue": true}}}});
                 let _ = socket.write(Message::text(info.to_string()));

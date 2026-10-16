@@ -7,6 +7,7 @@ use bachuc_client::{
     ChangedFile, CheckoutStatus, DirectoryEvent, FileKind, ProjectNode, QueuedPrompt, TurnBehavior,
     WorkspaceNode,
 };
+use bachuc_protocol::generated::ServerInfoPermissionsItem;
 use common::{FakeServer, Harness, agent_snapshot, session};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -55,6 +56,14 @@ fn server_info_is_typed_and_gates_the_queue() {
     let harness = connect(&server);
     let info = harness.core.typed_server_info().expect("typed server_info");
     assert_eq!(info.server_id, "fake");
+    // The unknown permission is skipped; the known ones stay.
+    assert_eq!(
+        info.permissions,
+        [
+            ServerInfoPermissionsItem::DaemonRead,
+            ServerInfoPermissionsItem::WorkspaceWrite
+        ]
+    );
     assert!(harness.core.supports_queue());
 }
 

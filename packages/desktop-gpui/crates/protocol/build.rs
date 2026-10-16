@@ -10,6 +10,7 @@
 //!
 //! After generation, every internally tagged enum gets an `Unrecognized` variant marked
 //! `#[serde(other)]`, so a message type from a newer daemon decodes instead of failing the frame.
+//! A list of string enum values that a newer daemon can extend skips each value it does not know.
 
 use heck::ToPascalCase;
 use quote::ToTokens;
@@ -103,6 +104,7 @@ fn main() {
         "typify named these types itself; teach becomes_type about them: {untitled:?}"
     );
     add_fallback_variants(&mut file);
+    skip_unknown_list_values(&mut file);
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("protocol.rs");
     std::fs::write(&out, prettyplease::unparse(&file)).expect("write generated code");
 }
@@ -546,6 +548,34 @@ fn constant_string(schema: &Value) -> Option<String> {
     match schema["enum"].as_array() {
         Some(values) if values.len() == 1 => values[0].as_str().map(str::to_string),
         _ => None,
+    }
+}
+
+/// List fields of a string enum that a newer daemon can extend, as (struct, field).
+const OPEN_ENUM_LISTS: &[(&str, &str)] = &[("ServerInfo", "permissions")];
+
+/// Makes each `OPEN_ENUM_LISTS` field skip a value this client does not know, so the known
+/// values stay typed and the message still decodes.
+fn skip_unknown_list_values(file: &mut syn::File) {
+    for (struct_name, field_name) in OPEN_ENUM_LISTS {
+        let field = file
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                syn::Item::Struct(item) if item.ident == *struct_name => {
+                    item.fields.iter_mut().find(|field| {
+                        field
+                            .ident
+                            .as_ref()
+                            .is_some_and(|ident| ident == field_name)
+                    })
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no generated field {struct_name}.{field_name}"));
+        field.attrs.push(syn::parse_quote! {
+            #[serde(deserialize_with = "crate::lenient::known_values")]
+        });
     }
 }
 

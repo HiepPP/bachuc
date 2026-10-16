@@ -112,6 +112,24 @@ fn server_info_decodes_into_the_typed_struct() {
 }
 
 #[test]
+fn server_info_skips_an_unknown_permission() {
+    let frame: Value = serde_json::from_str(fixture!("server_info")).unwrap();
+    let mut payload = frame["message"]["payload"].clone();
+    let known = decode_server_info(&payload).unwrap().permissions;
+    payload["permissions"]
+        .as_array_mut()
+        .unwrap()
+        .insert(1, json!("agent.future"));
+    let info = decode_server_info(&payload).expect("an unknown permission does not fail");
+    assert_eq!(info.permissions, known);
+    assert_eq!(info.permissions.len(), 9);
+    assert_eq!(
+        info.features.and_then(|f| f.agent_message_queue),
+        Some(true)
+    );
+}
+
+#[test]
 fn fetch_agents_response() {
     let message = decode_fixture(fixture!("fetch_agents_response"));
     let SessionOutbound::FetchAgentsResponse { payload } = message else {

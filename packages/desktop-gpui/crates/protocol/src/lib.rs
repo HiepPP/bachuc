@@ -2,13 +2,34 @@
 //! `packages/protocol` (ADR-0035). Refresh them with `codegen/export-schema.mjs`.
 //!
 //! Decoding follows the protocol contract: unknown fields are ignored, and a message type this
-//! client does not know decodes to the `Unrecognized` variant instead of failing the frame.
+//! client does not know decodes to the `Unrecognized` variant instead of failing the frame. A
+//! permission name this client does not know is skipped.
 
 /// Every generated type. Names come from the message tags (`agent_stream` -> `AgentStream`) and
 /// the property path; prefer the stable names below where one exists.
 #[allow(clippy::all, dead_code, unused_imports, irrefutable_let_patterns)]
 pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/protocol.rs"));
+}
+
+/// Decoders that `build.rs` names in the generated code.
+mod lenient {
+    use serde::Deserialize;
+    use serde::de::{DeserializeOwned, Deserializer};
+
+    /// Decodes a list and skips each value that does not decode, such as a permission name
+    /// from a newer daemon.
+    pub fn known_values<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: DeserializeOwned,
+    {
+        let values = Vec::<serde_json::Value>::deserialize(deserializer)?;
+        Ok(values
+            .into_iter()
+            .filter_map(|value| T::deserialize(value).ok())
+            .collect())
+    }
 }
 
 /// The `server_info` status payload, the daemon's answer to `hello`. The session envelope
