@@ -158,7 +158,8 @@ fn main() {
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
-                    size(px(1000.), px(760.)),
+                    // The size of the reference Electron window, for side-by-side checks.
+                    size(px(1200.), px(800.)),
                     cx,
                 ))),
                 titlebar: Some(TitlebarOptions {

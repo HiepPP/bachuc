@@ -24,6 +24,9 @@ const PANEL_WIDTH: f32 = 640.;
 const PANEL_HEIGHT: f32 = 560.;
 const PANEL_MAX_WIDTH: f32 = 0.92;
 const PANEL_MAX_HEIGHT: f32 = 0.8;
+/// The Electron input has no line height, so the browser uses `normal`: about 1.2 times the font
+/// size. With FONT_BASE this makes the 50 px header of the reference.
+const INPUT_LINE_HEIGHT: f32 = 1.2;
 /// How far the list draws beyond the visible rows.
 const OVERDRAW: f32 = 400.;
 
@@ -249,6 +252,7 @@ impl CommandCenter {
             .id(("command-item", item))
             .role(Role::Button)
             .aria_label(entry.title.clone())
+            .w_full()
             .h(px(crate::search::ROW_HEIGHT))
             .px(px(SPACE_4))
             .flex()
@@ -269,7 +273,8 @@ impl CommandCenter {
                     .flex_1()
                     .min_w_0()
                     .gap(px(SPACE_3))
-                    .children(entry.icon.map(|name| {
+                    // The slot stays without an icon, so every title starts on the same rail.
+                    .child(
                         div()
                             .w(px(ICON_MD))
                             .h(px(20.))
@@ -277,8 +282,12 @@ impl CommandCenter {
                             .items_center()
                             .justify_center()
                             .flex_shrink_0()
-                            .child(icon(name).text_color(colors.foreground_muted))
-                    }))
+                            .children(
+                                entry
+                                    .icon
+                                    .map(|name| icon(name).text_color(colors.foreground_muted)),
+                            ),
+                    )
                     .child(
                         div()
                             .min_w_0()
@@ -310,6 +319,7 @@ impl CommandCenter {
 /// A section row: content sits at the bottom of a fixed height, as in Electron.
 fn v_section(height: f32) -> Div {
     div()
+        .w_full()
         .h(px(height))
         .flex()
         .flex_col()
@@ -320,6 +330,7 @@ fn v_section(height: f32) -> Div {
 impl Render for CommandCenter {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = tokens(cx);
+        let input_line = ui_font_size(FONT_BASE, cx) * INPUT_LINE_HEIGHT;
         let body = if self.layout.rows.is_empty() {
             div()
                 .id("command-center-empty")
@@ -397,6 +408,14 @@ impl Render for CommandCenter {
                                     .appearance(false)
                                     .bordered(false)
                                     .focus_bordered(false)
+                                    // Replace the gpui-kit Medium padding, height, and text_sm
+                                    // with the Electron input: SPACE_1 above and below one
+                                    // line of FONT_BASE, no side inset.
+                                    .px_0()
+                                    .py(px(SPACE_1))
+                                    .h(input_line + px(SPACE_1 * 2.))
+                                    .line_height(input_line)
+                                    .text_size(ui_font_size(FONT_BASE, cx))
                                     .accessibility_id("command-center-input")
                                     .aria_label("Search commands"),
                             ),
