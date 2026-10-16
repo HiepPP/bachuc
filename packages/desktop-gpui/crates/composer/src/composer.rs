@@ -1,19 +1,25 @@
 //! The composer view: the Electron message box. It has a multiline input, image pills, a slash
-//! command menu, mode, model, and thinking pills, the queued prompts, and Send or Stop.
+//! command menu, mode, model, and thinking pills, the provider feature controls, the diff-count
+//! row, the queued prompts, and Send or Stop.
 
 use crate::actions::{
     PrimaryAction, SendPlan, line_height, max_input_rows, primary_action, send_plan,
 };
 use crate::attachments::{Attachment, can_send, mime_for_path};
+use crate::features::{
+    FeatureRequests, Highlight, active_highlight, diff_row, feature_icon, feature_tooltip,
+    select_choices, select_current, select_request, toggle_request, visible_diff_stat,
+};
 use crate::slash::{
     ClientCommand, SlashItem, arrow_delta, filter_items, insert_text, menu_items,
     resolve_client_command, slash_query, step,
 };
 use bachuc_client::{
-    AgentControls, Client, ClientEvent, QueuedPrompt, SlashCommand, ThinkingControls,
+    AgentControls, AgentFeature, AgentFeatureKind, Client, ClientEvent, DiffStat, QueuedPrompt,
+    SlashCommand, ThinkingControls,
 };
 use bachuc_command::{Shortcut, display_combos, load_shortcuts};
-use bachuc_icons::{IconName, icon};
+use bachuc_icons::{IconName, icon, provider_fallback_icon, provider_logo};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, RADIUS_2XL, RADIUS_LG, RADIUS_MD,
     SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4,
@@ -22,6 +28,7 @@ use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
 use gpui_kit::component::input::{InputEvent, Position, Textarea, TextareaState};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::theme::Theme;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Selectable, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -40,9 +47,6 @@ const PLACEHOLDER: &str = "Message the agent, tag @files, or use /commands and /
 const GLYPH: f32 = 14.;
 /// The slash list height cap: the `Autocomplete` default `maxHeight`.
 const SLASH_MAX_HEIGHT: f32 = 220.;
-/// Electron's `ClaudeIcon`, a filled logo. `bachuc_icons` carries only lucide stroke icons, so
-/// the composer draws it as an SVG image with the fill color written in.
-const CLAUDE_LOGO: &str = include_str!("../assets/claude.svg");
 /// The left and right editor padding of an `XSmall` gpui-kit textarea. The input box takes it
 /// back with a negative margin, so text starts at the surface padding as in Electron.
 const INPUT_INSET: f32 = 4.;
@@ -66,16 +70,22 @@ struct Watched {
     queued: Vec<QueuedPrompt>,
     supports_queue: bool,
     provider: Option<String>,
+    features: Vec<AgentFeature>,
+    /// The workspace stat when it has changes; `None` hides the diff row.
+    diff_stat: Option<DiffStat>,
 }
 
 impl Watched {
     fn read(client: &Client, agent_id: &str) -> Self {
+        let agent = client.agents().iter().find(|agent| agent.id == agent_id);
         Self {
-            provider: client
-                .agents()
-                .iter()
-                .find(|agent| agent.id == agent_id)
-                .map(|agent| agent.provider.clone()),
+            provider: agent.map(|agent| agent.provider.clone()),
+            diff_stat: visible_diff_stat(
+                agent
+                    .and_then(|agent| agent.workspace_id.as_deref())
+                    .and_then(|workspace_id| client.workspace_diff_stat(workspace_id)),
+            ),
+            features: client.agent_features(agent_id),
             controls: client.agent_controls(agent_id),
             thinking: client.agent_thinking(agent_id),
             queued: client.queued_prompts(agent_id),
@@ -112,8 +122,8 @@ pub struct Composer {
     /// Escape closed the menu for the text being typed.
     slash_dismissed: bool,
     slash_scroll: ScrollHandle,
-    /// The provider logo drawn in the last fill color; rebuilt when the theme changes it.
-    logo: Option<(Hsla, Arc<Image>)>,
+    /// The feature requests that wait for the daemon.
+    requests: FeatureRequests,
     /// The row limit the input was last given, from the window height.
     max_rows: usize,
     /// "⌘L to focus", shown while the input is empty and unfocused; None when unassigned.
@@ -198,7 +208,7 @@ impl Composer {
             slash_active: 0,
             slash_dismissed: false,
             slash_scroll: ScrollHandle::new(),
-            logo: None,
+            requests: FeatureRequests::default(),
             max_rows,
             focus_hint: focus_hint(&load_shortcuts()),
             _subscriptions: subscriptions,
@@ -465,27 +475,98 @@ impl Composer {
         took
     }
 
-    /// The model pill icon: the provider logo, or `Bot` as Electron's `getProviderIcon` falls
-    /// back to. Only the Claude logo is carried here.
-    fn model_glyph(&mut self, color: Hsla) -> Glyph {
-        if self.watched.provider.as_deref() != Some("claude") {
-            return Glyph::Icon(IconName::Bot);
+    /// Sends a feature request, unless one for the same feature waits for the daemon. After the
+    /// answer it reads the features again, so a failed request leaves the daemon value on screen.
+    fn send_feature(
+        &mut self,
+        request: Option<(String, serde_json::Value)>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((feature_id, value)) = request else {
+            return;
+        };
+        if !self.requests.begin(&feature_id) {
+            return;
         }
-        match &self.logo {
-            Some((drawn, image)) if *drawn == color => Glyph::Image(image.clone()),
-            _ => {
-                let image = Arc::new(Image::from_bytes(
-                    ImageFormat::Svg,
-                    filled_svg(CLAUDE_LOGO, color).into_bytes(),
-                ));
-                self.logo = Some((color, image.clone()));
-                Glyph::Image(image)
-            }
-        }
+        let agent_id = self.agent_id.clone();
+        let sent = feature_id.clone();
+        let task = self.client.update(cx, |client, cx| {
+            client.set_agent_feature(&agent_id, &sent, value, cx)
+        });
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.requests.finish(&feature_id);
+                if let Err(error) = result {
+                    log::warn!(
+                        "cannot set feature {feature_id} of {}: {error}",
+                        this.agent_id
+                    );
+                }
+                this.watched = Watched::read(this.client.read(cx), &this.agent_id);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
-    /// The pills, in the Electron order: model, thinking, mode.
-    fn pills(&self, model_glyph: Glyph) -> Vec<AnyElement> {
+    /// The provider feature controls, in the order the daemon sends them, drawn after the mode
+    /// pill as `DesktopFeatureItem` does.
+    fn feature_pills(&self, weak: &WeakEntity<Composer>, cx: &App) -> Vec<AnyElement> {
+        let t = tokens(cx);
+        self.watched
+            .features
+            .iter()
+            .map(|feature| match &feature.kind {
+                AgentFeatureKind::Toggle { .. } => {
+                    let color = match active_highlight(feature) {
+                        Highlight::Yellow => t.status_warning,
+                        Highlight::Green => t.status_success,
+                        Highlight::Blue => t.accent,
+                        Highlight::Default => t.foreground_muted,
+                    };
+                    let (weak, feature_id) = (weak.clone(), feature.id.clone());
+                    feature_toggle(
+                        feature,
+                        color,
+                        t.surface2,
+                        self.requests.is_pending(&feature.id),
+                        move |cx| {
+                            weak.update(cx, |this, cx| {
+                                let request = toggle_request(&this.watched.features, &feature_id);
+                                this.send_feature(request, cx);
+                            })
+                            .ok();
+                        },
+                    )
+                }
+                AgentFeatureKind::Select { .. } => {
+                    let (weak, feature_id) = (weak.clone(), feature.id.clone());
+                    choice_pill(
+                        feature_element_id("composer-feature", &feature.id),
+                        feature.label.clone(),
+                        Glyph::Icon(feature_icon(feature.icon.as_deref())),
+                        select_choices(feature),
+                        select_current(feature),
+                        &feature.label,
+                        Some(feature_tooltip(feature).to_string()),
+                        move |option_id, cx| {
+                            weak.update(cx, |this, cx| {
+                                let request =
+                                    select_request(&this.watched.features, &feature_id, option_id);
+                                this.send_feature(request, cx);
+                            })
+                            .ok();
+                        },
+                    )
+                }
+            })
+            .collect()
+    }
+
+    /// The pills, in the Electron order: model, thinking, mode, then the provider features.
+    fn pills(&self, model_glyph: Glyph, weak: &WeakEntity<Composer>, cx: &App) -> Vec<AnyElement> {
         let controls = self.watched.controls.clone().unwrap_or(AgentControls {
             modes: Vec::new(),
             current_mode: None,
@@ -497,24 +578,26 @@ impl Composer {
 
         let (client, agent_id) = (self.client.clone(), self.agent_id.clone());
         pills.push(choice_pill(
-            "composer-model",
-            "Model",
+            "composer-model".into(),
+            "Model".into(),
             model_glyph,
             controls.models,
             controls.current_model,
             "Model",
+            None,
             move |id, cx| client.update(cx, |c, cx| c.set_model(&agent_id, id, cx)),
         ));
 
         if let Some(thinking) = self.watched.thinking.clone() {
             let (client, agent_id) = (self.client.clone(), self.agent_id.clone());
             pills.push(choice_pill(
-                "composer-thinking",
-                "Thinking",
+                "composer-thinking".into(),
+                "Thinking".into(),
                 Glyph::Icon(IconName::Brain),
                 thinking.options,
                 thinking.current,
                 "Thinking",
+                None,
                 move |id, cx| client.update(cx, |c, cx| c.set_thinking(&agent_id, id, cx)),
             ));
         }
@@ -523,34 +606,63 @@ impl Composer {
         if !controls.modes.is_empty() {
             let (client, agent_id) = (self.client.clone(), self.agent_id.clone());
             pills.push(choice_pill(
-                "composer-mode",
-                "Mode",
+                "composer-mode".into(),
+                "Mode".into(),
                 Glyph::Icon(IconName::ShieldCheck),
                 controls.modes,
                 controls.current_mode,
                 "Mode",
+                None,
                 move |id, cx| client.update(cx, |c, cx| c.set_mode(&agent_id, id, cx)),
             ));
         }
+        pills.extend(self.feature_pills(weak, cx));
         pills
     }
 }
 
-/// The SVG with its `{FILL}` and `{OPACITY}` placeholders set to `color`.
-fn filled_svg(template: &str, color: Hsla) -> String {
-    let rgba = Rgba::from(color);
-    let channel = |value: f32| (value.clamp(0., 1.) * 255.).round() as u8;
-    template
-        .replace(
-            "{FILL}",
-            &format!(
-                "#{:02x}{:02x}{:02x}",
-                channel(rgba.r),
-                channel(rgba.g),
-                channel(rgba.b)
-            ),
+/// The model pill icon: the provider logo, or the fallback icon of `getProviderIcon`.
+fn provider_glyph(provider: Option<&str>, color: Hsla) -> Glyph {
+    let provider = provider.unwrap_or_default();
+    match provider_logo(provider, color) {
+        Some(image) => Glyph::Image(image),
+        None => Glyph::Icon(provider_fallback_icon(provider)),
+    }
+}
+
+fn feature_element_id(prefix: &'static str, feature_id: &str) -> ElementId {
+    ElementId::Name(format!("{prefix}-{feature_id}").into())
+}
+
+/// A toggle feature: an icon button with a tooltip, tinted while the feature is on.
+fn feature_toggle(
+    feature: &AgentFeature,
+    color: Hsla,
+    hover: Hsla,
+    pending: bool,
+    on_click: impl Fn(&mut App) + 'static,
+) -> AnyElement {
+    let tooltip = feature_tooltip(feature).to_string();
+    h_flex()
+        .id(feature_element_id("composer-feature", &feature.id))
+        .role(Role::Button)
+        .aria_label(tooltip.clone())
+        .h(px(CONTROL))
+        .px(px(SPACE_2))
+        .flex_none()
+        .items_center()
+        .rounded(px(RADIUS_2XL))
+        .cursor_pointer()
+        .hover(move |pill| pill.bg(hover))
+        .when(pending, |pill| pill.opacity(0.5))
+        .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+        .on_click(move |_, _, cx| on_click(cx))
+        .child(
+            icon(feature_icon(feature.icon.as_deref()))
+                .with_size(px(GLYPH))
+                .text_color(color),
         )
-        .replace("{OPACITY}", &format!("{:.3}", rgba.a.clamp(0., 1.)))
+        .into_any_element()
 }
 
 /// `composer.input.focusHint` with the first combo of the focus shortcut, or None when the
@@ -627,9 +739,10 @@ enum Glyph {
 #[derive(IntoElement)]
 struct PillTrigger {
     id: ElementId,
-    kind: &'static str,
+    kind: String,
     glyph: Glyph,
     label: String,
+    tooltip: Option<String>,
     disabled: bool,
     open: bool,
 }
@@ -667,6 +780,9 @@ impl RenderOnce for PillTrigger {
             .when(!disabled, |pill| {
                 pill.cursor_pointer().hover(|pill| pill.bg(t.surface2))
             })
+            .when_some(self.tooltip, |pill, text| {
+                pill.tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
+            })
             .child(match self.glyph {
                 Glyph::Icon(name) => icon(name)
                     .with_size(px(GLYPH))
@@ -689,21 +805,24 @@ impl RenderOnce for PillTrigger {
 type PickFn = Rc<dyn Fn(&str, &mut App)>;
 
 /// A pill that opens a menu of choices above itself. With no choices it only shows the label.
+#[allow(clippy::too_many_arguments)]
 fn choice_pill(
-    id: &'static str,
-    kind: &'static str,
+    id: ElementId,
+    kind: String,
     glyph: Glyph,
     choices: Vec<(String, String)>,
     current: Option<String>,
     fallback: &str,
+    tooltip: Option<String>,
     on_pick: impl Fn(&str, &mut App) + 'static,
 ) -> AnyElement {
     let label = pill_label(&choices, current.as_deref(), fallback);
     let trigger = PillTrigger {
-        id: id.into(),
-        kind,
+        id: id.clone(),
+        kind: kind.clone(),
         glyph,
         label,
+        tooltip,
         disabled: choices.is_empty(),
         open: false,
     };
@@ -898,8 +1017,26 @@ impl Render for Composer {
         let focused = self.input.read(cx).focus_handle(cx).is_focused(window);
         let focus_hint = self.focus_hint.clone().filter(|_| empty && !focused);
         let matches = self.slash_matches(cx);
-        let model_glyph = self.model_glyph(t.foreground_muted);
+        let model_glyph = provider_glyph(self.watched.provider.as_deref(), t.foreground_muted);
         let weak = cx.weak_entity();
+        let pills = self.pills(model_glyph, &weak, cx);
+        let diff_strip = diff_row(self.watched.diff_stat).map(|(additions, deletions)| {
+            // `ComposerDiffStatPill` in the track strip above the input, at the right end.
+            h_flex().justify_end().child(
+                h_flex()
+                    .id("composer-diff-stat")
+                    .role(Role::Group)
+                    .aria_label(format!("Changes {additions} {deletions}"))
+                    .h(px(CONTROL))
+                    .px(px(SPACE_1_5))
+                    .gap(px(SPACE_1))
+                    .items_center()
+                    .rounded(px(RADIUS_MD))
+                    .text_size(small_size)
+                    .child(div().text_color(t.status_success).child(additions))
+                    .child(div().text_color(t.status_danger).child(deletions)),
+            )
+        });
 
         let queue = (!self.watched.queued.is_empty()).then(|| {
             v_flex()
@@ -1103,6 +1240,7 @@ impl Render for Composer {
                     .gap(px(SPACE_2))
                     .children(self.slash_menu(&matches, cx))
                     .children(queue)
+                    .children(diff_strip)
                     .child(
                         v_flex()
                             .gap(px(SPACE_1_5))
@@ -1138,7 +1276,7 @@ impl Render for Composer {
                                                     this.pick_images(window, cx)
                                                 })),
                                             )
-                                            .children(self.pills(model_glyph)),
+                                            .children(pills),
                                     )
                                     .children(primary_button),
                             ),
@@ -1150,9 +1288,88 @@ impl Render for Composer {
 #[cfg(test)]
 mod tests {
     // Named imports: `use super::*` would bring in GPUI's `test` macro over `#[test]`.
-    use super::{CLAUDE_LOGO, FOCUS_ACTION, filled_svg, focus_hint, outgoing_text, pill_label};
+    use super::{
+        FOCUS_ACTION, Glyph, Watched, focus_hint, outgoing_text, pill_label, provider_glyph,
+    };
+    use bachuc_client::{AgentFeature, AgentFeatureKind, DiffStat};
     use bachuc_command::default_shortcuts;
+    use bachuc_icons::IconName;
     use gpui_kit::{Hsla, Rgba};
+
+    fn watched(diff_stat: Option<DiffStat>, features: Vec<AgentFeature>) -> Watched {
+        Watched {
+            controls: None,
+            thinking: None,
+            queued: Vec::new(),
+            supports_queue: true,
+            provider: Some("codex".into()),
+            features,
+            diff_stat,
+        }
+    }
+
+    fn fast_mode(value: bool) -> AgentFeature {
+        AgentFeature {
+            id: "fast_mode".into(),
+            label: "Fast mode".into(),
+            description: None,
+            tooltip: None,
+            icon: Some("zap".into()),
+            kind: AgentFeatureKind::Toggle { value },
+        }
+    }
+
+    #[test]
+    fn an_unchanged_snapshot_causes_no_redraw() {
+        // The client subscription calls `cx.notify()` only when the new `Watched` differs.
+        let stat = Some(DiffStat {
+            additions: 2,
+            deletions: 1,
+        });
+        let first = watched(stat, vec![fast_mode(false)]);
+        assert_eq!(first, watched(stat, vec![fast_mode(false)]));
+        assert_ne!(first, watched(stat, vec![fast_mode(true)]));
+        assert_ne!(first, watched(None, vec![fast_mode(false)]));
+        assert_ne!(first, watched(stat, Vec::new()));
+    }
+
+    #[test]
+    fn the_provider_logo_or_the_fallback_icon_is_drawn() {
+        let color: Hsla = Rgba {
+            r: 1.,
+            g: 0.5,
+            b: 0.,
+            a: 0.5,
+        }
+        .into();
+        assert!(matches!(
+            provider_glyph(Some("claude"), color),
+            Glyph::Image(_)
+        ));
+        assert!(matches!(
+            provider_glyph(Some("codex"), color),
+            Glyph::Image(_)
+        ));
+        assert!(matches!(
+            provider_glyph(Some("custom"), color),
+            Glyph::Icon(IconName::Bot)
+        ));
+        assert!(matches!(
+            provider_glyph(Some("kiro"), color),
+            Glyph::Icon(IconName::PackagePlus)
+        ));
+        assert!(matches!(
+            provider_glyph(None, color),
+            Glyph::Icon(IconName::Bot)
+        ));
+    }
+
+    #[test]
+    fn a_select_pill_shows_its_label_until_an_option_is_chosen() {
+        let choices = vec![("low".to_string(), "Low".to_string())];
+        assert_eq!(pill_label(&choices, None, "Effort"), "Effort");
+        assert_eq!(pill_label(&choices, Some("low"), "Effort"), "Low");
+    }
 
     #[test]
     fn the_focus_hint_shows_the_focus_chord() {
@@ -1164,21 +1381,6 @@ mod tests {
             }
         }
         assert_eq!(focus_hint(&shortcuts), None);
-    }
-
-    #[test]
-    fn the_logo_takes_the_fill_color() {
-        let color: Hsla = Rgba {
-            r: 1.,
-            g: 0.5,
-            b: 0.,
-            a: 0.5,
-        }
-        .into();
-        let svg = filled_svg(CLAUDE_LOGO, color);
-        assert!(svg.contains(r##"fill="#ff8000""##), "{svg}");
-        assert!(svg.contains(r#"fill-opacity="0.500""#), "{svg}");
-        assert!(!svg.contains('{'));
     }
 
     #[test]

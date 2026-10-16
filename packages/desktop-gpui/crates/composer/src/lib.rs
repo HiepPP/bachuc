@@ -5,6 +5,7 @@
 mod actions;
 mod attachments;
 mod composer;
+mod features;
 mod slash;
 
 pub use attachments::{Attachment, can_send, mime_for_path};
