@@ -26,6 +26,7 @@ build_dir_env: CARGO_TARGET_DIR
 - Use only `packages/desktop-gpui/cargo.sh` for cargo, so the rustup toolchain runs. A per-builder build folder goes under `packages/desktop-gpui/target/groups/<groupId>` through `CARGO_TARGET_DIR`, and only when the disk rule in the watchtower skill allows it (free disk was 14 GB and `target` was 22 GB on 2026-10-16, so builders share `target` until the owner frees disk).
 - Builders run Claude with `bypassPermissions`, because nobody answers a permission. They still obey every rule in this file.
 - Builders carry the label `watchtower.task=<first TASK ID of the group>` (Q-037).
+- A test or UI checker agent never takes the user's mouse cursor (owner answer, 2026-10-16). Use only AX actions, AX reads, window screenshots, and keyboard input sent to the app. Record a line that needs the pointer (hover, drag, pointer scroll) as `UNVERIFIED (unattended): needs pointer`.
 - Builders run no screen check. They return each app screenshot, `cua_repl` step, AX tree read, and `measure.sh` read as `DEFERRED (UI checker)`.
 - Builders and the UI checker archive or kill every mock agent and terminal they create on live, except the run-start fixture.
 - Never push and never open a PR.
