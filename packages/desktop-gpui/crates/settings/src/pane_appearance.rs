@@ -1,0 +1,247 @@
+//! The Appearance pane: the theme and the interface and code font sizes. A change applies at
+//! once and is stored in `appearance.json`.
+
+use crate::appearance::{
+    Appearance, CODE_RANGE, INTERFACE_RANGE, apply, load_from, parse_size, save_to, theme_label,
+};
+use crate::ui::{card, column, error_text, row, row_text, scroll_page, section};
+use bachuc_icons::{IconName, icon};
+use bachuc_theme::metrics::{
+    CONTROL_XS, FONT_SM, ICON_SM, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_2, SPACE_3,
+};
+use bachuc_theme::{ThemeChoice, tokens, ui_font_size};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::theme::Theme;
+use gpui_kit::component::{Sizable as _, h_flex};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
+use std::path::PathBuf;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Size {
+    Interface,
+    Code,
+}
+
+pub struct AppearancePane {
+    current: Appearance,
+    interface: Entity<InputState>,
+    code: Entity<InputState>,
+    error: Option<SharedString>,
+    dir: PathBuf,
+    scroll: ScrollHandle,
+    _subscriptions: Vec<Subscription>,
+}
+
+fn size_text(size: f32) -> String {
+    format!("{}", size.round() as i32)
+}
+
+impl AppearancePane {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::in_dir(bachuc_command::data_dir(), window, cx)
+    }
+
+    /// `new` with the folder of `appearance.json` given.
+    pub fn in_dir(dir: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let current = load_from(&dir);
+        let interface = cx
+            .new(|cx| InputState::new(window, cx).default_value(size_text(current.interface_size)));
+        let code =
+            cx.new(|cx| InputState::new(window, cx).default_value(size_text(current.code_size)));
+        let mut subscriptions = vec![cx.observe_global::<Theme>(|_, cx| cx.notify())];
+        for (input, which) in [(&interface, Size::Interface), (&code, Size::Code)] {
+            subscriptions.push(cx.subscribe_in(
+                input,
+                window,
+                move |this: &mut AppearancePane, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
+                        this.commit_size(which, window, cx);
+                    }
+                },
+            ));
+        }
+        Self {
+            current,
+            interface,
+            code,
+            error: None,
+            dir,
+            scroll: ScrollHandle::new(),
+            _subscriptions: subscriptions,
+        }
+    }
+
+    fn persist(&mut self, next: Appearance, cx: &mut Context<Self>) {
+        self.current = next;
+        apply(&next, cx);
+        self.error = save_to(&self.dir, &next)
+            .err()
+            .map(|error| format!("Could not save the appearance: {error}").into());
+        cx.notify();
+    }
+
+    fn set_theme(&mut self, theme: ThemeChoice, cx: &mut Context<Self>) {
+        if self.current.theme != theme {
+            self.persist(
+                Appearance {
+                    theme,
+                    ..self.current
+                },
+                cx,
+            );
+        }
+    }
+
+    fn commit_size(&mut self, which: Size, window: &mut Window, cx: &mut Context<Self>) {
+        let (input, range, committed) = match which {
+            Size::Interface => (
+                &self.interface,
+                INTERFACE_RANGE,
+                self.current.interface_size,
+            ),
+            Size::Code => (&self.code, CODE_RANGE, self.current.code_size),
+        };
+        let size = parse_size(&input.read(cx).value(), range).unwrap_or(committed);
+        input.clone().update(cx, |input, cx| {
+            input.set_value(size_text(size), window, cx);
+        });
+        if size != committed {
+            let mut next = self.current;
+            match which {
+                Size::Interface => next.interface_size = size,
+                Size::Code => next.code_size = size,
+            }
+            self.persist(next, cx);
+        }
+    }
+
+    fn theme_button(
+        &self,
+        theme: ThemeChoice,
+        icon_name: IconName,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let colors = tokens(cx);
+        let selected = self.current.theme == theme;
+        let label = theme_label(theme);
+        div()
+            .id(("theme", theme as usize))
+            .role(Role::RadioButton)
+            .aria_label(label)
+            .aria_selected(selected)
+            .h(px(CONTROL_XS))
+            .px(px(SPACE_3))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(SPACE_2))
+            .rounded(px(RADIUS_MD))
+            .cursor_pointer()
+            .text_size(ui_font_size(bachuc_theme::metrics::FONT_BASE, cx))
+            .when(selected, |this| {
+                this.bg(colors.surface3)
+                    .border_1()
+                    .border_color(colors.border_accent)
+                    .text_color(colors.foreground)
+            })
+            .when(!selected, |this| {
+                this.text_color(colors.foreground_muted)
+                    .hover(|style| style.bg(colors.surface2))
+            })
+            .child(
+                icon(icon_name)
+                    .with_size(px(ICON_SM))
+                    .text_color(colors.foreground_muted),
+            )
+            .child(label)
+            .on_click(cx.listener(move |this, _, _, cx| this.set_theme(theme, cx)))
+    }
+
+    fn size_row(
+        &self,
+        id: &'static str,
+        title: &'static str,
+        hint: &'static str,
+        label: &'static str,
+        input: &Entity<InputState>,
+        first: bool,
+        cx: &App,
+    ) -> Div {
+        let colors = tokens(cx);
+        row(first, cx)
+            .child(row_text(title, Some(hint.into()), cx))
+            .child(
+                h_flex()
+                    .gap(px(SPACE_1 + SPACE_0_5))
+                    .items_center()
+                    .child(
+                        div()
+                            .w(px(72.))
+                            .child(Input::new(input).accessibility_id(id).aria_label(label)),
+                    )
+                    .child(
+                        div()
+                            .text_size(ui_font_size(FONT_SM, cx))
+                            .text_color(colors.foreground_muted)
+                            .child("px"),
+                    ),
+            )
+    }
+}
+
+impl Render for AppearancePane {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let themes = [
+            (ThemeChoice::Light, IconName::Sun),
+            (ThemeChoice::ClaudeDark, IconName::Moon),
+            (ThemeChoice::System, IconName::Monitor),
+        ];
+        let buttons: Vec<Stateful<Div>> = themes
+            .into_iter()
+            .map(|(theme, name)| self.theme_button(theme, name, cx))
+            .collect();
+        let body = column()
+            .child(section(
+                "Theme",
+                None,
+                card(cx).child(
+                    row(true, cx).child(row_text("Theme", None, cx)).child(
+                        h_flex()
+                            .id("theme-options")
+                            .role(Role::RadioGroup)
+                            .aria_label("Theme")
+                            .gap(px(SPACE_1))
+                            .children(buttons),
+                    ),
+                ),
+                cx,
+            ))
+            .child(section(
+                "Fonts",
+                None,
+                card(cx)
+                    .child(self.size_row(
+                        "interface-size-input",
+                        "Interface size",
+                        "Used for navigation, controls, and labels",
+                        "Interface font size",
+                        &self.interface,
+                        true,
+                        cx,
+                    ))
+                    .child(self.size_row(
+                        "code-size-input",
+                        "Code size",
+                        "Used for code, diffs, and terminal output",
+                        "Code font size",
+                        &self.code,
+                        false,
+                        cx,
+                    )),
+                cx,
+            ))
+            .children(self.error.clone().map(|error| error_text(error, cx)));
+        scroll_page("appearance-pane", &self.scroll, body, cx)
+    }
+}
