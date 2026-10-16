@@ -738,6 +738,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bachuc-plugin-watchtower-board"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "bachuc-theme",
+ "gpui-kit",
+ "log",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bachuc-protocol"
 version = "0.1.0"
 dependencies = [

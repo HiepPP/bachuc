@@ -1,0 +1,79 @@
+{
+  "plan": {
+    "title": "Mouse wheel selects a value on composer pills",
+    "slug": "20261013-composer-pill-wheel-select",
+    "status": "ARCHIVED",
+    "updated": "2026-10-13"
+  },
+  "tasks": [
+    {
+      "id": "TASK-079",
+      "title": "TASK-079 Wheel step helper and hook",
+      "status": "DONE",
+      "deps": "-",
+      "notes": "auto: manual checks pending. New files only.",
+      "spec": "watchtower/tasks/TASK-079-wheel-step-helper-and-hook.md",
+      "taskClass": "code",
+      "blocker": null,
+      "error": null,
+      "depIds": [],
+      "group": "A"
+    },
+    {
+      "id": "TASK-080",
+      "title": "TASK-080 Wire the toolbar pills",
+      "status": "DONE",
+      "deps": "TASK-079",
+      "notes": "auto: manual checks pending. Mode, thinking, provider, select feature pills.",
+      "spec": "watchtower/tasks/TASK-080-wire-toolbar-pills.md",
+      "taskClass": "risky",
+      "blocker": null,
+      "error": null,
+      "depIds": ["TASK-079"],
+      "group": "B"
+    }
+  ],
+  "planVerify": ["npm run typecheck -> passes."],
+  "manualChecks": [],
+  "run": {
+    "runner": "loop",
+    "started": "2026-10-13 14:07",
+    "finished": "2026-10-13 14:41",
+    "log": [
+      {
+        "task": "TASK-079",
+        "result": "DONE",
+        "detail": "#65",
+        "start": "14:08",
+        "end": "14:14",
+        "startMinute": 1,
+        "endMinute": 7
+      },
+      {
+        "task": "TASK-080",
+        "result": "DONE",
+        "detail": "#66; Q-030 to Q-032 DEFAULTED",
+        "start": "14:14",
+        "end": "14:30",
+        "startMinute": 7,
+        "endMinute": 23
+      }
+    ],
+    "nowMinute": 34,
+    "stopped": false
+  },
+  "questions": [
+    {
+      "id": "Q-030",
+      "tasks": ["TASK-080"],
+      "blocks": [],
+      "question": "The desktop provider pill is a plain ComboboxTrigger, not an AgentControlTrigger. Should it become an AgentControlTrigger, or keep its direct useWheelSelect call?",
+      "default": "Keep the direct useWheelSelect call in DesktopAgentControlsContent, composed with the anchor ref.",
+      "status": "DEFAULTED"
+    }
+  ],
+  "decisions": [],
+  "history": [],
+  "message": null,
+  "warnings": []
+}

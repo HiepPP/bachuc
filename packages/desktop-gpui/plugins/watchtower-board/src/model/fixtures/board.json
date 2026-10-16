@@ -1,0 +1,46 @@
+{
+  "title": "GPUI parity follow-ups: client fields, explorer diffs, fonts, composer, New workspace, and native plugins",
+  "tasks": [
+    {
+      "id": "TASK-157",
+      "title": "TASK-157 Client fields and requests for the follow-ups",
+      "status": "DONE",
+      "deps": "-",
+      "notes": "Add-only API; Q-074, Q-075, Q-077, Q-078, Q-079, Q-081.",
+      "spec": "watchtower/tasks/TASK-157-client-fields-and-requests.md",
+      "taskClass": "risky",
+      "brief": "Goal: Give the follow-up views every daemon field and request they need, without changing any existing public item.\n\nChange: the client drops `requiresAttention",
+      "blocker": null,
+      "error": null
+    },
+    {
+      "id": "TASK-158",
+      "title": "TASK-158 Provider logos in bachuc-icons",
+      "status": "DONE",
+      "deps": "-",
+      "notes": "Replaces the composer's local claude.svg.",
+      "spec": "watchtower/tasks/TASK-158-provider-logos.md",
+      "taskClass": "code",
+      "brief": "Goal: Draw the Electron provider logos in the GPUI client.\n\nChange: only a local `crates/composer/assets/claude.svg`, and a bot icon for every other provider ->",
+      "blocker": null,
+      "error": null
+    },
+    {
+      "id": "TASK-159",
+      "title": "TASK-159 Theme font and syntax API",
+      "status": "DONE",
+      "deps": "-",
+      "notes": "Q-083.",
+      "spec": "watchtower/tasks/TASK-159-theme-font-and-syntax-api.md",
+      "taskClass": "code",
+      "brief": "Goal: Let the app set the interface font family, code font family, content size, and syntax theme, as the Electron appearance settings do.\n\nChange: `bachuc-them",
+      "blocker": null,
+      "error": null
+    }
+  ],
+  "message": null,
+  "questions": [],
+  "run": null,
+  "proposedAdrs": 0,
+  "warnings": []
+}
