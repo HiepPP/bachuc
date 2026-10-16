@@ -2,5 +2,25 @@
 resolver = "3"
 members = ["crates/*"]
 
+[workspace.dependencies]
+# gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot. Every crate uses this one entry, so
+# building one crate or the whole workspace reuses the same GPUI build instead of a copy
+# per feature set. The tree-sitter features color the file viewer and fenced code.
+gpui-kit = { version = "=0.7.3", features = [
+    "tree-sitter-bash",
+    "tree-sitter-javascript",
+    "tree-sitter-python",
+    "tree-sitter-rust",
+    "tree-sitter-tsx",
+    "tree-sitter-typescript",
+] }
+
+[profile.dev]
+debug = "line-tables-only"
+
+# Dependencies keep no debuginfo; this cuts most of the size of target/debug.
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 debug = false

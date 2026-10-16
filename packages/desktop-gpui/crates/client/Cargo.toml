@@ -6,8 +6,7 @@ publish = false
 
 [dependencies]
 bachuc-protocol = { path = "../protocol" }
-# gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot; keep the same pin in every crate.
-gpui-kit = "=0.7.3"
+gpui-kit.workspace = true
 anyhow = "1"
 base64 = "0.22"
 futures = "0.3"

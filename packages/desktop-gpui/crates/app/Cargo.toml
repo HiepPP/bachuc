@@ -21,8 +21,7 @@ bachuc-terminal = { path = "../terminal" }
 bachuc-theme = { path = "../theme" }
 bachuc-timeline = { path = "../timeline" }
 bachuc-workspace = { path = "../workspace" }
-# gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot; keep the same pin in every crate.
-gpui-kit = "=0.7.3"
+gpui-kit.workspace = true
 log = "0.4"
 serde_json = "1"
 

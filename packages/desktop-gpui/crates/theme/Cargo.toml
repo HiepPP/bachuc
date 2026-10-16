@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-gpui-kit = "=0.7.3"
+gpui-kit.workspace = true
 
 [dev-dependencies]
 # Only the tokens example draws icons. bachuc-icons depends on this crate for ICON_MD; a

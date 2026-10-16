@@ -11,16 +11,7 @@ bachuc-diagram = { path = "../diagram" }
 bachuc-explorer = { path = "../explorer" }
 bachuc-icons = { path = "../icons" }
 bachuc-theme = { path = "../theme" }
-# gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot; keep the same pin in every crate.
-# The tree-sitter features highlight fenced code in the markdown answer.
-gpui-kit = { version = "=0.7.3", features = [
-    "tree-sitter-bash",
-    "tree-sitter-javascript",
-    "tree-sitter-python",
-    "tree-sitter-rust",
-    "tree-sitter-tsx",
-    "tree-sitter-typescript",
-] }
+gpui-kit.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 serde_json = "1"
 similar = "2"

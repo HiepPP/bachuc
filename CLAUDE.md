@@ -169,6 +169,10 @@ and updating `next`, integrating it after a release, and releasing a hotfix from
   - If you must run a broad suite, pipe output to a file and read it afterward: `npx vitest run <file> --bail=1 > /tmp/test-output.txt 2>&1` then read the file.
   - Never re-run a test suite that another agent already ran and reported green — trust the result.
   - GitHub Actions is off for this fork since 2026-10-08, so no CI run checks a change. Run each test file your change affects locally, one file at a time.
+- **Clean up `packages/desktop-gpui` after you build or test it.** Cargo never deletes old artifacts, and `target/debug` grew to 38 GB in one day.
+  - Run cargo only through `./cargo.sh`. Another toolchain builds a second copy of every crate.
+  - Declare `gpui-kit` only in `[workspace.dependencies]`. A crate that adds its own features makes a second GPUI build.
+  - When your tests are done, quit the GPUI app you launched and run `./cargo.sh clean --profile dev`. Skip the clean if another `cargo` or `rustc` process runs, because it deletes that build. Keep `target/release` and `target/bundles`.
 - Add tests to existing suites and reuse their npm scripts and CI jobs instead of creating feature-specific ones.
 - **Always run typecheck and lint after every change.**
 - **Build workspace packages before diagnosing cross-package type errors.** This repo consumes generated declarations across workspaces. If typecheck fails in a package that depends on another workspace, rebuild the owning stack first so `dist` declarations are current:
