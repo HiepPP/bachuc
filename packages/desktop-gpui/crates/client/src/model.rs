@@ -295,6 +295,201 @@ pub struct QueuedPrompt {
     pub text: String,
 }
 
+// ---- composer, New workspace, and tab menu data (TASK-169) ----
+
+/// The daemon's metrics of one finished turn (`TurnMetricsSchema`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TurnMetrics {
+    pub ttft_ms: Option<f64>,
+    pub output_tokens: Option<u64>,
+    pub output_tokens_per_second: Option<f64>,
+}
+
+/// The running turn of an agent (snapshot `activeTurn`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveTurn {
+    pub turn_id: String,
+    pub started_at: Option<String>,
+}
+
+/// The token use of an agent's last turn (snapshot `lastUsage`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct AgentUsage {
+    pub input_tokens: Option<u64>,
+    pub cached_input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub total_cost_usd: Option<f64>,
+    pub context_window_max_tokens: Option<u64>,
+    pub context_window_used_tokens: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+/// One item of the agent's newest `todo` timeline item.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskEntry {
+    pub id: Option<String>,
+    pub text: String,
+    pub completed: bool,
+    pub status: Option<TaskStatus>,
+    pub active_form: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubagentKind {
+    /// A Paseo agent whose `paseo.parent-agent-id` label names the parent.
+    Paseo,
+    /// A provider-owned child (`agent.provider_subagents.*`).
+    Provider,
+}
+
+/// One row of the composer track strip.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubagentRow {
+    pub id: String,
+    pub kind: SubagentKind,
+    pub provider: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub subtitle: Option<String>,
+    pub status: String,
+    pub requires_attention: bool,
+    pub created_at: String,
+}
+
+/// A prompt with its images (`{data, mimeType}`) and attachments (`AgentAttachment` objects).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct OutgoingMessage {
+    pub text: String,
+    pub images: Vec<serde_json::Value>,
+    pub attachments: Vec<serde_json::Value>,
+}
+
+/// The agent settings of a draft that has no agent yet.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DraftConfig {
+    pub provider: String,
+    pub cwd: String,
+    pub model: Option<String>,
+    pub mode_id: Option<String>,
+    pub thinking_option_id: Option<String>,
+}
+
+/// A `workspace.create.request`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CreateWorkspace {
+    pub source: WorkspaceSource,
+    pub title: Option<String>,
+    pub first_agent_prompt: Option<String>,
+    pub agent: Option<InitialAgent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkspaceSource {
+    /// The workspace runs in this folder.
+    Directory {
+        path: String,
+        project_id: Option<String>,
+    },
+    /// The daemon creates a worktree of the repo at `cwd`.
+    Worktree {
+        cwd: String,
+        project_id: Option<String>,
+        action: Option<WorktreeAction>,
+        ref_name: Option<String>,
+        base_branch: Option<String>,
+        branch_name: Option<String>,
+        worktree_slug: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorktreeAction {
+    BranchOff,
+    Checkout,
+}
+
+/// The first agent of a new workspace, or a new agent with its full config.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InitialAgent {
+    pub config: DraftConfig,
+    pub feature_values: std::collections::BTreeMap<String, serde_json::Value>,
+    pub env: std::collections::BTreeMap<String, String>,
+    pub initial_prompt: String,
+    pub images: Vec<serde_json::Value>,
+    pub attachments: Vec<serde_json::Value>,
+    pub labels: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreatedWorkspace {
+    pub workspace_id: String,
+    pub agent_id: Option<String>,
+    pub setup_terminal_id: Option<String>,
+}
+
+/// A branch of `branch_suggestions`; the detail fields are `None` without `branchDetails`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BranchSuggestion {
+    pub name: String,
+    pub committer_date: Option<f64>,
+    pub has_local: Option<bool>,
+    pub has_remote: Option<bool>,
+    pub local_ahead: Option<u32>,
+    pub local_behind: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchValidation {
+    pub exists: bool,
+    pub resolved_ref: Option<String>,
+    pub is_remote: bool,
+}
+
+/// A project that `project.add` registered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AddedProject {
+    pub id: String,
+    pub name: String,
+    pub root: String,
+    /// `projectKey`, else `["<serverId>","<projectId>"]`, as `Client::project_view_key`.
+    pub view_key: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiffMode {
+    Uncommitted,
+    Base,
+}
+
+/// What `checkout.diff.get` compares against.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiffCompare {
+    pub mode: DiffMode,
+    pub base_ref: Option<String>,
+    pub ignore_whitespace: bool,
+}
+
+/// The provider CLI command that resumes a session, from the app's
+/// `provider-command-templates.ts`. `None` for a provider without a template.
+pub fn resume_command(provider: &str, session_id: &str) -> Option<String> {
+    let template = match provider {
+        "codex" => "codex resume {sessionId}",
+        "claude" => "claude --resume {sessionId}",
+        "hermes" => "hermes --resume {sessionId}",
+        "pi" => "pi --session {sessionId}",
+        "omp" => "omp --session {sessionId}",
+        "opencode" => "opencode --session {sessionId}",
+        _ => return None,
+    };
+    Some(template.replace("{sessionId}", session_id))
+}
+
 /// The display name of a provider id. The provider list RPC has no labels.
 pub(crate) fn provider_label(id: &str) -> String {
     match id {

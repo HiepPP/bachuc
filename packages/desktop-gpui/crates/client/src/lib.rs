@@ -5,17 +5,25 @@
 //! timeline changes are announced at most every 50 ms, terminal frames go straight to each
 //! terminal's channel.
 
+mod composer_data;
 pub mod connection;
 pub mod core;
 mod files;
 mod hosts;
 mod model;
+mod plugins;
 mod terminal;
 pub mod timeline;
 
 pub use connection::{ConnectionConfig, WorkerEvent};
 pub use core::ClientCore;
 pub use hosts::{HostConfig, client_id, data_dir, load_hosts, save_hosts};
+pub use model::{
+    ActiveTurn, AddedProject, AgentUsage, BranchSuggestion, BranchValidation, CreateWorkspace,
+    CreatedWorkspace, DiffCompare, DiffMode, DraftConfig, InitialAgent, OutgoingMessage,
+    SubagentKind, SubagentRow, TaskEntry, TaskStatus, TurnMetrics, WorkspaceSource, WorktreeAction,
+    resume_command,
+};
 pub use model::{AgentControls, AgentSummary, ClientEvent, ProviderSummary, WorkspaceSummary};
 pub use model::{
     AgentFeature, AgentFeatureKind, AgentFeatureOption, AttentionReason, ChangedFileDetails,
@@ -25,11 +33,15 @@ pub use model::{
     ChangedFile, CheckoutStatus, DirectoryEvent, FileContent, FileEntry, FileKind, ProjectNode,
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
 };
+pub use plugins::{
+    PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite, PluginStatus,
+};
 pub use terminal::{TerminalFrame, TerminalHandle};
 pub use timeline::TimelineState;
 
 use futures::StreamExt as _;
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Task};
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 /// Timeline changes reach the UI at most this often.
@@ -46,6 +58,7 @@ pub struct Client {
 
 impl EventEmitter<ClientEvent> for Client {}
 impl EventEmitter<DirectoryEvent> for Client {}
+impl EventEmitter<PluginEvent> for Client {}
 
 /// Waits for a core reply on the background executor.
 fn reply_task<T: Send + 'static>(
@@ -106,11 +119,15 @@ impl Client {
     fn publish(&mut self, cx: &mut Context<Self>) {
         let events = self.core.take_events();
         let directory_events = self.core.take_directory_events();
+        let plugin_events = self.core.take_plugin_events();
         let changed = !events.is_empty() || !directory_events.is_empty();
         for event in events {
             cx.emit(event);
         }
         for event in directory_events {
+            cx.emit(event);
+        }
+        for event in plugin_events {
             cx.emit(event);
         }
         if self.core.has_dirty_timelines() && self.flush_task.is_none() {
@@ -566,6 +583,345 @@ impl Client {
         cx: &mut Context<Client>,
     ) -> Task<anyhow::Result<Option<FileDiff>>> {
         let receiver = self.core.commit_file_diff(cwd, sha, path);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    // ---- plugins (TASK-168) ----
+
+    /// The installed plugins in the daemon's order. `PluginEvent::CatalogChanged` marks a change.
+    pub fn list_plugins(
+        &mut self,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<PluginListItem>>> {
+        let receiver = self.core.list_plugins();
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// The ids of the loaded plugins.
+    pub fn plugin_catalog_ids(
+        &mut self,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<String>>> {
+        let receiver = self.core.plugin_catalog_ids();
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Calls a plugin RPC and resolves to its `output`.
+    pub fn invoke_plugin_rpc(
+        &mut self,
+        plugin_id: &str,
+        method: &str,
+        input: serde_json::Value,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<serde_json::Value>> {
+        let receiver = self.core.plugin_rpc(plugin_id, method, input);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Calls a plugin RPC with a typed input and output. An output that does not fit `O` fails.
+    pub fn plugin_rpc<I: serde::Serialize, O: serde::de::DeserializeOwned + Send + 'static>(
+        &mut self,
+        plugin_id: &str,
+        method: &str,
+        input: &I,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<O>> {
+        let receiver = match serde_json::to_value(input) {
+            Ok(input) => self.core.plugin_rpc(plugin_id, method, input),
+            Err(error) => {
+                let (reply, receiver) = futures::channel::oneshot::channel();
+                let _ = reply.send(Err(anyhow::anyhow!("{method} input: {error}")));
+                receiver
+            }
+        };
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn read_plugin_settings(
+        &mut self,
+        plugin_id: &str,
+        settings_id: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<PluginSettingsRead>> {
+        let receiver = self.core.read_plugin_settings(plugin_id, settings_id);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn write_plugin_settings(
+        &mut self,
+        plugin_id: &str,
+        settings_id: &str,
+        revision: &str,
+        values: serde_json::Value,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<PluginSettingsWrite>> {
+        let receiver = self
+            .core
+            .write_plugin_settings(plugin_id, settings_id, revision, values);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn reset_plugin_settings(
+        &mut self,
+        plugin_id: &str,
+        settings_id: &str,
+        revision: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<PluginSettingsWrite>> {
+        let receiver = self
+            .core
+            .reset_plugin_settings(plugin_id, settings_id, revision);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// The agent's labels; `None` for an unknown agent.
+    pub fn agent_labels(&self, agent_id: &str) -> Option<BTreeMap<String, String>> {
+        self.core.agent_labels(agent_id)
+    }
+
+    /// Sets these labels; the agent's other labels stay.
+    pub fn set_agent_labels(
+        &mut self,
+        agent_id: &str,
+        labels: BTreeMap<String, String>,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.set_agent_labels(agent_id, labels);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Closes the agent's provider runtime.
+    pub fn close_agent_runtime(
+        &mut self,
+        agent_id: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.close_agent_runtime(agent_id);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    // ---- composer, New workspace, and tab menu data (TASK-169) ----
+
+    /// The running turn from the agent snapshot.
+    pub fn agent_active_turn(&self, agent_id: &str) -> Option<ActiveTurn> {
+        self.core.agent_active_turn(agent_id)
+    }
+
+    /// The metrics of the viewed agent's last turn; `None` when the newest turn has none.
+    pub fn agent_last_turn_metrics(&self, agent_id: &str) -> Option<TurnMetrics> {
+        self.core.agent_last_turn_metrics(agent_id)
+    }
+
+    pub fn agent_last_usage(&self, agent_id: &str) -> Option<AgentUsage> {
+        self.core.agent_last_usage(agent_id)
+    }
+
+    /// The newest task list of a viewed agent; empty for an agent that is not viewed.
+    pub fn agent_tasks(&self, agent_id: &str) -> Vec<TaskEntry> {
+        self.core.agent_tasks(agent_id)
+    }
+
+    /// The track strip rows of a parent agent. A change emits `ClientEvent::AgentsChanged`.
+    pub fn subagents(&self, parent_agent_id: &str) -> Vec<SubagentRow> {
+        self.core.subagents(parent_agent_id)
+    }
+
+    pub fn agent_parent_id(&self, agent_id: &str) -> Option<String> {
+        self.core.agent_parent_id(agent_id)
+    }
+
+    /// Sends a prompt with images and attachments; a refused send fails with its error.
+    pub fn send_message(
+        &mut self,
+        agent_id: &str,
+        message: OutgoingMessage,
+        behavior: TurnBehavior,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.send_outgoing(agent_id, message, behavior);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Queues a prompt with images and attachments behind the running turn.
+    pub fn enqueue_message(
+        &mut self,
+        agent_id: &str,
+        message: OutgoingMessage,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.enqueue_outgoing(agent_id, message);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn queue_held(&self, agent_id: &str) -> bool {
+        self.core.queue_held(agent_id)
+    }
+
+    pub fn edit_queued(
+        &mut self,
+        agent_id: &str,
+        queued_id: &str,
+        text: &str,
+        cx: &mut Context<Client>,
+    ) {
+        self.core.edit_queued(agent_id, queued_id, text);
+        self.publish(cx);
+    }
+
+    /// Moves a queued prompt before `before_id`; `None` moves it to the end.
+    pub fn reorder_queued(
+        &mut self,
+        agent_id: &str,
+        queued_id: &str,
+        before_id: Option<&str>,
+        cx: &mut Context<Client>,
+    ) {
+        self.core.reorder_queued(agent_id, queued_id, before_id);
+        self.publish(cx);
+    }
+
+    pub fn promote_queued(&mut self, agent_id: &str, queued_id: &str, cx: &mut Context<Client>) {
+        self.core.promote_queued(agent_id, queued_id);
+        self.publish(cx);
+    }
+
+    pub fn resume_queue(&mut self, agent_id: &str, cx: &mut Context<Client>) {
+        self.core.resume_queue(agent_id);
+        self.publish(cx);
+    }
+
+    pub fn provider_modes(
+        &mut self,
+        provider: &str,
+        cwd: Option<&str>,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<(String, String)>>> {
+        let receiver = self.core.provider_modes(provider, cwd);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn draft_features(
+        &mut self,
+        config: DraftConfig,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<AgentFeature>>> {
+        let receiver = self.core.draft_features(config);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn default_model(&self, provider: &str) -> Option<String> {
+        self.core.default_model(provider)
+    }
+
+    pub fn model_thinking(&self, provider: &str, model: &str) -> Option<ThinkingControls> {
+        self.core.model_thinking(provider, model)
+    }
+
+    pub fn create_workspace(
+        &mut self,
+        request: CreateWorkspace,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<CreatedWorkspace>> {
+        let receiver = self.core.create_workspace(request);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Creates an agent with its full config and resolves to its id.
+    pub fn create_agent_with(
+        &mut self,
+        agent: InitialAgent,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<String>> {
+        let receiver = self.core.create_agent_with(agent);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn branch_suggestions(
+        &mut self,
+        cwd: &str,
+        query: Option<&str>,
+        limit: Option<u32>,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<BranchSuggestion>>> {
+        let receiver = self.core.branch_suggestions(cwd, query, limit);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn validate_branch(
+        &mut self,
+        cwd: &str,
+        branch_name: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<BranchValidation>> {
+        let receiver = self.core.validate_branch(cwd, branch_name);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn add_project(
+        &mut self,
+        cwd: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<AddedProject>> {
+        let receiver = self.core.add_project(cwd);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn refresh_agent(
+        &mut self,
+        agent_id: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.refresh_agent(agent_id);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn agent_provider_session_id(&self, agent_id: &str) -> Option<String> {
+        self.core.agent_provider_session_id(agent_id)
+    }
+
+    pub fn agent_updated_at(&self, agent_id: &str) -> Option<String> {
+        self.core.agent_updated_at(agent_id)
+    }
+
+    pub fn rename_terminal(
+        &mut self,
+        terminal_id: &str,
+        title: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.rename_terminal(terminal_id, title);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Every changed file of `cwd` with its diff, against `compare`.
+    pub fn checkout_diff_with(
+        &mut self,
+        cwd: &str,
+        compare: DiffCompare,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<FileDiff>>> {
+        let receiver = self.core.checkout_diff_with(cwd, compare);
         self.publish(cx);
         reply_task(receiver, cx)
     }

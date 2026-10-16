@@ -3,7 +3,9 @@
 #![allow(dead_code)]
 
 use bachuc_client::timeline::{LiveRow, merge_entry};
-use bachuc_client::{ClientCore, ClientEvent, ConnectionConfig, DirectoryEvent, WorkerEvent};
+use bachuc_client::{
+    ClientCore, ClientEvent, ConnectionConfig, DirectoryEvent, PluginEvent, WorkerEvent,
+};
 use futures::channel::oneshot;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -21,6 +23,7 @@ pub struct Harness {
     receiver: Receiver<WorkerEvent>,
     pub events: Vec<ClientEvent>,
     pub directory_events: Vec<DirectoryEvent>,
+    pub plugin_events: Vec<PluginEvent>,
 }
 
 impl Harness {
@@ -50,6 +53,7 @@ impl Harness {
             receiver,
             events: Vec::new(),
             directory_events: Vec::new(),
+            plugin_events: Vec::new(),
         }
     }
 
@@ -57,6 +61,7 @@ impl Harness {
         self.events.extend(self.core.take_events());
         self.directory_events
             .extend(self.core.take_directory_events());
+        self.plugin_events.extend(self.core.take_plugin_events());
         for agent_id in self.core.take_dirty_timelines() {
             self.events.push(ClientEvent::TimelineChanged { agent_id });
         }
@@ -150,6 +155,8 @@ pub struct State {
     pub log: Vec<Log>,
     pub agents: Vec<Value>,
     pub timelines: HashMap<String, FakeTimeline>,
+    /// Extra `server_info.features` flags, merged over the default ones.
+    pub features: serde_json::Map<String, Value>,
     conns: Vec<Arc<Mutex<Conn>>>,
     next_subscription: u64,
 }
@@ -381,12 +388,16 @@ fn serve(stream: TcpStream, state: Arc<Mutex<State>>) {
         if let Some(at) = hello_at {
             let delay = state.lock().unwrap().server_info_delay;
             if !conn.lock().unwrap().ready && at.elapsed() >= delay {
+                let mut features = json!({"ownedSubscriptions": true,
+                    "selectiveAgentTimeline": true, "agentMessageQueue": true});
+                for (key, value) in state.lock().unwrap().features.clone() {
+                    features[key] = value;
+                }
                 let info = json!({"type": "session", "message": {"type": "status", "payload": {
                     "status": "server_info", "serverId": "fake", "version": "test",
                     // `agent.future` stands for a permission from a newer daemon.
                     "permissions": ["daemon.read", "agent.future", "workspace.write"],
-                    "features": {"ownedSubscriptions": true, "selectiveAgentTimeline": true,
-                        "agentMessageQueue": true}}}});
+                    "features": features}}});
                 let _ = socket.write(Message::text(info.to_string()));
                 state.lock().unwrap().log.push(Log::ServerInfoSent);
                 conn.lock().unwrap().ready = true;

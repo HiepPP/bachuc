@@ -1,8 +1,14 @@
 //! The client state machine, free of GPUI: it turns worker events into state and requests.
 //! `Client` wraps it in a GPUI entity; tests drive it directly.
 
+use crate::composer_data::{self, PARENT_AGENT_LABEL, ProviderSubagent};
 use crate::connection::{Connection, ConnectionConfig, WorkerEvent, session_frame};
 use crate::files::{self, TransferFrame};
+use crate::model::{
+    ActiveTurn, AddedProject, AgentUsage, BranchSuggestion, BranchValidation, CreateWorkspace,
+    CreatedWorkspace, DiffCompare, DraftConfig, InitialAgent, OutgoingMessage, SubagentKind,
+    SubagentRow, TaskEntry, TurnMetrics,
+};
 use crate::model::{
     AgentControls, AgentFeature, AgentFeatureKind, AgentFeatureOption, AgentSummary,
     AttentionReason, ChangedFile, CheckoutDetails, CheckoutStatus, ClientEvent, CommitList,
@@ -10,6 +16,7 @@ use crate::model::{
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode, WorkspaceSummary,
     provider_label,
 };
+use crate::plugins::{self, PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite};
 use crate::terminal::{self, TerminalFrame, TerminalHandle};
 use crate::timeline::{FetchPlan, LiveRow, TimelineState, TimelineSync};
 use anyhow::anyhow;
@@ -18,9 +25,12 @@ use bachuc_protocol::generated::UpsertAgentFeaturesItem;
 use futures::channel::{mpsc, oneshot};
 use serde::Deserialize as _;
 use serde_json::{Value, json};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 type Reply<T> = oneshot::Sender<anyhow::Result<T>>;
+
+/// Takes a plugin RPC `output`, or the error, and answers the caller with its decoded form.
+type RpcFinish = Box<dyn FnOnce(anyhow::Result<Value>) + Send>;
 
 /// The diff the changed files come from, as the app's working diff shows it by default.
 const UNCOMMITTED: &str = "uncommitted";
@@ -49,7 +59,11 @@ enum Pending {
     CommitFileDiff(Reply<Option<FileDiff>>),
     SetFeature(Reply<()>),
     Commands(Reply<Vec<SlashCommand>>),
-    Queue(String),
+    /// A queue request; its answer replaces the stored queue. `reply` waits for the answer.
+    Queue {
+        agent_id: String,
+        reply: Option<Reply<()>>,
+    },
     ReadConfig {
         root: String,
         reply: Reply<Value>,
@@ -82,6 +96,20 @@ enum Pending {
         )>,
     },
     Action(&'static str),
+    PluginList(Reply<Vec<PluginListItem>>),
+    PluginCatalog(Reply<Vec<String>>),
+    PluginRpc(RpcFinish),
+    /// An `AgentActionResponsePayloadSchema` answer: `accepted: false` fails with `error`.
+    Accepted(Reply<()>),
+    ProviderSubagents(String),
+    Modes(Reply<Vec<(String, String)>>),
+    DraftFeatures(Reply<Vec<AgentFeature>>),
+    CreateWorkspace(Reply<CreatedWorkspace>),
+    BranchSuggestions(Reply<Vec<BranchSuggestion>>),
+    ValidateBranch(Reply<BranchValidation>),
+    AddProject(Reply<AddedProject>),
+    Refresh(Reply<()>),
+    RenameTerminal(Reply<()>),
 }
 
 impl Pending {
@@ -110,6 +138,21 @@ impl Pending {
             Pending::Commands(reply) => send(reply, error),
             Pending::ReadConfig { reply, .. } => send(reply, error),
             Pending::WriteConfig { reply, .. } => send(reply, error),
+            Pending::PluginList(reply) => send(reply, error),
+            Pending::PluginCatalog(reply) => send(reply, error),
+            Pending::PluginRpc(finish) => finish(Err(error)),
+            Pending::Accepted(reply) => send(reply, error),
+            Pending::Queue {
+                reply: Some(reply), ..
+            } => send(reply, error),
+            Pending::Modes(reply) => send(reply, error),
+            Pending::DraftFeatures(reply) => send(reply, error),
+            Pending::CreateWorkspace(reply) => send(reply, error),
+            Pending::BranchSuggestions(reply) => send(reply, error),
+            Pending::ValidateBranch(reply) => send(reply, error),
+            Pending::AddProject(reply) => send(reply, error),
+            Pending::Refresh(reply) => send(reply, error),
+            Pending::RenameTerminal(reply) => send(reply, error),
             _ => {}
         }
     }
@@ -148,6 +191,44 @@ struct AgentExtra {
     requires_attention: bool,
     attention_reason: Option<AttentionReason>,
     features: Vec<AgentFeature>,
+    labels: BTreeMap<String, String>,
+    /// The snapshot `title`, which `AgentSummary` replaces with an id prefix when null.
+    title: Option<String>,
+    created_at: Option<String>,
+    active_turn: Option<ActiveTurn>,
+    last_usage: Option<AgentUsage>,
+    /// `runtimeInfo.sessionId`, else `persistence.sessionId`.
+    session_id: Option<String>,
+    queue_held: bool,
+}
+
+/// The newest `todo` item of a viewed timeline, kept as pages and live rows arrive.
+#[derive(Default)]
+struct TasksCache {
+    epoch: Option<String>,
+    seq: Option<u64>,
+    tasks: Vec<TaskEntry>,
+}
+
+impl TasksCache {
+    /// Keeps the `todo` entries of `entries` that are newer than the kept one.
+    fn note<'a>(&mut self, epoch: &str, entries: impl IntoIterator<Item = &'a Value>) {
+        if self.epoch.as_deref() != Some(epoch) {
+            return;
+        }
+        for entry in entries {
+            if entry["item"]["type"] != "todo" {
+                continue;
+            }
+            let Some(seq) = entry["seqStart"].as_u64() else {
+                continue;
+            };
+            if self.seq.is_none_or(|kept| seq >= kept) {
+                self.seq = Some(seq);
+                self.tasks = composer_data::task_entries(&entry["item"]);
+            }
+        }
+    }
 }
 
 /// A project as `project.list` or a workspace describes it.
@@ -181,10 +262,13 @@ struct TerminalStream {
 
 /// Session events this client subscribes to; with `explicit_event_subscriptions` the daemon
 /// sends them only on request.
-const SESSION_EVENTS: [&str; 3] = [
+const SESSION_EVENTS: [&str; 6] = [
     "agent_permission_request",
     "agent_permission_resolved",
     "project.update",
+    "status.plugin_catalog_changed",
+    "status.plugin_settings_changed",
+    "agent.provider_subagents.update",
 ];
 
 /// Client state for one host.
@@ -224,6 +308,11 @@ pub struct ClientCore {
     checkout_watches: HashMap<String, Option<String>>,
     /// The revision of the last project config read or written, per repo root.
     config_revisions: HashMap<String, Value>,
+    plugin_events: Vec<PluginEvent>,
+    /// Per viewed agent.
+    tasks: HashMap<String, TasksCache>,
+    /// Provider-owned subagents by parent agent id.
+    provider_subagents: HashMap<String, Vec<ProviderSubagent>>,
 }
 
 impl ClientCore {
@@ -264,7 +353,15 @@ impl ClientCore {
             default_models: HashMap::new(),
             checkout_watches: HashMap::new(),
             config_revisions: HashMap::new(),
+            plugin_events: Vec::new(),
+            tasks: HashMap::new(),
+            provider_subagents: HashMap::new(),
         }
+    }
+
+    /// Plugin events since the last call.
+    pub fn take_plugin_events(&mut self) -> Vec<PluginEvent> {
+        std::mem::take(&mut self.plugin_events)
     }
 
     /// The `server_info` of the current connection as the generated type. `None` before the
@@ -445,6 +542,10 @@ impl ClientCore {
                         .ok();
                     self.server_info = Some(server_info);
                     self.events.push(ClientEvent::Connected);
+                    // The feature flag is known only now, so the list goes here, not in `opened`.
+                    for agent_id in self.viewed.clone() {
+                        self.request_provider_subagents(&agent_id);
+                    }
                 }
             }
             WorkerEvent::Closed { generation, reason } => self.closed(generation, reason),
@@ -625,11 +726,35 @@ impl ClientCore {
         }
         let plan = sync.plan_tail();
         self.timelines.insert(agent_id.to_string(), sync);
+        self.tasks
+            .insert(agent_id.to_string(), TasksCache::default());
         if self.generation.is_some() {
             // Subscribe first so rows after the tail page are buffered, not missed.
             self.update_timeline_subscription();
             self.send_plan(agent_id, plan);
         }
+        if self.ready {
+            self.request_provider_subagents(agent_id);
+        }
+    }
+
+    fn supports_provider_subagents(&self) -> bool {
+        self.typed_server_info
+            .as_ref()
+            .and_then(|info| info.features.as_ref())
+            .and_then(|features| features.provider_subagents)
+            == Some(true)
+    }
+
+    /// Lists the provider subagents of a viewed agent when the host has them.
+    fn request_provider_subagents(&mut self, agent_id: &str) {
+        if !self.supports_provider_subagents() {
+            return;
+        }
+        let _ = self.request(
+            json!({"type": "agent.provider_subagents.list.request", "parentAgentId": agent_id}),
+            Pending::ProviderSubagents(agent_id.to_string()),
+        );
     }
 
     pub fn unview_agent(&mut self, agent_id: &str) {
@@ -638,6 +763,7 @@ impl ClientCore {
         };
         self.viewed.remove(index);
         self.timelines.remove(agent_id);
+        self.tasks.remove(agent_id);
         self.dirty_timelines.remove(agent_id);
         if self.generation.is_some() {
             self.update_timeline_subscription();
@@ -699,14 +825,360 @@ impl ClientCore {
         if !images.is_empty() {
             message["images"] = Value::Array(images);
         }
-        let _ = self.request(message, Pending::Queue(agent_id.to_string()));
+        self.queue_request(message, agent_id, None);
     }
 
     pub fn cancel_queued(&mut self, agent_id: &str, queued_id: &str) {
-        let _ = self.request(
+        self.queue_request(
             json!({"type": "agent.queue.cancel.request", "agentId": agent_id, "itemId": queued_id}),
-            Pending::Queue(agent_id.to_string()),
+            agent_id,
+            None,
         );
+    }
+
+    fn queue_request(&mut self, message: Value, agent_id: &str, reply: Option<Reply<()>>) {
+        let pending = Pending::Queue {
+            agent_id: agent_id.to_string(),
+            reply,
+        };
+        if let Err(pending) = self.request(message, pending) {
+            pending.fail(anyhow!("not connected"));
+        }
+    }
+
+    // ---- composer, New workspace, and tab menu requests (TASK-169) ----
+
+    /// Adds the images and attachments of `message` to a send or enqueue request.
+    fn with_outgoing(mut request: Value, message: OutgoingMessage) -> Value {
+        if !message.images.is_empty() {
+            request["images"] = Value::Array(message.images);
+        }
+        if !message.attachments.is_empty() {
+            request["attachments"] = Value::Array(message.attachments);
+        }
+        request
+    }
+
+    /// Sends a prompt with images and attachments; resolves on the daemon's answer.
+    pub fn send_outgoing(
+        &mut self,
+        agent_id: &str,
+        message: OutgoingMessage,
+        behavior: TurnBehavior,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let request = json!({
+            "type": "send_agent_message_request",
+            "agentId": agent_id,
+            "text": message.text,
+            "messageId": uuid::Uuid::new_v4().to_string(),
+            "activeTurnBehavior": behavior.wire(),
+        });
+        self.request_reply(Self::with_outgoing(request, message), Pending::Accepted)
+    }
+
+    /// Queues a prompt with images and attachments; resolves when the daemon holds it.
+    pub fn enqueue_outgoing(
+        &mut self,
+        agent_id: &str,
+        message: OutgoingMessage,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let request = json!({"type": "agent.queue.enqueue.request", "agentId": agent_id, "text": message.text});
+        let (reply, receiver) = oneshot::channel();
+        self.queue_request(Self::with_outgoing(request, message), agent_id, Some(reply));
+        receiver
+    }
+
+    /// Whether Stop holds the agent's queue until a resume or a promote.
+    pub fn queue_held(&self, agent_id: &str) -> bool {
+        self.extras
+            .get(agent_id)
+            .is_some_and(|extra| extra.queue_held)
+    }
+
+    pub fn edit_queued(&mut self, agent_id: &str, queued_id: &str, text: &str) {
+        self.queue_request(
+            json!({"type": "agent.queue.edit.request", "agentId": agent_id, "itemId": queued_id,
+                   "text": text}),
+            agent_id,
+            None,
+        );
+    }
+
+    /// Moves a queued prompt before `before_id`; `None` moves it to the end.
+    pub fn reorder_queued(&mut self, agent_id: &str, queued_id: &str, before_id: Option<&str>) {
+        self.queue_request(
+            json!({"type": "agent.queue.reorder.request", "agentId": agent_id, "itemId": queued_id,
+                   "beforeItemId": before_id}),
+            agent_id,
+            None,
+        );
+    }
+
+    /// Sends a queued prompt now.
+    pub fn promote_queued(&mut self, agent_id: &str, queued_id: &str) {
+        self.queue_request(
+            json!({"type": "agent.queue.promote.request", "agentId": agent_id, "itemId": queued_id}),
+            agent_id,
+            None,
+        );
+    }
+
+    /// Releases a held queue.
+    pub fn resume_queue(&mut self, agent_id: &str) {
+        self.queue_request(
+            json!({"type": "agent.queue.resume.request", "agentId": agent_id}),
+            agent_id,
+            None,
+        );
+    }
+
+    pub fn agent_active_turn(&self, agent_id: &str) -> Option<ActiveTurn> {
+        self.extras.get(agent_id)?.active_turn.clone()
+    }
+
+    pub fn agent_last_usage(&self, agent_id: &str) -> Option<AgentUsage> {
+        self.extras.get(agent_id)?.last_usage
+    }
+
+    /// The metrics of the viewed agent's last turn. It scans back from the end and stops at
+    /// the last user message, as the app's `findLastTurnMetrics` does.
+    pub fn agent_last_turn_metrics(&self, agent_id: &str) -> Option<TurnMetrics> {
+        let entries = &self.timelines.get(agent_id)?.state.entries;
+        for entry in entries.iter().rev() {
+            match entry["item"]["type"].as_str() {
+                Some("user_message") => return None,
+                Some("assistant_message") => {
+                    if let Some(metrics) = composer_data::turn_metrics(&entry["turnMetrics"]) {
+                        return Some(metrics);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// The newest `todo` list of a viewed agent; empty for an agent that is not viewed.
+    pub fn agent_tasks(&self, agent_id: &str) -> Vec<TaskEntry> {
+        self.tasks
+            .get(agent_id)
+            .map(|cache| cache.tasks.clone())
+            .unwrap_or_default()
+    }
+
+    /// The trimmed `paseo.parent-agent-id` label; `None` when it is absent or blank.
+    pub fn agent_parent_id(&self, agent_id: &str) -> Option<String> {
+        let parent = self.extras.get(agent_id)?.labels.get(PARENT_AGENT_LABEL)?;
+        let parent = parent.trim();
+        (!parent.is_empty()).then(|| parent.to_string())
+    }
+
+    /// The track strip rows of a parent agent: Paseo children, then provider children, merged
+    /// by `createdAt` as the app's `useSubagentsForParent` does.
+    pub fn subagents(&self, parent_agent_id: &str) -> Vec<SubagentRow> {
+        let mut rows: Vec<SubagentRow> = self
+            .agents
+            .iter()
+            .filter(|agent| self.agent_parent_id(&agent.id).as_deref() == Some(parent_agent_id))
+            .map(|agent| {
+                let extra = self.extras.get(&agent.id);
+                SubagentRow {
+                    id: agent.id.clone(),
+                    kind: SubagentKind::Paseo,
+                    provider: agent.provider.clone(),
+                    title: extra.and_then(|extra| extra.title.clone()),
+                    description: None,
+                    subtitle: None,
+                    status: agent.status.clone(),
+                    requires_attention: extra.is_some_and(|extra| extra.requires_attention),
+                    created_at: extra
+                        .and_then(|extra| extra.created_at.clone())
+                        .unwrap_or_default(),
+                }
+            })
+            .collect();
+        rows.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+        if !self.supports_provider_subagents() {
+            return rows;
+        }
+        let nesting = self
+            .typed_server_info
+            .as_ref()
+            .and_then(|info| info.features.as_ref())
+            .and_then(|features| features.provider_subagent_nesting)
+            == Some(true);
+        let mut provider: Vec<SubagentRow> = self
+            .provider_subagents
+            .get(parent_agent_id)
+            .into_iter()
+            .flatten()
+            .filter(|subagent| !(nesting && subagent.nested))
+            .map(|subagent| subagent.row.clone())
+            .collect();
+        if provider.is_empty() {
+            return rows;
+        }
+        rows.append(&mut provider);
+        rows.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+        rows
+    }
+
+    /// The modes of a provider as `(id, label)`.
+    pub fn provider_modes(
+        &mut self,
+        provider: &str,
+        cwd: Option<&str>,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<(String, String)>>> {
+        let mut message = json!({"type": "list_provider_modes_request", "provider": provider});
+        if let Some(cwd) = cwd {
+            message["cwd"] = json!(cwd);
+        }
+        self.request_reply(message, Pending::Modes)
+    }
+
+    /// The provider features of a draft; a feature type this client does not know is left out.
+    pub fn draft_features(
+        &mut self,
+        config: DraftConfig,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<AgentFeature>>> {
+        self.request_reply(
+            json!({"type": "list_provider_features_request",
+                   "draftConfig": composer_data::draft_config(&config)}),
+            Pending::DraftFeatures,
+        )
+    }
+
+    /// The provider's default model.
+    pub fn default_model(&self, provider: &str) -> Option<String> {
+        self.default_models.get(provider).cloned()
+    }
+
+    /// The thinking options of a model; `current` is the model default. `None` when the model
+    /// has none.
+    pub fn model_thinking(&self, provider: &str, model: &str) -> Option<ThinkingControls> {
+        let thinking = self
+            .model_thinking
+            .get(&(provider.to_string(), model.to_string()))?;
+        if thinking.options.is_empty() {
+            return None;
+        }
+        Some(ThinkingControls {
+            options: thinking.options.clone(),
+            current: thinking.default.clone(),
+        })
+    }
+
+    /// Creates a workspace, with its first agent when `request.agent` is set.
+    pub fn create_workspace(
+        &mut self,
+        request: CreateWorkspace,
+    ) -> oneshot::Receiver<anyhow::Result<CreatedWorkspace>> {
+        let receipts = self
+            .typed_server_info
+            .as_ref()
+            .and_then(|info| info.features.as_ref())
+            .and_then(|features| features.workspace_request_receipts)
+            == Some(true);
+        self.request_reply(
+            composer_data::create_workspace(&request, receipts),
+            Pending::CreateWorkspace,
+        )
+    }
+
+    /// Creates an agent with its full config and resolves to its id.
+    pub fn create_agent_with(
+        &mut self,
+        agent: InitialAgent,
+    ) -> oneshot::Receiver<anyhow::Result<String>> {
+        let mut fields = composer_data::initial_agent(&agent);
+        // As `create_agent`: no prompt, no turn.
+        if agent.initial_prompt.is_empty() {
+            fields.remove("initialPrompt");
+            fields.remove("clientMessageId");
+        }
+        let mut message = Value::Object(fields);
+        message["type"] = json!("create_agent_request");
+        self.request_reply(message, Pending::CreateAgent)
+    }
+
+    pub fn branch_suggestions(
+        &mut self,
+        cwd: &str,
+        query: Option<&str>,
+        limit: Option<u32>,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<BranchSuggestion>>> {
+        let mut message = json!({"type": "branch_suggestions_request", "cwd": cwd});
+        if let Some(query) = query {
+            message["query"] = json!(query);
+        }
+        if let Some(limit) = limit {
+            message["limit"] = json!(limit);
+        }
+        self.request_reply(message, Pending::BranchSuggestions)
+    }
+
+    pub fn validate_branch(
+        &mut self,
+        cwd: &str,
+        branch_name: &str,
+    ) -> oneshot::Receiver<anyhow::Result<BranchValidation>> {
+        self.request_reply(
+            json!({"type": "validate_branch_request", "cwd": cwd, "branchName": branch_name}),
+            Pending::ValidateBranch,
+        )
+    }
+
+    /// Registers the folder as a project.
+    pub fn add_project(&mut self, cwd: &str) -> oneshot::Receiver<anyhow::Result<AddedProject>> {
+        self.request_reply(
+            json!({"type": "project.add.request", "cwd": cwd}),
+            Pending::AddProject,
+        )
+    }
+
+    /// Reloads the agent's timeline from its provider.
+    pub fn refresh_agent(&mut self, agent_id: &str) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.request_reply(
+            json!({"type": "refresh_agent_request", "agentId": agent_id}),
+            Pending::Refresh,
+        )
+    }
+
+    /// The provider-native session id: `runtimeInfo.sessionId`, else `persistence.sessionId`.
+    pub fn agent_provider_session_id(&self, agent_id: &str) -> Option<String> {
+        self.extras.get(agent_id)?.session_id.clone()
+    }
+
+    /// The snapshot `updatedAt`; `None` for an unknown agent.
+    pub fn agent_updated_at(&self, agent_id: &str) -> Option<String> {
+        if !self.agents.iter().any(|agent| agent.id == agent_id) {
+            return None;
+        }
+        self.extras.get(agent_id)?.updated_at.clone()
+    }
+
+    pub fn rename_terminal(
+        &mut self,
+        terminal_id: &str,
+        title: &str,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.request_reply(
+            json!({"type": "terminal.rename.request", "terminalId": terminal_id, "title": title}),
+            Pending::RenameTerminal,
+        )
+    }
+
+    /// Every changed file of `cwd` with its diff, against `compare`.
+    pub fn checkout_diff_with(
+        &mut self,
+        cwd: &str,
+        compare: DiffCompare,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<FileDiff>>> {
+        self.request_reply(
+            json!({"type": "checkout.diff.get.request", "cwd": cwd,
+                   "compare": composer_data::diff_compare(&compare)}),
+            Pending::CheckoutDiff,
+        )
     }
 
     pub fn set_thinking(&mut self, agent_id: &str, option_id: &str) {
@@ -975,6 +1447,124 @@ impl ClientCore {
                 root: root.to_string(),
                 reply,
             },
+        )
+    }
+
+    // ---- plugins (TASK-168) ----
+
+    /// The installed plugins in the daemon's order.
+    pub fn list_plugins(&mut self) -> oneshot::Receiver<anyhow::Result<Vec<PluginListItem>>> {
+        self.request_reply(json!({"type": "plugin.list.request"}), Pending::PluginList)
+    }
+
+    /// The ids of the loaded plugins (`plugin.catalog.get`).
+    pub fn plugin_catalog_ids(&mut self) -> oneshot::Receiver<anyhow::Result<Vec<String>>> {
+        self.request_reply(
+            json!({"type": "plugin.catalog.get.request"}),
+            Pending::PluginCatalog,
+        )
+    }
+
+    /// Calls a plugin RPC and decodes its `output` with `decode`.
+    fn plugin_call<T: Send + 'static>(
+        &mut self,
+        plugin_id: &str,
+        method: &str,
+        input: Value,
+        decode: impl FnOnce(Value) -> anyhow::Result<T> + Send + 'static,
+    ) -> oneshot::Receiver<anyhow::Result<T>> {
+        let (reply, receiver) = oneshot::channel();
+        let finish: RpcFinish = Box::new(move |result| {
+            let _ = reply.send(result.and_then(decode));
+        });
+        let message = json!({
+            "type": "plugin.rpc.invoke.request",
+            "pluginId": plugin_id,
+            "method": method,
+            "input": input,
+        });
+        if let Err(pending) = self.request(message, Pending::PluginRpc(finish)) {
+            pending.fail(anyhow!("not connected"));
+        }
+        receiver
+    }
+
+    /// Calls a plugin RPC; `output` must decode as `O`.
+    pub fn plugin_rpc<O: serde::de::DeserializeOwned + Send + 'static>(
+        &mut self,
+        plugin_id: &str,
+        method: &str,
+        input: Value,
+    ) -> oneshot::Receiver<anyhow::Result<O>> {
+        let method_name = method.to_string();
+        self.plugin_call(plugin_id, method, input, move |output| {
+            serde_json::from_value(output)
+                .map_err(|error| anyhow!("{method_name} output does not decode: {error}"))
+        })
+    }
+
+    pub fn read_plugin_settings(
+        &mut self,
+        plugin_id: &str,
+        settings_id: &str,
+    ) -> oneshot::Receiver<anyhow::Result<PluginSettingsRead>> {
+        let method = format!("settings.{settings_id}.read");
+        self.plugin_call(plugin_id, &method, json!({}), plugins::settings_read)
+    }
+
+    pub fn write_plugin_settings(
+        &mut self,
+        plugin_id: &str,
+        settings_id: &str,
+        revision: &str,
+        values: Value,
+    ) -> oneshot::Receiver<anyhow::Result<PluginSettingsWrite>> {
+        let method = format!("settings.{settings_id}.write");
+        let input = json!({"revision": revision, "values": values});
+        self.plugin_call(plugin_id, &method, input, plugins::settings_write)
+    }
+
+    pub fn reset_plugin_settings(
+        &mut self,
+        plugin_id: &str,
+        settings_id: &str,
+        revision: &str,
+    ) -> oneshot::Receiver<anyhow::Result<PluginSettingsWrite>> {
+        let method = format!("settings.{settings_id}.reset");
+        let input = json!({"revision": revision});
+        self.plugin_call(plugin_id, &method, input, plugins::settings_write)
+    }
+
+    /// The agent's labels; empty when the snapshot has none, `None` for an unknown agent.
+    pub fn agent_labels(&self, agent_id: &str) -> Option<BTreeMap<String, String>> {
+        if !self.agents.iter().any(|agent| agent.id == agent_id) {
+            return None;
+        }
+        Some(
+            self.extras
+                .get(agent_id)
+                .map(|extra| extra.labels.clone())
+                .unwrap_or_default(),
+        )
+    }
+
+    /// Sets these labels; the daemon keeps the agent's other labels.
+    pub fn set_agent_labels(
+        &mut self,
+        agent_id: &str,
+        labels: BTreeMap<String, String>,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.request_reply(
+            json!({"type": "update_agent_request", "agentId": agent_id, "labels": labels}),
+            Pending::Accepted,
+        )
+    }
+
+    /// Closes the agent's provider runtime; the agent stays and resumes on the next prompt.
+    pub fn close_agent_runtime(&mut self, agent_id: &str) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.request_reply(
+            json!({"type": "agent.runtime.close.request", "agentId": agent_id}),
+            Pending::Accepted,
         )
     }
 
@@ -1306,8 +1896,56 @@ impl ClientCore {
                     payload["requestId"].as_str().unwrap_or_default(),
                 );
             }
+            "status" => self.plugin_status(payload),
+            "agent.provider_subagents.update" => match payload["kind"].as_str() {
+                Some("upsert") => {
+                    let Some(subagent) = composer_data::provider_subagent(&payload["subagent"])
+                    else {
+                        return;
+                    };
+                    let rows = self
+                        .provider_subagents
+                        .entry(subagent.parent_agent_id.clone())
+                        .or_default();
+                    match rows.iter_mut().find(|row| row.row.id == subagent.row.id) {
+                        Some(existing) => *existing = subagent,
+                        None => rows.push(subagent),
+                    }
+                    self.directory_changed = true;
+                }
+                Some("remove") => {
+                    let parent = payload["parentAgentId"].as_str().unwrap_or_default();
+                    let id = payload["subagentId"].as_str().unwrap_or_default();
+                    if let Some(rows) = self.provider_subagents.get_mut(parent) {
+                        rows.retain(|row| row.row.id != id);
+                        self.directory_changed = true;
+                    }
+                }
+                _ => {}
+            },
             _ => {}
         }
+    }
+
+    /// A `status` event without a request: only the plugin change statuses are read.
+    fn plugin_status(&mut self, payload: &Value) {
+        let plugin_id = payload["pluginId"].as_str().map(str::to_string);
+        let event = match (payload["status"].as_str(), plugin_id) {
+            (Some("plugin_catalog_changed"), Some(plugin_id)) => {
+                PluginEvent::CatalogChanged { plugin_id }
+            }
+            (Some("plugin_settings_changed"), Some(plugin_id)) => {
+                let Some(settings_id) = payload["settingsId"].as_str() else {
+                    return;
+                };
+                PluginEvent::SettingsChanged {
+                    plugin_id,
+                    settings_id: settings_id.to_string(),
+                }
+            }
+            _ => return,
+        };
+        self.plugin_events.push(event);
     }
 
     fn response(&mut self, pending: Pending, kind: &str, payload: &Value) {
@@ -1403,6 +2041,20 @@ impl ClientCore {
                 let Some(sync) = self.timelines.get_mut(&agent_id) else {
                     return;
                 };
+                if generation == sync.generation()
+                    && let (Some(epoch), Some(cache)) =
+                        (page["epoch"].as_str(), self.tasks.get_mut(&agent_id))
+                {
+                    let replaces = matches!(plan, FetchPlan::Tail) || page["reset"] == true;
+                    if cache.epoch.as_deref() != Some(epoch) && (replaces || cache.epoch.is_none())
+                    {
+                        *cache = TasksCache {
+                            epoch: Some(epoch.to_string()),
+                            ..TasksCache::default()
+                        };
+                    }
+                    cache.note(epoch, page["entries"].as_array().into_iter().flatten());
+                }
                 let version = sync.state.version;
                 let next = sync.on_page(&plan, generation, &page);
                 if sync.state.version != version {
@@ -1683,15 +2335,23 @@ impl ClientCore {
                 };
                 let _ = reply.send(result);
             }
-            Pending::Queue(agent_id) => {
+            Pending::Queue { agent_id, reply } => {
                 if let Some(error) = error {
-                    return log::warn!("queue request for {agent_id} failed: {error}");
+                    log::warn!("queue request for {agent_id} failed: {error}");
+                    if let Some(reply) = reply {
+                        let _ = reply.send(Err(anyhow!(error)));
+                    }
+                    return;
                 }
                 if payload["queue"].is_object()
                     && let Some(extra) = self.extras.get_mut(&agent_id)
                 {
                     extra.queue = queued_prompts(&payload["queue"]);
+                    extra.queue_held = payload["queue"]["held"] == true;
                     self.directory_changed = true;
+                }
+                if let Some(reply) = reply {
+                    let _ = reply.send(Ok(()));
                 }
             }
             Pending::ReadConfig { root, reply } => {
@@ -1709,6 +2369,149 @@ impl ClientCore {
                 });
                 let _ = reply.send(result);
             }
+            pending => self.plugin_response(pending, kind, payload, error),
+        }
+    }
+
+    /// Answers of the plugin requests and the agent actions plugins use (TASK-168).
+    fn plugin_response(
+        &mut self,
+        pending: Pending,
+        kind: &str,
+        payload: &Value,
+        error: Option<String>,
+    ) {
+        match pending {
+            Pending::PluginList(reply) => {
+                let result = match error {
+                    Some(error) => Err(anyhow!(error)),
+                    None => Ok(plugins::plugin_list(&payload["plugins"])),
+                };
+                let _ = reply.send(result);
+            }
+            Pending::PluginCatalog(reply) => {
+                let result = match error {
+                    Some(error) => Err(anyhow!(error)),
+                    None => Ok(plugins::catalog_ids(&payload["plugins"])),
+                };
+                let _ = reply.send(result);
+            }
+            Pending::PluginRpc(finish) => finish(match error {
+                Some(error) => Err(anyhow!(error)),
+                None => Ok(payload.get("output").cloned().unwrap_or(Value::Null)),
+            }),
+            Pending::Accepted(reply) => {
+                let result = match error {
+                    Some(error) => Err(anyhow!(error)),
+                    None if payload["accepted"] != true => Err(anyhow!("request refused")),
+                    None => Ok(()),
+                };
+                let _ = reply.send(result);
+            }
+            pending => self.composer_response(pending, kind, payload, error),
+        }
+    }
+
+    /// Answers of the composer, New workspace, and tab menu requests (TASK-169).
+    fn composer_response(
+        &mut self,
+        pending: Pending,
+        kind: &str,
+        payload: &Value,
+        error: Option<String>,
+    ) {
+        fn reply<T>(
+            reply: Reply<T>,
+            error: Option<String>,
+            ok: impl FnOnce() -> anyhow::Result<T>,
+        ) {
+            let _ = reply.send(match error {
+                Some(error) => Err(anyhow!(error)),
+                None => ok(),
+            });
+        }
+        match pending {
+            Pending::ProviderSubagents(parent) => {
+                if let Some(error) = error {
+                    return log::warn!("provider subagents of {parent} failed: {error}");
+                }
+                let subagents = payload["subagents"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(composer_data::provider_subagent)
+                    .collect();
+                self.provider_subagents.insert(parent, subagents);
+                self.directory_changed = true;
+            }
+            Pending::Modes(sender) => reply(sender, error, || {
+                Ok(payload["modes"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|mode| {
+                        let id = mode["id"].as_str()?.to_string();
+                        let label = mode["label"].as_str().unwrap_or(&id).to_string();
+                        Some((id, label))
+                    })
+                    .collect())
+            }),
+            Pending::DraftFeatures(sender) => {
+                reply(sender, error, || Ok(agent_features(&payload["features"])))
+            }
+            Pending::CreateWorkspace(sender) => reply(sender, error, || {
+                let workspace_id = payload["workspace"]["id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow!("workspace creation failed"))?;
+                Ok(CreatedWorkspace {
+                    workspace_id: workspace_id.to_string(),
+                    agent_id: payload["agent"]["id"].as_str().map(str::to_string),
+                    setup_terminal_id: payload["setupTerminalId"].as_str().map(str::to_string),
+                })
+            }),
+            Pending::BranchSuggestions(sender) => reply(sender, error, || {
+                Ok(composer_data::branch_suggestions(payload))
+            }),
+            Pending::ValidateBranch(sender) => reply(sender, error, || {
+                Ok(BranchValidation {
+                    exists: payload["exists"] == true,
+                    resolved_ref: payload["resolvedRef"].as_str().map(str::to_string),
+                    is_remote: payload["isRemote"] == true,
+                })
+            }),
+            Pending::AddProject(sender) => {
+                let project = project_info(&payload["project"]);
+                if let (None, Some(project)) = (&error, &project) {
+                    match self.project_list.iter_mut().find(|p| p.id == project.id) {
+                        Some(existing) => *existing = project.clone(),
+                        None => self.project_list.push(project.clone()),
+                    }
+                    self.projects_dirty = true;
+                }
+                reply(sender, error, || {
+                    let project = project.ok_or_else(|| anyhow!("project could not be added"))?;
+                    let view_key = self
+                        .project_view_key(&project.id)
+                        .ok_or_else(|| anyhow!("project has no view key"))?;
+                    Ok(AddedProject {
+                        id: project.id,
+                        name: project.name,
+                        root: project.root,
+                        view_key,
+                    })
+                })
+            }
+            Pending::Refresh(sender) => reply(sender, error, || match payload["status"].as_str() {
+                Some("agent_refreshed") => Ok(()),
+                _ => Err(anyhow!("unexpected refresh answer {kind}")),
+            }),
+            Pending::RenameTerminal(sender) => reply(sender, error, || {
+                if payload["success"] == true {
+                    Ok(())
+                } else {
+                    Err(anyhow!("terminal rename failed"))
+                }
+            }),
             other => other.fail(anyhow!("unexpected response {kind}")),
         }
     }
@@ -1836,6 +2639,21 @@ impl ClientCore {
             .as_str()
             .and_then(AttentionReason::parse);
         extra.features = agent_features(&agent["features"]);
+        extra.labels = agent["labels"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string())))
+            .collect();
+        extra.title = agent["title"].as_str().map(str::to_string);
+        extra.created_at = agent["createdAt"].as_str().map(str::to_string);
+        extra.active_turn = composer_data::active_turn(&agent["activeTurn"]);
+        extra.last_usage = composer_data::agent_usage(&agent["lastUsage"]);
+        extra.session_id = runtime["sessionId"]
+            .as_str()
+            .or_else(|| agent["persistence"]["sessionId"].as_str())
+            .map(str::to_string);
+        extra.queue_held = agent["queue"]["held"] == true;
         self.set_permissions(id, permissions);
         self.directory_changed = true;
     }
@@ -1965,6 +2783,9 @@ impl ClientCore {
                 let Some(sync) = self.timelines.get_mut(&agent_id) else {
                     return;
                 };
+                if let Some(cache) = self.tasks.get_mut(&agent_id) {
+                    cache.note(&row.epoch, [&row.entry]);
+                }
                 let version = sync.state.version;
                 let plan = sync.on_live(row);
                 if sync.state.version != version {
@@ -1980,8 +2801,27 @@ impl ClientCore {
             Some("permission_resolved") => {
                 self.remove_permission(&agent_id, event["requestId"].as_str().unwrap_or_default())
             }
+            Some("turn_completed") => self.turn_completed(&agent_id, event),
             _ => {}
         }
+    }
+
+    /// Puts the turn's metrics on its last assistant entry, where a fresh fetch puts them.
+    fn turn_completed(&mut self, agent_id: &str, event: &Value) {
+        let (Some(turn_id), true) = (event["turnId"].as_str(), event["metrics"].is_object()) else {
+            return;
+        };
+        let Some(sync) = self.timelines.get_mut(agent_id) else {
+            return;
+        };
+        let Some(entry) = sync.state.entries.iter_mut().rev().find(|entry| {
+            entry["item"]["type"] == "assistant_message" && entry["turnId"] == turn_id
+        }) else {
+            return;
+        };
+        entry["turnMetrics"] = event["metrics"].clone();
+        sync.state.version += 1;
+        self.dirty_timelines.insert(agent_id.to_string());
     }
 
     fn add_permission(&mut self, agent_id: &str, request: Value) {

@@ -467,3 +467,26 @@ fn live_agent_commands_thinking_and_queue() {
         "queued prompt is cancelled"
     );
 }
+
+#[test]
+#[ignore]
+fn live_plugin_list_matches_catalog() {
+    let mut client = Harness::connect(LIVE, None);
+    assert!(client.connected(), "live daemon on 6768");
+    let reply = client.core.plugin_catalog_ids();
+    let catalog = wait_reply(&mut client, reply);
+    let reply = client.core.list_plugins();
+    let plugins = wait_reply(&mut client, reply);
+    for id in &catalog {
+        let plugin = plugins
+            .iter()
+            .find(|plugin| &plugin.id == id)
+            .unwrap_or_else(|| panic!("{id} is listed"));
+        assert!(plugin.enabled, "{id} is enabled");
+        assert_eq!(
+            plugin.status,
+            bachuc_client::PluginStatus::Running,
+            "{id} runs"
+        );
+    }
+}
