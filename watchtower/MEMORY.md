@@ -283,3 +283,12 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: an element that toggles `display` (hidden or flex) from hover or `group_hover` panics with "must call prepaint before paint". Prepaint tests hover against the previous frame and skips a hidden child, but paint tests fresh hover and paints that child. GPUI also logs "has no accessibility node" for a focused element that has an id but no role.
 - Source: TASK-149 and TASK-155 outcomes.
 - Use next time: swap hover content by visibility or stacked layers, never by display. Give every `track_focus` element a role and a label.
+
+### 2026-10-16 - Plan 20261016-gpui-parity-follow-ups
+
+- Learned: GPUI view crates have no headless test context here, so builders put each rule (fallback, clamp, in-flight guard, redraw check) in a pure function and test that. Code that needs `App` or `Context` is checked only by reading it.
+- Source: TASK-159, TASK-160, TASK-161, and TASK-163 outcomes.
+- Use next time: write GPUI Verify lines against pure model functions, and plan any window check as a separate owner step.
+- Learned: the lefthook format hook checks staged `*.md` and `*.json` everywhere, so the vendored `packages/desktop-gpui/vendor/gpui-base` needed an `ignorePatterns` entry in `.oxfmtrc.json`.
+- Source: TASK-166 commit, 2026-10-16.
+- Use next time: add a vendored folder to `.oxfmtrc.json` before its first commit.
