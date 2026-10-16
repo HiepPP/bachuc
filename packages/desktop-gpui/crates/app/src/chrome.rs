@@ -243,17 +243,51 @@ impl Shell {
     }
 
     /// The workspace header (`ScreenHeader` with `WorkspaceHeaderTitleBar`): sidebar toggle,
-    /// workspace name and project, then the tab menu and the Explorer toggle.
-    pub(crate) fn render_header(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    /// workspace name and project, then the tab menu and the Explorer toggle. A plugin header
+    /// subtitle replaces the project name; the New workspace screen adds its side panel toggle.
+    pub(crate) fn render_header(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let t = tokens(cx);
-        let (title, subtitle) = {
+        let (title, subtitle, subtitle_input) = {
             let client = self.client.read(cx);
             match find_workspace(client.projects(), &self.selected) {
-                Some((project, workspace)) => (workspace.name.clone(), Some(project.name.clone())),
-                None => ("New tab".to_string(), None),
+                Some((project, workspace)) => (
+                    workspace.name.clone(),
+                    Some(project.name.clone()),
+                    Some((
+                        workspace.id.clone(),
+                        project.id.clone(),
+                        project.name.clone(),
+                        project.root.clone(),
+                    )),
+                ),
+                None => ("New tab".to_string(), None, None),
             }
         };
-        let subtitle = subtitle.filter(|project| *project != title);
+        let plugin_subtitle = self.plugin_subtitle(subtitle_input, window, cx);
+        let subtitle = subtitle.filter(|project| *project != title && plugin_subtitle.is_none());
+        let side_panel = self
+            .active_new_workspace(cx)
+            .filter(|screen| screen.read(cx).side_panel_available(cx))
+            .map(|screen| screen.read(cx).side_panel_open())
+            .map(|open| {
+                chrome_button(
+                    "new-workspace-side-panel-toggle",
+                    if open {
+                        "Hide side panel"
+                    } else {
+                        "Show side panel"
+                    },
+                    IconName::PanelRight,
+                    cx,
+                )
+                .aria_expanded(open)
+                .when(open, |button| button.bg(t.surface2))
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_side_panel(cx)))
+            });
         let has_workspace = self.selected_cwd().is_some();
         let active_agent = self
             .active_key(cx)
@@ -380,6 +414,9 @@ impl Shell {
                                 .text_color(t.foreground_muted)
                                 .child(project),
                         )
+                    })
+                    .when_some(plugin_subtitle, |row, view| {
+                        row.child(div().min_w_0().overflow_hidden().child(view))
                     }),
             )
             .child(
@@ -387,6 +424,7 @@ impl Shell {
                     .flex_shrink_0()
                     .items_center()
                     .gap(px(SPACE_1))
+                    .children(side_panel)
                     .child(menu)
                     .when(has_workspace, |row| {
                         row.child(

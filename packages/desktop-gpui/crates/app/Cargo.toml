@@ -15,6 +15,7 @@ bachuc-composer = { path = "../composer" }
 bachuc-diagram = { path = "../diagram" }
 bachuc-explorer = { path = "../explorer" }
 bachuc-icons = { path = "../icons" }
+bachuc-plugin-host = { path = "../plugin-host" }
 bachuc-settings = { path = "../settings" }
 bachuc-sidebar = { path = "../sidebar" }
 bachuc-terminal = { path = "../terminal" }
@@ -24,6 +25,7 @@ bachuc-workspace = { path = "../workspace" }
 gpui-kit.workspace = true
 log = "0.4"
 serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # GPUI has no dock badge API, so the badge goes through NSDockTile.

@@ -8,10 +8,13 @@
 mod actions;
 mod chrome;
 mod dock;
-mod new_agent;
+mod new_workspace;
 mod panes;
+mod plugin_views;
+mod plugins;
 mod shell;
 mod state;
+mod workspace_draft;
 
 use gpui_kit::*;
 
@@ -50,6 +53,9 @@ fn main() {
             // appearance applies over the theme defaults.
             gpui_kit::init(cx);
             bachuc_theme::init(cx);
+            // The views read the host's contributions; no plugin is active before the shell
+            // gives it a client.
+            bachuc_plugin_host::init(plugins::registered_plugins(), cx);
             bachuc_settings::load_appearance(cx);
             // The shell binds the shortcut table; these never change.
             cx.bind_keys(actions::fixed_bindings());

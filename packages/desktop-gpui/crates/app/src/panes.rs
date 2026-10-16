@@ -5,7 +5,7 @@
 use crate::actions::{AGENT_CONTEXT, FindInTimeline};
 use bachuc_client::Client;
 use bachuc_command::display_combos;
-use bachuc_composer::Composer;
+use bachuc_composer::{Composer, CornerPills};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
@@ -58,10 +58,12 @@ impl Render for PaneFrame {
 
 // ----- agent pane -----
 
-/// One agent tab: its timeline over its composer.
+/// One agent tab: its timeline over its composer, with the plugin corner pills over the
+/// timeline's top-right corner.
 pub struct AgentPane {
     pub timeline: Entity<TimelineView>,
     pub composer: Entity<Composer>,
+    corner_pills: Entity<CornerPills>,
 }
 
 impl AgentPane {
@@ -76,8 +78,15 @@ impl AgentPane {
         let timeline_id = agent_id.clone();
         let timeline =
             cx.new(|cx| TimelineView::new(timeline_client, timeline_id, diagrams, window, cx));
+        let pills_client = client.clone();
+        let pills_id = agent_id.clone();
+        let corner_pills = cx.new(|cx| CornerPills::new(pills_client, pills_id, cx));
         let composer = cx.new(|cx| Composer::new(client, agent_id, window, cx));
-        AgentPane { timeline, composer }
+        AgentPane {
+            timeline,
+            composer,
+            corner_pills,
+        }
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
@@ -100,10 +109,12 @@ impl Render for AgentPane {
             }))
             .child(
                 div()
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .w_full()
-                    .child(self.timeline.clone()),
+                    .child(self.timeline.clone())
+                    .child(self.corner_pills.clone()),
             )
             .child(self.composer.clone())
     }

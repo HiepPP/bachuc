@@ -8,18 +8,27 @@ use crate::actions::{
 };
 use crate::chrome::{ExplorerResize, HANDLE_WIDTH, NoPreview};
 use crate::dock;
-use crate::new_agent::{Created, DraftPane};
+use crate::new_workspace::{self, NewWorkspacePreset, NewWorkspaceScreen, SidePanelChanged};
 use crate::panes::{
     AgentPane, Launch, LaunchItem, LazyAgentPane, NewTabPane, PaneFrame, launch_hints,
+};
+use crate::plugin_views::{
+    OpenSurface, PluginViews, surface_body, surface_header, surface_overlay, surface_page,
+};
+use crate::plugins::{
+    keystroke_text, panel_identity, panel_location, plugin_shortcut, surface_heading,
 };
 use crate::state::{
     Connection, LayoutPrefs, LogoFill, absolute_path, agent_icon, agent_key, agent_of_key,
     agent_title, all_diffs_key, badge_count, badge_label, command_items, commit_diff_key,
     commit_diff_title, diff_key, explorer_width, file_key, file_name, file_of_key, find_workspace,
-    initial_host, next_mode, next_theme, notification_for, step_index, step_workspace,
-    workspace_agents, workspace_order,
+    initial_host, next_mode, notification_for, step_index, step_workspace, workspace_agents,
+    workspace_order,
 };
-use bachuc_client::{Client, ClientEvent, DirectoryEvent, HostConfig, load_hosts};
+use crate::workspace_draft::{self, WorkspaceDraftPane};
+use bachuc_client::{
+    Client, ClientEvent, CreatedWorkspace, DirectoryEvent, HostConfig, load_hosts, resume_command,
+};
 use bachuc_command::{CommandCenter, CommandEvent, Shortcut, data_dir, load_shortcuts};
 use bachuc_composer::ComposerEvent;
 use bachuc_diagram::DiagramRenderer;
@@ -27,10 +36,14 @@ use bachuc_explorer::{
     DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerTab, FileView,
 };
 use bachuc_icons::{IconName, provider_logo};
+use bachuc_plugin_host::{
+    PanelInput, PanelTarget, PluginHost, PluginHostEvent, SurfacePresentation,
+};
 use bachuc_settings::{Settings, SettingsEvent};
 use bachuc_sidebar::model::archive_prompt;
 use bachuc_sidebar::{Sidebar, SidebarEvent};
 use bachuc_terminal::{TerminalEvent, TerminalView};
+use bachuc_theme::metrics::TRAFFIC_LIGHT_WIDTH;
 use bachuc_theme::tokens;
 use bachuc_timeline::TimelineEvent;
 use bachuc_workspace::model::Rect;
@@ -38,6 +51,7 @@ use bachuc_workspace::{PaneEvent, PaneItem, SplitAxis, TabKind, TabMenuEvent, Wo
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{WindowExt as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -59,11 +73,16 @@ pub(crate) enum PaneContent {
     Agent(Entity<AgentPane>),
     /// An agent tab not shown yet; `materialize` makes its `AgentPane`.
     LazyAgent(Entity<LazyAgentPane>),
-    Draft(Entity<DraftPane>),
+    /// The workspace draft tab.
+    Draft(Entity<WorkspaceDraftPane>),
+    /// The New workspace screen, in a tab of the home view.
+    NewWorkspace(Entity<NewWorkspaceScreen>),
     NewTab(Entity<NewTabPane>),
     Terminal(Entity<TerminalView>),
     File(Entity<FileView>),
     Diff(Entity<DiffView>),
+    /// A plugin workspace panel, built once when its tab opens.
+    Plugin(AnyView),
 }
 
 impl PaneContent {
@@ -72,10 +91,12 @@ impl PaneContent {
             PaneContent::Agent(view) => view.clone().into(),
             PaneContent::LazyAgent(view) => view.clone().into(),
             PaneContent::Draft(view) => view.clone().into(),
+            PaneContent::NewWorkspace(view) => view.clone().into(),
             PaneContent::NewTab(view) => view.clone().into(),
             PaneContent::Terminal(view) => view.clone().into(),
             PaneContent::File(view) => view.clone().into(),
             PaneContent::Diff(view) => view.clone().into(),
+            PaneContent::Plugin(view) => view.clone(),
         }
     }
 
@@ -84,7 +105,10 @@ impl PaneContent {
     fn owns_focus(&self) -> bool {
         matches!(
             self,
-            PaneContent::Agent(_) | PaneContent::Draft(_) | PaneContent::Terminal(_)
+            PaneContent::Agent(_)
+                | PaneContent::Draft(_)
+                | PaneContent::NewWorkspace(_)
+                | PaneContent::Terminal(_)
         )
     }
 
@@ -130,6 +154,14 @@ pub(crate) struct Pane {
     _subscriptions: Vec<Subscription>,
 }
 
+/// A workspace the New workspace screen created, and the tab of that screen.
+#[derive(Clone, Debug)]
+struct PendingOpen {
+    screen_workspace: String,
+    screen_key: String,
+    created: CreatedWorkspace,
+}
+
 pub(crate) struct OpenWorkspace {
     cwd: Option<String>,
     view: Entity<Workspace>,
@@ -162,6 +194,17 @@ pub struct Shell {
     command: Option<(Entity<CommandCenter>, Subscription)>,
     settings: Option<(Entity<Settings>, Subscription)>,
     pub(crate) dragging_window: bool,
+    /// A workspace the New workspace screen created, opened once the client lists it.
+    pending_open: Option<PendingOpen>,
+    /// The plugin host that `main` started; it follows the active host and tab.
+    plugin_host: Option<Entity<PluginHost>>,
+    /// The workspace and agent last given to `PluginHost::set_active`.
+    plugin_active: (Option<String>, Option<String>),
+    /// The plugin surface on screen, as a page or an overlay.
+    surface: Option<OpenSurface>,
+    plugin_views: PluginViews,
+    /// The New workspace side panel choice, kept for the session.
+    side_panel_open: bool,
     focus: FocusHandle,
     /// Subscriptions to the client and the views that hold it; a host switch replaces them.
     host_subscriptions: Vec<Subscription>,
@@ -182,7 +225,7 @@ impl Shell {
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         Self::open_agent_on_notification(window, cx);
-        let subscriptions = vec![
+        let mut subscriptions = vec![
             // set_theme and the font and syntax setters write this global; the chrome reads
             // tokens. The logos follow only a change of their fill.
             cx.observe_global::<Theme>(|this, cx| {
@@ -190,6 +233,11 @@ impl Shell {
                 cx.notify()
             }),
         ];
+        let plugin_host = bachuc_plugin_host::host(cx);
+        if let Some(host) = &plugin_host {
+            host.update(cx, |host, cx| host.set_client(client.clone(), cx));
+            subscriptions.push(cx.subscribe_in(host, window, Self::on_plugin_event));
+        }
         let logo_fill = LogoFill::new(tokens(cx).foreground);
         let mut shell = Shell {
             hosts,
@@ -214,6 +262,12 @@ impl Shell {
             command: None,
             settings: None,
             dragging_window: false,
+            pending_open: None,
+            plugin_host,
+            plugin_active: (None, None),
+            surface: None,
+            plugin_views: PluginViews::default(),
+            side_panel_open: false,
             focus,
             host_subscriptions: Vec::new(),
             _subscriptions: subscriptions,
@@ -232,6 +286,7 @@ impl Shell {
                 |this: &mut Shell, _, event: &DirectoryEvent, window, cx| {
                     if *event == DirectoryEvent::ProjectsChanged {
                         this.on_projects_changed(window, cx);
+                        this.open_pending(window, cx);
                     }
                 },
             ),
@@ -426,9 +481,15 @@ impl Shell {
         self.selected = HOME.to_string();
         self.known_agents.clear();
         self.command = None;
+        self.pending_open = None;
         self.connection = Connection::Connecting;
         let client = Client::connect(self.hosts[self.host_index].clone(), cx);
         self.retired = Some(std::mem::replace(&mut self.client, client.clone()));
+        // Plugins follow the new host: the host deactivates them and lists the new host's.
+        self.surface = None;
+        if let Some(host) = self.plugin_host.clone() {
+            host.update(cx, |host, cx| host.set_client(client.clone(), cx));
+        }
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(RETIRE_AFTER).await;
             let _ = this.update(cx, |shell, _| shell.retired = None);
@@ -446,6 +507,7 @@ impl Shell {
         self.subscribe_host(window, cx);
         self.ensure_home(window, cx);
         self.refresh_badge(cx);
+        self.sync_plugin_active(cx);
         cx.notify();
     }
 
@@ -581,7 +643,21 @@ impl Shell {
         } else {
             window.focus(&self.focus, cx);
         }
+        self.sync_plugin_active(cx);
         cx.notify();
+    }
+
+    /// Tells the plugin host the selected workspace and the focused agent tab, on a change.
+    fn sync_plugin_active(&mut self, cx: &mut Context<Self>) {
+        let workspace = (self.selected != HOME).then(|| self.selected.clone());
+        let active = (workspace, self.active_agent(cx));
+        if active == self.plugin_active {
+            return;
+        }
+        self.plugin_active = active.clone();
+        if let Some(host) = self.plugin_host.clone() {
+            host.update(cx, |host, cx| host.set_active(active.0, active.1, cx));
+        }
     }
 
     /// Points the Explorer at the selected workspace and shows or hides it. The Explorer is made
@@ -731,6 +807,7 @@ impl Shell {
                 {
                     pane.content.release(cx);
                 }
+                self.sync_plugin_active(cx);
                 cx.notify();
             }
             PaneEvent::Activated { key } => {
@@ -741,6 +818,7 @@ impl Shell {
                 if workspace_id == self.selected {
                     self.focus_pane(workspace_id, key, window, cx);
                 }
+                self.sync_plugin_active(cx);
                 cx.notify();
             }
             PaneEvent::NewTab => self.open_new_tab(workspace_id, None, window, cx),
@@ -764,6 +842,7 @@ impl Shell {
         match &pane.content {
             PaneContent::Agent(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
             PaneContent::Draft(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
+            PaneContent::NewWorkspace(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
             // A terminal focuses itself when it opens and on a click.
             PaneContent::Terminal(_) => {}
             // Inside the workspace element, so the workspace shortcuts still reach it.
@@ -949,24 +1028,143 @@ impl Shell {
                 }
             }
             TabMenuEvent::Rename { key } => {
+                let pane = self.pane(workspace_id, key);
+                let agent_id = pane.and_then(|pane| agent_of_key(pane.identity.as_deref()?));
+                let terminal_id = match pane.map(|pane| &pane.content) {
+                    Some(PaneContent::Terminal(view)) => {
+                        Some(view.read(cx).terminal_id().map(str::to_string))
+                    }
+                    _ => None,
+                };
+                match rename_target(agent_id, terminal_id) {
+                    RenameTarget::Agent(agent_id) => self.rename_agent(agent_id, window, cx),
+                    RenameTarget::Terminal(terminal_id) => {
+                        self.rename_terminal(workspace_id, key, terminal_id, window, cx)
+                    }
+                    RenameTarget::Notice(notice) => window.push_notification(notice, cx),
+                }
+            }
+            TabMenuEvent::CopyResumeCommand { key } => {
+                let Some(agent_id) = self
+                    .pane(workspace_id, key)
+                    .and_then(|pane| agent_of_key(pane.identity.as_deref()?))
+                    .map(str::to_string)
+                else {
+                    return;
+                };
+                let provider = self.agent_provider(&agent_id, cx);
+                let session = self.client.read(cx).agent_provider_session_id(&agent_id);
+                match resume_text(provider.as_deref(), session.as_deref()) {
+                    Ok(command) => copy_text(command, "Resume command copied", window, cx),
+                    Err(notice) => window.push_notification(Notification::error(notice), cx),
+                }
+            }
+            TabMenuEvent::ReloadAgent { key } => {
                 let agent_id = self
                     .pane(workspace_id, key)
                     .and_then(|pane| agent_of_key(pane.identity.as_deref()?))
                     .map(str::to_string);
-                match agent_id {
-                    Some(agent_id) => self.rename_agent(agent_id, window, cx),
-                    // The client has no terminal rename request.
-                    None => window.push_notification("This tab cannot be renamed yet", cx),
+                if let Some(agent_id) = agent_id {
+                    self.reload_agent(agent_id, window, cx);
                 }
             }
-            // The client holds no provider session id and has no refresh request.
-            TabMenuEvent::CopyResumeCommand { .. } => {
-                window.push_notification("The resume command is not available yet", cx)
-            }
-            TabMenuEvent::ReloadAgent { .. } => {
-                window.push_notification("Reloading an agent is not available yet", cx)
-            }
         }
+    }
+
+    /// `handleReloadAgent`: refreshes the agent, then views it again, so the timeline loads
+    /// the new epoch.
+    fn reload_agent(&mut self, agent_id: String, window: &mut Window, cx: &mut Context<Self>) {
+        window.push_notification("Reloading agent...", cx);
+        let task = self
+            .client
+            .update(cx, |client, cx| client.refresh_agent(&agent_id, cx));
+        let client = self.client.clone();
+        cx.spawn_in(window, async move |_, cx| {
+            let result = task.await;
+            let _ = cx.update(|window, cx| match result {
+                Ok(()) => {
+                    // `view_agent` does nothing for a viewed agent, so the sync starts over.
+                    client.update(cx, |client, cx| {
+                        client.unview_agent(&agent_id, cx);
+                        client.view_agent(&agent_id, cx);
+                    });
+                    window.push_notification("Reloaded agent", cx);
+                }
+                Err(error) => {
+                    let notice = reload_error(&format!("{error:#}"));
+                    window.push_notification(Notification::error(notice), cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The `rename_agent` dialog for a terminal. The tab keeps its title until the daemon
+    /// accepts the new one.
+    fn rename_terminal(
+        &mut self,
+        workspace_id: &str,
+        key: &str,
+        terminal_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self
+            .pane(workspace_id, key)
+            .map(|pane| pane.title.to_string())
+            .unwrap_or_default();
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(current));
+        let client = self.client.clone();
+        let shell = cx.weak_entity();
+        let (workspace_id, key) = (workspace_id.to_string(), key.to_string());
+        let focus_once = Cell::new(true);
+        window.open_dialog(cx, move |dialog, window, cx| {
+            if focus_once.replace(false) {
+                input.update(cx, |input, cx| input.focus(window, cx));
+            }
+            let client = client.clone();
+            let shell = shell.clone();
+            let field = input.clone();
+            let terminal_id = terminal_id.clone();
+            let workspace_id = workspace_id.clone();
+            let key = key.clone();
+            dialog
+                .title("Rename terminal")
+                .w(px(420.))
+                .child(Input::new(&input).aria_label("Terminal name"))
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text("Rename")
+                        .show_cancel(true)
+                        .on_ok(move |_, window, cx| {
+                            let title = field.read(cx).value().trim().to_string();
+                            if title.is_empty() {
+                                return true;
+                            }
+                            let task = client.update(cx, |client, cx| {
+                                client.rename_terminal(&terminal_id, &title, cx)
+                            });
+                            let shell = shell.clone();
+                            let workspace_id = workspace_id.clone();
+                            let key = key.clone();
+                            window
+                                .spawn(cx, async move |cx| {
+                                    let result = task.await;
+                                    let _ = shell.update_in(cx, |shell, window, cx| match result {
+                                        Ok(()) => {
+                                            shell.retitle(&workspace_id, &key, title.into(), cx)
+                                        }
+                                        Err(error) => window.push_notification(
+                                            Notification::error(format!("{error:#}")),
+                                            cx,
+                                        ),
+                                    });
+                                })
+                                .detach();
+                            true
+                        }),
+                )
+        });
     }
 
     fn open_new_tab(
@@ -1018,6 +1216,8 @@ impl Shell {
         }
     }
 
+    /// The Agent launch: the workspace draft tab in a workspace, else the New workspace screen,
+    /// as Electron does.
     fn open_draft(
         &mut self,
         workspace_id: &str,
@@ -1025,19 +1225,24 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let key = replace.unwrap_or_else(|| self.next_key());
         let cwd = self
             .workspaces
             .get(workspace_id)
             .and_then(|open| open.cwd.clone());
+        let Some(cwd) = cwd else {
+            let preset = NewWorkspacePreset::default();
+            self.open_new_workspace_screen(workspace_id, replace, preset, window, cx);
+            return;
+        };
+        let key = replace.unwrap_or_else(|| self.next_key());
         let client = self.client.clone();
         let pane_key = key.clone();
-        let view = cx.new(|cx| DraftPane::new(client, pane_key, cwd, window, cx));
+        let view = cx.new(|cx| WorkspaceDraftPane::new(client, pane_key, cwd, window, cx));
         let workspace = workspace_id.to_string();
         let subscription = cx.subscribe_in(
             &view,
             window,
-            move |this: &mut Shell, _, created: &Created, window, cx| {
+            move |this: &mut Shell, _, created: &workspace_draft::Created, window, cx| {
                 this.open_agent_pane(
                     &workspace,
                     Some(created.key.clone()),
@@ -1060,6 +1265,417 @@ impl Shell {
             cx,
         );
         view.update(cx, |pane, cx| pane.focus(window, cx));
+    }
+
+    /// Opens the New workspace screen in a new tab of the home view and shows it.
+    pub(crate) fn open_new_workspace(
+        &mut self,
+        preset: NewWorkspacePreset,
+        window: &mut Window,
+        cx: &mut Context<Shell>,
+    ) {
+        self.ensure_home(window, cx);
+        self.open_new_workspace_screen(HOME, None, preset, window, cx);
+        self.select(HOME.to_string(), window, cx);
+    }
+
+    fn open_new_workspace_screen(
+        &mut self,
+        workspace_id: &str,
+        replace: Option<String>,
+        preset: NewWorkspacePreset,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = replace.unwrap_or_else(|| self.next_key());
+        let client = self.client.clone();
+        let pane_key = key.clone();
+        let view = cx.new(|cx| NewWorkspaceScreen::new(client, pane_key, preset, window, cx));
+        let workspace = workspace_id.to_string();
+        let subscription = cx.subscribe_in(
+            &view,
+            window,
+            move |this: &mut Shell, _, created: &new_workspace::Created, window, cx| {
+                this.pending_open = Some(PendingOpen {
+                    screen_workspace: workspace.clone(),
+                    screen_key: created.key.clone(),
+                    created: created.created.clone(),
+                });
+                this.open_pending(window, cx);
+            },
+        );
+        let subscriptions = vec![
+            subscription,
+            cx.subscribe(
+                &view,
+                |this: &mut Shell, _, changed: &SidePanelChanged, cx| {
+                    this.side_panel_open = changed.0;
+                    cx.notify();
+                },
+            ),
+            // The header's side panel toggle follows the chosen project.
+            cx.observe(&view, |_, _, cx| cx.notify()),
+        ];
+        let open = self.side_panel_open;
+        view.update(cx, |screen, cx| screen.set_side_panel_open(open, cx));
+        self.put_pane(
+            workspace_id,
+            key,
+            None,
+            "New workspace".into(),
+            IconName::FolderPlus,
+            PaneContent::NewWorkspace(view.clone()),
+            subscriptions,
+            window,
+            cx,
+        );
+        view.update(cx, |screen, cx| screen.focus(window, cx));
+    }
+
+    /// Opens the workspace the New workspace screen created once the client lists it, then its
+    /// first agent's tab. A new tab takes the spent screen's place.
+    fn open_pending(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pending) = self.pending_open.clone() else {
+            return;
+        };
+        let workspace_id = pending.created.workspace_id.clone();
+        if find_workspace(self.client.read(cx).projects(), &workspace_id).is_none() {
+            return;
+        }
+        self.pending_open = None;
+        let spent = self
+            .pane(&pending.screen_workspace, &pending.screen_key)
+            .is_some_and(|pane| matches!(pane.content, PaneContent::NewWorkspace(_)));
+        if spent {
+            let key = Some(pending.screen_key.clone());
+            self.open_new_tab(&pending.screen_workspace, key, window, cx);
+        }
+        self.open_workspace(workspace_id.clone(), window, cx);
+        let Some(agent_id) = pending.created.agent_id else {
+            return;
+        };
+        self.known_agents.insert(agent_id.clone());
+        match self.find_identity(&workspace_id, &agent_key(&agent_id)) {
+            Some(key) => self.activate_key(&workspace_id, &key, window, cx),
+            None => {
+                // The agent may not be listed yet; its tab takes the empty new tab's place.
+                let replace = self.workspace_active_key(&workspace_id, cx).filter(|key| {
+                    self.pane(&workspace_id, key)
+                        .is_some_and(|pane| matches!(pane.content, PaneContent::NewTab(_)))
+                });
+                self.open_agent_pane(&workspace_id, replace, &agent_id, window, cx);
+            }
+        }
+    }
+
+    /// The diff stat pill: the all-files diff tab of that workspace's folder.
+    fn open_workspace_changes(
+        &mut self,
+        workspace_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let cwd = find_workspace(self.client.read(cx).projects(), workspace_id)
+            .map(|(_, workspace)| workspace.cwd.clone());
+        let Some(cwd) = cwd else {
+            return;
+        };
+        if self.selected != workspace_id {
+            self.open_workspace(workspace_id.to_string(), window, cx);
+        }
+        self.open_all_diffs(&cwd, None, window, cx);
+    }
+
+    // ----- plugins -----
+
+    /// Routes the plugin host's UI requests. The composer handles `SetComposerText` and
+    /// `AddComposerAttachment`, and the timeline the transforms, so those redraw nothing here.
+    fn on_plugin_event(
+        &mut self,
+        host: &Entity<PluginHost>,
+        event: &PluginHostEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            PluginHostEvent::ContributionsChanged => {
+                let index = host.read(cx).index().clone();
+                self.plugin_views.prune(&index);
+                cx.notify();
+            }
+            PluginHostEvent::PluginStateChanged { .. } => cx.notify(),
+            PluginHostEvent::OpenSurface {
+                plugin_id,
+                surface_id,
+                presentation,
+                params,
+            } => {
+                self.settings = None;
+                self.surface = Some(OpenSurface {
+                    plugin_id: plugin_id.clone(),
+                    surface_id: surface_id.clone(),
+                    presentation: *presentation,
+                    params: params.clone(),
+                });
+                window.focus(&self.focus, cx);
+                cx.notify();
+            }
+            PluginHostEvent::OpenPanel {
+                plugin_id,
+                panel_id,
+                target,
+            } => self.open_plugin_panel(plugin_id, panel_id, target, window, cx),
+            // Settings has no plugin page here yet; both open Settings on its current page.
+            PluginHostEvent::OpenSettings { .. } | PluginHostEvent::OpenPluginsPage => {
+                self.open_settings(window, cx)
+            }
+            PluginHostEvent::OpenNewWorkspace(request) => {
+                let preset = NewWorkspacePreset {
+                    cwd: Some(request.cwd.clone()),
+                    project_id: request.project_id.clone(),
+                    title: request.name.clone(),
+                };
+                self.open_new_workspace(preset, window, cx);
+            }
+            PluginHostEvent::OpenAgent { agent_id }
+            | PluginHostEvent::OpenAgentAt { agent_id, .. } => {
+                self.open_agent(agent_id, window, cx)
+            }
+            PluginHostEvent::OpenWorkspace { workspace_id } => {
+                self.open_workspace(workspace_id.clone(), window, cx)
+            }
+            // The timeline scrolls to the passage; the app opens the agent tab.
+            PluginHostEvent::RevealTimelinePassage(passage) => {
+                self.open_agent(&passage.agent_id, window, cx)
+            }
+            _ => {}
+        }
+    }
+
+    /// `openPanel`: a workspace tab with the panel identity, focused when already open. The
+    /// explorer has no plugin slot, so the `Explorer` location also opens a workspace tab.
+    fn open_plugin_panel(
+        &mut self,
+        plugin_id: &'static str,
+        panel_id: &str,
+        target: &PanelTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(host) = self.plugin_host.clone() else {
+            return;
+        };
+        let panel = host
+            .read(cx)
+            .index()
+            .workspace_panels()
+            .iter()
+            .find(|entry| entry.plugin_id == plugin_id && entry.value.id == panel_id)
+            .map(|entry| entry.value.clone());
+        let Some(panel) = panel else {
+            let notice = format!("Workspace panel {panel_id} is unavailable");
+            window.push_notification(Notification::error(notice), cx);
+            return;
+        };
+        if let Err(notice) = panel_location(panel.id, &panel.locations, target.location) {
+            window.push_notification(Notification::error(notice), cx);
+            return;
+        }
+        let workspace_id = target.workspace_id.clone();
+        if self.selected != workspace_id {
+            self.open_workspace(workspace_id.clone(), window, cx);
+        }
+        if !self.workspaces.contains_key(&workspace_id) {
+            return;
+        }
+        let identity = panel_identity(
+            plugin_id,
+            panel.id,
+            panel.context,
+            target.agent_id.as_deref(),
+        );
+        if let Some(key) = self.find_identity(&workspace_id, &identity) {
+            self.activate_key(&workspace_id, &key, window, cx);
+            return;
+        }
+        let input = PanelInput {
+            workspace_id: workspace_id.clone(),
+            agent_id: target.agent_id.clone(),
+        };
+        let view = (panel.view)(input, window, cx);
+        let key = self.next_key();
+        self.put_pane(
+            &workspace_id,
+            key,
+            Some(identity),
+            panel.title.clone(),
+            panel.icon,
+            PaneContent::Plugin(view),
+            Vec::new(),
+            window,
+            cx,
+        );
+    }
+
+    fn close_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.surface.take().is_some() {
+            self.refocus(window, cx);
+            cx.notify();
+        }
+    }
+
+    /// Escape closes a surface; a free key runs the first plugin shortcut with that combo, or
+    /// closes the shortcut's surface when it shows. Host bindings run before this listener.
+    fn on_key_capture(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let keystroke = &event.keystroke;
+        let modifiers = &keystroke.modifiers;
+        if self.surface.is_some() && keystroke.key == "escape" && !modifiers.modified() {
+            self.close_surface(window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        let Some(host) = self.plugin_host.clone() else {
+            return;
+        };
+        let hit = {
+            let shortcuts = host.read(cx).index().shortcuts();
+            if shortcuts.is_empty() {
+                return;
+            }
+            let pressed = keystroke_text(
+                modifiers.control,
+                modifiers.alt,
+                modifiers.shift,
+                modifiers.platform,
+                &keystroke.key,
+            );
+            let combos: Vec<&str> = shortcuts.iter().map(|entry| entry.value.combo).collect();
+            plugin_shortcut(&self.shortcuts, &combos, &pressed).map(|ix| shortcuts[ix].clone())
+        };
+        let Some(entry) = hit else {
+            return;
+        };
+        cx.stop_propagation();
+        let shows = entry.value.surface.is_some_and(|surface| {
+            self.surface
+                .as_ref()
+                .is_some_and(|open| open.plugin_id == entry.plugin_id && open.surface_id == surface)
+        });
+        if shows {
+            self.close_surface(window, cx);
+        } else {
+            let workspace = (self.selected != HOME).then(|| self.selected.clone());
+            (entry.value.on_press)(workspace, window, cx);
+        }
+    }
+
+    /// The open surface as a page or an overlay, with its view built once per input.
+    fn render_surface(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<(SurfacePresentation, AnyElement)> {
+        let open = self.surface.clone()?;
+        let surface = self.plugin_host.as_ref().and_then(|host| {
+            host.read(cx)
+                .index()
+                .surface(&open.plugin_id, &open.surface_id)
+                .map(|entry| entry.value.clone())
+        });
+        let title = surface_heading(
+            surface.as_ref().map(|surface| {
+                (
+                    surface.title.as_ref().map(|title| title.as_ref()),
+                    surface.id,
+                )
+            }),
+            &open.plugin_id,
+        );
+        let glyph = surface.as_ref().and_then(|surface| surface.icon);
+        let view = surface
+            .as_ref()
+            .map(|surface| self.plugin_views.surface(surface, &open, window, cx));
+        let weak = cx.weak_entity();
+        let close = move |window: &mut Window, cx: &mut App| {
+            let _ = weak.update(cx, |shell, cx| shell.close_surface(window, cx));
+        };
+        let page = open.presentation == SurfacePresentation::Page;
+        let inset = if page && !self.layout.sidebar_open {
+            TRAFFIC_LIGHT_WIDTH
+        } else {
+            0.
+        };
+        let header = surface_header(title.into(), glyph, close.clone(), inset, cx);
+        let body = surface_body(view, cx);
+        let element = if page {
+            let header = div()
+                .relative()
+                .flex_shrink_0()
+                .child(self.drag_area("plugin-surface-drag", cx))
+                .child(header)
+                .into_any_element();
+            surface_page(header, body, cx)
+        } else {
+            surface_overlay(header.into_any_element(), body, close, cx)
+        };
+        Some((open.presentation, element))
+    }
+
+    /// The New workspace screen of the active tab, if it shows.
+    pub(crate) fn active_new_workspace(&self, cx: &App) -> Option<Entity<NewWorkspaceScreen>> {
+        let key = self.active_key(cx)?;
+        match &self.pane(&self.selected, &key)?.content {
+            PaneContent::NewWorkspace(view) => Some(view.clone()),
+            _ => None,
+        }
+    }
+
+    /// The header toggle: shows or hides the side panel of every New workspace screen.
+    pub(crate) fn toggle_side_panel(&mut self, cx: &mut Context<Self>) {
+        self.side_panel_open = !self.side_panel_open;
+        let open = self.side_panel_open;
+        let screens: Vec<Entity<NewWorkspaceScreen>> = self
+            .workspaces
+            .values()
+            .flat_map(|workspace| workspace.panes.values())
+            .filter_map(|pane| match &pane.content {
+                PaneContent::NewWorkspace(view) => Some(view.clone()),
+                _ => None,
+            })
+            .collect();
+        for screen in screens {
+            screen.update(cx, |screen, cx| screen.set_side_panel_open(open, cx));
+        }
+        cx.notify();
+    }
+
+    /// The first header subtitle contribution, when the workspace has a project id.
+    pub(crate) fn plugin_subtitle(
+        &mut self,
+        input: Option<(String, String, String, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyView> {
+        let host = self.plugin_host.clone()?;
+        let entry = host.read(cx).index().header_subtitles().first().cloned();
+        let (workspace_id, project_id, name, root) = input?;
+        let input = crate::plugins::subtitle_input(
+            entry.is_some(),
+            &workspace_id,
+            &project_id,
+            &name,
+            &root,
+        )?;
+        let entry = entry?;
+        Some(
+            self.plugin_views
+                .subtitle(entry.plugin_id, &entry.value, input, window, cx),
+        )
     }
 
     fn open_agent_pane(
@@ -1091,10 +1707,15 @@ impl Shell {
             ),
             cx.subscribe_in(&composer, window, {
                 let key = key.clone();
-                move |this: &mut Shell, _, event: &ComposerEvent, window, cx| {
-                    if *event == ComposerEvent::ReplaceWithDraft {
-                        this.open_draft(&workspace, Some(key.clone()), window, cx);
+                move |this: &mut Shell, _, event: &ComposerEvent, window, cx| match event {
+                    ComposerEvent::ReplaceWithDraft => {
+                        this.open_draft(&workspace, Some(key.clone()), window, cx)
                     }
+                    ComposerEvent::OpenChanges { workspace_id } => {
+                        this.open_workspace_changes(workspace_id, window, cx)
+                    }
+                    ComposerEvent::OpenAgent { agent_id } => this.open_agent(agent_id, window, cx),
+                    _ => {}
                 }
             }),
         ];
@@ -1605,13 +2226,15 @@ impl Shell {
                 None => self.open_settings(window, cx),
             },
             "theme.cycle" => {
+                // The cycle also clears a selected plugin theme, so the shortcut always shows
+                // a change (Q-103).
+                let choice = bachuc_theme::cycle_builtin_theme(cx);
                 let dir = data_dir();
-                let mut appearance = bachuc_settings::appearance::load_from(&dir);
-                appearance.theme = next_theme(appearance.theme);
+                let stored = bachuc_settings::appearance::load_from(&dir);
+                let appearance = bachuc_settings::appearance::with_builtin_theme(&stored, choice);
                 if let Err(error) = bachuc_settings::appearance::save_to(&dir, &appearance) {
                     log::warn!("cannot save appearance.json: {error}");
                 }
-                bachuc_settings::appearance::apply(&appearance, cx);
             }
             "host.cycle" => {
                 let next = (self.host_index + 1) % self.hosts.len();
@@ -1863,7 +2486,7 @@ fn neighbor_active_key(workspace: &Workspace, direction: &str) -> Option<String>
 }
 
 impl Render for Shell {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = tokens(cx);
         if let Some((settings, _)) = &self.settings {
             let settings: AnyView = settings.clone().into();
@@ -1876,6 +2499,7 @@ impl Render for Shell {
                 .on_action(cx.listener(|this, action: &RunAction, window, cx| {
                     this.run_action(&action.0, window, cx)
                 }))
+                .capture_key_down(cx.listener(Self::on_key_capture))
                 .size_full()
                 .bg(t.surface0)
                 .text_color(t.foreground)
@@ -1886,9 +2510,37 @@ impl Render for Shell {
             .layout
             .sidebar_open
             .then(|| self.render_sidebar_column(cx));
-        let header = self.render_header(cx);
-        let center = self.render_center(cx);
-        let explorer = self.render_explorer(cx);
+        let (page, overlay) = match self.render_surface(window, cx) {
+            Some((SurfacePresentation::Page, page)) => (Some(page), None),
+            Some((_, overlay)) => (None, Some(overlay)),
+            None => (None, None),
+        };
+        // A page replaces the workspace, as Settings does, so the workspace views stay unbuilt.
+        let main = match page {
+            Some(page) => page,
+            None => {
+                let header = self.render_header(window, cx);
+                let center = self.render_center(cx);
+                div()
+                    .id("main")
+                    .role(Role::Main)
+                    .aria_label("Workspace")
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .bg(t.surface0)
+                    .child(header)
+                    .child(div().flex_1().min_h_0().w_full().child(center))
+                    .into_any_element()
+            }
+        };
+        let explorer = if self.surface.is_some() && overlay.is_none() {
+            None
+        } else {
+            self.render_explorer(cx)
+        };
         let area = self.area.clone();
         div()
             .id("shell")
@@ -1899,6 +2551,7 @@ impl Render for Shell {
             .on_action(cx.listener(|this, action: &RunAction, window, cx| {
                 this.run_action(&action.0, window, cx)
             }))
+            .capture_key_down(cx.listener(Self::on_key_capture))
             .on_action(cx.listener(|this, action: &JumpToTab, window, cx| {
                 let index = action.0;
                 let selected = this.selected.clone();
@@ -1940,25 +2593,116 @@ impl Render for Shell {
                             .absolute()
                             .size_full(),
                     )
-                    .child(
-                        div()
-                            .id("main")
-                            .role(Role::Main)
-                            .aria_label("Workspace")
-                            .flex_1()
-                            .min_w_0()
-                            .h_full()
-                            .flex()
-                            .flex_col()
-                            .bg(t.surface0)
-                            .child(header)
-                            .child(div().flex_1().min_h_0().w_full().child(center)),
-                    )
+                    .child(main)
                     .children(explorer),
             )
+            .children(overlay)
             .when_some(self.command.as_ref(), |root, (center, _)| {
                 root.child(center.clone())
             })
             .into_any_element()
+    }
+}
+
+pub(crate) const TERMINAL_NOT_OPEN: &str = "The terminal is not open yet";
+pub(crate) const CANNOT_RENAME: &str = "This tab cannot be renamed";
+pub(crate) const RESUME_ID_UNAVAILABLE: &str = "Resume ID not available";
+pub(crate) const RESUME_COMMAND_UNAVAILABLE: &str = "Resume command not available";
+pub(crate) const RELOAD_FAILED: &str = "Failed to reload agent";
+
+/// What Rename does on a tab.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RenameTarget {
+    Agent(String),
+    Terminal(String),
+    Notice(&'static str),
+}
+
+/// An agent tab renames the agent; a terminal tab renames its daemon terminal once it is open.
+/// `terminal` is `Some` for a terminal tab, holding its id once known.
+pub(crate) fn rename_target(agent: Option<&str>, terminal: Option<Option<String>>) -> RenameTarget {
+    match (agent, terminal) {
+        (Some(agent_id), _) => RenameTarget::Agent(agent_id.to_string()),
+        (None, Some(Some(terminal_id))) => RenameTarget::Terminal(terminal_id),
+        (None, Some(None)) => RenameTarget::Notice(TERMINAL_NOT_OPEN),
+        (None, None) => RenameTarget::Notice(CANNOT_RENAME),
+    }
+}
+
+/// `handleCopyResumeCommand`: the command, or the notice for a missing session id or template.
+pub(crate) fn resume_text(
+    provider: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<String, &'static str> {
+    let session_id = session_id.ok_or(RESUME_ID_UNAVAILABLE)?;
+    provider
+        .and_then(|provider| resume_command(provider, session_id))
+        .ok_or(RESUME_COMMAND_UNAVAILABLE)
+}
+
+/// The notice of a failed reload: its text, or the Electron fallback when it is empty.
+pub(crate) fn reload_error(message: &str) -> String {
+    let message = message.trim();
+    if message.is_empty() {
+        RELOAD_FAILED.to_string()
+    } else {
+        message.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Not `super::*`: the gpui glob brings a `test` macro that shadows the std one.
+    use super::{
+        CANNOT_RENAME, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE, RESUME_ID_UNAVAILABLE,
+        RenameTarget, TERMINAL_NOT_OPEN, reload_error, rename_target, resume_text,
+    };
+
+    #[test]
+    fn rename_follows_the_tab_kind() {
+        assert_eq!(
+            rename_target(Some("a1"), None),
+            RenameTarget::Agent("a1".into())
+        );
+        assert_eq!(
+            rename_target(None, Some(Some("t1".into()))),
+            RenameTarget::Terminal("t1".into())
+        );
+        assert_eq!(
+            rename_target(None, Some(None)),
+            RenameTarget::Notice(TERMINAL_NOT_OPEN)
+        );
+        // A file, diff, or new tab.
+        assert_eq!(
+            rename_target(None, None),
+            RenameTarget::Notice(CANNOT_RENAME)
+        );
+    }
+
+    #[test]
+    fn the_resume_command_needs_a_session_and_a_template() {
+        assert_eq!(
+            resume_text(Some("claude"), Some("s-1")).as_deref(),
+            Ok("claude --resume s-1")
+        );
+        assert_eq!(
+            resume_text(Some("claude"), None),
+            Err(RESUME_ID_UNAVAILABLE)
+        );
+        assert_eq!(
+            resume_text(Some("mock"), Some("s-1")),
+            Err(RESUME_COMMAND_UNAVAILABLE)
+        );
+        assert_eq!(
+            resume_text(None, Some("s-1")),
+            Err(RESUME_COMMAND_UNAVAILABLE)
+        );
+    }
+
+    #[test]
+    fn a_reload_error_shows_its_text_or_the_fallback() {
+        assert_eq!(reload_error("not connected"), "not connected");
+        assert_eq!(reload_error(""), RELOAD_FAILED);
+        assert_eq!(reload_error("  "), RELOAD_FAILED);
     }
 }

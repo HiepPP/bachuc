@@ -535,6 +535,7 @@ dependencies = [
  "bachuc-diagram",
  "bachuc-explorer",
  "bachuc-icons",
+ "bachuc-plugin-host",
  "bachuc-settings",
  "bachuc-sidebar",
  "bachuc-terminal",
@@ -547,6 +548,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
