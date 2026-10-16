@@ -128,3 +128,20 @@ Parity mismatches, same window size (1200 x 800), eva agent "hi":
 Matched: sidebar width 320 and fill `(244,244,246)`; header and tab bar height 36; first tab chip x 326 to 422; user bubble x 1117 to 1162 right aligned; row pitch 38.
 
 Cleanup: the app and the reference app were quit; both terminals closed; the agent `380c019` was only attached (it stays idle on 6770, not created by the checker, not archived); 6767 untouched; `hosts.json` restored.
+
+## Fix Round 1
+
+Builder, 2026-10-16, on HEAD 9fec90f18. Files: `crates/app/src/panes.rs`, `crates/app/src/shell.rs`, `crates/app/src/main.rs`. The agent pane and composer rows were fixed in eda235491 and 9fec90f18 and are not redone here.
+
+- AX log, `FocusId(2v1)` and `FocusId(75v3)`: both are the focus handles of `bachuc_workspace::Workspace` views. `Shell::focus_pane` focused the workspace handle for every pane kind with no own focus target (new tab, loading agent, file, diff). The tracked element is `div().id("workspace")` in `crates/workspace/src/workspace.rs` line 989, with an id and no role. `2v1` is the home workspace: startup opens its new tab and focuses it. `75v3` is the eva workspace: the diff, file, and new-tab opens each focused it. Fix: a new app view `PaneFrame` (`panes.rs`) wraps those panes in `div().id("pane-frame").role(Role::Group).aria_label(<tab title>).track_focus(..)`, and `focus_pane` focuses the frame. The frame sits inside the workspace element, so the workspace key context and shortcuts still apply. Agent, draft, and terminal panes keep their own focus targets (`PaneContent::owns_focus`). No unit test: the check needs a window, and the crate tests views through plain functions. The UI checker reruns the log watch.
+- Header right, VS Code "open in editor" and `Commit` split buttons: out of scope for TASK-155. The spec's Boundaries, How, and daily flows name neither. The Commit menu holds commit, push, and pull-request actions, and the PR panel is out of scope in `CONTEXT.md` Decisions. Not built.
+- 900 px check: the build already has it. Launch with `BACHUC_WINDOW=900x800` (`main.rs` line 70, `state::window_size`; default 1200x800, minimum 640x480). Through the bundle, use `open --env BACHUC_WINDOW=900x800 "target/bundles/Bachuc GPUI.app"`, or run the binary in `Contents/MacOS` with the variable set. The layout math has tests: `the_window_size_reads_width_and_height` (`" 900 x 700 "` parses) and `the_explorer_leaves_the_workspace_body_its_minimum` (a 900 px window with the 320 px sidebar leaves 580 px, and the Explorer gets its 240 px minimum). The `main.rs` header now names the variable.
+
+Verified:
+
+- `CARGO_BUILD_JOBS=4 cargo.sh test -p bachuc-app` -> PASS: 24 passed, 0 failed.
+- `cargo.sh fmt --check -p bachuc-app` -> PASS: exit 0.
+- `cargo.sh clippy -p bachuc-app --all-targets` -> PASS: exit 0, no warning in `bachuc-app` (2 warnings in the `bachuc-protocol` build script and 1 in `bachuc-settings`, which belong to other crates).
+- `cargo.sh build --release -p bachuc-app` -> PASS: exit 0.
+- "has no accessibility node" log watch with workspace, tabs, diff, file, and settings -> DEFERRED (UI checker).
+- 900 px wide window with the sidebar and Explorer open, launched with `BACHUC_WINDOW=900x800` -> DEFERRED (UI checker).

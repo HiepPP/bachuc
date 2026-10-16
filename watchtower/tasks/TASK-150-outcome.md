@@ -171,6 +171,88 @@ Run on 2026-10-16 against the 4 parity mismatches in `## UI Checks`. Code checks
 - The lightning button needs agent features (id, icon, value, set) in `bachuc_client`; then the composer can draw `DesktopFeatureItem` toggles after the mode pill.
 - Provider logos other than Claude (Codex, Copilot, OpenCode, Pi) are filled SVGs that `bachuc_icons` does not carry; the composer falls back to `Bot`. They belong in `bachuc_icons` as a provider icon set, then the composer's `claude.svg` can go.
 
+### Re-check 2 (after Fix Round 2; sits above Re-check 1 by an editing slip)
+
+Run by the UI checker on 2026-10-16, HEAD 9fec90f18 (fix commit 9fec90f18 included), light theme. Bundle `BachucComposer` rebuilt before the run. The example ran on `ws://127.0.0.1:6770/ws` against an idle Claude agent made for this check: `7d4ad155` (haiku-5-5, `/tmp/gpui-bench`, title gpui-ui-check; one turn with a fixed markdown reply, no tools). The reference is the in-place Electron build on 6770, same agent. Two gotchas: a GPUI window draws only while in front, so the first screenshots were stale until an `open` loop ran; and the reference Electron window stops painting while the GPUI window covers it (AX still updates), so reference captures were taken with the example quit. The example window is fixed at 720 x 592 and cannot be resized, so offsets inside the card compare. Screenshots: `/tmp/gpui-ui-check/F/` (`*-r3*.png`).
+
+| Line                              | Result     | Evidence                                                                                                                                                                                                                                                                                               |
+| --------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Placeholder look                  | PASS       | Same words, 12 px, light grey in both. Text starts 12 to 13 px from the card edge in both (GPUI card x 16, text x 29; reference card x 350, text x 363). Text run to "/command" is about 270 px in both.                                                                                               |
+| Pill chevrons                     | PASS       | A down chevron follows every pill label in GPUI (model "claude-haiku-5-5", mode "Bypass") as in the reference ("Opus 5.5", thinking, mode).                                                                                                                                                            |
+| Slash menu, first open            | PASS       | Fresh launch, typed `/`: the list shows bottom to top `/exit` (selected), `/clear`, `/__remote-workflow`, `/agent-sdk-dev:new-sdk-app`, `/agents`, `/anthropic-skills:skill-creator`, pinned to the bottom within 0.7 s of the first `/`. The reference shows the same list.                           |
+| Detail card height                | PASS       | `/exit` card y 204 to 264 = 60 px (1 px under the reference 61 px, y 387 to 448); card to list gap 5 px (reference 6 px); list rows 36 px in both; list 220 px high (reference 219).                                                                                                                   |
+| Composer card inset 30 px         | PASS       | Cannot make the 880 px pane in the fixed example window. At 720 px the card is inset 16 px each side (x 16 to 704). With the window zoomed to the 2560 px screen the card is 819 px wide and centered (x 870 to 1690 of 2000 displayed). Reference card is 820 px from x 350 to 1170 in a 880 px pane. |
+| Focus hint                        | PASS       | With the input unfocused and empty, "⌘L to focus" shows at the top right of the input, light grey, 14 px from the card edge (reference 13 px).                                                                                                                                                         |
+| Pill menus                        | PASS       | The mode pill opened a menu of 5 modes (Plan Mode, Always Ask, Accept File Edits, Auto mode, Bypass) with a check on the current one.                                                                                                                                                                  |
+| Lightning, microphone, diff row   | known gap  | Q-079 and the Fix Round 2 notes. Recorded, not failed.                                                                                                                                                                                                                                                 |
+| Live send, steer, queue, thinking | UNVERIFIED | Live (6768) is down; the reference has no mock provider.                                                                                                                                                                                                                                               |
+
+Side effect: clicking the mode pill in the example changed agent `7d4ad155` from Always Ask to Bypass on 6770. The agent is archived after the TASK-149 check. Cleanup: the example was quit; the lock was released; 6767 untouched.
+
 ### Lessons
 
 - A filled, non-lucide SVG draws through `img(Arc<Image>)` with `ImageFormat::Svg`; gpui rasterizes it at 2x the SVG's own size, so the asset sets `width`/`height` 56 for a crisp 14 px icon.
+
+### Re-check 1
+
+Run by the UI checker on commit 9ffc6f3a9 (HEAD d552985b8), 2026-10-16. Bundle `BachucComposer` rebuilt before the run, light theme. Live (6768) is down and the reference daemon on 6770 has no mock provider, so the example ran on the existing Claude agent `380c019` ("hi", Opus 5.5, low, `~/Projects/eva`): `BachucComposer.app --args ws://127.0.0.1:6770/ws 380c019`. The checker could not create an idle Claude agent without a prompt (`paseo run` needs one) and sent nothing, so it did not archive `380c019`: it is an existing agent, not one the checker made. Window sizes differ (example 720 x 592, reference 1200 x 800 with an 820 px composer), so only offsets inside the composer and the slash menu compare. Screenshots: `/tmp/gpui-ui-check/F/` (`gpui-rest-r2.png`, `ref-rest-r2.png`, `gpui-slash-r2.png`, `gpui-slash-r2c.png`, `ref-slash-r2.png`, `*-zoom.png`).
+
+| Line                                  | Result    | Evidence                                                                                                                                                                                                                                                                        |
+| ------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Placeholder text                      | PASS      | AX placeholder "Message the agent, tag @files, or use /commands and /skills" in both. AX label stays "Message".                                                                                                                                                                 |
+| Placeholder look                      | FAIL      | Same words, different style. Reference: darkest pixel `(207,207,209)` (light grey), text 342 px wide, starts 12 px from the card edge. GPUI: darkest pixel `(107,106,112)` (mid grey), text 412 px wide, starts 23 px from the card edge.                                       |
+| Model pill logo                       | PASS      | Claude sparkle in both, same size and place (Opus 5.5 pill starts 50 px from the card left in both).                                                                                                                                                                            |
+| Thinking pill                         | PASS      | Brain icon and "Low" in both.                                                                                                                                                                                                                                                   |
+| Pill chevrons                         | FAIL      | The reference draws a down chevron after "Opus 5.5" and after "Low"; GPUI draws none.                                                                                                                                                                                           |
+| Mode pill at rest                     | PASS      | Hidden in the first seconds in the example (AX: Attach, Model, Thinking only) and in the first reference screenshot; after the agent loads, both show "Auto mode" at rest (the reference with a chevron; the GPUI app composer showed `Mode: Auto mode` at rest too).           |
+| Slash menu order                      | PASS      | After the query changes, the list reads bottom to top: `/exit` (selected), `/clear`, `/__remote-workflow`, `/agent-sdk-dev:new-sdk-app`, `/agents`, `/anthropic-skills:skill-creator`; the reference reads the same.                                                            |
+| Slash menu anchor, first open         | FAIL      | On the first `/` (daemon commands arrive after the menu opens) the list shows the top: `/xlsx`, `/workflow-launch-exec`, `/workflow-authoring`, `/watchtower`, `/voyager`, `/verify`, while the detail card says `/exit`. The reference shows `/exit` at the bottom.            |
+| Slash menu anchor, after query change | PASS      | Backspace then `/` again pins the list to the bottom with `/exit` selected, as in the reference.                                                                                                                                                                                |
+| Slash row                             | PASS      | Row 36 px high, selected fill `(244,244,246)`, name then muted description on one line, name 13 px from the card edge: all equal in both.                                                                                                                                       |
+| Detail card                           | FAIL      | Present with `/exit` and "Archive the current agent" in both, but GPUI is 71 px high (y 201 to 272) and the reference 61 px (y 387 to 448); the description sits 48 px below the card top in GPUI and 41 px in the reference. Gap list to composer: GPUI 5 px, reference 13 px. |
+| Lightning toggles, @file mentions     | known gap | Q-079 and Q-080; the reference shows a lightning button after the mode pill, GPUI none. Recorded, not failed.                                                                                                                                                                   |
+
+Cleanup: the example was quit; the typed `/` in the reference composer was cleared (nothing was sent to any agent); 6767 untouched; no agent or terminal was created.
+
+## Fix Round 2
+
+Run on 2026-10-16 against the failed lines of `### Re-check 1` and the composer rows of the TASK-155 parity table. Code checks only; screen checks are DEFERRED (UI checker).
+
+### Changed
+
+- `packages/desktop-gpui/crates/composer/src/composer.rs`: own placeholder, input inset, focus hint, pill chevrons, slash anchor on load, detail card line height and gap, 16 px outer inset with an 820 px max width.
+- `packages/desktop-gpui/crates/composer/Cargo.toml`: adds `bachuc-command` (focus shortcut chord).
+- `packages/desktop-gpui/Cargo.lock`: updated by cargo.
+
+### Mismatches
+
+| Line                     | Fix                                                                                                                                                                                                                                                                                            | State |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| Placeholder look         | Electron sets `[data-composer-input]::placeholder` to `sm` (12 px) in `surface4` (`apply-root-font.web.ts`, `input.tsx` line 70). gpui-kit draws the placeholder in its muted color at the input size, so the view draws its own: `FONT_SM`, `surface4`, 21 px line height, one truncated line | fixed |
+| Placeholder 12 px inset  | The textarea is `XSmall` (editor padding 0 top and bottom, 4 at the sides) with a -4 px side margin, so text starts at the 12 px surface padding. The input row is now 21 px, as in Electron                                                                                                   | fixed |
+| Pill chevrons            | `ChevronDown` 14 px, `foreground_muted`, 1 px low, after the label of every pill (`ComboboxTrigger`)                                                                                                                                                                                           | fixed |
+| Slash anchor, first open | When `list_commands` returns, the menu resets the selection to the best match and pins the list to the bottom                                                                                                                                                                                  | fixed |
+| Detail card height       | Line height 1.2 (React Native Web `normal`): 2 + 24 + 16.8 + 4 + 14.4 = 61 px. Gap to the composer is 12 px (`OFFSET_FROM_ANCHOR`)                                                                                                                                                             | fixed |
+| Composer card inset      | The composer root is Electron's `inputAreaContainer`: 16 px at the sides and bottom, content centered at `MAX_CONTENT_WIDTH` 820. In an 880 px pane the card runs from 30 to 850 px. Set in the composer crate, not in `crates/app`                                                            | fixed |
+| `⌘L to focus` hint       | `sm`, `foreground_muted` at 0.5 opacity, top right of the input, while the input is empty and unfocused. The chord comes from the `message-input.focus` shortcut; unassigned shows nothing                                                                                                     | fixed |
+| Diff-count row           | Not added. Electron shows the workspace `diffStat` (against the base ref) from the workspace descriptor. `bachuc_client` has no workspace diff stat; `checkout_status` gives uncommitted files only and gets no updates without `watch_checkout`, which only the Explorer may call             | open  |
+
+### Verified
+
+- `CARGO_BUILD_JOBS=4 cargo.sh test -p bachuc-composer` -> PASS: 24 passed (new: focus hint chord and unassigned case).
+- `cargo.sh fmt --check -p bachuc-composer` -> PASS.
+- `CARGO_BUILD_JOBS=4 cargo.sh clippy -p bachuc-composer --all-targets` -> PASS: no composer warning (2 pre-existing warnings in `crates/protocol/build.rs`).
+- `CARGO_BUILD_JOBS=4 cargo.sh build -p bachuc-app` -> PASS.
+- Public API unchanged: `Composer::new`, `agent_id`, `focus`, `attachment_count`, `ComposerEvent`.
+- Parity re-check of placeholder look and inset, chevrons, first-open anchor, detail card, card inset, and focus hint -> DEFERRED (UI checker).
+
+### Questions
+
+- The AX placeholder attribute is gone from `composer-input`: the textarea has no placeholder now, so gpui-kit sets no `aria_placeholder`. The AX label stays "Message". gpui-kit has no per-input placeholder color; a theme-level placeholder color in gpui-kit would let the state keep it.
+- The diff-count row needs a workspace diff stat (`additions`, `deletions`) on `WorkspaceSummary` or `WorkspaceNode` in `bachuc_client`, kept fresh from the daemon's workspace updates.
+- The focus hint reads the shortcut table once per composer. A rebind in settings shows in composers opened after it. Electron also shows it only in the active composer (`isActiveComposer`); GPUI shows it in every unfocused empty composer, which matters only with split panes.
+
+### Lessons
+
+- gpui-kit sets a multi-line input's editor padding from its `Size` (`input_px`, `input_py`) in render, so `.px_0()` on the textarea does not remove it. Use `.xsmall()` (4 px sides, 0 top and bottom) and a negative side margin.
+- A ScrollHandle `scroll_to_bottom()` is a one-shot flag used at the next prepaint with that frame's content size. Call it again after rows arrive asynchronously.
