@@ -73,6 +73,36 @@ mod tests {
     }
 
     #[test]
+    fn plugin_port_icons_load() {
+        let plugin_icons = [
+            IconName::Route,
+            IconName::Columns3,
+            IconName::CornerLeftUp,
+            IconName::CornerDownRight,
+            IconName::Laptop,
+            IconName::PencilOff,
+            IconName::Scale,
+            IconName::ClipboardCheck,
+            IconName::MessageCircleQuestion,
+            IconName::Hand,
+            IconName::LoaderCircle,
+            IconName::Quote,
+            IconName::MessagesSquare,
+            IconName::Power,
+            IconName::Languages,
+            IconName::Send,
+            IconName::FileImage,
+            IconName::FileCode,
+            IconName::CloudDownload,
+        ];
+        for name in plugin_icons {
+            assert!(IconName::ALL.contains(&name), "{name:?}: not in ALL");
+            let bytes = Assets.load(name.path()).unwrap().unwrap();
+            assert!(!bytes.is_empty(), "{name:?}: empty svg");
+        }
+    }
+
+    #[test]
     fn nodes_other_than_path_survive() {
         let text = String::from_utf8(
             Assets

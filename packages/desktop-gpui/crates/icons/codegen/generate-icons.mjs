@@ -28,6 +28,34 @@ const NON_ICON_NAMES = new Set(["Icon", "LucideIcon", "LucideProps", "createLuci
 // plugins/icons.ts imports the whole package by namespace; plugin surfaces are out of scope.
 const SKIPPED_FILES = new Set([join(appSrc, "plugins", "icons.ts")]);
 
+// Icons that the GPUI plugin ports draw by their lucide export name; the Electron app resolves
+// them at runtime through the namespace import, so no import in packages/app/src lists them.
+const PLUGIN_ICONS = [
+  // TASK-187, jev-orchestrator
+  "Route",
+  // TASK-189 and TASK-193, board
+  "Columns3",
+  "CornerLeftUp",
+  "CornerDownRight",
+  "Laptop",
+  "PencilOff",
+  // TASK-194, watchtower-board
+  "Scale",
+  "ClipboardCheck",
+  "MessageCircleQuestion",
+  "Hand",
+  "LoaderCircle",
+  // TASK-181, TASK-183, TASK-185, and TASK-186
+  "Quote",
+  "MessagesSquare",
+  "Power",
+  "Languages",
+  "Send",
+  "FileImage",
+  "FileCode",
+  "CloudDownload",
+];
+
 function walk(dir, files = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
@@ -149,7 +177,7 @@ ${table}
 }
 
 const index = readNameIndex();
-const imported = [...collectImportedNames()].sort();
+const imported = [...new Set([...collectImportedNames(), ...PLUGIN_ICONS])].sort();
 const skipped = imported.filter((name) => NON_ICON_NAMES.has(name));
 const missing = imported.filter((name) => !NON_ICON_NAMES.has(name) && !index.has(name));
 if (missing.length > 0) {
