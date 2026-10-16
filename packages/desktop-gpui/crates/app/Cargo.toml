@@ -10,14 +10,21 @@ path = "src/main.rs"
 
 [dependencies]
 bachuc-client = { path = "../client" }
+bachuc-command = { path = "../command" }
 bachuc-composer = { path = "../composer" }
 bachuc-diagram = { path = "../diagram" }
+bachuc-explorer = { path = "../explorer" }
+bachuc-icons = { path = "../icons" }
+bachuc-settings = { path = "../settings" }
+bachuc-sidebar = { path = "../sidebar" }
 bachuc-terminal = { path = "../terminal" }
 bachuc-theme = { path = "../theme" }
 bachuc-timeline = { path = "../timeline" }
+bachuc-workspace = { path = "../workspace" }
 # gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot; keep the same pin in every crate.
 gpui-kit = "=0.7.3"
 log = "0.4"
+serde_json = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # GPUI has no dock badge API, so the badge goes through NSDockTile.

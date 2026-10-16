@@ -1,69 +1,190 @@
-//! The new-agent dialog: a provider, a model, a folder, and a first prompt.
+//! The new-agent draft tab: the Electron draft, a composer with a provider and a model choice,
+//! opened from the new-tab launcher. It replaces the old new-agent dialog. In a workspace the
+//! agent starts in the workspace folder; with no workspace the draft asks for a folder.
 
-use crate::actions::{CloseDialogAction, DIALOG_CONTEXT};
-use crate::shell::Shell;
-use bachuc_client::ProviderSummary;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
-use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _, h_flex, v_flex,
+use bachuc_client::{Client, ClientEvent, ProviderSummary};
+use bachuc_theme::metrics::{
+    FONT_BASE, FONT_LG, FONT_SM, MAX_CONTENT_WIDTH, RADIUS_2XL, RADIUS_LG, SPACE_1, SPACE_2,
+    SPACE_3, SPACE_4, WEIGHT_MEDIUM,
 };
+use bachuc_theme::{tokens, ui_font_size};
+use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::theme::Theme;
+use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-/// The state of the open dialog.
-pub struct NewAgent {
-    /// The chosen provider id. None picks the first available one.
-    pub provider: Option<String>,
-    /// The chosen model id. None uses the provider default.
-    pub model: Option<String>,
-    pub folder: Entity<InputState>,
-    pub prompt: Entity<TextareaState>,
-    pub error: Option<String>,
-    pub creating: bool,
-    _subscription: Subscription,
+/// The draft made an agent; the owner replaces the draft tab with the agent tab.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Created {
+    pub key: String,
+    pub agent_id: String,
 }
 
-impl NewAgent {
-    pub fn new(default_folder: String, window: &mut Window, cx: &mut Context<Shell>) -> Self {
-        let folder = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Folder")
-                .default_value(default_folder)
-        });
+pub struct DraftPane {
+    client: Entity<Client>,
+    key: String,
+    /// The workspace folder. None shows the folder field.
+    cwd: Option<String>,
+    folder: Entity<InputState>,
+    prompt: Entity<TextareaState>,
+    /// The chosen provider id. None picks the first available one.
+    provider: Option<String>,
+    /// The chosen model id. None uses the provider default.
+    model: Option<String>,
+    /// The client's provider list as last drawn, so the pane redraws only when it changes.
+    providers: Vec<ProviderSummary>,
+    error: Option<String>,
+    creating: bool,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl EventEmitter<Created> for DraftPane {}
+
+impl DraftPane {
+    pub fn new(
+        client: Entity<Client>,
+        key: String,
+        cwd: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<DraftPane>,
+    ) -> DraftPane {
+        let folder = cx.new(|cx| InputState::new(window, cx).placeholder("Folder"));
         let prompt = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .auto_grow(3, 8)
-                .placeholder("Prompt")
+                .auto_grow(3, 12)
+                .placeholder("Message the agent")
                 .submit_on_enter(true)
         });
-        // Enter sends the prompt; Shift+Enter inserts a line and still emits `PressEnter`.
-        let subscription = cx.subscribe_in(
-            &prompt,
-            window,
-            |shell: &mut Shell, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::PressEnter { shift: false, .. }) {
-                    shell.create_agent(window, cx);
+        let subscriptions = vec![
+            // Enter sends; Shift+Enter inserts a line and still emits `PressEnter`.
+            cx.subscribe_in(
+                &prompt,
+                window,
+                |this: &mut DraftPane, _, event: &InputEvent, window, cx| match event {
+                    InputEvent::PressEnter { shift: false, .. } => this.create(window, cx),
+                    // The Create button follows the text.
+                    InputEvent::Change => cx.notify(),
+                    _ => {}
+                },
+            ),
+            cx.subscribe(&folder, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
                 }
-            },
-        );
-        prompt.update(cx, |prompt, cx| prompt.focus(window, cx));
-        NewAgent {
-            provider: None,
-            model: None,
+            }),
+            cx.subscribe(&client, |this: &mut DraftPane, client, event, cx| {
+                if matches!(event, ClientEvent::AgentsChanged | ClientEvent::Connected) {
+                    let providers = client.read(cx).providers();
+                    if this.providers != providers {
+                        this.providers = providers.to_vec();
+                        cx.notify();
+                    }
+                }
+            }),
+            cx.observe_global::<Theme>(|_, cx| cx.notify()),
+        ];
+        let providers = client.read(cx).providers().to_vec();
+        DraftPane {
+            client,
+            key,
+            cwd,
             folder,
             prompt,
+            provider: None,
+            model: None,
+            providers,
             error: None,
             creating: false,
-            _subscription: subscription,
+            _subscriptions: subscriptions,
         }
     }
 
-    pub fn provider<'a>(&self, providers: &'a [ProviderSummary]) -> Option<&'a ProviderSummary> {
-        pick_provider(self.provider.as_deref(), providers)
+    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+        self.prompt
+            .update(cx, |prompt, cx| prompt.focus(window, cx));
     }
 
-    pub fn model<'a>(&'a self, provider: &ProviderSummary) -> Option<&'a str> {
-        pick_model(self.model.as_deref(), provider)
+    fn folder_value(&self, cx: &App) -> String {
+        match &self.cwd {
+            Some(cwd) => cwd.clone(),
+            None => self.folder.read(cx).value().trim().to_string(),
+        }
+    }
+
+    fn create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let folder = self.folder_value(cx);
+        let prompt = self.prompt.read(cx).value().trim().to_string();
+        let provider = pick_provider(self.provider.as_deref(), &self.providers);
+        if !can_create(provider, &folder, &prompt, self.creating) {
+            return;
+        }
+        let Some(provider) = provider else {
+            return;
+        };
+        let provider_id = provider.id.clone();
+        let model = pick_model(self.model.as_deref(), provider).map(str::to_string);
+        self.creating = true;
+        self.error = None;
+        let task = self.client.update(cx, |client, cx| {
+            client.create_agent(&provider_id, model.as_deref(), &folder, &prompt, cx)
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.creating = false;
+                match result {
+                    Ok(agent_id) => cx.emit(Created {
+                        key: this.key.clone(),
+                        agent_id,
+                    }),
+                    Err(error) => this.error = Some(format!("{error:#}")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// A choice pill. The chosen one says so in its label, because a button's selected state
+    /// does not reach VoiceOver (a11y audit).
+    fn pill(
+        &self,
+        id: (&'static str, usize),
+        text: String,
+        label: String,
+        chosen: bool,
+        enabled: bool,
+        cx: &App,
+    ) -> Stateful<Div> {
+        let t = tokens(cx);
+        div()
+            .id(id)
+            .role(Role::Button)
+            .aria_label(if chosen {
+                format!("{label}, selected")
+            } else {
+                label
+            })
+            .aria_selected(chosen)
+            .px(px(SPACE_2))
+            .py(px(SPACE_1))
+            .rounded(px(RADIUS_LG))
+            .border_1()
+            .border_color(if chosen { t.border_accent } else { t.border })
+            .text_size(ui_font_size(FONT_SM, cx))
+            .text_color(if chosen {
+                t.foreground
+            } else {
+                t.foreground_muted
+            })
+            .when(chosen, |pill| pill.bg(t.surface2))
+            .when(!enabled, |pill| pill.opacity(0.5))
+            .when(enabled, |pill| {
+                pill.cursor_pointer().hover(|style| style.bg(t.surface2))
+            })
+            .child(text)
     }
 }
 
@@ -89,7 +210,7 @@ pub fn pick_model<'a>(chosen: Option<&'a str>, provider: &ProviderSummary) -> Op
         .then_some(id)
 }
 
-/// True when the dialog has everything `create_agent` needs.
+/// True when the draft has everything `create` needs.
 pub fn can_create(
     provider: Option<&ProviderSummary>,
     folder: &str,
@@ -99,193 +220,221 @@ pub fn can_create(
     provider.is_some() && !folder.trim().is_empty() && !prompt.trim().is_empty() && !creating
 }
 
-impl Shell {
-    pub(crate) fn render_new_agent(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        // The shell calls this on every frame, so it returns before it copies anything.
-        self.new_agent.as_ref()?;
-        let theme = cx.theme().clone();
-        let providers: Vec<ProviderSummary> = self.client.read(cx).providers().to_vec();
-        let dialog = self.new_agent.as_ref()?;
-        let provider = dialog.provider(&providers).cloned();
+impl Render for DraftPane {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = tokens(cx);
+        let provider = pick_provider(self.provider.as_deref(), &self.providers).cloned();
         let model = provider
             .as_ref()
-            .and_then(|provider| dialog.model(provider).map(str::to_string));
-        let folder_state = dialog.folder.clone();
-        let prompt_state = dialog.prompt.clone();
-        let error = dialog.error.clone();
-        let creating = dialog.creating;
-        let folder = folder_state.read(cx).value();
-        let prompt = prompt_state.read(cx).value();
-        let ready = can_create(provider.as_ref(), &folder, &prompt, creating);
+            .and_then(|provider| pick_model(self.model.as_deref(), provider).map(str::to_string));
+        let folder = self.folder_value(cx);
+        let prompt = self.prompt.read(cx).value();
+        let ready = can_create(provider.as_ref(), &folder, &prompt, self.creating);
 
-        let provider_buttons = providers.iter().enumerate().map(|(ix, entry)| {
-            let id = entry.id.clone();
-            let chosen = provider.as_ref().is_some_and(|p| p.id == entry.id);
-            Button::new(("new-agent-provider", ix))
-                .small()
-                .outline()
-                .label(entry.label.clone())
-                .accessibility_label(if entry.available {
+        let provider_pills: Vec<Stateful<Div>> = self
+            .providers
+            .iter()
+            .enumerate()
+            .map(|(ix, entry)| {
+                let chosen = provider.as_ref().is_some_and(|p| p.id == entry.id);
+                let label = if entry.available {
                     format!("Provider {}", entry.label)
                 } else {
                     format!("Provider {}, unavailable", entry.label)
+                };
+                let id = entry.id.clone();
+                self.pill(
+                    ("draft-provider", ix),
+                    entry.label.clone(),
+                    label,
+                    chosen,
+                    entry.available,
+                    cx,
+                )
+                .when(entry.available, |pill| {
+                    pill.on_click(cx.listener(move |this, _, _, cx| {
+                        this.provider = Some(id.clone());
+                        this.model = None;
+                        cx.notify();
+                    }))
                 })
-                .selected(chosen)
-                .disabled(!entry.available)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(dialog) = this.new_agent.as_mut() {
-                        dialog.provider = Some(id.clone());
-                        dialog.model = None;
-                        cx.notify();
-                    }
-                }))
-        });
+            })
+            .collect();
 
-        let model_buttons = provider.iter().flat_map(|provider| {
-            let default = std::iter::once((None, "Default".to_string()));
-            let models = provider
-                .models
-                .iter()
-                .map(|(id, label)| (Some(id.clone()), label.clone()));
-            default.chain(models).collect::<Vec<_>>()
-        });
-        let model_buttons = model_buttons.enumerate().map(|(ix, (id, label))| {
-            let chosen = id == model;
-            Button::new(("new-agent-model", ix))
-                .small()
-                .outline()
-                .label(label.clone())
-                .accessibility_label(format!("Model {label}"))
-                .selected(chosen)
+        let models: Vec<(Option<String>, String)> = provider
+            .iter()
+            .flat_map(|provider| {
+                std::iter::once((None, "Default".to_string())).chain(
+                    provider
+                        .models
+                        .iter()
+                        .map(|(id, label)| (Some(id.clone()), label.clone())),
+                )
+            })
+            .collect();
+        let model_pills: Vec<Stateful<Div>> = models
+            .into_iter()
+            .enumerate()
+            .map(|(ix, (id, label))| {
+                let chosen = id == model;
+                self.pill(
+                    ("draft-model", ix),
+                    label.clone(),
+                    format!("Model {label}"),
+                    chosen,
+                    true,
+                    cx,
+                )
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(dialog) = this.new_agent.as_mut() {
-                        dialog.model = id.clone();
-                        cx.notify();
-                    }
+                    this.model = id.clone();
+                    cx.notify();
                 }))
-        });
+            })
+            .collect();
 
-        let field = |label: &'static str| {
+        let heading = |text: &'static str| {
             div()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(label)
+                .text_size(ui_font_size(FONT_SM, cx))
+                .text_color(t.foreground_extra_muted)
+                .child(text)
+        };
+        let selection = match (&provider, &model) {
+            (Some(provider), Some(model)) => format!("{} · {model}", provider.label),
+            (Some(provider), None) => format!("{} · Default model", provider.label),
+            (None, _) => "No provider available".to_string(),
         };
 
+        let send_fg = if ready {
+            t.accent_foreground
+        } else {
+            t.foreground_muted
+        };
         let card = v_flex()
-            .id("new-agent-dialog")
-            .role(Role::Dialog)
-            .aria_label("New agent")
-            .key_context(DIALOG_CONTEXT)
-            .w(px(520.))
-            .max_h(relative(0.9))
-            .gap_3()
-            .p_4()
-            .rounded_lg()
+            .id("draft-composer")
+            .role(Role::Group)
+            .aria_label(format!("New agent, {selection}"))
+            .w_full()
+            .max_w(px(MAX_CONTENT_WIDTH))
+            .gap(px(SPACE_3))
+            .p(px(SPACE_3))
+            .rounded(px(RADIUS_2XL))
             .border_1()
-            .border_color(theme.border)
-            .bg(theme.popover)
-            .text_color(theme.popover_foreground)
-            .on_action(cx.listener(|this, _: &CloseDialogAction, _, cx| this.close_new_agent(cx)))
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("New agent"))
-            .child(field("Provider"))
+            .border_color(t.border)
+            .bg(t.surface1)
+            .when(self.cwd.is_none(), |card| {
+                card.child(heading("Folder")).child(
+                    Input::new(&self.folder)
+                        .accessibility_id("draft-folder")
+                        .aria_label("Folder"),
+                )
+            })
+            .child(
+                Textarea::new(&self.prompt)
+                    .w_full()
+                    .accessibility_id("draft-prompt")
+                    .aria_label("Prompt"),
+            )
+            .child(heading("Provider"))
             .child(
                 h_flex()
-                    .id("new-agent-providers")
+                    .id("draft-providers")
                     .role(Role::Group)
                     .aria_label("Providers")
                     .flex_wrap()
-                    .gap_1()
-                    .children(provider_buttons),
+                    .gap(px(SPACE_1))
+                    .children(provider_pills),
             )
-            .child(field("Model"))
+            .child(heading("Model"))
             .child(
                 h_flex()
-                    .id("new-agent-models")
+                    .id("draft-models")
                     .role(Role::Group)
                     .aria_label("Models")
                     .flex_wrap()
-                    .gap_1()
-                    .max_h(px(140.))
+                    .gap(px(SPACE_1))
+                    .max_h(px(120.))
                     .overflow_y_scroll()
-                    .children(model_buttons),
+                    .children(model_pills),
             )
-            .child(field("Folder"))
-            .child(
-                h_flex()
-                    .gap_1()
-                    .child(
-                        div().flex_1().child(
-                            Input::new(&folder_state)
-                                .accessibility_id("new-agent-folder")
-                                .aria_label("Folder"),
-                        ),
-                    )
-                    .child(
-                        Button::new("new-agent-browse")
-                            .small()
-                            .outline()
-                            .label("Browse")
-                            .accessibility_label("Browse for a folder")
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.pick_folder(window, cx)),
-                            ),
-                    ),
-            )
-            .child(field("Prompt"))
-            .child(
-                Textarea::new(&prompt_state)
-                    .w_full()
-                    .accessibility_id("new-agent-prompt")
-                    .aria_label("Prompt"),
-            )
-            .children(error.map(|message| {
+            .children(self.error.clone().map(|message| {
                 div()
-                    .id("new-agent-error")
+                    .id("draft-error")
                     .role(Role::Alert)
                     .aria_label(format!("Error: {message}"))
-                    .text_sm()
-                    .text_color(theme.danger)
+                    .text_size(ui_font_size(FONT_SM, cx))
+                    .text_color(t.destructive)
                     .child(message)
             }))
             .child(
                 h_flex()
-                    .justify_end()
-                    .gap_2()
+                    .justify_between()
+                    .items_center()
+                    .gap(px(SPACE_2))
                     .child(
-                        Button::new("new-agent-cancel")
-                            .outline()
-                            .label("Cancel")
-                            .accessibility_label("Cancel new agent")
-                            .on_click(cx.listener(|this, _, _, cx| this.close_new_agent(cx))),
+                        div()
+                            .id("draft-selection")
+                            .role(Role::Status)
+                            .aria_label(format!("Selected: {selection}"))
+                            .min_w_0()
+                            .truncate()
+                            .text_size(ui_font_size(FONT_SM, cx))
+                            .text_color(t.foreground_muted)
+                            .child(selection.clone()),
                     )
                     .child(
-                        Button::new("new-agent-create")
-                            .primary()
-                            .label(if creating { "Creating..." } else { "Create" })
-                            .accessibility_label("Create agent")
-                            .disabled(!ready)
-                            .on_click(
-                                cx.listener(|this, _, window, cx| this.create_agent(window, cx)),
-                            ),
+                        div()
+                            .id("draft-create")
+                            .role(Role::Button)
+                            .aria_label("Create agent")
+                            .flex_shrink_0()
+                            .px(px(SPACE_3))
+                            .py(px(SPACE_1))
+                            .rounded(px(RADIUS_LG))
+                            .text_size(ui_font_size(FONT_BASE, cx))
+                            .text_color(send_fg)
+                            .when(ready, |button| {
+                                button.bg(t.accent).cursor_pointer().on_click(
+                                    cx.listener(|this, _, window, cx| this.create(window, cx)),
+                                )
+                            })
+                            .when(!ready, |button| button.bg(t.surface2))
+                            .child(if self.creating {
+                                "Creating..."
+                            } else {
+                                "Create"
+                            }),
                     ),
             );
 
-        Some(
-            div()
-                .id("new-agent-backdrop")
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(theme.overlay)
-                .occlude()
-                .child(card)
-                .into_any_element(),
-        )
+        let where_text = self.cwd.clone().unwrap_or_else(|| "Pick a folder".into());
+        v_flex()
+            .id("pane-draft")
+            .role(Role::Group)
+            .aria_label("New agent")
+            .size_full()
+            .p(px(SPACE_4))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(SPACE_1))
+                    .child(
+                        div()
+                            .text_size(ui_font_size(FONT_LG, cx))
+                            .font_weight(FontWeight(WEIGHT_MEDIUM))
+                            .text_color(t.foreground)
+                            .child("New agent"),
+                    )
+                    .child(
+                        div()
+                            .text_size(ui_font_size(FONT_BASE, cx))
+                            .text_color(t.foreground_muted)
+                            .child(where_text),
+                    ),
+            )
+            .child(h_flex().w_full().justify_center().child(card))
     }
 }
 
@@ -321,10 +470,6 @@ mod tests {
             Some("mock")
         );
         assert!(pick_provider(Some("claude"), &providers).is_none());
-        assert_eq!(
-            pick_provider(Some("mock"), &providers).map(|p| p.id.as_str()),
-            Some("mock")
-        );
         assert!(pick_provider(None, &[provider("claude", false)]).is_none());
     }
 

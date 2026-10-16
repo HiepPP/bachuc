@@ -530,16 +530,23 @@ name = "bachuc-app"
 version = "0.1.0"
 dependencies = [
  "bachuc-client",
+ "bachuc-command",
  "bachuc-composer",
  "bachuc-diagram",
+ "bachuc-explorer",
+ "bachuc-icons",
+ "bachuc-settings",
+ "bachuc-sidebar",
  "bachuc-terminal",
  "bachuc-theme",
  "bachuc-timeline",
+ "bachuc-workspace",
  "gpui-kit",
  "log",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "serde_json",
 ]
 
 [[package]]

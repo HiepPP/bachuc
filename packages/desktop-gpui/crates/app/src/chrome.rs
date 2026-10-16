@@ -1,476 +1,530 @@
-//! The sidebar, the tab bar, and the status line, each a view of its own. The timeline redraws the
-//! window many times a second, so every extra element in these views costs frame time: keep the
-//! rows to a few elements each.
+//! The window chrome around the crate views, after the Electron window: the sidebar column's
+//! title-bar row and host switch, the workspace header, the host gate, and the drag areas that
+//! move the window (`titlebar-drag-region.tsx`). The window has a transparent title bar with the
+//! traffic lights at (16, 10), so every top row leaves them `TRAFFIC_LIGHT_WIDTH` of room.
 
+use crate::panes::chrome_button;
 use crate::shell::Shell;
-use crate::state::{Connection, Tab, TabKind, agent_title, badge_count, group_agents, short_id};
-use bachuc_client::AgentSummary;
-use gpui_kit::component::{ActiveTheme as _, h_flex, v_flex};
+use crate::state::{agent_of_key, find_workspace, host_gate, host_option_label};
+use bachuc_icons::{IconName, icon};
+use bachuc_theme::metrics::{
+    FONT_BASE, FONT_SM, HEADER_HEIGHT, ICON_SM, RADIUS_LG, SETTINGS_SIDEBAR_WIDTH, SPACE_1,
+    SPACE_2, SPACE_3, SPACE_6, TRAFFIC_LIGHT_WIDTH, WEIGHT_MEDIUM,
+};
+use bachuc_theme::{tokens, ui_font_size};
+use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
+use gpui_kit::component::{Selectable, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-pub const SIDEBAR_WIDTH: f32 = 272.;
-pub const TAB_BAR_HEIGHT: f32 = 36.;
-pub const STATUS_HEIGHT: f32 = 24.;
+/// An icon button that anchors a gpui-kit dropdown menu and keeps its fill while the menu is
+/// open, as the sidebar kebab does.
+#[derive(IntoElement)]
+pub struct MenuButton {
+    base: Stateful<Div>,
+    open: bool,
+    fill: Hsla,
+}
 
-/// The dot color of an agent row.
-fn status_color(agent: &AgentSummary, theme: &gpui_kit::component::Theme) -> Hsla {
-    if agent.pending_permissions > 0 {
-        return theme.warning;
+impl Selectable for MenuButton {
+    fn selected(mut self, selected: bool) -> Self {
+        self.open = selected;
+        self
     }
-    match agent.status.as_str() {
-        "running" => theme.success,
-        "error" => theme.danger,
-        _ => theme.muted_foreground,
+
+    fn is_selected(&self) -> bool {
+        self.open
     }
 }
 
-/// A text button of one element. The component `Button` builds about ten, and these views redraw
-/// with every timeline update. It takes focus and answers the accessibility Click action.
-fn lean_button(
-    id: &'static str,
+impl Styled for MenuButton {
+    fn style(&mut self) -> &mut StyleRefinement {
+        self.base.style()
+    }
+}
+
+impl InteractiveElement for MenuButton {
+    fn interactivity(&mut self) -> &mut Interactivity {
+        self.base.interactivity()
+    }
+}
+
+impl DropdownMenu for MenuButton {}
+
+impl RenderOnce for MenuButton {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let fill = self.fill;
+        self.base.when(self.open, |button| button.bg(fill))
+    }
+}
+
+/// What follows the pointer while a divider is dragged: nothing.
+pub struct NoPreview;
+
+impl Render for NoPreview {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
+
+/// The marker of an Explorer resize drag.
+#[derive(Clone, Copy)]
+pub struct ExplorerResize;
+
+/// The Explorer resize band straddles its left border, 10 px wide (`POINTER_HANDLE_WIDTH`).
+pub const HANDLE_WIDTH: f32 = 10.;
+
+fn menu_item(
     label: &'static str,
-    primary: bool,
-    theme: &gpui_kit::component::Theme,
-) -> Stateful<Div> {
-    div()
-        .id(id)
-        .role(Role::Button)
-        .aria_label(label)
-        .focusable()
-        .cursor_pointer()
-        .px_2()
-        .py_1()
-        .rounded_md()
-        .text_sm()
-        .border_1()
-        .border_color(theme.border)
-        .when(primary, |button| {
-            button
-                .bg(theme.primary)
-                .text_color(theme.primary_foreground)
-                .border_color(theme.primary)
+    name: IconName,
+    weak: WeakEntity<Shell>,
+    run: impl Fn(&mut Shell, &mut Window, &mut Context<Shell>) + 'static,
+) -> PopupMenuItem {
+    PopupMenuItem::new(label)
+        .icon(icon(name).with_size(px(ICON_SM)))
+        .on_click(move |_, window, cx| {
+            weak.update(cx, |shell, cx| run(shell, window, cx)).ok();
         })
-        .when(!primary, |button| {
-            button.hover(|button| button.bg(theme.accent))
-        })
-        .child(label)
 }
 
-// ----- sidebar -----
-
-pub struct Sidebar {
-    shell: WeakEntity<Shell>,
-}
-
-impl Sidebar {
-    pub fn new(shell: WeakEntity<Shell>) -> Self {
-        Self { shell }
-    }
-}
-
-impl Render for Sidebar {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
-        let Some(shell) = self.shell.upgrade() else {
-            return div().into_any_element();
-        };
-        let data = shell.read(cx).sidebar_data(cx);
-        let groups = group_agents(data.agents, data.workspaces);
-
-        let host_rows = data.hosts_open.then(|| {
-            data.hosts
-                .iter()
-                .enumerate()
-                .map(|(ix, host)| {
-                    let (name, url) = (&host.name, &host.url);
-                    let current = ix == data.host_index;
-                    div()
-                        .id(("host", ix))
-                        .role(Role::MenuItem)
-                        .aria_label(format!("Host {name}, {url}"))
-                        .aria_selected(current)
-                        .cursor_pointer()
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .text_sm()
-                        .when(current, |row| row.bg(theme.accent))
-                        .hover(|row| row.bg(theme.accent))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.act(cx, |shell, cx| shell.switch_host(ix, window, cx))
-                        }))
-                        .child(format!("{name}  {url}"))
-                })
-                .collect::<Vec<_>>()
-        });
-
-        let mut rows = Vec::new();
-        for (group_ix, group) in groups.iter().enumerate() {
-            rows.push(
-                div()
-                    .id(("group", group_ix))
-                    .role(Role::Heading)
-                    .aria_label(format!("Workspace {}", group.name))
-                    .px_2()
-                    .pt_3()
-                    .pb_1()
-                    .flex_none()
-                    .truncate()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(group.name.to_string())
-                    .into_any_element(),
-            );
-            for &agent in &group.agents {
-                let selected = data.active_agent == Some(agent.id.as_str());
-                let dot = status_color(agent, &theme);
-                let title = agent_title(agent);
-                let mut label = format!("Agent {title}, {}", agent.status);
-                if agent.pending_permissions > 0 {
-                    label.push_str(&format!(
-                        ", {} permission waiting",
-                        agent.pending_permissions
-                    ));
+impl Shell {
+    /// An area that moves the window when dragged and zooms it on a double click, as the title
+    /// bar does. Put it first, so the controls above it take their own clicks.
+    pub(crate) fn drag_area(&self, id: &'static str, cx: &mut Context<Self>) -> Stateful<Div> {
+        div()
+            .id(id)
+            .absolute()
+            .inset_0()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| this.dragging_window = true),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| this.dragging_window = false),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| this.dragging_window = false),
+            )
+            .on_mouse_move(cx.listener(|this, _, window, _| {
+                if this.dragging_window {
+                    this.dragging_window = false;
+                    window.start_window_move();
                 }
-                let id = agent.id.clone();
-                rows.push(
-                    h_flex()
-                        .id(SharedString::from(format!("agent-{}", agent.id)))
-                        .role(Role::ListItem)
-                        .aria_label(label)
-                        .aria_selected(selected)
-                        .cursor_pointer()
-                        .gap_2()
-                        .mx_1()
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .items_center()
-                        .when(selected, |row| row.bg(theme.accent))
-                        .hover(|row| row.bg(theme.accent))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.act(cx, |shell, cx| shell.open_agent(id.clone(), window, cx))
-                        }))
-                        .child(div().size(px(8.)).flex_none().rounded_full().bg(dot))
-                        .child(div().min_w_0().flex_1().truncate().text_sm().child(title))
-                        .when(agent.pending_permissions > 0, |row| {
-                            row.child(
-                                div()
-                                    .px_1p5()
-                                    .rounded_full()
-                                    .bg(theme.warning)
-                                    .text_xs()
-                                    .text_color(theme.warning_foreground)
-                                    .child(agent.pending_permissions.to_string()),
-                            )
-                        })
-                        .into_any_element(),
-                );
-            }
-        }
-        let empty = rows.is_empty();
-        let empty_text = if *data.connection == Connection::Connected {
-            "No agents yet. Press Cmd+N to start one."
-        } else {
-            "Waiting for the host."
-        };
-        let host_name = data
-            .hosts
-            .get(data.host_index)
-            .map(|host| host.name.as_str())
-            .unwrap_or_default();
+            }))
+            .on_click(|event, window, _| {
+                if event.click_count() == 2 {
+                    window.titlebar_double_click();
+                }
+            })
+    }
 
-        v_flex()
-            .id("sidebar")
-            .role(Role::Complementary)
-            .aria_label("Sidebar")
-            .size_full()
+    /// The sidebar column: the title-bar row (`desktopChromeRow`), the host switch, then the
+    /// sidebar view.
+    pub(crate) fn render_sidebar_column(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let t = tokens(cx);
+        let host_name = self.hosts[self.host_index].name.clone();
+        let hosts_open = self.hosts_open;
+        let options =
+            hosts_open.then(|| {
+                self.hosts
+                    .iter()
+                    .enumerate()
+                    .map(|(ix, host)| {
+                        let current = ix == self.host_index;
+                        div()
+                            .id(("host-option", ix))
+                            .role(Role::Button)
+                            .aria_label(host_option_label(host, current))
+                            .aria_selected(current)
+                            .mx(px(SPACE_2))
+                            .px(px(SPACE_2))
+                            .py(px(SPACE_1))
+                            .rounded(px(RADIUS_LG))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(SPACE_2))
+                            .cursor_pointer()
+                            .overflow_hidden()
+                            .text_size(ui_font_size(FONT_SM, cx))
+                            .text_color(t.foreground)
+                            .when(current, |row| row.bg(t.surface_sidebar_selected))
+                            .hover(|row| row.bg(t.surface_sidebar_hover))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.switch_host(ix, window, cx)
+                            }))
+                            .child(div().w(px(ICON_SM)).flex_shrink_0().when(current, |slot| {
+                                slot.child(icon(IconName::Check).with_size(px(ICON_SM)))
+                            }))
+                            .child(host.name.clone())
+                            .child(div().text_color(t.foreground_muted).child(host.url.clone()))
+                    })
+                    .collect::<Vec<_>>()
+            });
+        let chrome_row = div()
+            .id("sidebar-chrome")
+            .relative()
+            .flex_shrink_0()
+            .h(px(HEADER_HEIGHT))
+            .bg(t.surface_sidebar)
             .border_r_1()
-            .border_color(theme.sidebar_border)
-            .bg(theme.sidebar)
-            .text_color(theme.sidebar_foreground)
+            .border_color(t.border)
+            .child(self.drag_area("sidebar-drag", cx));
+        let host_switch = div()
+            .flex_shrink_0()
+            .relative()
+            .h(px(32.))
+            .bg(t.surface_sidebar)
+            .border_r_1()
+            .border_color(t.border)
             .child(
-                v_flex()
-                    .gap_2()
-                    .p_2()
+                // Absolute, so a long host name never widens the column past the sidebar.
+                div()
+                    .id("host-switch")
+                    .role(Role::Button)
+                    .aria_label(format!("Host: {host_name}"))
+                    .aria_expanded(hosts_open)
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(px(SPACE_2))
+                    .right(px(SPACE_2))
+                    .px(px(SPACE_2))
+                    .rounded(px(RADIUS_LG))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(SPACE_2))
+                    .cursor_pointer()
+                    .overflow_hidden()
+                    .text_size(ui_font_size(FONT_BASE, cx))
+                    .text_color(t.foreground_muted)
+                    .hover(|style| style.bg(t.surface_sidebar_hover))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.hosts_open = !this.hosts_open;
+                        cx.notify();
+                    }))
+                    .child(icon(IconName::Server).with_size(px(ICON_SM)))
+                    .child(div().flex_1().min_w_0().truncate().child(host_name))
+                    .child(
+                        icon(if hosts_open {
+                            IconName::ChevronUp
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .with_size(px(ICON_SM)),
+                    ),
+            );
+        v_flex()
+            .id("sidebar-column")
+            .flex_none()
+            .h_full()
+            .child(chrome_row)
+            .child(host_switch)
+            .when_some(options, |column, options| {
+                column.child(
+                    v_flex()
+                        .id("host-options")
+                        .role(Role::List)
+                        .aria_label("Hosts")
+                        .flex_shrink_0()
+                        .relative()
+                        .h(px(30. * options.len() as f32 + SPACE_1))
+                        .bg(t.surface_sidebar)
+                        .border_r_1()
+                        .border_color(t.border)
+                        .child(v_flex().absolute().inset_0().gap(px(2.)).children(options)),
+                )
+            })
+            .child(div().flex_1().min_h_0().child(self.sidebar.clone()))
+            .into_any_element()
+    }
+
+    /// The workspace header (`ScreenHeader` with `WorkspaceHeaderTitleBar`): sidebar toggle,
+    /// workspace name and project, then the tab menu and the Explorer toggle.
+    pub(crate) fn render_header(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let t = tokens(cx);
+        let (title, subtitle) = {
+            let client = self.client.read(cx);
+            match find_workspace(client.projects(), &self.selected) {
+                Some((project, workspace)) => (workspace.name.clone(), Some(project.name.clone())),
+                None => ("New tab".to_string(), None),
+            }
+        };
+        let subtitle = subtitle.filter(|project| *project != title);
+        let has_workspace = self.selected_cwd().is_some();
+        let active_agent = self
+            .active_key(cx)
+            .and_then(|key| self.pane_identity(&key))
+            .and_then(|identity| agent_of_key(&identity).map(str::to_string));
+        let weak = cx.weak_entity();
+        let menu = MenuButton {
+            base: chrome_button(
+                "header-menu",
+                "Workspace actions",
+                IconName::MoreHorizontal,
+                cx,
+            ),
+            open: false,
+            fill: t.surface2,
+        }
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu: PopupMenu, _, _| {
+            let mut menu = menu.min_w(px(220.));
+            if let Some(agent_id) = active_agent.clone() {
+                let rename_id = agent_id.clone();
+                menu = menu
+                    .item(menu_item(
+                        "Rename agent",
+                        IconName::Pencil,
+                        weak.clone(),
+                        move |shell, window, cx| shell.rename_agent(rename_id.clone(), window, cx),
+                    ))
+                    .item(menu_item(
+                        "Archive agent",
+                        IconName::Archive,
+                        weak.clone(),
+                        move |shell, _, cx| shell.archive_agent(&agent_id, cx),
+                    ))
+                    .separator();
+            }
+            menu.item(menu_item(
+                "New tab",
+                IconName::Plus,
+                weak.clone(),
+                |shell, window, cx| shell.run_action("workspace.tab.menu.open", window, cx),
+            ))
+            .item(menu_item(
+                "Split pane right",
+                IconName::Columns2,
+                weak.clone(),
+                |shell, window, cx| shell.run_action("workspace.pane.split.right", window, cx),
+            ))
+            .item(menu_item(
+                "Split pane down",
+                IconName::Rows2,
+                weak.clone(),
+                |shell, window, cx| shell.run_action("workspace.pane.split.down", window, cx),
+            ))
+            .when(has_workspace, |menu| {
+                menu.item(menu_item(
+                    "Copy path",
+                    IconName::Copy,
+                    weak.clone(),
+                    |shell, window, cx| shell.copy_workspace_path(window, cx),
+                ))
+            })
+        });
+        let explorer_open = self.layout.explorer_open;
+        h_flex()
+            .id("workspace-header")
+            .role(Role::Banner)
+            .aria_label("Workspace header")
+            .relative()
+            .flex_shrink_0()
+            .h(px(HEADER_HEIGHT))
+            .px(px(SPACE_3))
+            .when(!self.layout.sidebar_open, |row| {
+                row.pl(px(TRAFFIC_LIGHT_WIDTH + SPACE_3))
+            })
+            .gap(px(SPACE_2))
+            .items_center()
+            .justify_between()
+            .bg(t.surface0)
+            .border_b_1()
+            .border_color(t.border)
+            .child(self.drag_area("header-drag", cx))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_center()
+                    .gap(px(SPACE_2))
+                    .child(
+                        chrome_button(
+                            "toggle-sidebar",
+                            if self.layout.sidebar_open {
+                                "Hide sidebar"
+                            } else {
+                                "Show sidebar"
+                            },
+                            IconName::PanelLeft,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.run_action("sidebar.toggle.left", window, cx)
+                        })),
+                    )
                     .child(
                         div()
-                            .id("host-switcher")
-                            // A combo box role maps to a pop-up button, which does not answer the
-                            // press action; a button with an expanded state does.
-                            .role(Role::Button)
-                            .aria_label(format!("Host switcher: {host_name}"))
-                            .aria_expanded(data.hosts_open)
-                            .cursor_pointer()
-                            .px_2()
-                            .py_1()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(theme.border)
-                            .text_sm()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.act(cx, |shell, cx| shell.toggle_hosts(cx))
-                            }))
-                            .child(format!("Host: {host_name}")),
+                            .id("workspace-title")
+                            .role(Role::Heading)
+                            .aria_label(match &subtitle {
+                                Some(project) => format!("{title}, {project}"),
+                                None => title.clone(),
+                            })
+                            .min_w_0()
+                            .truncate()
+                            .text_size(ui_font_size(FONT_BASE, cx))
+                            .font_weight(FontWeight(WEIGHT_MEDIUM))
+                            .text_color(t.foreground)
+                            .child(title),
                     )
-                    .children(host_rows.into_iter().flatten())
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .child(
-                                lean_button("sidebar-new-agent", "New agent", true, &theme)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.act(cx, |shell, cx| shell.open_new_agent(window, cx))
-                                    })),
-                            )
-                            .child(
-                                lean_button("sidebar-new-terminal", "New terminal", false, &theme)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.act(cx, |shell, cx| shell.open_terminal(window, cx))
-                                    })),
-                            ),
-                    ),
+                    .when_some(subtitle, |row, project| {
+                        row.child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(ui_font_size(FONT_BASE, cx))
+                                .text_color(t.foreground_muted)
+                                .child(project),
+                        )
+                    }),
             )
             .child(
-                v_flex()
-                    .id("sidebar-agents")
-                    .role(Role::List)
-                    .aria_label("Agents")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .pb_2()
-                    .children(rows)
-                    .when(empty, |list| {
-                        list.child(
-                            div()
-                                .id("sidebar-empty")
-                                .role(Role::Note)
-                                .aria_label(empty_text)
-                                .p_3()
-                                .text_sm()
-                                .text_color(theme.muted_foreground)
-                                .child(empty_text),
+                h_flex()
+                    .flex_shrink_0()
+                    .items_center()
+                    .gap(px(SPACE_1))
+                    .child(menu)
+                    .when(has_workspace, |row| {
+                        row.child(
+                            chrome_button(
+                                "toggle-explorer",
+                                if explorer_open {
+                                    "Hide Explorer"
+                                } else {
+                                    "Show Explorer"
+                                },
+                                IconName::PanelRight,
+                                cx,
+                            )
+                            .aria_expanded(explorer_open)
+                            .when(explorer_open, |button| button.bg(t.surface2))
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    this.run_action("sidebar.toggle.right", window, cx)
+                                },
+                            )),
                         )
                     }),
             )
             .into_any_element()
     }
-}
 
-impl Sidebar {
-    /// Runs `f` on the shell. The shell outlives its views, so a missing shell means the window
-    /// is closing.
-    fn act(&self, cx: &mut Context<Self>, f: impl FnOnce(&mut Shell, &mut Context<Shell>)) {
-        let _ = self.shell.update(cx, f);
-    }
-}
-
-/// What the sidebar shows, borrowed from the shell and its client: the sidebar draws on every
-/// frame of a stream, so it copies no list.
-pub struct SidebarData<'a> {
-    pub agents: &'a [AgentSummary],
-    pub workspaces: &'a [bachuc_client::WorkspaceSummary],
-    pub active_agent: Option<&'a str>,
-    pub hosts: &'a [bachuc_client::HostConfig],
-    pub host_index: usize,
-    pub hosts_open: bool,
-    pub connection: &'a Connection,
-}
-
-// ----- tab bar -----
-
-pub struct TabBar {
-    shell: WeakEntity<Shell>,
-}
-
-impl TabBar {
-    pub fn new(shell: WeakEntity<Shell>) -> Self {
-        Self { shell }
-    }
-
-    fn act(&self, cx: &mut Context<Self>, f: impl FnOnce(&mut Shell, &mut Context<Shell>)) {
-        let _ = self.shell.update(cx, f);
-    }
-}
-
-/// The tab label: the terminal name, or the agent title.
-pub fn tab_title(tab: &Tab, agents: &[AgentSummary]) -> String {
-    match &tab.kind {
-        TabKind::Terminal => tab.title.clone(),
-        TabKind::Agent(id) => agents
-            .iter()
-            .find(|agent| agent.id == *id)
-            .map(agent_title)
-            .unwrap_or_else(|| format!("Agent {}", short_id(id))),
-    }
-}
-
-impl Render for TabBar {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
-        let tabs: Vec<(u64, String)> = match self.shell.upgrade() {
-            Some(shell) => shell.read(cx).tab_labels(cx),
-            None => Vec::new(),
+    /// Electron's host gate (`WorkspaceUnreachable`): who is offline, the status, the reason,
+    /// Retry and Manage host. The client retries by itself; Retry reconnects at once.
+    pub(crate) fn render_gate(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let host = self.hosts[self.host_index].name.clone();
+        let (title, description) = host_gate(&self.connection, &host)?;
+        let t = tokens(cx);
+        let reason = match &self.connection {
+            crate::state::Connection::Disconnected(reason) if !reason.is_empty() => {
+                Some(reason.clone())
+            }
+            _ => None,
         };
-        let active = self
-            .shell
-            .upgrade()
-            .and_then(|shell| shell.read(cx).active_tab_id());
-        h_flex()
-            .id("tab-bar")
-            .role(Role::TabList)
-            .aria_label("Tabs")
+        let offline = reason.is_some()
+            || matches!(self.connection, crate::state::Connection::Disconnected(_));
+        let button = |id: &'static str, label: &'static str, name: IconName, primary: bool| {
+            h_flex()
+                .id(id)
+                .role(Role::Button)
+                .aria_label(label)
+                .h(px(28.))
+                .px(px(SPACE_3))
+                .gap(px(SPACE_1))
+                .items_center()
+                .rounded(px(RADIUS_LG))
+                .border_1()
+                .cursor_pointer()
+                .text_size(ui_font_size(FONT_SM, cx))
+                .when(primary, |b| {
+                    b.bg(t.accent)
+                        .border_color(t.accent)
+                        .text_color(t.accent_foreground)
+                })
+                .when(!primary, |b| {
+                    b.border_color(t.border)
+                        .text_color(t.foreground)
+                        .hover(|style| style.bg(t.surface2))
+                })
+                .child(icon(name).with_size(px(ICON_SM)))
+                .child(label)
+        };
+        Some(
+            v_flex()
+                .id("host-gate")
+                .role(Role::Status)
+                .aria_label(format!("{title}. {description}"))
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap(px(SPACE_3))
+                .px(px(SPACE_6))
+                .child(
+                    v_flex()
+                        .items_center()
+                        .gap(px(SPACE_2))
+                        .max_w(px(520.))
+                        .text_size(ui_font_size(FONT_BASE, cx))
+                        .child(div().text_color(t.foreground).child(title))
+                        .child(div().text_color(t.foreground_muted).child(description))
+                        .when_some(reason, |stack, reason| {
+                            stack.child(div().text_color(t.destructive).child(reason))
+                        }),
+                )
+                .when(offline, |gate| {
+                    gate.child(
+                        h_flex()
+                            .gap(px(SPACE_2))
+                            .child(
+                                button("gate-retry", "Retry", IconName::RotateCw, true).on_click(
+                                    cx.listener(|this, _, window, cx| {
+                                        this.reconnect(this.host_index, window, cx)
+                                    }),
+                                ),
+                            )
+                            .child(
+                                button("gate-manage", "Manage host", IconName::Settings, false)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_settings(window, cx)
+                                    })),
+                            ),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
+    /// The settings screen under a title-bar row that keeps the traffic lights clear.
+    pub(crate) fn render_settings(
+        &mut self,
+        settings: AnyView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let t = tokens(cx);
+        v_flex()
             .size_full()
-            .items_center()
-            .gap_1()
-            .px_1()
-            .border_b_1()
-            .border_color(theme.border)
-            .bg(theme.tab_bar)
-            .children(tabs.into_iter().map(|(id, title)| {
-                let selected = active == Some(id);
+            .child(
                 h_flex()
-                    .items_center()
-                    .rounded_md()
-                    .when(selected, |tab| tab.bg(theme.tab_active))
+                    .id("settings-chrome")
+                    .relative()
+                    .flex_shrink_0()
+                    .h(px(HEADER_HEIGHT))
+                    .bg(t.surface0)
                     .child(
                         div()
-                            .id(("tab", id))
-                            .role(Role::Tab)
-                            .aria_label(format!("Tab {title}"))
-                            .aria_selected(selected)
-                            .cursor_pointer()
-                            .max_w(px(200.))
-                            .truncate()
-                            .pl_3()
-                            .pr_1()
-                            .py_1()
-                            .text_sm()
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.act(cx, |shell, cx| shell.select_tab(id, window, cx))
-                            }))
-                            .child(title.clone()),
+                            .w(px(SETTINGS_SIDEBAR_WIDTH))
+                            .h_full()
+                            .bg(t.surface_sidebar)
+                            .border_r_1()
+                            .border_color(t.border),
                     )
-                    .child(
-                        div()
-                            .id(("tab-close", id))
-                            .role(Role::Button)
-                            .aria_label(format!("Close {title}"))
-                            .focusable()
-                            .cursor_pointer()
-                            .px_2()
-                            .py_1()
-                            .rounded_md()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .hover(|button| button.bg(theme.accent))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.act(cx, |shell, cx| shell.close_tab(id, window, cx))
-                            }))
-                            .child("x"),
-                    )
-            }))
-    }
-}
-
-// ----- status line -----
-
-pub struct StatusLine {
-    shell: WeakEntity<Shell>,
-}
-
-impl StatusLine {
-    pub fn new(shell: WeakEntity<Shell>) -> Self {
-        Self { shell }
-    }
-}
-
-/// The status line text: connection, host, agent count, waiting permissions, last message.
-pub fn status_text(
-    connection: &Connection,
-    host: &str,
-    agents: &[AgentSummary],
-    message: Option<&str>,
-) -> String {
-    let mut parts = vec![
-        connection.text(),
-        host.to_string(),
-        format!("{} agents", agents.len()),
-    ];
-    let permissions = badge_count(agents);
-    if permissions > 0 {
-        parts.push(format!("{permissions} permission waiting"));
-    }
-    if let Some(message) = message {
-        parts.push(message.to_string());
-    }
-    parts.join("  |  ")
-}
-
-impl Render for StatusLine {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
-        let (text, failed) = match self.shell.upgrade() {
-            Some(shell) => shell.read(cx).status(cx),
-            None => (String::new(), false),
-        };
-        div()
-            .id("status-line")
-            .role(Role::Status)
-            .aria_label(text.clone())
-            .size_full()
-            .flex()
-            .items_center()
-            .px_2()
-            .border_t_1()
-            .border_color(theme.border)
-            .text_xs()
-            .text_color(if failed {
-                theme.danger
-            } else {
-                theme.muted_foreground
-            })
-            .child(text)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::status_text;
-    use crate::state::Connection;
-    use bachuc_client::AgentSummary;
-
-    fn agent(permissions: usize) -> AgentSummary {
-        AgentSummary {
-            id: "a".into(),
-            title: "t".into(),
-            status: "idle".into(),
-            cwd: "/".into(),
-            workspace_id: None,
-            provider: "mock".into(),
-            model: None,
-            pending_permissions: permissions,
-        }
-    }
-
-    #[test]
-    fn the_status_line_names_host_agents_and_waiting_permissions() {
-        let text = status_text(&Connection::Connected, "live", &[agent(1), agent(0)], None);
-        assert_eq!(
-            text,
-            "Connected  |  live  |  2 agents  |  1 permission waiting"
-        );
-        let text = status_text(
-            &Connection::Disconnected("incorrect_password".into()),
-            "macmini",
-            &[],
-            Some("note"),
-        );
-        assert_eq!(
-            text,
-            "Disconnected: incorrect_password, retrying  |  macmini  |  0 agents  |  note"
-        );
+                    .child(self.drag_area("settings-drag", cx)),
+            )
+            .child(div().flex_1().min_h_0().child(settings))
+            .into_any_element()
     }
 }

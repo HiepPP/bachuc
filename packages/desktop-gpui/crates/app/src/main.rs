@@ -8,6 +8,7 @@ mod actions;
 mod chrome;
 mod dock;
 mod new_agent;
+mod panes;
 mod shell;
 mod state;
 
@@ -40,34 +41,50 @@ fn main() {
     if log::set_logger(&StderrLogger).is_ok() {
         log::set_max_level(log::LevelFilter::Info);
     }
-    gpui_kit::application().run(|cx| {
-        // The theme reads the registry that `init` builds, so it comes second.
-        gpui_kit::init(cx);
-        bachuc_theme::init(cx);
-        cx.bind_keys(actions::key_bindings());
-        cx.activate(true);
-        let (width, height) = state::window_size(std::env::var("BACHUC_WINDOW").ok().as_deref());
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(width), px(height)),
-                cx,
-            ))),
-            titlebar: Some(TitlebarOptions {
-                title: Some("Bachuc GPUI".into()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        gpui_kit::open_window(options, cx, |window, cx| {
-            cx.new(|cx| shell::Shell::new(window, cx))
-        })
-        .expect("open window");
-        cx.on_window_closed(|cx, _| {
-            if cx.windows().is_empty() {
-                cx.quit();
-            }
-        })
-        .detach();
-    });
+    // The views draw lucide icons from the Bachuc asset source.
+    gpui_kit::application()
+        .with_assets(bachuc_icons::Assets)
+        .run(|cx| {
+            // The theme reads the registry that `init` builds, so it comes second; the stored
+            // appearance applies over the theme defaults.
+            gpui_kit::init(cx);
+            bachuc_theme::init(cx);
+            bachuc_settings::load_appearance(cx);
+            // The shell binds the shortcut table; these never change.
+            cx.bind_keys(actions::fixed_bindings());
+            cx.activate(true);
+            open_main_window(cx);
+            cx.on_window_closed(|cx, _| {
+                if cx.windows().is_empty() {
+                    cx.quit();
+                }
+            })
+            .detach();
+        });
+}
+
+/// Electron's window chrome: `titleBarStyle: "hidden"` with the traffic lights at (16, 14)
+/// moved by the app's -4 offset (`window-manager.ts`), so at (16, 10). The app draws its own
+/// title-bar rows and moves the window from them.
+fn open_main_window(cx: &mut App) {
+    let (width, height) = state::window_size(std::env::var("BACHUC_WINDOW").ok().as_deref());
+    let options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+            None,
+            size(px(width), px(height)),
+            cx,
+        ))),
+        titlebar: Some(TitlebarOptions {
+            title: Some("Bachuc GPUI".into()),
+            appears_transparent: true,
+            traffic_light_position: Some(point(px(16.), px(10.))),
+        }),
+        app_owns_titlebar_drag: true,
+        window_min_size: Some(size(px(640.), px(480.))),
+        ..Default::default()
+    };
+    gpui_kit::open_window(options, cx, |window, cx| {
+        cx.new(|cx| shell::Shell::new(window, cx))
+    })
+    .expect("open window");
 }
