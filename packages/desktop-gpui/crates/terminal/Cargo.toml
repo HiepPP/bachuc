@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 bachuc-client = { path = "../client" }
+bachuc-theme = { path = "../theme" }
 # gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot; keep the same pin in every crate.
 gpui-kit = "=0.7.3"
 alacritty_terminal = "0.26"

@@ -10,7 +10,7 @@ mod size;
 mod snapshot;
 mod view;
 
-pub use emulator::{Emulator, RenderedLine};
+pub use emulator::{Emulator, Palette, RenderedLine};
 pub use keys::{key_bytes, paste_bytes};
 pub use size::{PADDING, cell_at, grid_size};
 pub use snapshot::Snapshot;

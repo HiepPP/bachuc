@@ -9,21 +9,53 @@ use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb};
+use bachuc_theme::Tokens;
 use gpui_kit::{
-    FontStyle, FontWeight, HighlightStyle, SharedString, StrikethroughStyle, UnderlineStyle, px,
-    rgb,
+    FontStyle, FontWeight, HighlightStyle, Hsla, Rgba, SharedString, StrikethroughStyle,
+    UnderlineStyle, px, rgb,
 };
 use serde_json::Value;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ops::Range;
 use std::rc::Rc;
 
 /// Largest grid a snapshot may ask for. A bad value must not allocate a huge grid.
 const MAX_DIMENSION: usize = 1000;
 
-pub const BACKGROUND: u32 = 0x0f1115;
-pub const FOREGROUND: u32 = 0xd4d4d4;
-const SELECTION: u32 = 0x2f4f7f;
+/// The terminal colors: the 16 ANSI colors plus the default background, foreground, cursor, and
+/// selection. The view takes them from the theme tokens.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Palette {
+    pub ansi: [Hsla; 16],
+    pub background: Hsla,
+    pub foreground: Hsla,
+    pub cursor: Hsla,
+    pub selection: Hsla,
+}
+
+impl Palette {
+    pub fn from_tokens(tokens: &Tokens) -> Self {
+        Self {
+            ansi: tokens.ansi,
+            background: tokens.terminal_background,
+            foreground: tokens.terminal_foreground,
+            cursor: tokens.terminal_cursor,
+            selection: tokens.terminal_selection,
+        }
+    }
+}
+
+impl Default for Palette {
+    fn default() -> Self {
+        Self::from_tokens(&Tokens::claude_dark())
+    }
+}
+
+fn channels(color: Hsla) -> (u8, u8, u8) {
+    let rgba = Rgba::from(color);
+    let byte = |value: f32| (value.clamp(0., 1.) * 255.).round() as u8;
+    (byte(rgba.r), byte(rgba.g), byte(rgba.b))
+}
 
 struct Size {
     rows: usize,
@@ -45,16 +77,19 @@ impl Dimensions for Size {
 /// Collects what the emulator writes back to the PTY: cursor position reports, color queries,
 /// and similar.
 #[derive(Clone, Default)]
-struct Replies(Rc<RefCell<Vec<u8>>>);
+struct Replies {
+    bytes: Rc<RefCell<Vec<u8>>>,
+    palette: Rc<Cell<Palette>>,
+}
 
 impl EventListener for Replies {
     fn send_event(&self, event: Event) {
         match event {
-            Event::PtyWrite(text) => self.0.borrow_mut().extend_from_slice(text.as_bytes()),
+            Event::PtyWrite(text) => self.bytes.borrow_mut().extend_from_slice(text.as_bytes()),
             Event::ColorRequest(index, format) => {
-                let (r, g, b) = palette_color(index);
+                let (r, g, b) = palette_color(&self.palette.get(), index);
                 let text = format(Rgb { r, g, b });
-                self.0.borrow_mut().extend_from_slice(text.as_bytes());
+                self.bytes.borrow_mut().extend_from_slice(text.as_bytes());
             }
             _ => {}
         }
@@ -111,7 +146,21 @@ impl Emulator {
 
     /// Throws the screen and its history away and starts again at `rows` x `cols`.
     pub fn reset(&mut self, rows: usize, cols: usize) {
+        let palette = self.palette();
         *self = Self::new(rows, cols);
+        self.set_palette(palette);
+    }
+
+    pub fn palette(&self) -> Palette {
+        self.replies.palette.get()
+    }
+
+    /// Recolors the screen. Cells keep their ANSI indexes, so old output changes color too.
+    pub fn set_palette(&mut self, palette: Palette) {
+        if self.palette() != palette {
+            self.replies.palette.set(palette);
+            self.invalidate_all();
+        }
     }
 
     pub fn feed(&mut self, bytes: &[u8]) {
@@ -120,7 +169,7 @@ impl Emulator {
 
     /// Bytes the emulator wants to send to the PTY since the last call.
     pub fn take_replies(&mut self) -> Vec<u8> {
-        std::mem::take(&mut *self.replies.0.borrow_mut())
+        std::mem::take(&mut *self.replies.bytes.borrow_mut())
     }
 
     /// Replaces everything with the daemon's snapshot: the emulator takes the snapshot's size,
@@ -253,13 +302,15 @@ impl Emulator {
                 .and_then(|selection| selection.to_range(&self.term));
             let cursor = self.term.renderable_content().cursor;
             let offset = self.display_offset();
+            let palette = self.palette();
             let cursor_row = cursor.point.line.0 + offset as i32;
             for row in 0..rows {
                 if self.lines[row].is_none() {
                     let cursor_here = (cursor_row == row as i32
                         && cursor.shape != CursorShape::Hidden)
                         .then_some((cursor.point.column.0, cursor.shape));
-                    let line = build_line(&self.term, row, offset, selection, cursor_here);
+                    let line =
+                        build_line(&self.term, &palette, row, offset, selection, cursor_here);
                     self.lines[row] = Some(line);
                 }
             }
@@ -274,6 +325,7 @@ fn side(right: bool) -> Side {
 
 fn build_line(
     term: &Term<Replies>,
+    palette: &Palette,
     row: usize,
     offset: usize,
     selection: Option<alacritty_terminal::selection::SelectionRange>,
@@ -299,16 +351,16 @@ fn build_line(
             }
         }
 
-        let mut foreground = resolve(cell.fg, true);
-        let mut background = resolve(cell.bg, false);
+        let mut foreground = resolve(palette, cell.fg, true);
+        let mut background = resolve(palette, cell.bg, false);
         if cell.flags.contains(Flags::INVERSE) {
             let (fg, bg) = (background, foreground);
-            foreground = Some(fg.unwrap_or(BACKGROUND));
-            background = Some(bg.unwrap_or(FOREGROUND));
+            foreground = Some(fg.unwrap_or(palette.background));
+            background = Some(bg.unwrap_or(palette.foreground));
         }
         let mut style = HighlightStyle {
-            color: foreground.map(|color| rgb(color).into()),
-            background_color: background.map(|color| rgb(color).into()),
+            color: foreground,
+            background_color: background,
             ..Default::default()
         };
         if cell.flags.contains(Flags::BOLD) {
@@ -330,7 +382,7 @@ fn build_line(
             });
         }
         if selection.is_some_and(|range| range.contains(point)) {
-            style.background_color = Some(rgb(SELECTION).into());
+            style.background_color = Some(palette.selection);
         }
         if let Some((cursor_col, shape)) = cursor
             && cursor_col == col
@@ -338,8 +390,8 @@ fn build_line(
             if shape == CursorShape::Underline {
                 style.underline = Some(underline());
             } else {
-                style.background_color = Some(rgb(FOREGROUND).into());
-                style.color = Some(rgb(BACKGROUND).into());
+                style.background_color = Some(palette.cursor);
+                style.color = Some(palette.background);
             }
         }
 
@@ -367,51 +419,37 @@ fn underline() -> UnderlineStyle {
     }
 }
 
-/// A cell color as 0xRRGGBB. `None` means the default foreground or background.
-fn resolve(color: Color, foreground: bool) -> Option<u32> {
-    let (r, g, b) = match color {
-        Color::Spec(Rgb { r, g, b }) => (r, g, b),
-        Color::Named(NamedColor::Foreground) if foreground => return None,
-        Color::Named(NamedColor::Background) if !foreground => return None,
-        Color::Named(name) if (name as usize) < 16 => ANSI[name as usize],
-        Color::Named(_) => return None,
-        Color::Indexed(index) => indexed(index),
-    };
-    Some(((r as u32) << 16) | ((g as u32) << 8) | b as u32)
+fn from_bytes((r, g, b): (u8, u8, u8)) -> Hsla {
+    rgb(((r as u32) << 16) | ((g as u32) << 8) | b as u32).into()
 }
 
-/// The RGB value for a color query (OSC 4, 10, 11).
-fn palette_color(index: usize) -> (u8, u8, u8) {
-    let hex = |value: u32| ((value >> 16) as u8, (value >> 8) as u8, value as u8);
-    match index {
-        0..=255 => indexed(index as u8),
-        257 => hex(BACKGROUND),
-        _ => hex(FOREGROUND),
+/// A cell color. `None` means the default foreground or background.
+fn resolve(palette: &Palette, color: Color, foreground: bool) -> Option<Hsla> {
+    match color {
+        Color::Spec(Rgb { r, g, b }) => Some(from_bytes((r, g, b))),
+        Color::Named(NamedColor::Foreground) if foreground => None,
+        Color::Named(NamedColor::Background) if !foreground => None,
+        Color::Named(name) if (name as usize) < 16 => Some(palette.ansi[name as usize]),
+        Color::Named(_) => None,
+        Color::Indexed(index @ 0..=15) => Some(palette.ansi[index as usize]),
+        Color::Indexed(index) => Some(from_bytes(indexed(index))),
     }
 }
 
-const ANSI: [(u8, u8, u8); 16] = [
-    (0, 0, 0),
-    (205, 49, 49),
-    (13, 188, 121),
-    (229, 229, 16),
-    (36, 114, 200),
-    (188, 63, 188),
-    (17, 168, 205),
-    (229, 229, 229),
-    (102, 102, 102),
-    (241, 76, 76),
-    (35, 209, 139),
-    (245, 245, 67),
-    (59, 142, 234),
-    (214, 112, 214),
-    (41, 184, 219),
-    (255, 255, 255),
-];
+/// The RGB value for a color query (OSC 4, 10, 11).
+fn palette_color(palette: &Palette, index: usize) -> (u8, u8, u8) {
+    match index {
+        0..=15 => channels(palette.ansi[index]),
+        16..=255 => indexed(index as u8),
+        257 => channels(palette.background),
+        _ => channels(palette.foreground),
+    }
+}
 
+/// The 6x6x6 color cube and the gray ramp of the 256-color palette.
 fn indexed(index: u8) -> (u8, u8, u8) {
     match index {
-        0..=15 => ANSI[index as usize],
+        0..=15 => (0, 0, 0),
         16..=231 => {
             let i = index - 16;
             let level = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
@@ -595,6 +633,58 @@ mod tests {
         let line = emulator.lines().next().unwrap().clone();
         assert_eq!(line.runs.len(), 1);
         assert_eq!(line.runs[0].0, 1..3);
+    }
+
+    #[test]
+    fn each_ansi_index_maps_to_its_token() {
+        for tokens in [Tokens::light(), Tokens::claude_dark()] {
+            let palette = Palette::from_tokens(&tokens);
+            for index in 0..16u8 {
+                let expected = tokens.ansi[index as usize];
+                assert_eq!(
+                    resolve(&palette, Color::Indexed(index), true),
+                    Some(expected)
+                );
+                let named = [
+                    NamedColor::Black,
+                    NamedColor::Red,
+                    NamedColor::Green,
+                    NamedColor::Yellow,
+                    NamedColor::Blue,
+                    NamedColor::Magenta,
+                    NamedColor::Cyan,
+                    NamedColor::White,
+                    NamedColor::BrightBlack,
+                    NamedColor::BrightRed,
+                    NamedColor::BrightGreen,
+                    NamedColor::BrightYellow,
+                    NamedColor::BrightBlue,
+                    NamedColor::BrightMagenta,
+                    NamedColor::BrightCyan,
+                    NamedColor::BrightWhite,
+                ][index as usize];
+                assert_eq!(resolve(&palette, Color::Named(named), true), Some(expected));
+                assert_eq!(palette_color(&palette, index as usize), channels(expected));
+            }
+            assert_eq!(
+                resolve(&palette, Color::Named(NamedColor::Foreground), true),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn a_new_palette_recolors_and_survives_a_reset() {
+        let mut emulator = Emulator::new(2, 10);
+        emulator.feed(b"\x1b[31mred");
+        let before = emulator.lines().next().unwrap().runs[0].1.color;
+        let light = Palette::from_tokens(&Tokens::light());
+        emulator.set_palette(light);
+        let after = emulator.lines().next().unwrap().runs[0].1.color;
+        assert_ne!(before, after);
+        assert_eq!(after, Some(light.ansi[1]));
+        emulator.reset(2, 10);
+        assert_eq!(emulator.palette(), light);
     }
 
     #[test]

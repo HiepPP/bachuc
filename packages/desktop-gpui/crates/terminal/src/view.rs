@@ -1,18 +1,34 @@
 //! The terminal pane: it owns an emulator, feeds it the daemon's frames, sizes it to the pane,
 //! and turns keys, the mouse, and the clipboard into terminal input.
 
-use crate::emulator::{BACKGROUND, Emulator, FOREGROUND};
+use crate::emulator::{Emulator, Palette};
 use crate::keys::{key_bytes, paste_bytes};
 use crate::size::{PADDING, cell_at, grid_size};
 use alacritty_terminal::term::TermMode;
 use bachuc_client::{Client, TerminalFrame, TerminalHandle};
 use futures::StreamExt;
+use gpui_kit::component::theme::Theme;
 use gpui_kit::*;
 use std::cell::Cell;
 use std::rc::Rc;
 
-const FONT_FAMILY: &str = "Menlo";
-const FONT_SIZE: f32 = 13.0;
+/// The Electron terminal font list (`terminal-font.ts`), in order; the first installed one wins.
+const FONT_FAMILIES: [&str; 13] = [
+    "JetBrains Mono",
+    "JetBrainsMono Nerd Font",
+    "JetBrainsMono NF",
+    "MesloLGM Nerd Font",
+    "MesloLGM NF",
+    "Hack Nerd Font",
+    "FiraCode Nerd Font",
+    "Symbols Nerd Font",
+    "SF Mono",
+    "Menlo",
+    "Monaco",
+    "Consolas",
+    "Liberation Mono",
+];
+const FALLBACK_FAMILY: &str = "Menlo";
 const INITIAL_ROWS: usize = 24;
 const INITIAL_COLS: usize = 80;
 /// Frames fed to the emulator before the view draws again, so a flood of output costs one draw.
@@ -40,26 +56,49 @@ struct Metrics {
     line_height: f32,
 }
 
-impl Metrics {
-    fn measure(window: &Window) -> Self {
-        let system = window.text_system();
+/// The font, size, and cell size the pane draws with.
+#[derive(Clone, PartialEq)]
+struct Typeface {
+    family: &'static str,
+    size: f32,
+}
+
+impl Typeface {
+    /// The first installed family of the Electron list, at the code font size.
+    fn current(cx: &App) -> Self {
+        let installed = cx.text_system().all_font_names();
+        let family = FONT_FAMILIES
+            .into_iter()
+            .find(|name| installed.iter().any(|font| font == name))
+            .unwrap_or(FALLBACK_FAMILY);
+        Self {
+            family,
+            size: f32::from(bachuc_theme::code_font_size(
+                bachuc_theme::metrics::FONT_CODE,
+                cx,
+            )),
+        }
+    }
+
+    fn measure(&self, cx: &App) -> Metrics {
+        let system = cx.text_system();
         let font = Font {
-            family: FONT_FAMILY.into(),
+            family: self.family.into(),
             features: FontFeatures::default(),
             fallbacks: None,
             weight: FontWeight::NORMAL,
             style: FontStyle::Normal,
         };
         let id = system.resolve_font(&font);
-        let size = px(FONT_SIZE);
+        let size = px(self.size);
         let cell_width = system
             .advance(id, size, 'm')
-            .map_or(FONT_SIZE * 0.6, |advance| f32::from(advance.width));
+            .map_or(self.size * 0.6, |advance| f32::from(advance.width));
         let line_height =
             f32::from(system.ascent(id, size)) + f32::from(system.descent(id, size)).abs();
         Metrics {
             cell_width,
-            line_height: line_height.ceil().max(FONT_SIZE),
+            line_height: line_height.ceil().max(self.size),
         }
     }
 }
@@ -76,7 +115,10 @@ pub struct TerminalView {
     /// later sizes only resize. Every snapshot starts over, because a reconnect resubscribes.
     claimed: bool,
     focus: FocusHandle,
+    typeface: Typeface,
     metrics: Metrics,
+    palette: Palette,
+    _theme: Subscription,
     /// The pane's bounds from the last paint, for mouse positions.
     bounds: Rc<Cell<Bounds<Pixels>>>,
     /// The size the last paint asked for, so a steady pane asks once.
@@ -159,22 +201,47 @@ impl TerminalView {
 
         let focus = cx.focus_handle();
         focus.focus(window, cx);
+        let typeface = Typeface::current(cx);
+        let palette = Palette::from_tokens(&bachuc_theme::tokens(cx));
+        let mut emulator = Emulator::new(INITIAL_ROWS, INITIAL_COLS);
+        emulator.set_palette(palette);
         TerminalView {
             client,
             name,
-            emulator: Emulator::new(INITIAL_ROWS, INITIAL_COLS),
+            emulator,
             terminal_id: None,
             exited: false,
             size: None,
             claimed: false,
             focus,
-            metrics: Metrics::measure(window),
+            metrics: typeface.measure(cx),
+            typeface,
+            palette,
+            // `bachuc_theme::set_theme` and `set_font_scale` write the gpui-kit theme.
+            _theme: cx.observe_global::<Theme>(|this, cx| this.restyle(cx)),
             bounds: Rc::new(Cell::new(Bounds::default())),
             painted_size: Rc::new(Cell::new((0, 0))),
             dragging: false,
             wheel_remainder: 0.0,
             reader: Some(reader),
         }
+    }
+
+    /// Takes the colors, font, and size of the theme on screen. A new cell size changes the grid
+    /// at the next paint, which resizes the emulator and the PTY.
+    fn restyle(&mut self, cx: &mut Context<TerminalView>) {
+        let palette = Palette::from_tokens(&bachuc_theme::tokens(cx));
+        let typeface = Typeface::current(cx);
+        if palette == self.palette && typeface == self.typeface {
+            return;
+        }
+        self.palette = palette;
+        self.emulator.set_palette(palette);
+        if typeface != self.typeface {
+            self.metrics = typeface.measure(cx);
+            self.typeface = typeface;
+        }
+        cx.notify();
     }
 
     /// The daemon id of the terminal, once it is open.
@@ -474,10 +541,10 @@ impl Render for TerminalView {
             .relative()
             .size_full()
             .overflow_hidden()
-            .bg(rgb(BACKGROUND))
-            .text_color(rgb(FOREGROUND))
-            .font_family(FONT_FAMILY)
-            .text_size(px(FONT_SIZE))
+            .bg(self.palette.background)
+            .text_color(self.palette.foreground)
+            .font_family(self.typeface.family)
+            .text_size(px(self.typeface.size))
             .line_height(px(line_height))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key_down(event, cx)))
             .on_mouse_down(
