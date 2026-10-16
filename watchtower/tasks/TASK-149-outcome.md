@@ -209,3 +209,39 @@ Run by the UI checker on 2026-10-16, HEAD abf2569f1 (fix commit abf2569f1), ligh
 Not run (owner rules, 2026-10-16): the hover-then-click badge step was run with pointer clicks before the pointer rule; a repeat is `UNVERIFIED (unattended): needs pointer, owner rule 2026-10-16`. CPU reads and live answers stay `UNVERIFIED (unattended): live down`.
 
 Cleanup: the apps were quit; agent `99f8fc28` archived; its workspace `wks_671d9c2c2abfbaa1` (`main`, `/tmp/gpui-bench`, on 6770) was left because the archive command was declined; no terminal was created in this group; 6767 untouched.
+
+## Fix Round 3
+
+Status: DONE. Fixes the "Heading rule to code block" row (Q-086): GPUI 25 to 26 px, reference 37. File: `crates/timeline/src/lib.rs`. `TimelineView::new`, `find`, `TimelineEvent`, and the per-flush work of ADR-0039 are unchanged; the change is in the cached markdown style only.
+
+### Cause
+
+- gpui `div` defaults to `Display::Block` (`gpui-pre-0.3.9/src/style.rs:774`), and gpui-base's TextView root and block wrappers are plain divs (`gpui-base-0.7.3/src/text/document.rs:234`, `gapped` in `node.rs:2906`). taffy 0.13 block layout collapses adjoining vertical margins as CSS does (`taffy-0.13.0/src/compute/block.rs:1185` and `1222`).
+- An h1 or h2 holds its space under the rule as a bottom margin of 24, because the rule is its bottom border. The fence had a top margin of 12. The two collapsed to 24, plus the 1 px rule: the measured 25.
+- The web stream stacks blocks in flex columns, which never collapse: h2 `marginBottom: 12`, the block's 12, and the fence's `marginVertical: 12` give 36, plus the rule: 37.
+- A paragraph's gap is gpui-base padding (`gapped`), so paragraph to fence was already 24 + 12 = 36. h3 to h6 keep their space as padding, so they were not affected.
+- No margin pair can give 36 and keep the paragraph cases: collapse takes the larger margin.
+
+### Fix
+
+- `fence_spacing`: the fence has no top margin. It moves down 12 with a relative `top` offset and has a 12 bottom margin, so the blocks under it keep their place. An offset never collapses. Heading to fence is now max(24, 0) + 12 = 36, and paragraph to fence stays 24 + 0 + 12 = 36.
+- A last fence's bottom margin leaves the text view and stops at its flex-column parent (the assistant message `v_flex` and the step-note `v_flex`), so the row height includes it. The visible block ends where it did before.
+- Test `fence_gaps_match_the_web_stream` computes both gaps from `heading_style`, `fence_spacing`, `BLOCK_GAP`, and `SPACE_3` with the collapse rule. It fails with the old `mt(12)`, which gives 24.
+
+### Text row drift (TASK-155 K row)
+
+- The K row shows reply text 2 to 4 px lower than the reference: first line 224 vs 222, second paragraph 272 vs 269, heading 369 vs 365. It grows about 1 px per block.
+- Not the same cause: no two margins adjoin on that path. The bubble-to-reply gap is row padding, paragraph gaps are padding, and a heading after a paragraph uses padding on top. The 1 px per block matches the paragraph pitch of Re-check 2 (48 vs 47), which is line-box rounding. Not fixed in this round.
+
+### Verified
+
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-timeline` -> PASS: 61 tests, new `fence_gaps_match_the_web_stream`.
+- `packages/desktop-gpui/cargo.sh fmt --check -p bachuc-timeline` -> PASS.
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh clippy -p bachuc-timeline --all-targets` -> PASS: no timeline warning; only the existing `crates/protocol/build.rs` warnings.
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh build -p bachuc-app` -> PASS.
+- GitNexus `impact` upstream `markdown_style`: not found, because the index is behind. It is private, and the text search shows one caller, `render_markdown`, in the crate.
+- `380c019` "Next Steps" rule to code block top is 37 px, and paragraph to block stays 52 to 53 -> DEFERRED (UI checker).
+
+### Lessons
+
+- gpui divs are block layout, and taffy collapses adjoining vertical margins. If a gap must add to a neighbor's margin, use padding or a relative offset with an equal bottom margin. Do not use a top margin.

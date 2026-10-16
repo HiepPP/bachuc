@@ -89,3 +89,23 @@ Gauge: idle CPU of the connected `client_probe` with the project tree and checko
 
 - The builder rules allow only `-p` scoped cargo, so `cargo.sh test --workspace` from Verify was replaced by building `bachuc-app`, `bachuc-timeline`, `bachuc-composer`, and `bachuc-terminal`, and testing `bachuc-app`. The lead should run the workspace test after the wave.
 - The `updatedAt` guard changes TASK-136 behavior: an upsert with an older `updatedAt` is ignored. Does the daemon ever send a newer state with an older `updatedAt`? None was seen on live.
+
+## Fix Round 1 (Q-073)
+
+Status: DONE, 2026-10-16T07:50Z. An unknown permission name no longer fails `decode_server_info`.
+
+- `crates/protocol/build.rs`: `OPEN_ENUM_LISTS` lists `ServerInfo.permissions`. `skip_unknown_list_values` adds `#[serde(deserialize_with = "crate::lenient::known_values")]` to that generated field and panics if the field is gone. The schema and the codegen script are unchanged.
+- `crates/protocol/src/lib.rs`: private `lenient::known_values` decodes the list and drops each value that does not decode. The type stays `Vec<ServerInfoPermissionsItem>`, so every known value stays typed and no caller changes.
+- No other closed enum is in `ServerInfo`: `features` holds only bools, and `capabilities`, `hostname`, and `version` are open JSON.
+- `supports_queue` reads `features.agentMessageQueue`, not a permission. The tests check that it stays true next to an unknown permission.
+- Tests: `server_info_skips_an_unknown_permission` in `crates/protocol/tests/fixtures.rs`. The fake daemon in `crates/client/tests/common/mod.rs` now sends `permissions` with `agent.future`, and `server_info_is_typed_and_gates_the_queue` checks the 2 known values and `supports_queue`.
+
+Verified:
+
+- `CARGO_BUILD_JOBS=4 cargo.sh test -p bachuc-protocol -p bachuc-client` -> exit 0: protocol 19 passed and 1 ignored; client 13 unit, 14 `rpcs`, and 13 `sync` passed. PASS.
+- `cargo.sh fmt --check -p bachuc-protocol -p bachuc-client` -> exit 0. PASS.
+- `cargo.sh clippy -p bachuc-protocol -p bachuc-client --all-targets` -> exit 0. The 3 warnings existed before: `build.rs` lines 130 and 302, and `tests/fixtures.rs` line 315 (line 297 at HEAD). PASS.
+- `cargo.sh build -p bachuc-app` -> exit 0. PASS.
+- No `.mjs` changed, so no lint run. `git diff -- packages/protocol` -> empty.
+
+Lessons: list a new open enum list in `OPEN_ENUM_LISTS` in `build.rs`. `Client::server_info()` is now `None` only when a field has the wrong shape.
