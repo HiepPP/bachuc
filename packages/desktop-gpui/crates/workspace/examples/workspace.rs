@@ -1,14 +1,15 @@
 //! A workspace with three plain text panes in one group. Split with the "More actions" menu or
 //! cmd-\ and cmd-shift-\; each split and the new-tab button (cmd-t) open one more text pane.
 //! Drag tabs to reorder them or to move them to another group, and drag a divider to resize.
-//! cmd-w closes the active tab.
+//! cmd-w closes the active tab. Right click a tab, or press the menu key, for its menu; every
+//! second pane is an agent with a logo. The toolbar's maximize button shows one group alone.
 //!
 //! Usage: workspace
 
 use bachuc_icons::IconName;
 use bachuc_theme::{metrics, tokens, ui_font_size};
-use bachuc_workspace::actions::{CloseActiveTab, NewTab, SplitDown, SplitRight};
-use bachuc_workspace::{KEY_CONTEXT, PaneEvent, PaneItem, Workspace};
+use bachuc_workspace::actions::{CloseActiveTab, NewTab, OpenTabMenu, SplitDown, SplitRight};
+use bachuc_workspace::{KEY_CONTEXT, PaneEvent, PaneItem, TabKind, Workspace};
 use gpui_kit::*;
 
 struct TextPane {
@@ -42,11 +43,15 @@ const ICONS: [IconName; 4] = [
 impl Example {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
-        cx.subscribe_in(&workspace, window, |this, _, event, window, cx| {
-            if *event == PaneEvent::NewTab {
-                this.open_pane(window, cx);
-            }
-        })
+        cx.subscribe_in(
+            &workspace,
+            window,
+            |this, _, event: &PaneEvent, window, cx| {
+                if *event == PaneEvent::NewTab {
+                    this.open_pane(window, cx);
+                }
+            },
+        )
         .detach();
         let mut example = Example { workspace, next: 1 };
         for _ in 0..3 {
@@ -72,8 +77,28 @@ impl Example {
             modified: number.is_multiple_of(3),
             view: view.into(),
         };
-        self.workspace
-            .update(cx, |workspace, cx| workspace.open(item, window, cx));
+        let key = item.key.clone();
+        let foreground = tokens(cx).foreground;
+        self.workspace.update(cx, |workspace, cx| {
+            workspace.open(item, window, cx);
+            // Every other pane is an agent with the Claude logo; the rest are files.
+            if number.is_multiple_of(2) {
+                workspace.set_item_kind(
+                    &key,
+                    TabKind::Agent {
+                        id: format!("agent-{number:04}"),
+                    },
+                    cx,
+                );
+                workspace.set_item_logo(
+                    &key,
+                    bachuc_icons::provider_logo("claude", foreground),
+                    cx,
+                );
+            } else {
+                workspace.set_item_kind(&key, TabKind::File, cx);
+            }
+        });
     }
 }
 
@@ -95,6 +120,8 @@ fn main() {
                 KeyBinding::new("cmd-|", SplitDown, Some(KEY_CONTEXT)),
                 KeyBinding::new("cmd-w", CloseActiveTab, Some(KEY_CONTEXT)),
                 KeyBinding::new("cmd-t", NewTab, Some(KEY_CONTEXT)),
+                KeyBinding::new("menu", OpenTabMenu, Some(KEY_CONTEXT)),
+                KeyBinding::new("shift-f10", OpenTabMenu, Some(KEY_CONTEXT)),
             ]);
             cx.activate(true);
             let options = WindowOptions {

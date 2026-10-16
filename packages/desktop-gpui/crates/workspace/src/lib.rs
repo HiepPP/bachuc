@@ -5,19 +5,25 @@
 
 pub mod model;
 pub mod tab_layout;
+pub mod tab_menu;
 mod workspace;
 
 use bachuc_icons::IconName;
 use gpui_kit::{AnyView, SharedString};
 
 pub use model::SplitAxis;
+pub use tab_menu::{TabKind, TabMenuEvent};
 pub use workspace::Workspace;
 
 /// Keyboard and menu actions the [`Workspace`] handles while focus is inside it. The app binds
 /// the keys, for example `cmd-\` to `SplitRight` and `cmd-shift-\` to `SplitDown` with the
-/// [`KEY_CONTEXT`] context.
+/// [`KEY_CONTEXT`] context. `OpenTabMenu` opens the context menu of the active tab; bind it to
+/// the keyboard menu key, `menu`, and to `shift-f10`.
 pub mod actions {
-    gpui_kit::actions!(workspace, [SplitRight, SplitDown, CloseActiveTab, NewTab]);
+    gpui_kit::actions!(
+        workspace,
+        [SplitRight, SplitDown, CloseActiveTab, NewTab, OpenTabMenu]
+    );
 }
 
 /// The key context of the workspace root.

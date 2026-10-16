@@ -8,6 +8,16 @@ use std::collections::HashMap;
 pub const MIN_SPLIT_SIZE: f32 = 0.1;
 /// The width of a divider line in logical pixels.
 pub const DIVIDER: f32 = 1.;
+/// The divider's pointer band and its accent line while hovered or dragged. Both are odd, so
+/// that centering them on the one-pixel line puts every edge on a whole pixel; an even width
+/// lands on half pixels, and the band then draws 1 to 2 px off the line at 1x scale.
+pub const DIVIDER_HIT: f32 = 11.;
+pub const DIVIDER_HIGHLIGHT: f32 = 3.;
+
+/// How far a centered band of `size` starts before the divider line's own start.
+pub fn divider_inset(size: f32) -> f32 {
+    (size - DIVIDER) / 2.
+}
 
 pub type NodeId = u64;
 
@@ -284,6 +294,8 @@ pub struct Layout<T> {
     root: Node<T>,
     focused: NodeId,
     next_id: NodeId,
+    /// The group shown alone. It is the focused group, or `None`; `settle` keeps it so.
+    maximized: Option<NodeId>,
 }
 
 impl<T: Keyed> Default for Layout<T> {
@@ -303,6 +315,7 @@ impl<T: Keyed> Layout<T> {
             }),
             focused: 1,
             next_id: 2,
+            maximized: None,
         }
     }
 
@@ -312,6 +325,41 @@ impl<T: Keyed> Layout<T> {
 
     pub fn focused(&self) -> NodeId {
         self.focused
+    }
+
+    /// The group shown alone, if any.
+    pub fn maximized(&self) -> Option<NodeId> {
+        self.maximized
+    }
+
+    /// Maximizes the focused group, or restores the layout when one is maximized. A layout with
+    /// one group has nothing to maximize. Returns whether the state changed.
+    pub fn toggle_maximize(&mut self) -> bool {
+        if self.maximized.take().is_some() {
+            return true;
+        }
+        if self.groups().len() < 2 {
+            return false;
+        }
+        self.maximized = Some(self.focused);
+        true
+    }
+
+    /// Keeps the maximize state valid after any change: it needs two groups to mean anything,
+    /// and it follows the focus, so a tab opened or activated in a hidden group comes into view.
+    fn settle(&mut self) {
+        if self.maximized.is_none() {
+            return;
+        }
+        self.maximized = (self.groups().len() > 1).then_some(self.focused);
+    }
+
+    /// Like `rects`, but a maximized group fills `rect` and every other node is absent.
+    pub fn visible_rects(&self, rect: Rect) -> HashMap<NodeId, Rect> {
+        match self.maximized {
+            Some(group) => HashMap::from([(group, rect)]),
+            None => self.rects(rect),
+        }
     }
 
     pub fn group(&self, id: NodeId) -> Option<&Group<T>> {
@@ -387,6 +435,7 @@ impl<T: Keyed> Layout<T> {
             return false;
         }
         self.focused = group;
+        self.settle();
         true
     }
 
@@ -398,6 +447,7 @@ impl<T: Keyed> Layout<T> {
             group_ref.items[index] = item;
             group_ref.active = index;
             self.focused = group;
+            self.settle();
             return;
         }
         let focused = self.focused;
@@ -426,6 +476,7 @@ impl<T: Keyed> Layout<T> {
         }
         group_ref.active = index;
         self.focused = group;
+        self.settle();
         true
     }
 
@@ -446,10 +497,16 @@ impl<T: Keyed> Layout<T> {
         if group_ref.items.is_empty()
             && matches!(self.root, Node::Split(_))
             && let Some(neighbor) = remove_group(&mut self.root, group)
-            && self.focused == group
         {
-            self.focused = neighbor;
+            // Electron drops the maximized pane when it goes away; the others stay hidden.
+            if self.maximized == Some(group) {
+                self.maximized = None;
+            }
+            if self.focused == group {
+                self.focused = neighbor;
+            }
         }
+        self.settle();
         item
     }
 
@@ -483,6 +540,8 @@ impl<T: Keyed> Layout<T> {
         let focused = self.focused;
         insert_split(&mut self.root, focused, axis, new, split_id);
         self.focused = id;
+        // The new group is the one the user is about to fill, so it must show.
+        self.maximized = None;
         id
     }
 
@@ -505,6 +564,7 @@ impl<T: Keyed> Layout<T> {
             group.items.insert(target_index, item);
             group.active = target_index;
             self.focused = to;
+            self.settle();
             return target_index != index;
         }
         let item = self.remove_at(from, index);
@@ -512,6 +572,7 @@ impl<T: Keyed> Layout<T> {
         group.items.insert(slot, item);
         group.active = slot;
         self.focused = to;
+        self.settle();
         true
     }
 

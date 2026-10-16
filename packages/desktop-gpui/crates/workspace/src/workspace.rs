@@ -4,28 +4,34 @@
 //! in an event handler or a public method, and the one layout read that a frame cannot answer
 //! itself, the root size, comes from a canvas and re-renders on the next frame.
 
-use crate::actions::{CloseActiveTab, NewTab, SplitDown, SplitRight};
-use crate::model::{DIVIDER, Group, Layout, Node, NodeId, Rect, Split, SplitAxis, child_rects};
+use crate::actions::{CloseActiveTab, NewTab, OpenTabMenu, SplitDown, SplitRight};
+use crate::model::{
+    DIVIDER, DIVIDER_HIGHLIGHT, DIVIDER_HIT, Group, Layout, Node, NodeId, Rect, Split, SplitAxis,
+    child_rects, divider_inset,
+};
 use crate::tab_layout::{
     self, SPLIT_ACTIONS_MARGIN, SPLIT_ACTIONS_PADDING, TAB_CHIP_GAP, TAB_CHIP_PADDING,
     TAB_CONTENT_GAP, TAB_DROP_INDICATOR_WIDTH, TAB_ICON_WIDTH, TAB_MODIFIED_DOT, TAB_ROW_PADDING,
     TOOLBAR_BUTTON, TabLayout, label_allowance,
 };
-use crate::{KEY_CONTEXT, PaneEvent, PaneItem};
+use crate::tab_menu::{self, TabExtras, TabKind, TabMenuAction, TabMenuEntry, TabMenuItem};
+use crate::{KEY_CONTEXT, PaneEvent, PaneItem, TabMenuEvent};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
     CONTROL_XS, FONT_BASE, ICON_SM, ICON_XS, RADIUS_MD, RADIUS_SM, SPACE_0_5, SPACE_1,
     TAB_BAR_HEIGHT,
 };
 use bachuc_theme::{Tokens, tokens, ui_font_size};
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenu};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Selectable, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
 
 type MenuBuilder = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
 
@@ -33,16 +39,24 @@ type MenuBuilder = Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) ->
 const CLOSE_OVERLAY_WIDTH: f32 = 48.;
 const CLOSE_SCRIM_SOLID: f32 = 0.55;
 const CLOSE_BUTTON: f32 = 18.;
-/// The divider's pointer band and its accent line while hovered or dragged (`resize-handle.tsx`).
-const DIVIDER_HIT: f32 = 10.;
-const DIVIDER_HIGHLIGHT: f32 = 3.;
 const SPLIT_MENU_WIDTH: f32 = 220.;
+const TAB_MENU_WIDTH: f32 = 220.;
+/// The pointer rests this long on a tab before its title shows (`delayDuration={400}`).
+const TAB_TOOLTIP_DELAY: Duration = Duration::from_millis(400);
 
 #[derive(Clone)]
 struct TabDrag {
     key: String,
     title: SharedString,
     icon: IconName,
+    logo: Option<Arc<Image>>,
+}
+
+/// The open tab context menu and what keeps it alive.
+struct OpenTabMenuState {
+    menu: Entity<PopupMenu>,
+    position: Point<Pixels>,
+    _dismiss: Subscription,
 }
 
 #[derive(Clone, Copy)]
@@ -53,13 +67,22 @@ struct DividerDrag {
 
 /// What follows the pointer during a drag: a tab chip, or nothing for a divider.
 enum DragPreview {
-    Tab { title: SharedString, icon: IconName },
+    Tab {
+        title: SharedString,
+        icon: IconName,
+        logo: Option<Arc<Image>>,
+    },
     Divider,
 }
 
 impl Render for DragPreview {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let DragPreview::Tab { title, icon: name } = self else {
+        let DragPreview::Tab {
+            title,
+            icon: name,
+            logo,
+        } = self
+        else {
             return div().into_any_element();
         };
         let t = tokens(cx);
@@ -72,13 +95,23 @@ impl Render for DragPreview {
             .opacity(0.85)
             .text_size(ui_font_size(FONT_BASE, cx))
             .text_color(t.foreground)
-            .child(
-                icon(*name)
-                    .with_size(px(TAB_ICON_WIDTH))
-                    .text_color(t.foreground),
-            )
+            .child(tab_glyph(*name, logo.as_ref(), t.foreground))
             .child(title.clone())
             .into_any_element()
+    }
+}
+
+/// The tab's provider logo when it has one, else its icon.
+fn tab_glyph(name: IconName, logo: Option<&Arc<Image>>, color: Hsla) -> AnyElement {
+    match logo {
+        Some(logo) => img(logo.clone())
+            .flex_none()
+            .size(px(TAB_ICON_WIDTH))
+            .into_any_element(),
+        None => icon(name)
+            .with_size(px(TAB_ICON_WIDTH))
+            .text_color(color)
+            .into_any_element(),
     }
 }
 
@@ -131,6 +164,31 @@ fn one_line(title: &SharedString) -> SharedString {
     }
 }
 
+/// One context menu row. A hint or a tooltip needs a custom row; the rest are plain items.
+fn menu_item(item: &TabMenuItem, muted: Hsla) -> PopupMenuItem {
+    let glyph = icon(item.icon).with_size(px(ICON_SM)).text_color(muted);
+    let base = if item.hint.is_some() || item.tooltip.is_some() {
+        let (key, label, hint, tooltip) = (item.key, item.label, item.hint.clone(), item.tooltip);
+        PopupMenuItem::element(move |_, _| {
+            h_flex()
+                .id(key)
+                .w_full()
+                .gap(px(SPACE_1))
+                .justify_between()
+                .child(label)
+                .when_some(hint.clone(), |row, hint| {
+                    row.child(div().text_color(muted).child(hint))
+                })
+                .when_some(tooltip, |row, tip| {
+                    row.tooltip(move |window, cx| Tooltip::new(tip).build(window, cx))
+                })
+        })
+    } else {
+        PopupMenuItem::new(item.label)
+    };
+    base.icon(glyph).disabled(item.disabled)
+}
+
 pub struct Workspace {
     layout: Layout<PaneItem>,
     focus_handle: FocusHandle,
@@ -146,9 +204,14 @@ pub struct Workspace {
     tab_layouts: HashMap<NodeId, TabLayout>,
     scroll: HashMap<NodeId, ScrollHandle>,
     new_tab_menu: Option<MenuBuilder>,
+    extras: TabExtras,
+    tab_menu: Option<OpenTabMenuState>,
+    /// The bounds of each tab chip in the last frame, for the keyboard menu key.
+    tab_bounds: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
 }
 
 impl EventEmitter<PaneEvent> for Workspace {}
+impl EventEmitter<TabMenuEvent> for Workspace {}
 
 impl Focusable for Workspace {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -172,6 +235,9 @@ impl Workspace {
             tab_layouts: HashMap::new(),
             scroll: HashMap::new(),
             new_tab_menu: None,
+            extras: TabExtras::default(),
+            tab_menu: None,
+            tab_bounds: Rc::default(),
         }
     }
 
@@ -193,6 +259,37 @@ impl Workspace {
         updated
     }
 
+    /// Shows `logo` in place of the icon of the open tab `key`; `None` brings the icon back. An
+    /// unknown key changes nothing.
+    pub fn set_item_logo(
+        &mut self,
+        key: &str,
+        logo: Option<Arc<Image>>,
+        cx: &mut Context<Workspace>,
+    ) {
+        let open = self.layout.item(key).is_some();
+        if self.extras.set_logo(open, key, logo) {
+            cx.notify();
+        }
+    }
+
+    /// Tells the workspace what the open tab `key` shows, which decides its context menu. An
+    /// unknown key changes nothing.
+    pub fn set_item_kind(&mut self, key: &str, kind: TabKind, cx: &mut Context<Workspace>) {
+        let open = self.layout.item(key).is_some();
+        if self.extras.set_kind(open, key, kind) {
+            cx.notify();
+        }
+    }
+
+    /// Shows the focused group alone, or restores the layout when one group is maximized. With
+    /// one group there is nothing to maximize.
+    pub fn toggle_maximize(&mut self, _window: &mut Window, cx: &mut Context<Workspace>) {
+        if self.layout.toggle_maximize() {
+            cx.notify();
+        }
+    }
+
     /// Closes the active tab of the focused group.
     pub fn close_active(&mut self, window: &mut Window, cx: &mut Context<Workspace>) {
         if let Some(key) = self.active() {
@@ -206,6 +303,8 @@ impl Workspace {
         let Some(closed) = self.layout.close(key) else {
             return;
         };
+        self.extras.forget(key);
+        self.tab_bounds.borrow_mut().remove(key);
         cx.emit(PaneEvent::Closed {
             key: closed.item.key,
         });
@@ -307,6 +406,95 @@ impl Workspace {
         cx.emit(PaneEvent::NewTab);
     }
 
+    /// Opens the context menu of tab `key` at `position`. A second call replaces the open menu.
+    fn open_tab_menu(
+        &mut self,
+        key: &str,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        let Some((group, index)) = self.layout.find(key) else {
+            return;
+        };
+        let count = self
+            .layout
+            .group(group)
+            .map_or(0, |group| group.items.len());
+        let entries = tab_menu::menu_entries(&self.extras.kind(key), index, count);
+        let workspace = cx.entity().downgrade();
+        let key = key.to_owned();
+        let muted = tokens(cx).foreground_muted;
+        let menu = PopupMenu::build(window, cx, move |menu, _, _| {
+            let mut menu = menu.min_w(px(TAB_MENU_WIDTH));
+            for entry in &entries {
+                menu = match entry {
+                    TabMenuEntry::Separator { .. } => menu.separator(),
+                    TabMenuEntry::Item(item) => {
+                        let workspace = workspace.clone();
+                        let key = key.clone();
+                        let action = item.action;
+                        menu.item(menu_item(item, muted).on_click(move |_, window, cx| {
+                            workspace
+                                .update(cx, |this, cx| {
+                                    this.run_tab_menu_action(action, &key, window, cx)
+                                })
+                                .ok();
+                        }))
+                    }
+                };
+            }
+            menu
+        });
+        let dismiss = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, window, cx| {
+            this.tab_menu = None;
+            this.focus_handle.focus(window, cx);
+            cx.notify();
+        });
+        menu.focus_handle(cx).focus(window, cx);
+        self.tab_menu = Some(OpenTabMenuState {
+            menu,
+            position,
+            _dismiss: dismiss,
+        });
+        cx.notify();
+    }
+
+    /// Opens the menu of the focused group's active tab below the tab, for the keyboard menu key.
+    fn open_active_tab_menu(&mut self, window: &mut Window, cx: &mut Context<Workspace>) {
+        let Some(key) = self.active() else {
+            return;
+        };
+        let Some(bounds) = self.tab_bounds.borrow().get(&key).copied() else {
+            return;
+        };
+        self.open_tab_menu(&key, bounds.bottom_left(), window, cx);
+    }
+
+    fn run_tab_menu_action(
+        &mut self,
+        action: TabMenuAction,
+        key: &str,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        if let Some(event) = action.event(key) {
+            cx.emit(event);
+            return;
+        }
+        let Some((group, index)) = self.layout.find(key) else {
+            return;
+        };
+        let keys: Vec<String> = self
+            .layout
+            .group(group)
+            .map(|group| group.items.iter().map(|item| item.key.clone()).collect())
+            .unwrap_or_default();
+        for target in tab_menu::close_targets(action, &keys, index) {
+            self.close(&target, window, cx);
+        }
+    }
+
     fn track_drop(
         &mut self,
         group: NodeId,
@@ -388,7 +576,7 @@ impl Workspace {
             self.label_font_size = font;
         }
         let size = self.bounds.get().size;
-        let rects = self.layout.rects(Rect {
+        let rects = self.layout.visible_rects(Rect {
             x: 0.,
             y: 0.,
             w: f32::from(size.width),
@@ -497,7 +685,7 @@ impl Workspace {
         let me = Some((split, index));
         let highlighted = self.dragging_divider == me
             || (self.dragging_divider.is_none() && self.hovered_divider == me);
-        let inset = (DIVIDER_HIT - DIVIDER) / 2.;
+        let inset = divider_inset(DIVIDER_HIT);
         let band = div()
             .id(SharedString::from(format!("divider:{split}:{index}")))
             .role(Role::Splitter)
@@ -537,7 +725,7 @@ impl Workspace {
                 cx.new(|_| DragPreview::Divider)
             })
             .when(highlighted, |band| {
-                let start = inset - (DIVIDER_HIGHLIGHT - DIVIDER) / 2.;
+                let start = inset - divider_inset(DIVIDER_HIGHLIGHT);
                 band.child(
                     div()
                         .absolute()
@@ -631,6 +819,11 @@ impl Workspace {
             .when(layout.scrolls, |toolbar| {
                 toolbar.child(self.render_new_tab_button(id, TOOLBAR_BUTTON, t, cx))
             })
+            // One group has nothing to maximize; a maximized group keeps the button to restore.
+            .when(
+                self.layout.maximized().is_some() || self.layout.groups().len() > 1,
+                |toolbar| toolbar.child(self.render_maximize_button(id, t, cx)),
+            )
             .child(self.render_split_menu(id, t));
         let tab_bar = h_flex()
             .id(("tab-bar", id as usize))
@@ -762,7 +955,22 @@ impl Workspace {
 
         let hover_key = key.clone();
         let middle_key = key.clone();
+        let menu_key = key.clone();
         let tooltip_title = title.clone();
+        let logo = self.extras.logo(&key).cloned();
+        let bounds_key = key.clone();
+        let tab_bounds = self.tab_bounds.clone();
+        let measure = canvas(
+            move |bounds, _, _| {
+                let mut known = tab_bounds.borrow_mut();
+                if known.get(&bounds_key) != Some(&bounds) {
+                    known.insert(bounds_key, bounds);
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full();
         let chip = h_flex()
             .id(SharedString::from(format!("tab:{key}")))
             .role(Role::Tab)
@@ -784,6 +992,12 @@ impl Workspace {
                 MouseButton::Middle,
                 cx.listener(move |this, _, window, cx| this.close(&middle_key, window, cx)),
             )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.open_tab_menu(&menu_key, event.position, window, cx)
+                }),
+            )
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 let next = hovered.then(|| hover_key.clone());
                 if this.hovered_tab != next
@@ -798,20 +1012,19 @@ impl Workspace {
                     key: key.clone(),
                     title: title.clone(),
                     icon: item.icon,
+                    logo: logo.clone(),
                 },
                 |drag, _, _, cx| {
                     cx.new(|_| DragPreview::Tab {
                         title: drag.title.clone(),
                         icon: drag.icon,
+                        logo: drag.logo.clone(),
                     })
                 },
             )
             .tooltip(move |window, cx| Tooltip::new(tooltip_title.clone()).build(window, cx))
-            .child(
-                icon(item.icon)
-                    .with_size(px(TAB_ICON_WIDTH))
-                    .text_color(label_color),
-            )
+            .tooltip_show_delay(TAB_TOOLTIP_DELAY)
+            .child(tab_glyph(item.icon, logo.as_ref(), label_color))
             .child(
                 div()
                     .flex_1()
@@ -833,7 +1046,8 @@ impl Workspace {
                         .bg(t.foreground_muted),
                 )
             })
-            .child(close_overlay);
+            .child(close_overlay)
+            .child(measure);
 
         let pill_offset = -(TAB_CHIP_GAP / 2. + TAB_DROP_INDICATOR_WIDTH / 2.);
         div()
@@ -920,6 +1134,32 @@ impl Workspace {
         }
     }
 
+    fn render_maximize_button(
+        &self,
+        group: NodeId,
+        t: &Tokens,
+        cx: &mut Context<Workspace>,
+    ) -> AnyElement {
+        let maximized = self.layout.maximized().is_some();
+        let (label, name) = if maximized {
+            ("Restore pane", IconName::Minimize)
+        } else {
+            ("Maximize pane", IconName::Maximize)
+        };
+        let fill = t.interaction_highlight;
+        self.icon_button(
+            ("maximize-pane", group as usize).into(),
+            label,
+            name,
+            TOOLBAR_BUTTON,
+            t,
+        )
+        .when(maximized, |button| button.bg(fill))
+        .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
+        .on_click(cx.listener(|this, _, window, cx| this.toggle_maximize(window, cx)))
+        .into_any_element()
+    }
+
     fn render_split_menu(&self, group: NodeId, t: &Tokens) -> AnyElement {
         let focus = self.focus_handle.clone();
         let muted = t.foreground_muted;
@@ -985,7 +1225,20 @@ impl Render for Workspace {
         .absolute()
         .size_full();
 
-        let tree = self.render_node(self.layout.root(), &t, font, cx);
+        // A maximized group fills the root alone; the other groups and the dividers do not render.
+        let tree = match self.layout.maximized().and_then(|id| self.layout.group(id)) {
+            Some(group) => self.render_group(group, &t, font, cx),
+            None => self.render_node(self.layout.root(), &t, font, cx),
+        };
+        let tab_menu = self.tab_menu.as_ref().map(|open| {
+            deferred(
+                anchored()
+                    .position(open.position)
+                    .snap_to_window_with_margin(px(8.))
+                    .child(open.menu.clone()),
+            )
+            .with_priority(gpui_kit::base::POPUP_PRIORITY)
+        });
         div()
             .id("workspace")
             .role(Role::Group)
@@ -1008,10 +1261,14 @@ impl Render for Workspace {
                 let group = this.layout.focused();
                 this.request_new_tab(group, cx)
             }))
+            .on_action(cx.listener(|this, _: &OpenTabMenu, window, cx| {
+                this.open_active_tab_menu(window, cx)
+            }))
             .on_drag_move::<DividerDrag>(
                 cx.listener(|this, event, _, cx| this.drag_divider(event, cx)),
             )
             .child(measure)
             .child(tree)
+            .children(tab_menu)
     }
 }

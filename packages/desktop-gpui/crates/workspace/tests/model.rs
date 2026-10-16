@@ -1,6 +1,10 @@
 use bachuc_workspace::SplitAxis;
-use bachuc_workspace::model::{Layout, MIN_SPLIT_SIZE, Node, Rect, child_rects, resize_pair};
+use bachuc_workspace::model::{
+    DIVIDER, DIVIDER_HIGHLIGHT, DIVIDER_HIT, Layout, MIN_SPLIT_SIZE, Node, Rect, child_rects,
+    divider_inset, resize_pair,
+};
 use bachuc_workspace::tab_layout::{self, TAB_MAX_WIDTH, TAB_MIN_WIDTH};
+use std::collections::HashMap;
 
 fn layout(keys: &[&str]) -> Layout<String> {
     let mut layout = Layout::new();
@@ -294,4 +298,99 @@ fn the_drop_slot_follows_tab_centers() {
     assert_eq!(tab_layout::drop_slot(&widths, 159.), 1);
     assert_eq!(tab_layout::drop_slot(&widths, 161.), 2);
     assert_eq!(tab_layout::drop_slot(&[], 10.), 0);
+}
+
+/// Group 1 holds a and b, group 2 holds c, and group 2 is focused.
+fn two_groups() -> Layout<String> {
+    let mut layout = layout(&["a", "b"]);
+    layout.split_focused(SplitAxis::Right);
+    layout.open("c".into());
+    layout
+}
+
+const ROOT: Rect = Rect {
+    x: 0.,
+    y: 0.,
+    w: 800.,
+    h: 600.,
+};
+
+#[test]
+fn maximize_shows_the_focused_group_alone_and_toggling_restores_the_layout() {
+    let mut layout = two_groups();
+    let before = layout.rects(ROOT);
+    assert_eq!(before.len(), 3);
+    assert_eq!(layout.visible_rects(ROOT), before);
+
+    assert!(layout.toggle_maximize());
+    assert_eq!(layout.maximized(), Some(2));
+    assert_eq!(layout.visible_rects(ROOT), HashMap::from([(2, ROOT)]));
+
+    assert!(layout.toggle_maximize());
+    assert_eq!(layout.maximized(), None);
+    assert_eq!(layout.visible_rects(ROOT), before);
+    assert_eq!(keys(&layout, 1), ["a", "b"]);
+    assert_eq!(keys(&layout, 2), ["c"]);
+}
+
+#[test]
+fn maximize_with_one_group_does_nothing() {
+    let mut layout = layout(&["a", "b"]);
+    assert!(!layout.toggle_maximize());
+    assert_eq!(layout.maximized(), None);
+    assert_eq!(layout.visible_rects(ROOT), layout.rects(ROOT));
+}
+
+#[test]
+fn closing_the_last_tab_of_the_maximized_group_restores_the_layout() {
+    let mut layout = two_groups();
+    layout.toggle_maximize();
+    layout.close("c").unwrap();
+    assert_eq!(layout.maximized(), None);
+    assert_eq!(group_ids(&layout), [1]);
+    assert_eq!(layout.focused(), 1);
+}
+
+#[test]
+fn closing_one_of_several_tabs_keeps_the_group_maximized() {
+    let mut layout = two_groups();
+    layout.open("d".into());
+    layout.toggle_maximize();
+    layout.close("d").unwrap();
+    assert_eq!(layout.maximized(), Some(2));
+    assert_eq!(layout.visible_rects(ROOT), HashMap::from([(2, ROOT)]));
+}
+
+#[test]
+fn opening_a_key_from_a_hidden_group_moves_the_maximize_to_that_group() {
+    let mut layout = two_groups();
+    layout.toggle_maximize();
+    // Re-opening a key that lives in the hidden group brings that group into view.
+    layout.open("a".into());
+    assert_eq!(layout.focused(), 1);
+    assert_eq!(layout.maximized(), Some(1));
+    layout.close("a").unwrap();
+    layout.close("b").unwrap();
+    assert_eq!(layout.maximized(), None);
+}
+
+#[test]
+fn a_split_leaves_maximize_so_the_new_group_shows() {
+    let mut layout = two_groups();
+    layout.toggle_maximize();
+    layout.split_focused(SplitAxis::Down);
+    assert_eq!(layout.maximized(), None);
+}
+
+#[test]
+fn the_divider_band_and_accent_line_center_on_the_drawn_line_on_whole_pixels() {
+    let line_center = DIVIDER / 2.;
+    for size in [DIVIDER_HIT, DIVIDER_HIGHLIGHT] {
+        let inset = divider_inset(size);
+        assert_eq!(inset.fract(), 0., "{size} px starts on a whole pixel");
+        assert_eq!(-inset + size / 2., line_center, "{size} px is centered");
+    }
+    // The accent line sits inside the band, centered on it.
+    let start = divider_inset(DIVIDER_HIT) - divider_inset(DIVIDER_HIGHLIGHT);
+    assert_eq!(start + DIVIDER_HIGHLIGHT / 2., DIVIDER_HIT / 2.);
 }
