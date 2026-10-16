@@ -6,11 +6,10 @@ publish = false
 
 [dependencies]
 bachuc-client = { path = "../client" }
+bachuc-icons = { path = "../icons" }
+bachuc-theme = { path = "../theme" }
 # gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot; keep the same pin in every crate.
 gpui-kit = "=0.7.3"
 base64 = "0.22"
 log = "0.4"
 serde_json = "1"
-
-[dev-dependencies]
-bachuc-theme = { path = "../theme" }

@@ -1,8 +1,19 @@
 //! Image attachments: what the composer keeps until send, and the JSON the client sends.
 
 use base64::Engine as _;
+use gpui_kit::{Image, ImageFormat};
 use serde_json::{Value, json};
 use std::path::Path;
+use std::sync::Arc;
+
+fn image_format(mime_type: &str) -> ImageFormat {
+    match mime_type {
+        "image/jpeg" => ImageFormat::Jpeg,
+        "image/gif" => ImageFormat::Gif,
+        "image/webp" => ImageFormat::Webp,
+        _ => ImageFormat::Png,
+    }
+}
 
 /// One image the user attached. `data` is base64, as `ImageAttachmentSchema` in
 /// `packages/protocol/src/messages.ts` wants it.
@@ -12,6 +23,8 @@ pub struct Attachment {
     pub mime_type: &'static str,
     pub data: String,
     pub bytes: usize,
+    /// The thumbnail the pill draws.
+    pub preview: Arc<Image>,
 }
 
 impl Attachment {
@@ -21,6 +34,7 @@ impl Attachment {
             mime_type,
             data: base64::engine::general_purpose::STANDARD.encode(bytes),
             bytes: bytes.len(),
+            preview: Arc::new(Image::from_bytes(image_format(mime_type), bytes.to_vec())),
         }
     }
 

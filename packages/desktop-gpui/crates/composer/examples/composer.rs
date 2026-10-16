@@ -144,32 +144,35 @@ fn main() {
         .or_else(|| std::env::var("BACHUC_URL").ok())
         .unwrap_or_else(|| "ws://127.0.0.1:6768/ws".into());
     let wanted = args.next();
-    gpui_kit::application().run(move |cx: &mut App| {
-        gpui_kit::init(cx);
-        bachuc_theme::init(cx);
-        cx.activate(true);
-        let host = HostConfig {
-            name: "composer".into(),
-            url,
-            password: std::env::var("BACHUC_PASSWORD").ok(),
-        };
-        let client = Client::connect(host, cx);
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(720.), px(560.)),
-                cx,
-            ))),
-            titlebar: Some(TitlebarOptions {
-                title: Some("Bachuc composer".into()),
+    // The composer draws lucide icons; they need the Bachuc asset source.
+    gpui_kit::application()
+        .with_assets(bachuc_icons::Assets)
+        .run(move |cx: &mut App| {
+            gpui_kit::init(cx);
+            bachuc_theme::init(cx);
+            cx.activate(true);
+            let host = HostConfig {
+                name: "composer".into(),
+                url,
+                password: std::env::var("BACHUC_PASSWORD").ok(),
+            };
+            let client = Client::connect(host, cx);
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                    None,
+                    size(px(720.), px(560.)),
+                    cx,
+                ))),
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Bachuc composer".into()),
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
-        // `Example` holds the client, so the socket stays open while the window lives.
-        gpui_kit::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| Example::new(client, wanted, window, cx))
-        })
-        .expect("open window");
-    });
+            };
+            // `Example` holds the client, so the socket stays open while the window lives.
+            gpui_kit::open_window(options, cx, move |window, cx| {
+                cx.new(|cx| Example::new(client, wanted, window, cx))
+            })
+            .expect("open window");
+        });
 }
