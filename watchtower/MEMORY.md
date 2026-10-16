@@ -277,3 +277,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: 6 Claude Code builders plus a UI checker, each with cargo builds on one shared `target`, used all 24 GB of RAM and the swap. macOS then hit a watchdog panic and rebooted. The reboot also cleared the builder rules files in `/tmp`. GitNexus `detect-changes` peaked at 730 MB, so it was not the main load.
 - Source: owner crash report and the `gpui-electron-parity` run.
 - Use next time: on this machine, run at most 2 builders with `CARGO_BUILD_JOBS=4`. Keep run files that must survive a reboot outside `/tmp`.
+
+### 2026-10-16 - GPUI hover display panic
+
+- Learned: an element that toggles `display` (hidden or flex) from hover or `group_hover` panics with "must call prepaint before paint". Prepaint tests hover against the previous frame and skips a hidden child, but paint tests fresh hover and paints that child. GPUI also logs "has no accessibility node" for a focused element that has an id but no role.
+- Source: TASK-149 and TASK-155 outcomes.
+- Use next time: swap hover content by visibility or stacked layers, never by display. Give every `track_focus` element a role and a label.
