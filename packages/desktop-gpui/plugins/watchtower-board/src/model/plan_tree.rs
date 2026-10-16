@@ -3,13 +3,13 @@
 
 use super::dashboard::task_title;
 use super::dto::{OverviewRunEntry, OverviewTask};
+use super::id_map::{IdMap as HashMap, IdSet as HashSet};
 use super::time::round_half_up;
 use super::timeline::{
-    BarKind, TaskMinutes, TimelineBar, TimelineInput, build_timeline, clock_text, started_at,
+    BarKind, TaskMinutes, Timeline, TimelineBar, TimelineInput, build_timeline, clock_text,
+    started_at,
 };
-use regex::Regex;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::LazyLock;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PlanTreeRow {
@@ -61,54 +61,56 @@ fn names(ids: &[&str], joiner: &str) -> String {
     }
 }
 
-/// Wave number per TASK ID; a TASK that sits in or behind a cycle has none.
-fn assign_waves(tasks: &[OverviewTask], in_plan: &HashSet<&str>) -> HashMap<String, usize> {
-    let mut levels: HashMap<String, usize> = HashMap::new();
-    let mut waiting: HashMap<&str, usize> = HashMap::new();
-    let mut dependents: HashMap<&str, Vec<&str>> = HashMap::new();
-    for item in tasks {
-        let mut deps: Vec<&str> = Vec::new();
+/// The wave number of each TASK, by position in `tasks`, which holds unique IDs; a TASK that sits
+/// in or behind a cycle has none. It works on positions, not IDs: per-ID maps made it the
+/// slowest part of the derived data in a debug build.
+fn assign_waves(tasks: &[OverviewTask]) -> Vec<Option<usize>> {
+    let index: HashMap<&str, usize> = tasks
+        .iter()
+        .enumerate()
+        .map(|(position, item)| (item.id.as_str(), position))
+        .collect();
+    let mut waiting = vec![0usize; tasks.len()];
+    let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); tasks.len()];
+    for (position, item) in tasks.iter().enumerate() {
+        let mut deps: Vec<usize> = Vec::new();
         for dep in &item.dep_ids {
-            if in_plan.contains(dep.as_str()) && !deps.contains(&dep.as_str()) {
+            if let Some(&dep) = index.get(dep.as_str())
+                && !deps.contains(&dep)
+            {
                 deps.push(dep);
             }
         }
-        waiting.insert(&item.id, deps.len());
+        waiting[position] = deps.len();
         for dep in deps {
-            dependents.entry(dep).or_default().push(&item.id);
+            dependents[dep].push(position);
         }
     }
-    let mut ready: Vec<&str> = tasks
-        .iter()
-        .filter(|item| waiting.get(item.id.as_str()) == Some(&0))
-        .map(|item| item.id.as_str())
+    let mut levels: Vec<Option<usize>> = vec![None; tasks.len()];
+    let mut ready: Vec<usize> = (0..tasks.len())
+        .filter(|&position| waiting[position] == 0)
         .collect();
-    for id in &ready {
-        levels.insert(id.to_string(), 1);
+    for &position in &ready {
+        levels[position] = Some(1);
     }
     while !ready.is_empty() {
         let mut next = Vec::new();
-        for id in ready {
-            let level = levels.get(id).copied().unwrap_or(1);
-            for &dependent in dependents.get(id).map_or(&[][..], Vec::as_slice) {
-                let current = levels.get(dependent).copied().unwrap_or(1);
-                levels.insert(dependent.to_string(), current.max(level + 1));
-                let left = waiting
-                    .get(dependent)
-                    .copied()
-                    .unwrap_or(0)
-                    .saturating_sub(1);
-                waiting.insert(dependent, left);
-                if left == 0 {
+        for position in ready {
+            let level = levels[position].unwrap_or(1);
+            for &dependent in &dependents[position] {
+                let current = levels[dependent].unwrap_or(1);
+                levels[dependent] = Some(current.max(level + 1));
+                waiting[dependent] = waiting[dependent].saturating_sub(1);
+                if waiting[dependent] == 0 {
                     next.push(dependent);
                 }
             }
         }
         ready = next;
     }
-    for (id, left) in waiting {
-        if left > 0 {
-            levels.remove(id);
+    for (level, left) in levels.iter_mut().zip(&waiting) {
+        if *left > 0 {
+            *level = None;
         }
     }
     levels
@@ -165,9 +167,13 @@ fn header_for(
     let running = rows.iter().any(|row| row.kind == BarKind::Running);
     if number == 1 {
         // A TASK with no group is a builder group of its own.
-        let groups: HashSet<String> = rows
+        let groups: HashSet<(bool, &str)> = rows
             .iter()
-            .map(|row| row.group.clone().unwrap_or_else(|| format!("\0{}", row.id)))
+            .map(|row| {
+                row.group
+                    .as_deref()
+                    .map_or((false, row.id.as_str()), |group| (true, group))
+            })
             .collect();
         let count = groups.len();
         let parallel = format!(
@@ -208,18 +214,45 @@ pub(crate) fn build_plan_tree(
     started: Option<&str>,
     live: &BTreeSet<String>,
 ) -> PlanTree {
-    let mut seen = HashSet::new();
+    build_plan_tree_and_timeline(input, started, live).0
+}
+
+/// `build_plan_tree` and `build_timeline` of the same input. With unique TASK IDs the tree reads
+/// that one timeline; a repeated ID builds the tree from the first of each instead.
+pub(crate) fn build_plan_tree_and_timeline(
+    input: TimelineInput<'_>,
+    started: Option<&str>,
+    live: &BTreeSet<String>,
+) -> (PlanTree, Timeline) {
+    let mut seen = HashSet::default();
+    if input.tasks.iter().all(|item| seen.insert(item.id.as_str())) {
+        let timeline = build_timeline(input);
+        let tree = tree_from(input.tasks, &timeline, started, live);
+        return (tree, timeline);
+    }
+    let mut seen = HashSet::default();
     let tasks: Vec<OverviewTask> = input
         .tasks
         .iter()
         .filter(|item| seen.insert(item.id.as_str()))
         .cloned()
         .collect();
-    let in_plan: HashSet<&str> = tasks.iter().map(|item| item.id.as_str()).collect();
-    let timeline = build_timeline(TimelineInput {
+    let tree_timeline = build_timeline(TimelineInput {
         tasks: &tasks,
         ..input
     });
+    let tree = tree_from(&tasks, &tree_timeline, started, live);
+    (tree, build_timeline(input))
+}
+
+/// The tree of unique `tasks` and their timeline.
+fn tree_from(
+    tasks: &[OverviewTask],
+    timeline: &Timeline,
+    started: Option<&str>,
+    live: &BTreeSet<String>,
+) -> PlanTree {
+    let in_plan: HashSet<&str> = tasks.iter().map(|item| item.id.as_str()).collect();
     let bars: HashMap<&str, &TimelineBar> = timeline
         .bars
         .iter()
@@ -228,14 +261,14 @@ pub(crate) fn build_plan_tree(
     let origin = started_at(started).map(|at| at.minutes);
     let average = timeline.stats.average_minutes;
 
-    let levels = assign_waves(&tasks, &in_plan);
-    let last_level = levels.values().copied().max().unwrap_or(0);
+    let levels = assign_waves(tasks);
+    let last_level = levels.iter().flatten().copied().max().unwrap_or(0);
     let mut buckets: Vec<(Vec<&OverviewTask>, bool)> =
         (0..last_level).map(|_| (Vec::new(), false)).collect();
     // Tracker order inside a wave comes from walking the tasks in order.
     let mut cycle_tasks = Vec::new();
-    for item in &tasks {
-        match levels.get(&item.id) {
+    for (item, level) in tasks.iter().zip(&levels) {
+        match level {
             Some(level) => buckets[level - 1].0.push(item),
             None => cycle_tasks.push(item),
         }
@@ -288,22 +321,27 @@ pub(crate) fn build_plan_tree(
     }
 }
 
-static COMMIT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?-u:\b)[0-9a-f]{7,40}(?-u:\b)").unwrap());
+/// A whole word of 7 to 40 lowercase hex characters with a digit. Words are runs of ASCII
+/// letters, digits, and `_`, the `\b` of a JS regex without the `u` flag.
+fn is_sha(word: &str) -> bool {
+    (7..=40).contains(&word.len())
+        && word.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        && word.bytes().any(|b| b.is_ascii_digit())
+}
 
 /// The short commit hash each TASK's log row names; rows with no hash are left out. A hash is
-/// the first whole word of 7 to 40 lowercase hex characters with a digit, as
-/// `/\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/` finds it.
+/// the first word that `/\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/` matches whole. The words are split
+/// by hand: in a debug build the regex scan took a tenth of the overview's derived data time.
 pub(crate) fn commit_shas(log: &[OverviewRunEntry]) -> BTreeMap<String, String> {
+    let first = |text: &str| {
+        text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .find(|word| is_sha(word))
+            .map(|word| word[..7].to_string())
+    };
     let mut shas = BTreeMap::new();
     for entry in log {
-        let text = format!("{} {}", entry.detail, entry.result);
-        let sha = COMMIT
-            .find_iter(&text)
-            .map(|found| found.as_str())
-            .find(|word| word.bytes().any(|b| b.is_ascii_digit()));
-        if let Some(sha) = sha {
-            shas.insert(entry.task.clone(), sha[..7].to_string());
+        if let Some(sha) = first(&entry.detail).or_else(|| first(&entry.result)) {
+            shas.insert(entry.task.clone(), sha);
         }
     }
     shas

@@ -1,9 +1,9 @@
 //! The run timeline model (`client/timeline.ts`) and `clockAt` (`client/run-cells.tsx`).
 
 use super::dto::{OverviewQuestion, OverviewRun, OverviewTask};
+use super::id_map::IdMap as HashMap;
 use super::time::round_half_up;
 use regex::Regex;
-use std::collections::HashMap;
 use std::sync::LazyLock;
 
 pub(crate) const DEFAULT_TASK_MINUTES: i64 = 20;
@@ -180,11 +180,12 @@ fn max_parallel(bars: &[TimelineBar]) -> usize {
 }
 
 /// Bars go into lanes by start time. A task takes its first dep's lane when that lane is free.
-fn pack_lanes(bars: &mut [TimelineBar], deps: &HashMap<&str, &[String]>) -> usize {
-    let mut by_id: HashMap<String, usize> = HashMap::new();
-    for (index, bar) in bars.iter().enumerate() {
-        by_id.insert(bar.id.clone(), index);
-    }
+/// `by_id` gives the last bar of each ID.
+fn pack_lanes(
+    bars: &mut [TimelineBar],
+    deps: &HashMap<&str, &[String]>,
+    by_id: &HashMap<&str, usize>,
+) -> usize {
     let mut lane_ends: Vec<i64> = Vec::new();
     let mut order: Vec<usize> = (0..bars.len()).collect();
     order.sort_by_key(|&index| bars[index].start);
@@ -192,7 +193,7 @@ fn pack_lanes(bars: &mut [TimelineBar], deps: &HashMap<&str, &[String]>) -> usiz
         let start = bars[index].start;
         let first = deps
             .get(bars[index].id.as_str())
-            .and_then(|ids| ids.iter().find_map(|id| by_id.get(id).copied()));
+            .and_then(|ids| ids.iter().find_map(|id| by_id.get(id.as_str()).copied()));
         let free = |lane: usize| lane_ends.get(lane).is_some_and(|end| *end <= start);
         let lane = match first.map(|dep| bars[dep].lane) {
             Some(lane) if free(lane) => lane,
@@ -219,21 +220,25 @@ pub(crate) fn build_timeline(input: TimelineInput<'_>) -> Timeline {
     } = input;
     let log = run.map_or(&[][..], |run| &run.log[..]);
     let now = run.and_then(|run| run.now_minute);
-    let mut last_done: HashMap<&str, (i64, i64)> = HashMap::new();
+    let mut last_done: HashMap<&str, (i64, i64)> = HashMap::default();
     for row in log {
         if let (true, Some(start), Some(end)) = (
-            row.result.to_uppercase() == "DONE",
+            // `toUpperCase() === "DONE"`: no non-ASCII letter uppercases to one of these.
+            row.result.eq_ignore_ascii_case("DONE"),
             row.start_minute,
             row.end_minute,
         ) {
             last_done.insert(&row.task, (start, end));
         }
     }
-    let mut bars: Vec<TimelineBar> = Vec::new();
+    let mut bars: Vec<TimelineBar> = Vec::with_capacity(tasks.len());
+    // The last bar of each ID, as a JS `Map` built from the bars keeps it.
+    let mut by_id: HashMap<&str, usize> = HashMap::with_capacity(tasks.len());
     for task in tasks {
         if let (true, Some(&(start, end))) =
             (task.status == "DONE", last_done.get(task.id.as_str()))
         {
+            by_id.insert(&task.id, bars.len());
             bars.push(TimelineBar {
                 id: task.id.clone(),
                 kind: BarKind::Done,
@@ -255,6 +260,7 @@ pub(crate) fn build_timeline(input: TimelineInput<'_>) -> Timeline {
     let last_end = log.iter().rev().find_map(|row| row.end_minute).unwrap_or(0);
     for task in tasks.iter().filter(|task| task.status == "IN PROGRESS") {
         let start = last_end.min(now.unwrap_or(last_end));
+        by_id.insert(&task.id, bars.len());
         bars.push(TimelineBar {
             id: task.id.clone(),
             kind: BarKind::Running,
@@ -265,10 +271,6 @@ pub(crate) fn build_timeline(input: TimelineInput<'_>) -> Timeline {
         });
     }
 
-    let mut ends: HashMap<String, i64> = HashMap::new();
-    for bar in &bars {
-        ends.insert(bar.id.clone(), bar_end(bar));
-    }
     let mut cursor = bars
         .iter()
         .filter(|bar| bar.kind == BarKind::Running)
@@ -281,7 +283,11 @@ pub(crate) fn build_timeline(input: TimelineInput<'_>) -> Timeline {
         let dep_end = task
             .dep_ids
             .iter()
-            .map(|id| ends.get(id).copied().unwrap_or(0))
+            .map(|id| {
+                by_id
+                    .get(id.as_str())
+                    .map_or(0, |&index| bar_end(&bars[index]))
+            })
             .fold(0, i64::max);
         let start = cursor.max(dep_end);
         let bar = TimelineBar {
@@ -296,24 +302,21 @@ pub(crate) fn build_timeline(input: TimelineInput<'_>) -> Timeline {
             expected_end: None,
             lane: 0,
         };
-        ends.insert(bar.id.clone(), bar.end);
+        by_id.insert(&task.id, bars.len());
         cursor = bar.end;
         bars.push(bar);
     }
 
-    let mut deps: HashMap<&str, &[String]> = HashMap::new();
-    for task in tasks {
-        deps.insert(&task.id, &task.dep_ids);
-    }
-    let lane_count = pack_lanes(&mut bars, &deps);
-    let mut by_id: HashMap<&str, &TimelineBar> = HashMap::new();
-    for bar in &bars {
-        by_id.insert(&bar.id, bar);
-    }
+    let deps: HashMap<&str, &[String]> = tasks
+        .iter()
+        .map(|task| (task.id.as_str(), task.dep_ids.as_slice()))
+        .collect();
+    let lane_count = pack_lanes(&mut bars, &deps, &by_id);
+    let bar_of = |id: &str| by_id.get(id).map(|&index| &bars[index]);
     let mut edges = Vec::new();
     for bar in &bars {
         for dep_id in deps.get(bar.id.as_str()).copied().unwrap_or_default() {
-            let Some(dep) = by_id.get(dep_id.as_str()) else {
+            let Some(dep) = bar_of(dep_id) else {
                 continue;
             };
             edges.push(TimelineEdge {
@@ -348,7 +351,7 @@ pub(crate) fn build_timeline(input: TimelineInput<'_>) -> Timeline {
         let start = question
             .blocks
             .iter()
-            .filter_map(|id| by_id.get(id.as_str()))
+            .filter_map(|id| bar_of(id))
             .filter(|bar| matches!(bar.kind, BarKind::Planned | BarKind::Blocked))
             .map(|bar| bar.start)
             .min();

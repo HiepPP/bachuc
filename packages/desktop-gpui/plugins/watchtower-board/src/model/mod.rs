@@ -1,6 +1,6 @@
 //! The data types and every pure rule of the plugin, each with unit tests. The views and the
-//! store read them; the overview of TASK-194 reads the ones this part does not draw yet, so
-//! those stay exported without a reader for now.
+//! store read them; a few ported rules, such as the timeline axis, have no reader, so they stay
+//! exported without one.
 
 #![allow(dead_code, unused_imports)]
 
@@ -9,12 +9,22 @@ mod builders;
 mod cache;
 mod dashboard;
 mod dto;
+mod id_map;
 mod lifecycle;
 mod markdown;
+mod overview_view;
 mod page;
 mod plan_tree;
 mod time;
 mod timeline;
+
+pub(crate) use overview_view::{
+    BodyItem, CellKind, DecisionRow, Derived, DerivedCache, DerivedKey, Grid, Layout, PaceItem,
+    RAIL_WIDTH, RejectPress, RejectStep, RowState, SegmentKind, StatusCounts, StripModel,
+    StripTone, action_subject, actions_disabled, active_builders, agent_note, archived_meta,
+    body_items, derive_overview, layout_for, lead_text, needs_warning, reject_step, row_state,
+    secondary_line, segments, send_disabled,
+};
 
 pub(crate) use actions::{
     AgentCandidate, AgentTarget, accept_decision_prompt, answer_prompt, choose_agent,
@@ -43,7 +53,8 @@ pub(crate) use page::{
     project_name,
 };
 pub(crate) use plan_tree::{
-    PlanTree, PlanTreePace, PlanTreeRow, PlanTreeWave, ago, build_plan_tree, commit_shas,
+    PlanTree, PlanTreePace, PlanTreeRow, PlanTreeWave, ago, build_plan_tree,
+    build_plan_tree_and_timeline, commit_shas,
 };
 pub(crate) use time::{now_ms, parse_iso_ms, round_half_up};
 pub(crate) use timeline::{

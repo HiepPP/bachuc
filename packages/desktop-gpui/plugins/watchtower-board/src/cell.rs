@@ -117,7 +117,8 @@ pub(crate) fn cell_title(
         }))
 }
 
-/// A whole bordered cell with a title row. `warning` tints a cell that needs attention.
+/// A whole bordered cell with a title row. `warning` tints a cell that needs attention. It grows
+/// to fill a grid column, so cells in one row end on the same line.
 pub(crate) fn overview_cell(
     title: impl Into<SharedString>,
     aside: Option<SharedString>,
@@ -126,6 +127,7 @@ pub(crate) fn overview_cell(
     cx: &App,
 ) -> AnyElement {
     cell_slice(Slice::Whole, warning, cx)
+        .flex_grow_1()
         .child(cell_title(title, aside, cx))
         .child(body)
         .into_any_element()

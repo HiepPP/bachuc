@@ -144,7 +144,6 @@ impl TaskList {
 
     /// A pick from outside the list, such as a plan tree row: opens its group when it is
     /// collapsed, so the row shows.
-    #[allow(dead_code, reason = "the plan tree of TASK-194 picks rows")]
     pub(crate) fn select_from_outside(&mut self, task_id: Option<String>, tasks: &[Task]) {
         if let Some(task) = task_id
             .as_ref()

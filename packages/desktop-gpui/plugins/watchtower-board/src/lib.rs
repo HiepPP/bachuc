@@ -5,10 +5,16 @@
 //! part stays in TypeScript; this crate calls it only through its plugin RPCs.
 
 mod cell;
+mod cells;
+mod decision_modal;
 mod model;
+mod needs_you;
+mod overview;
 mod page;
 mod panel;
+mod plan_tree_view;
 mod rail;
+mod run_cells;
 mod store;
 mod task_list;
 

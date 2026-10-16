@@ -15,7 +15,6 @@ use std::collections::{BTreeSet, HashMap};
 const READ: &str = "watchtower.read";
 const PROJECT_READ: &str = "watchtower.project.read";
 const OVERVIEW_READ: &str = "watchtower.overview.read";
-#[allow(dead_code, reason = "the decision modal of TASK-194 reads ADRs")]
 const DECISION_READ: &str = "watchtower.decision.read";
 
 pub(crate) struct WatchtowerStore {
@@ -135,7 +134,6 @@ impl WatchtowerStore {
         self.initial_task = task;
     }
 
-    #[allow(dead_code, reason = "the overview of TASK-194 selects this task")]
     pub(crate) fn initial_task(&self) -> Option<&str> {
         self.initial_task.as_deref()
     }
@@ -159,7 +157,6 @@ impl WatchtowerStore {
         self.load_project(project_id, Want::Force, cx);
     }
 
-    #[allow(dead_code, reason = "the decision modal of TASK-194 reads ADRs")]
     pub(crate) fn decision(
         &mut self,
         workspace_id: &str,
@@ -191,7 +188,6 @@ impl WatchtowerStore {
         match_builders(&agents, tasks, now_ms)
     }
 
-    #[allow(dead_code, reason = "the Needs you cell of TASK-194 shows the target")]
     pub(crate) fn agent_target(&self, workspace_id: &str, cx: &App) -> AgentTarget {
         match &self.client {
             Some(client) => choose_agent(&candidates(client.read(cx)), workspace_id),
@@ -201,7 +197,6 @@ impl WatchtowerStore {
 
     /// Sends a prompt to the workspace's target agent, looked up again now, and resolves the
     /// agent's id and name.
-    #[allow(dead_code, reason = "the Needs you actions of TASK-194 send prompts")]
     pub(crate) fn send(
         &mut self,
         workspace_id: &str,
