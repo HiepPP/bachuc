@@ -1,7 +1,8 @@
 //! Decodes frames recorded from the live daemon on 2026-10-15 (`tests/fixtures/*.json`).
 
 use bachuc_protocol::generated::{
-    AgentStreamPayloadEvent, WsInboundHelloCapabilities, WsInboundHelloClientType,
+    AgentStreamPayloadEvent, UpsertAgentFeaturesItem, WsInboundHelloCapabilities,
+    WsInboundHelloClientType,
 };
 use bachuc_protocol::{
     PROTOCOL_VERSION, SessionOutbound, WsInbound, WsOutbound, decode_outbound, decode_server_info,
@@ -136,6 +137,33 @@ fn fetch_agents_response() {
         panic!("expected fetch_agents_response, got {message:?}");
     };
     assert_eq!(payload.entries.len(), 1);
+}
+
+#[test]
+fn an_unknown_agent_feature_type_leaves_the_snapshot_decoded() {
+    let mut frame: Value = serde_json::from_str(fixture!("fetch_agents_response")).unwrap();
+    frame["message"]["payload"]["entries"][0]["agent"]["features"] = json!([
+        {"type": "toggle", "id": "fast", "label": "Fast", "value": true},
+        {"type": "slider", "id": "temp", "label": "Temperature", "min": 0, "max": 1},
+        {"type": "select", "id": "effort", "label": "Effort", "value": null,
+         "options": [{"id": "low", "label": "Low"}]},
+    ]);
+    let decoded = decode_outbound(&frame.to_string()).expect("the snapshot decodes");
+    let WsOutbound::Session {
+        message: SessionOutbound::FetchAgentsResponse { payload },
+    } = decoded
+    else {
+        panic!("expected fetch_agents_response, got {decoded:?}");
+    };
+    let features = &payload.entries[0].agent.features;
+    assert!(matches!(
+        features.as_slice(),
+        [
+            UpsertAgentFeaturesItem::Toggle { value: true, .. },
+            UpsertAgentFeaturesItem::Unrecognized,
+            UpsertAgentFeaturesItem::Select { value: None, .. },
+        ]
+    ));
 }
 
 #[test]

@@ -4,15 +4,19 @@
 use crate::connection::{Connection, ConnectionConfig, WorkerEvent, session_frame};
 use crate::files::{self, TransferFrame};
 use crate::model::{
-    AgentControls, AgentSummary, CheckoutStatus, ClientEvent, DirectoryEvent, FileContent,
-    FileEntry, ProjectNode, ProviderSummary, QueuedPrompt, SlashCommand, ThinkingControls,
-    TurnBehavior, WorkspaceNode, WorkspaceSummary, provider_label,
+    AgentControls, AgentFeature, AgentFeatureKind, AgentFeatureOption, AgentSummary,
+    AttentionReason, ChangedFile, CheckoutDetails, CheckoutStatus, ClientEvent, CommitList,
+    DiffStat, DirectoryEvent, FileContent, FileDiff, FileEntry, ProjectNode, ProviderSummary,
+    QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode, WorkspaceSummary,
+    provider_label,
 };
 use crate::terminal::{self, TerminalFrame, TerminalHandle};
 use crate::timeline::{FetchPlan, LiveRow, TimelineState, TimelineSync};
 use anyhow::anyhow;
 use bachuc_protocol::ServerInfo;
+use bachuc_protocol::generated::UpsertAgentFeaturesItem;
 use futures::channel::{mpsc, oneshot};
+use serde::Deserialize as _;
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap};
 
@@ -30,16 +34,20 @@ enum Pending {
         reply: Reply<FileContent>,
         transfer: Option<Box<(Value, Vec<u8>)>>,
     },
-    CheckoutStatus(Reply<CheckoutStatus>),
+    CheckoutStatus(CheckoutReply),
     CheckoutFiles {
         branch: Option<String>,
-        reply: Reply<CheckoutStatus>,
+        reply: CheckoutReply,
     },
     CheckoutWatch(String),
     FileDiff {
         path: String,
         reply: Reply<String>,
     },
+    CheckoutDiff(Reply<Vec<FileDiff>>),
+    Commits(Reply<CommitList>),
+    CommitFileDiff(Reply<Option<FileDiff>>),
+    SetFeature(Reply<()>),
     Commands(Reply<Vec<SlashCommand>>),
     Queue(String),
     ReadConfig {
@@ -92,13 +100,39 @@ impl Pending {
             Pending::FileList(reply) => send(reply, error),
             Pending::ReadFile { reply, .. } => send(reply, error),
             Pending::CheckoutStatus(reply) | Pending::CheckoutFiles { reply, .. } => {
-                send(reply, error)
+                reply.send(Err(error))
             }
             Pending::FileDiff { reply, .. } => send(reply, error),
+            Pending::CheckoutDiff(reply) => send(reply, error),
+            Pending::Commits(reply) => send(reply, error),
+            Pending::CommitFileDiff(reply) => send(reply, error),
+            Pending::SetFeature(reply) => send(reply, error),
             Pending::Commands(reply) => send(reply, error),
             Pending::ReadConfig { reply, .. } => send(reply, error),
             Pending::WriteConfig { reply, .. } => send(reply, error),
             _ => {}
+        }
+    }
+}
+
+/// Where a checkout status answer goes: `checkout_status` or `checkout_details`.
+enum CheckoutReply {
+    Status(Reply<CheckoutStatus>),
+    Details(Reply<CheckoutDetails>),
+}
+
+impl CheckoutReply {
+    fn send(self, result: anyhow::Result<CheckoutDetails>) {
+        match self {
+            CheckoutReply::Status(reply) => {
+                let _ = reply.send(result.map(|details| CheckoutStatus {
+                    branch: details.branch,
+                    files: details.files.into_iter().map(ChangedFile::from).collect(),
+                }));
+            }
+            CheckoutReply::Details(reply) => {
+                let _ = reply.send(result);
+            }
         }
     }
 }
@@ -111,6 +145,9 @@ struct AgentExtra {
     thinking: Option<String>,
     queue: Vec<QueuedPrompt>,
     updated_at: Option<String>,
+    requires_attention: bool,
+    attention_reason: Option<AttentionReason>,
+    features: Vec<AgentFeature>,
 }
 
 /// A project as `project.list` or a workspace describes it.
@@ -119,13 +156,16 @@ struct ProjectInfo {
     id: String,
     name: String,
     root: String,
+    /// `projectKey`; a workspace descriptor has none.
+    key: Option<String>,
 }
 
 /// The tree fields of a workspace that `WorkspaceSummary` does not hold.
 struct WorkspaceMeta {
     project: ProjectInfo,
     branch: Option<String>,
-    pinned: bool,
+    pinned_at: Option<String>,
+    diff_stat: Option<DiffStat>,
 }
 
 /// Thinking options of one model, as `(id, label)`, and its default.
@@ -344,6 +384,49 @@ impl ClientCore {
             current_model: agent.model.clone(),
             running: agent.status == "running",
         })
+    }
+
+    /// Whether the agent asks for attention, and why. `None` for an unknown agent.
+    pub fn agent_attention(&self, agent_id: &str) -> Option<(bool, Option<AttentionReason>)> {
+        if !self.agents.iter().any(|agent| agent.id == agent_id) {
+            return None;
+        }
+        let extra = self.extras.get(agent_id)?;
+        Some((extra.requires_attention, extra.attention_reason))
+    }
+
+    /// The agent's provider features. A feature type this client does not know is left out.
+    pub fn agent_features(&self, agent_id: &str) -> Vec<AgentFeature> {
+        self.extras
+            .get(agent_id)
+            .map(|extra| extra.features.clone())
+            .unwrap_or_default()
+    }
+
+    /// The key the app groups a project by: its `projectKey`, else `["<serverId>","<projectId>"]`
+    /// as `createProjectViewKey` builds it. `None` for an unknown project.
+    pub fn project_view_key(&self, project_id: &str) -> Option<String> {
+        let mut matches = self
+            .project_list
+            .iter()
+            .chain(&self.empty_projects)
+            .chain(self.workspace_meta.values().map(|meta| &meta.project))
+            .filter(|project| project.id == project_id)
+            .peekable();
+        matches.peek()?;
+        if let Some(key) = matches.find_map(|project| project.key.clone()) {
+            return Some(key);
+        }
+        let server_id = self.server_info.as_ref()?["serverId"].as_str()?;
+        Some(json!([server_id, project_id]).to_string())
+    }
+
+    pub fn workspace_diff_stat(&self, workspace_id: &str) -> Option<DiffStat> {
+        self.workspace_meta.get(workspace_id)?.diff_stat
+    }
+
+    pub fn workspace_pinned_at(&self, workspace_id: &str) -> Option<String> {
+        self.workspace_meta.get(workspace_id)?.pinned_at.clone()
     }
 
     // ---- worker events ----
@@ -753,7 +836,65 @@ impl ClientCore {
     ) -> oneshot::Receiver<anyhow::Result<CheckoutStatus>> {
         self.request_reply(
             json!({"type": "checkout_status_request", "cwd": cwd}),
-            Pending::CheckoutStatus,
+            |reply| Pending::CheckoutStatus(CheckoutReply::Status(reply)),
+        )
+    }
+
+    /// `checkout_status` with the git flag and the full file fields.
+    pub fn checkout_details(
+        &mut self,
+        cwd: &str,
+    ) -> oneshot::Receiver<anyhow::Result<CheckoutDetails>> {
+        self.request_reply(
+            json!({"type": "checkout_status_request", "cwd": cwd}),
+            |reply| Pending::CheckoutStatus(CheckoutReply::Details(reply)),
+        )
+    }
+
+    /// Every uncommitted file of `cwd` with its diff, from one request. A folder outside git
+    /// gives no files.
+    pub fn checkout_diff(&mut self, cwd: &str) -> oneshot::Receiver<anyhow::Result<Vec<FileDiff>>> {
+        self.request_reply(
+            json!({"type": "checkout.diff.get.request", "cwd": cwd, "compare": {"mode": UNCOMMITTED}}),
+            Pending::CheckoutDiff,
+        )
+    }
+
+    pub fn commits(&mut self, cwd: &str) -> oneshot::Receiver<anyhow::Result<CommitList>> {
+        self.request_reply(
+            json!({"type": "checkout.commits.list.request", "cwd": cwd}),
+            Pending::Commits,
+        )
+    }
+
+    /// The diff of one file in one commit; `None` when the commit has no text diff for it.
+    pub fn commit_file_diff(
+        &mut self,
+        cwd: &str,
+        sha: &str,
+        path: &str,
+    ) -> oneshot::Receiver<anyhow::Result<Option<FileDiff>>> {
+        self.request_reply(
+            json!({"type": "checkout.commits.file_diff.request", "cwd": cwd, "sha": sha, "path": path}),
+            Pending::CommitFileDiff,
+        )
+    }
+
+    /// Sets a provider feature; `value` is a bool for a toggle and an option id for a select.
+    pub fn set_agent_feature(
+        &mut self,
+        agent_id: &str,
+        feature_id: &str,
+        value: Value,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.request_reply(
+            json!({
+                "type": "set_agent_feature_request",
+                "agentId": agent_id,
+                "featureId": feature_id,
+                "value": value,
+            }),
+            Pending::SetFeature,
         )
     }
 
@@ -1389,22 +1530,23 @@ impl ClientCore {
             }
             Pending::CheckoutStatus(reply) => {
                 if let Some(error) = rpc_error {
-                    let _ = reply.send(Err(anyhow!(error)));
+                    reply.send(Err(anyhow!(error)));
                     return;
                 }
                 if payload["isGit"] != true {
                     let result = match files::checkout_error(payload) {
                         Some((code, message)) if code != "NOT_GIT_REPO" => Err(anyhow!(message)),
-                        _ => Ok(CheckoutStatus {
+                        _ => Ok(CheckoutDetails {
+                            is_git: false,
                             branch: None,
                             files: Vec::new(),
                         }),
                     };
-                    let _ = reply.send(result);
+                    reply.send(result);
                     return;
                 }
                 if let Some((_, message)) = files::checkout_error(payload) {
-                    let _ = reply.send(Err(anyhow!(message)));
+                    reply.send(Err(anyhow!(message)));
                     return;
                 }
                 // A detached HEAD has no branch to show, as in the app.
@@ -1430,7 +1572,8 @@ impl ClientCore {
                     (None, Some((code, message))) if code != "NOT_GIT_REPO" => {
                         Err(anyhow!(message))
                     }
-                    (None, error) => Ok(CheckoutStatus {
+                    (None, error) => Ok(CheckoutDetails {
+                        is_git: true,
                         branch,
                         files: if error.is_some() {
                             Vec::new()
@@ -1439,7 +1582,7 @@ impl ClientCore {
                         },
                     }),
                 };
-                let _ = reply.send(result);
+                reply.send(result);
             }
             Pending::CheckoutWatch(cwd) => {
                 let Some(subscription_id) = payload["subscriptionId"].as_str() else {
@@ -1479,6 +1622,44 @@ impl ClientCore {
                             },
                         }
                     }
+                };
+                let _ = reply.send(result);
+            }
+            Pending::CheckoutDiff(reply) => {
+                let result = match (rpc_error, files::checkout_error(payload)) {
+                    (Some(error), _) => Err(anyhow!(error)),
+                    (None, Some((code, _))) if code == "NOT_GIT_REPO" => Ok(Vec::new()),
+                    (None, Some((_, message))) => Err(anyhow!(message)),
+                    (None, None) => Ok(payload["files"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(files::file_diff)
+                        .collect()),
+                };
+                let _ = reply.send(result);
+            }
+            Pending::Commits(reply) => {
+                let result = match (rpc_error, files::checkout_error(payload)) {
+                    (Some(error), _) => Err(anyhow!(error)),
+                    (None, Some((_, message))) => Err(anyhow!(message)),
+                    (None, None) => Ok(files::commit_list(payload)),
+                };
+                let _ = reply.send(result);
+            }
+            Pending::CommitFileDiff(reply) => {
+                let result = match (rpc_error, files::checkout_error(payload)) {
+                    (Some(error), _) => Err(anyhow!(error)),
+                    (None, Some((_, message))) => Err(anyhow!(message)),
+                    (None, None) => Ok(files::file_diff(&payload["file"])),
+                };
+                let _ = reply.send(result);
+            }
+            Pending::SetFeature(reply) => {
+                let result = match error {
+                    Some(error) => Err(anyhow!(error)),
+                    None if payload["accepted"] == false => Err(anyhow!("feature change refused")),
+                    None => Ok(()),
                 };
                 let _ = reply.send(result);
             }
@@ -1650,6 +1831,11 @@ impl ClientCore {
             .map(str::to_string);
         extra.queue = queued_prompts(&agent["queue"]);
         extra.updated_at = updated_at;
+        extra.requires_attention = agent["requiresAttention"] == true;
+        extra.attention_reason = agent["attentionReason"]
+            .as_str()
+            .and_then(AttentionReason::parse);
+        extra.features = agent_features(&agent["features"]);
         self.set_permissions(id, permissions);
         self.directory_changed = true;
     }
@@ -1713,7 +1899,15 @@ impl ClientCore {
                 branch: workspace["gitRuntime"]["currentBranch"]
                     .as_str()
                     .map(str::to_string),
-                pinned: workspace["pinnedAt"].is_string(),
+                pinned_at: workspace["pinnedAt"].as_str().map(str::to_string),
+                diff_stat: workspace["diffStat"].is_object().then(|| DiffStat {
+                    additions: workspace["diffStat"]["additions"]
+                        .as_f64()
+                        .unwrap_or_default() as u32,
+                    deletions: workspace["diffStat"]["deletions"]
+                        .as_f64()
+                        .unwrap_or_default() as u32,
+                }),
             };
             self.workspace_meta.insert(id.to_string(), meta);
         }
@@ -1878,7 +2072,7 @@ impl ClientCore {
                     name: workspace.name.clone(),
                     cwd: workspace.cwd.clone(),
                     branch: meta.branch.clone(),
-                    pinned: meta.pinned,
+                    pinned: meta.pinned_at.is_some(),
                     agent_ids: agents_by_workspace
                         .remove(workspace.id.as_str())
                         .unwrap_or_default(),
@@ -1914,7 +2108,65 @@ fn project_info(descriptor: &Value) -> Option<ProjectInfo> {
             .as_str()
             .unwrap_or_default()
             .to_string(),
+        key: descriptor["projectKey"].as_str().map(str::to_string),
     })
+}
+
+/// The snapshot `features`, decoded one by one through the generated union, so a feature type
+/// from a newer daemon (`Unrecognized`) or a malformed feature is skipped.
+fn agent_features(features: &Value) -> Vec<AgentFeature> {
+    features
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|feature| UpsertAgentFeaturesItem::deserialize(feature).ok())
+        .filter_map(|feature| match feature {
+            UpsertAgentFeaturesItem::Toggle {
+                description,
+                icon,
+                id,
+                label,
+                tooltip,
+                value,
+            } => Some(AgentFeature {
+                id,
+                label,
+                description,
+                tooltip,
+                icon,
+                kind: AgentFeatureKind::Toggle { value },
+            }),
+            UpsertAgentFeaturesItem::Select {
+                description,
+                icon,
+                id,
+                label,
+                options,
+                tooltip,
+                value,
+            } => Some(AgentFeature {
+                id,
+                label,
+                description,
+                tooltip,
+                icon,
+                kind: AgentFeatureKind::Select {
+                    value,
+                    options: options
+                        .into_iter()
+                        .map(|option| AgentFeatureOption {
+                            id: option.id,
+                            label: option.label,
+                            description: option.description,
+                            is_default: option.is_default,
+                            metadata: option.metadata,
+                        })
+                        .collect(),
+                },
+            }),
+            UpsertAgentFeaturesItem::Unrecognized => None,
+        })
+        .collect()
 }
 
 fn queued_prompts(queue: &Value) -> Vec<QueuedPrompt> {

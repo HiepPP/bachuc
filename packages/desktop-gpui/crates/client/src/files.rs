@@ -1,7 +1,10 @@
 //! File reads and checkout diffs: binary file transfer frames, the JSON file forms, and
 //! changed files. See `packages/protocol/src/binary-frames/file-transfer.ts`.
 
-use crate::model::{ChangedFile, FileContent, FileEntry, FileKind};
+use crate::model::{
+    ChangedFile, ChangedFileDetails, CommitFile, CommitList, CommitSummary, FileContent, FileDiff,
+    FileDiffStatus, FileEntry, FileKind,
+};
 use base64::Engine as _;
 use serde_json::Value;
 
@@ -145,21 +148,101 @@ pub(crate) fn directory_entries(directory: &Value) -> Vec<FileEntry> {
         .collect()
 }
 
+fn count(value: &Value) -> u32 {
+    value.as_f64().unwrap_or_default() as u32
+}
+
 /// The changed files of a diff payload.
-pub(crate) fn changed_files(files: &Value) -> Vec<ChangedFile> {
+pub(crate) fn changed_files(files: &Value) -> Vec<ChangedFileDetails> {
     files
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|file| {
-            Some(ChangedFile {
+            Some(ChangedFileDetails {
                 path: file["path"].as_str()?.to_string(),
+                old_path: file["oldPath"].as_str().map(str::to_string),
+                is_new: file["isNew"] == true,
+                is_deleted: file["isDeleted"] == true,
                 status: file["status"].as_str().unwrap_or("ok").to_string(),
-                added: file["additions"].as_f64().unwrap_or_default() as u32,
-                removed: file["deletions"].as_f64().unwrap_or_default() as u32,
+                additions: count(&file["additions"]),
+                deletions: count(&file["deletions"]),
             })
         })
         .collect()
+}
+
+impl From<ChangedFileDetails> for ChangedFile {
+    fn from(file: ChangedFileDetails) -> Self {
+        ChangedFile {
+            path: file.path,
+            status: file.status,
+            added: file.additions,
+            removed: file.deletions,
+        }
+    }
+}
+
+/// One parsed diff file. A missing status is `ok`; a status from a newer daemon counts as
+/// `binary`, so the file shows without a diff.
+pub(crate) fn file_diff(file: &Value) -> Option<FileDiff> {
+    let status = match file["status"].as_str().unwrap_or("ok") {
+        "ok" => FileDiffStatus::Ok,
+        "too_large" => FileDiffStatus::TooLarge,
+        _ => FileDiffStatus::Binary,
+    };
+    Some(FileDiff {
+        path: file["path"].as_str()?.to_string(),
+        old_path: file["oldPath"].as_str().map(str::to_string),
+        is_new: file["isNew"] == true,
+        is_deleted: file["isDeleted"] == true,
+        additions: count(&file["additions"]),
+        deletions: count(&file["deletions"]),
+        text: if status == FileDiffStatus::Ok {
+            unified_diff(file)
+        } else {
+            String::new()
+        },
+        status,
+    })
+}
+
+/// The commits of a `checkout.commits.list` payload.
+pub(crate) fn commit_list(payload: &Value) -> CommitList {
+    let text = |value: &Value| value.as_str().unwrap_or_default().to_string();
+    let commits = payload["commits"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|commit| {
+            Some(CommitSummary {
+                sha: commit["sha"].as_str()?.to_string(),
+                short_sha: text(&commit["shortSha"]),
+                subject: text(&commit["subject"]),
+                author_name: text(&commit["authorName"]),
+                author_date: text(&commit["authorDate"]),
+                is_on_remote: commit["isOnRemote"] == true,
+                is_on_base: commit["isOnBase"].as_bool(),
+                files: commit["files"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|file| {
+                        Some(CommitFile {
+                            path: file["path"].as_str()?.to_string(),
+                            additions: count(&file["additions"]),
+                            deletions: count(&file["deletions"]),
+                            status: file["status"].as_str().map(str::to_string),
+                        })
+                    })
+                    .collect(),
+            })
+        })
+        .collect();
+    CommitList {
+        base_ref: payload["baseRef"].as_str().map(str::to_string),
+        commits,
+    }
 }
 
 /// The unified diff text of one parsed diff file. Hunk header lines carry their `@@` text.

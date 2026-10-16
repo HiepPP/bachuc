@@ -131,6 +131,134 @@ pub struct ChangedFile {
     pub removed: u32,
 }
 
+/// Why an agent asks for attention (`attentionReason`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttentionReason {
+    Finished,
+    Error,
+    Permission,
+}
+
+impl AttentionReason {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "finished" => Some(Self::Finished),
+            "error" => Some(Self::Error),
+            "permission" => Some(Self::Permission),
+            _ => None,
+        }
+    }
+}
+
+/// The added and removed line counts of a workspace (`diffStat`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiffStat {
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+/// `CheckoutStatus` with the git flag and the full file fields.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckoutDetails {
+    pub is_git: bool,
+    pub branch: Option<String>,
+    pub files: Vec<ChangedFileDetails>,
+}
+
+/// One changed file with its rename and add or delete flags. `status` is `ok`, `too_large`,
+/// or `binary`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChangedFileDetails {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub is_new: bool,
+    pub is_deleted: bool,
+    pub status: String,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+/// A provider feature of an agent, such as a toggle or a select in the composer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentFeature {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub tooltip: Option<String>,
+    pub icon: Option<String>,
+    pub kind: AgentFeatureKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AgentFeatureKind {
+    Toggle {
+        value: bool,
+    },
+    Select {
+        value: Option<String>,
+        options: Vec<AgentFeatureOption>,
+    },
+}
+
+/// One choice of a select feature.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentFeatureOption {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub is_default: Option<bool>,
+    pub metadata: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileDiffStatus {
+    Ok,
+    TooLarge,
+    Binary,
+}
+
+/// The diff of one file. `text` is the unified diff of an `Ok` file and empty otherwise.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileDiff {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub is_new: bool,
+    pub is_deleted: bool,
+    pub status: FileDiffStatus,
+    pub additions: u32,
+    pub deletions: u32,
+    pub text: String,
+}
+
+/// The commits of a checkout since its base.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitList {
+    pub base_ref: Option<String>,
+    pub commits: Vec<CommitSummary>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitSummary {
+    pub sha: String,
+    pub short_sha: String,
+    pub subject: String,
+    pub author_name: String,
+    pub author_date: String,
+    /// False for a local-only commit.
+    pub is_on_remote: bool,
+    pub is_on_base: Option<bool>,
+    pub files: Vec<CommitFile>,
+}
+
+/// One file of a commit. `status` is `added`, `modified`, `deleted`, or `renamed`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitFile {
+    pub path: String,
+    pub additions: u32,
+    pub deletions: u32,
+    pub status: Option<String>,
+}
+
 /// Thinking choices of an agent's model, as `(id, label)`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThinkingControls {

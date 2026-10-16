@@ -4,8 +4,10 @@
 mod common;
 
 use bachuc_client::{
-    ChangedFile, CheckoutStatus, DirectoryEvent, FileKind, ProjectNode, QueuedPrompt, TurnBehavior,
-    WorkspaceNode,
+    AgentFeature, AgentFeatureKind, AgentFeatureOption, AttentionReason, ChangedFile,
+    ChangedFileDetails, CheckoutDetails, CheckoutStatus, CommitFile, CommitList, CommitSummary,
+    DiffStat, DirectoryEvent, FileDiff, FileDiffStatus, FileKind, ProjectNode, QueuedPrompt,
+    TurnBehavior, WorkspaceNode,
 };
 use bachuc_protocol::generated::ServerInfoPermissionsItem;
 use common::{FakeServer, Harness, agent_snapshot, session};
@@ -722,4 +724,442 @@ fn project_config_reads_and_writes_with_the_revision() {
     assert_eq!(write["config"], config);
     assert_eq!(write["expectedRevision"]["mtimeMs"].as_f64(), Some(1.0));
     assert_eq!(write["expectedRevision"]["size"].as_f64(), Some(10.0));
+}
+
+// ---- follow-up fields and requests (TASK-157) ----
+
+#[test]
+fn agent_attention_reads_the_flag_and_the_reason() {
+    let server = FakeServer::start();
+    server.with(|s| {
+        let mut flagged = agent_snapshot("a1", "idle");
+        flagged["requiresAttention"] = json!(true);
+        flagged["attentionReason"] = json!("permission");
+        let mut cleared = agent_snapshot("a2", "idle");
+        cleared["requiresAttention"] = json!(false);
+        cleared["attentionReason"] = Value::Null;
+        s.agents = vec![flagged, cleared, agent_snapshot("a3", "idle")];
+    });
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.agents().len() == 3));
+    assert_eq!(
+        harness.core.agent_attention("a1"),
+        Some((true, Some(AttentionReason::Permission)))
+    );
+    assert_eq!(harness.core.agent_attention("a2"), Some((false, None)));
+    assert_eq!(
+        harness.core.agent_attention("a3"),
+        Some((false, None)),
+        "absent fields"
+    );
+    assert_eq!(harness.core.agent_attention("missing"), None);
+
+    let mut finished = agent_snapshot("a3", "idle");
+    finished["updatedAt"] = json!("2026-10-16T05:00:00.000Z");
+    finished["requiresAttention"] = json!(true);
+    finished["attentionReason"] = json!("finished");
+    server.broadcast(
+        json!({"type": "agent_update", "payload": {"kind": "upsert", "agent": finished}}),
+    );
+    assert!(harness.pump_until(WAIT, |h| h.core.agent_attention("a3")
+        == Some((true, Some(AttentionReason::Finished)))));
+}
+
+#[test]
+fn project_view_key_uses_the_project_key_or_the_placement_key() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut keyed = project("p1");
+    keyed["projectKey"] = json!("github.com/acme/app");
+    server.reply(
+        "project.list.request",
+        "project.list.response",
+        json!({"projects": [keyed, project("p2")]}),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.projects().len() == 2));
+    assert_eq!(
+        harness.core.project_view_key("p1").as_deref(),
+        Some("github.com/acme/app")
+    );
+    assert_eq!(
+        harness.core.project_view_key("p2").as_deref(),
+        Some(r#"["fake","p2"]"#),
+        "the JSON.stringify form of createProjectViewKey"
+    );
+    assert_eq!(harness.core.project_view_key("p9"), None);
+}
+
+#[test]
+fn workspace_diff_stat_and_pinned_at() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut changed = workspace("w1", "p1", Some("main"), json!("2026-10-16T00:00:00.000Z"));
+    changed["diffStat"] = json!({"additions": 12, "deletions": 3});
+    let mut clean = workspace("w2", "p1", None, Value::Null);
+    clean["diffStat"] = Value::Null;
+    server.reply(
+        "fetch_workspaces_request",
+        "fetch_workspaces_response",
+        json!({"subscriptionId": "sub-w", "entries": [
+            changed, clean, workspace("w3", "p1", None, Value::Null),
+        ], "pageInfo": page_info()}),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.workspace_diff_stat("w1").is_some()));
+    assert_eq!(
+        harness.core.workspace_diff_stat("w1"),
+        Some(DiffStat {
+            additions: 12,
+            deletions: 3
+        })
+    );
+    assert_eq!(harness.core.workspace_diff_stat("w2"), None, "null");
+    assert_eq!(harness.core.workspace_diff_stat("w3"), None, "absent");
+    assert_eq!(
+        harness.core.workspace_pinned_at("w1").as_deref(),
+        Some("2026-10-16T00:00:00.000Z")
+    );
+    assert_eq!(harness.core.workspace_pinned_at("w2"), None);
+    assert_eq!(harness.core.workspace_pinned_at("missing"), None);
+}
+
+#[test]
+fn checkout_details_carry_the_git_flag_and_the_file_fields() {
+    let server = git_server();
+    server.reply(
+        "checkout.diff.get.request",
+        "checkout.diff.get.response",
+        json!({"cwd": "/repo", "error": null, "files": [
+            {"path": "src/new.rs", "oldPath": "src/old.rs", "isNew": false, "isDeleted": false,
+             "additions": 1, "deletions": 1, "status": "ok", "hunks": []},
+            {"path": "gone.rs", "isNew": false, "isDeleted": true, "additions": 0,
+             "deletions": 4, "hunks": []},
+            {"path": "added.rs", "isNew": true, "isDeleted": false, "additions": 7,
+             "deletions": 0, "status": "ok", "hunks": []},
+        ]}),
+    );
+    let mut harness = connect(&server);
+    let file = |path: &str, old_path: Option<&str>, flags: (bool, bool), counts: (u32, u32)| {
+        ChangedFileDetails {
+            path: path.into(),
+            old_path: old_path.map(str::to_string),
+            is_new: flags.0,
+            is_deleted: flags.1,
+            status: "ok".into(),
+            additions: counts.0,
+            deletions: counts.1,
+        }
+    };
+    let reply = harness.core.checkout_details("/repo");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        CheckoutDetails {
+            is_git: true,
+            branch: Some("main".into()),
+            files: vec![
+                file("src/new.rs", Some("src/old.rs"), (false, false), (1, 1)),
+                file("gone.rs", None, (false, true), (0, 4)),
+                file("added.rs", None, (true, false), (7, 0)),
+            ],
+        }
+    );
+
+    let reply = harness.core.checkout_details("/plain");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        CheckoutDetails {
+            is_git: false,
+            branch: None,
+            files: vec![]
+        }
+    );
+    assert_eq!(server.requests_of("checkout.diff.get.request").len(), 1);
+}
+
+#[test]
+fn agent_features_decode_toggles_and_selects_and_skip_unknown_types() {
+    let server = FakeServer::start();
+    server.with(|s| {
+        let mut agent = agent_snapshot("a1", "idle");
+        agent["features"] = json!([
+            {"type": "toggle", "id": "fast", "label": "Fast mode", "description": "Faster",
+             "tooltip": "Use the fast model", "icon": "zap", "value": true},
+            {"type": "slider", "id": "temp", "label": "Temperature", "min": 0, "max": 1},
+            {"type": "select", "id": "effort", "label": "Effort", "value": null, "options": [
+                {"id": "low", "label": "Low", "isDefault": true},
+                {"id": "high", "label": "High", "description": "Slow", "metadata": {"tier": 2}}]},
+        ]);
+        s.agents = vec![agent, agent_snapshot("a2", "idle")];
+    });
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.agents().len() == 2));
+    assert_eq!(
+        harness.core.agents()[0].title,
+        "agent a1",
+        "the snapshot decodes"
+    );
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("tier".into(), json!(2));
+    assert_eq!(
+        harness.core.agent_features("a1"),
+        vec![
+            AgentFeature {
+                id: "fast".into(),
+                label: "Fast mode".into(),
+                description: Some("Faster".into()),
+                tooltip: Some("Use the fast model".into()),
+                icon: Some("zap".into()),
+                kind: AgentFeatureKind::Toggle { value: true },
+            },
+            AgentFeature {
+                id: "effort".into(),
+                label: "Effort".into(),
+                description: None,
+                tooltip: None,
+                icon: None,
+                kind: AgentFeatureKind::Select {
+                    value: None,
+                    options: vec![
+                        AgentFeatureOption {
+                            id: "low".into(),
+                            label: "Low".into(),
+                            description: None,
+                            is_default: Some(true),
+                            metadata: serde_json::Map::new(),
+                        },
+                        AgentFeatureOption {
+                            id: "high".into(),
+                            label: "High".into(),
+                            description: Some("Slow".into()),
+                            is_default: None,
+                            metadata,
+                        },
+                    ],
+                },
+            },
+        ]
+    );
+    assert_eq!(harness.core.agent_features("a2"), vec![]);
+}
+
+#[test]
+fn set_agent_feature_sends_the_value_and_reports_a_refusal() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.on("set_agent_feature_request", |request| {
+        let known = request["featureId"] == "fast";
+        vec![session(
+            "set_agent_feature_response",
+            json!({"requestId": request["requestId"], "agentId": request["agentId"],
+                   "accepted": known, "error": if known { Value::Null } else { json!("unknown feature") }}),
+        )]
+    });
+    let mut harness = connect(&server);
+    let reply = harness.core.set_agent_feature("a1", "fast", json!(true));
+    harness.wait(reply, WAIT).unwrap();
+    let requests = server.requests_of("set_agent_feature_request");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        (
+            requests[0]["agentId"].as_str(),
+            requests[0]["featureId"].as_str(),
+            &requests[0]["value"]
+        ),
+        (Some("a1"), Some("fast"), &json!(true))
+    );
+
+    let reply = harness
+        .core
+        .set_agent_feature("a1", "effort", json!("high"));
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "unknown feature"
+    );
+    assert_eq!(
+        server.requests_of("set_agent_feature_request")[1]["value"],
+        "high"
+    );
+}
+
+#[test]
+fn checkout_diff_returns_every_file_from_one_request() {
+    let server = git_server();
+    let mut files = diff_files();
+    files.as_array_mut().unwrap().push(json!(
+        {"path": "logo.png", "oldPath": "img/logo.png", "isNew": false, "isDeleted": false,
+         "additions": 0, "deletions": 0, "status": "binary", "hunks": []}));
+    server.reply(
+        "checkout.diff.get.request",
+        "checkout.diff.get.response",
+        json!({"cwd": "/repo", "files": files, "error": null}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.checkout_diff("/repo");
+    let diff = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        diff,
+        vec![
+            FileDiff {
+                path: "src/a.rs".into(),
+                old_path: None,
+                is_new: false,
+                is_deleted: false,
+                status: FileDiffStatus::Ok,
+                additions: 2,
+                deletions: 1,
+                text: "--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1,2 +1,3 @@\n fn a() {}\n-let x = 1;\n+let x = 2;\n+let y = 3;\n".into(),
+            },
+            FileDiff {
+                path: "big.json".into(),
+                old_path: None,
+                is_new: true,
+                is_deleted: false,
+                status: FileDiffStatus::TooLarge,
+                additions: 90000,
+                deletions: 0,
+                text: String::new(),
+            },
+            FileDiff {
+                path: "logo.png".into(),
+                old_path: Some("img/logo.png".into()),
+                is_new: false,
+                is_deleted: false,
+                status: FileDiffStatus::Binary,
+                additions: 0,
+                deletions: 0,
+                text: String::new(),
+            },
+        ]
+    );
+    let requests = server.requests_of("checkout.diff.get.request");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        (
+            requests[0]["cwd"].as_str(),
+            requests[0]["compare"]["mode"].as_str()
+        ),
+        (Some("/repo"), Some("uncommitted"))
+    );
+    assert!(server.requests_of("checkout_status_request").is_empty());
+}
+
+#[test]
+fn commits_list_the_commits_or_fail_with_the_checkout_error() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.on("checkout.commits.list.request", |request| {
+        let payload = if request["cwd"] == "/repo" {
+            json!({"cwd": "/repo", "baseRef": "origin/main", "error": null, "commits": [
+                {"sha": "abc123", "shortSha": "abc", "subject": "feat: one", "authorName": "Hiep",
+                 "authorDate": "2026-10-16T01:00:00Z", "isOnRemote": false, "isOnBase": false,
+                 "files": [{"path": "a.rs", "additions": 3, "deletions": 1, "status": "modified"},
+                           {"path": "b.rs", "additions": 5, "deletions": 0}]},
+                {"sha": "def456", "shortSha": "def", "subject": "fix: two", "authorName": "Hiep",
+                 "authorDate": "2026-10-15T01:00:00Z", "isOnRemote": true, "files": []}]})
+        } else {
+            json!({"cwd": request["cwd"], "baseRef": null, "commits": [],
+                   "error": {"code": "UNKNOWN", "message": "git log failed"}})
+        };
+        let mut payload = payload;
+        payload["requestId"] = request["requestId"].clone();
+        vec![session("checkout.commits.list.response", payload)]
+    });
+    let mut harness = connect(&server);
+    let reply = harness.core.commits("/repo");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        CommitList {
+            base_ref: Some("origin/main".into()),
+            commits: vec![
+                CommitSummary {
+                    sha: "abc123".into(),
+                    short_sha: "abc".into(),
+                    subject: "feat: one".into(),
+                    author_name: "Hiep".into(),
+                    author_date: "2026-10-16T01:00:00Z".into(),
+                    is_on_remote: false,
+                    is_on_base: Some(false),
+                    files: vec![
+                        CommitFile {
+                            path: "a.rs".into(),
+                            additions: 3,
+                            deletions: 1,
+                            status: Some("modified".into()),
+                        },
+                        CommitFile {
+                            path: "b.rs".into(),
+                            additions: 5,
+                            deletions: 0,
+                            status: None,
+                        },
+                    ],
+                },
+                CommitSummary {
+                    sha: "def456".into(),
+                    short_sha: "def".into(),
+                    subject: "fix: two".into(),
+                    author_name: "Hiep".into(),
+                    author_date: "2026-10-15T01:00:00Z".into(),
+                    is_on_remote: true,
+                    is_on_base: None,
+                    files: vec![],
+                },
+            ],
+        }
+    );
+    assert_eq!(
+        server.requests_of("checkout.commits.list.request")[0]["cwd"],
+        "/repo"
+    );
+
+    let reply = harness.core.commits("/broken");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "git log failed"
+    );
+}
+
+#[test]
+fn commit_file_diff_renders_a_file_or_gives_none_for_null() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.on("checkout.commits.file_diff.request", |request| {
+        let file = if request["path"] == "a.rs" {
+            json!({"path": "a.rs", "isNew": false, "isDeleted": false, "additions": 1,
+                   "deletions": 0, "hunks": [{"oldStart": 1, "oldCount": 1, "newStart": 1,
+                   "newCount": 2, "lines": [{"type": "header", "content": "@@ -1 +1,2 @@"},
+                   {"type": "context", "content": "a"}, {"type": "add", "content": "b"}]}]})
+        } else {
+            Value::Null
+        };
+        vec![session(
+            "checkout.commits.file_diff.response",
+            json!({"requestId": request["requestId"], "cwd": request["cwd"],
+                   "sha": request["sha"], "path": request["path"], "file": file, "error": null}),
+        )]
+    });
+    let mut harness = connect(&server);
+    let reply = harness.core.commit_file_diff("/repo", "abc123", "a.rs");
+    let diff = harness.wait(reply, WAIT).unwrap().expect("a file");
+    assert_eq!(
+        (diff.status, diff.additions, diff.text.as_str()),
+        (
+            FileDiffStatus::Ok,
+            1,
+            "--- a/a.rs\n+++ b/a.rs\n@@ -1 +1,2 @@\n a\n+b\n"
+        )
+    );
+    let request = &server.requests_of("checkout.commits.file_diff.request")[0];
+    assert_eq!(
+        (
+            request["cwd"].as_str(),
+            request["sha"].as_str(),
+            request["path"].as_str()
+        ),
+        (Some("/repo"), Some("abc123"), Some("a.rs"))
+    );
+
+    let reply = harness.core.commit_file_diff("/repo", "abc123", "logo.png");
+    assert_eq!(harness.wait(reply, WAIT).unwrap(), None);
 }

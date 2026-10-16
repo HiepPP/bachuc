@@ -18,6 +18,10 @@ pub use core::ClientCore;
 pub use hosts::{HostConfig, client_id, data_dir, load_hosts, save_hosts};
 pub use model::{AgentControls, AgentSummary, ClientEvent, ProviderSummary, WorkspaceSummary};
 pub use model::{
+    AgentFeature, AgentFeatureKind, AgentFeatureOption, AttentionReason, ChangedFileDetails,
+    CheckoutDetails, CommitFile, CommitList, CommitSummary, DiffStat, FileDiff, FileDiffStatus,
+};
+pub use model::{
     ChangedFile, CheckoutStatus, DirectoryEvent, FileContent, FileEntry, FileKind, ProjectNode,
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
 };
@@ -479,6 +483,89 @@ impl Client {
         cx: &mut Context<Client>,
     ) -> Task<anyhow::Result<()>> {
         let receiver = self.core.write_project_config(root, config);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    // ---- follow-up fields and requests (TASK-157) ----
+
+    /// Whether the agent asks for attention, and why. `None` for an unknown agent.
+    pub fn agent_attention(&self, agent_id: &str) -> Option<(bool, Option<AttentionReason>)> {
+        self.core.agent_attention(agent_id)
+    }
+
+    /// The project's `projectKey`, else `["<serverId>","<projectId>"]` as the app builds it.
+    pub fn project_view_key(&self, project_id: &str) -> Option<String> {
+        self.core.project_view_key(project_id)
+    }
+
+    pub fn workspace_diff_stat(&self, workspace_id: &str) -> Option<DiffStat> {
+        self.core.workspace_diff_stat(workspace_id)
+    }
+
+    pub fn workspace_pinned_at(&self, workspace_id: &str) -> Option<String> {
+        self.core.workspace_pinned_at(workspace_id)
+    }
+
+    /// The agent's provider features; a feature type this client does not know is left out.
+    pub fn agent_features(&self, agent_id: &str) -> Vec<AgentFeature> {
+        self.core.agent_features(agent_id)
+    }
+
+    /// Sets a provider feature; `value` is a bool for a toggle and an option id for a select.
+    pub fn set_agent_feature(
+        &mut self,
+        agent_id: &str,
+        feature_id: &str,
+        value: serde_json::Value,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.set_agent_feature(agent_id, feature_id, value);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// `checkout_status` with the git flag and the full file fields.
+    pub fn checkout_details(
+        &mut self,
+        cwd: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<CheckoutDetails>> {
+        let receiver = self.core.checkout_details(cwd);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Every uncommitted file of `cwd` with its diff, from one `checkout.diff.get` request.
+    pub fn checkout_diff(
+        &mut self,
+        cwd: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<FileDiff>>> {
+        let receiver = self.core.checkout_diff(cwd);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn commits(
+        &mut self,
+        cwd: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<CommitList>> {
+        let receiver = self.core.commits(cwd);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// The diff of one file in one commit; `None` when the commit has no text diff for it.
+    pub fn commit_file_diff(
+        &mut self,
+        cwd: &str,
+        sha: &str,
+        path: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Option<FileDiff>>> {
+        let receiver = self.core.commit_file_diff(cwd, sha, path);
         self.publish(cx);
         reply_task(receiver, cx)
     }
