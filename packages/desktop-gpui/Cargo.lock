@@ -836,6 +836,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bachuc-plugin-workspace-spaces"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "bachuc-theme",
+ "futures",
+ "gpui-kit",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bachuc-protocol"
 version = "0.1.0"
 dependencies = [
