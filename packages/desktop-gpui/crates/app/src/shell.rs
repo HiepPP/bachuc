@@ -7,7 +7,9 @@ use crate::actions::{BindingSpec, JumpToTab, RunAction, SHELL_CONTEXT, binding_s
 use crate::chrome::{ExplorerResize, HANDLE_WIDTH, NoPreview};
 use crate::dock;
 use crate::new_agent::{Created, DraftPane};
-use crate::panes::{AgentPane, Launch, LaunchItem, LazyAgentPane, NewTabPane, launch_hints};
+use crate::panes::{
+    AgentPane, Launch, LaunchItem, LazyAgentPane, NewTabPane, PaneFrame, launch_hints,
+};
 use crate::state::{
     Connection, LayoutPrefs, absolute_path, agent_key, agent_of_key, agent_title, badge_count,
     badge_label, command_items, diff_key, explorer_width, file_key, file_name, find_workspace,
@@ -72,6 +74,15 @@ impl PaneContent {
         }
     }
 
+    /// Whether the pane has its own focusable element with a role: a composer, a prompt, or a
+    /// terminal. Other panes get a `PaneFrame`.
+    fn owns_focus(&self) -> bool {
+        matches!(
+            self,
+            PaneContent::Agent(_) | PaneContent::Draft(_) | PaneContent::Terminal(_)
+        )
+    }
+
     /// Kills a terminal's daemon terminal; other panes need nothing.
     fn release(self, cx: &mut App) {
         if let PaneContent::Terminal(view) = self {
@@ -86,6 +97,8 @@ impl PaneContent {
 pub(crate) struct Pane {
     identity: Option<String>,
     content: PaneContent,
+    /// The focus target when the content has none (`PaneContent::owns_focus`).
+    frame: Option<Entity<PaneFrame>>,
     title: SharedString,
     _subscriptions: Vec<Subscription>,
 }
@@ -695,9 +708,10 @@ impl Shell {
             PaneContent::Draft(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
             // A terminal focuses itself when it opens and on a click.
             PaneContent::Terminal(_) => {}
+            // Inside the workspace element, so the workspace shortcuts still reach it.
             _ => {
-                if let Some(open) = self.workspaces.get(workspace_id) {
-                    open.view.read(cx).focus_handle(cx).focus(window, cx);
+                if let Some(frame) = &pane.frame {
+                    frame.update(cx, |frame, cx| frame.focus(window, cx));
                 }
             }
         }
@@ -729,18 +743,21 @@ impl Shell {
             content.release(cx);
             return;
         };
+        let frame = (!content.owns_focus())
+            .then(|| cx.new(|cx| PaneFrame::new(title.clone(), content.view(), cx)));
         let item = PaneItem {
             key: key.clone(),
             title: title.clone(),
             icon,
             modified: false,
-            view: content.view(),
+            view: frame.clone().map_or_else(|| content.view(), AnyView::from),
         };
         let old = open.panes.insert(
             key,
             Pane {
                 identity,
                 content,
+                frame,
                 title,
                 _subscriptions: subscriptions,
             },

@@ -1,6 +1,6 @@
 //! Pane views the app opens in a `Workspace`: the agent pane (timeline over composer) and the
-//! Electron new-tab launcher (`panels/new-tab-panel.tsx`). Terminal, file, and diff panes are
-//! the crate views themselves.
+//! Electron new-tab launcher (`panels/new-tab-panel.tsx`), and the focus frame around panes
+//! that cannot take focus. Terminal, file, and diff panes are the crate views themselves.
 
 use crate::actions::{AGENT_CONTEXT, FindInTimeline};
 use bachuc_client::Client;
@@ -18,6 +18,43 @@ use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+
+// ----- focus frame -----
+
+/// The focus target of a pane that has no focusable element of its own (new tab, loading
+/// agent, file, diff). Without it the app would focus the `Workspace` element, which has no
+/// role, so VoiceOver would announce the whole window.
+pub struct PaneFrame {
+    focus: FocusHandle,
+    label: SharedString,
+    child: AnyView,
+}
+
+impl PaneFrame {
+    pub fn new(label: SharedString, child: AnyView, cx: &mut Context<PaneFrame>) -> PaneFrame {
+        PaneFrame {
+            focus: cx.focus_handle(),
+            label,
+            child,
+        }
+    }
+
+    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+        self.focus.focus(window, cx);
+    }
+}
+
+impl Render for PaneFrame {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("pane-frame")
+            .role(Role::Group)
+            .aria_label(self.label.clone())
+            .track_focus(&self.focus)
+            .size_full()
+            .child(self.child.clone())
+    }
+}
 
 // ----- agent pane -----
 

@@ -2,7 +2,8 @@
 //!
 //! Bundle: `packages/desktop-gpui/bundle.sh bin bachuc-desktop "Bachuc GPUI" io.github.hieppp.bachuc-desktop`
 //! The host list is `~/Library/Application Support/BachucGpui/hosts.json`. The app opens on the
-//! host named `live`, or on the host named by `BACHUC_HOST`.
+//! host named `live`, or on the host named by `BACHUC_HOST`. `BACHUC_WINDOW=900x800` opens the
+//! window at that size (default 1200x800, minimum 640x480), for checks at a set width.
 
 mod actions;
 mod chrome;
