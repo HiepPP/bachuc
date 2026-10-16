@@ -1,0 +1,19 @@
+[package]
+name = "bachuc-plugin-jev-orchestrator"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The native client of `hiep-plugins/plugins/jev-orchestrator` (ADR-0045). Never depends on a
+# view crate or on another plugin crate.
+[dependencies]
+anyhow = "1"
+bachuc-client = { path = "../../crates/client" }
+bachuc-icons = { path = "../../crates/icons" }
+bachuc-plugin-host = { path = "../../crates/plugin-host" }
+bachuc-theme = { path = "../../crates/theme" }
+gpui-kit.workspace = true
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }

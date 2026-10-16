@@ -726,6 +726,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bachuc-plugin-jev-orchestrator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "bachuc-theme",
+ "gpui-kit",
+ "log",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "bachuc-plugin-next-prompt-actions"
 version = "0.1.0"
 dependencies = [
