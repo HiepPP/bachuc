@@ -6,3 +6,8 @@ publish = false
 
 [dependencies]
 gpui-kit = "=0.7.3"
+
+[dev-dependencies]
+# Only the tokens example draws icons. bachuc-icons depends on this crate for ICON_MD; a
+# dev-dependency cycle is allowed.
+bachuc-icons = { path = "../icons" }
