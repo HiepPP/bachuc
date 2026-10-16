@@ -735,9 +735,11 @@ dependencies = [
  "bachuc-diagram",
  "bachuc-explorer",
  "bachuc-icons",
+ "bachuc-plugin-host",
  "bachuc-theme",
  "chrono",
  "gpui-kit",
+ "log",
  "serde_json",
  "similar",
 ]

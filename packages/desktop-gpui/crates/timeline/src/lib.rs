@@ -13,15 +13,17 @@ pub mod grouping;
 mod image_view;
 pub mod links;
 pub mod markdown;
+mod plugin_view;
+pub mod plugins;
 mod tool_view;
 pub mod tools;
 
 pub use image_view::{display_size, image_dimensions, read_target};
 pub use tool_view::{change_bar, display_path, edit_status_label};
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -31,6 +33,7 @@ use bachuc_client::{Client, ClientEvent};
 use bachuc_diagram::{DiagramReady, DiagramRenderer, image_size};
 use bachuc_explorer::syntax::Run;
 use bachuc_icons::{IconName, icon};
+use bachuc_plugin_host::{PluginHost, PluginHostEvent};
 use bachuc_theme::metrics::{
     FONT_2XL, FONT_BASE, FONT_CODE, FONT_CONTENT, FONT_LG, FONT_XL, ICON_MD, ICON_SM, ICON_XS,
     MAX_CONTENT_WIDTH, RADIUS_2XL, RADIUS_BASE, RADIUS_LG, RADIUS_MD, RADIUS_SM, SPACE_1, SPACE_2,
@@ -50,9 +53,13 @@ use serde_json::Value;
 use card_view::FormState;
 use diff::DiffLine;
 use find_bar::FindState;
-use grouping::{SharedRow, StepCounts, TurnGroup, TurnGrouper, TurnStep, entry_key, item_type};
+use grouping::{
+    SharedRow, StepCounts, TurnGroup, TurnGrouper, TurnStep, entry_key, item_type, message_key,
+};
 use image_view::ImageLoad;
 use markdown::{Block, Segment};
+use plugin_view::{PendingReveal, Selection};
+use plugins::{Part, ProjectInput, Projector, StepPart};
 
 /// What the timeline asks of the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -191,8 +198,12 @@ struct ViewRow {
 /// segment.
 struct Message {
     seq_end: u64,
+    /// The hash of the shown text, which a plugin's kept source can replace.
+    text_hash: u64,
     segments: Vec<Segment>,
     states: Vec<Option<Entity<TextViewState>>>,
+    /// Watch the text states for a selection, for the selection actions.
+    observers: Vec<Subscription>,
 }
 
 /// Syntax runs per line, as `bachuc_explorer::syntax::split_lines` returns them.
@@ -265,6 +276,21 @@ pub struct TimelineView {
     clock: Option<Task<()>>,
     /// When the last sync redrew the view.
     synced_at: Option<Instant>,
+    /// The plugin host, when the app made one: transformers, renderers, and selection actions.
+    host: Option<Entity<PluginHost>>,
+    projector: Projector,
+    /// The host's timeline revision and the hash of the agent's labels at the last sync.
+    plugin_revision: u64,
+    labels_hash: Option<u64>,
+    workspace_id: Option<String>,
+    /// Plugin item views by item id, with the data hash they were built from.
+    plugin_views: HashMap<String, (u64, AnyView)>,
+    selection: Option<Selection>,
+    /// The timeline's bounds and the selection toolbar's size at the last paint.
+    bounds: Rc<Cell<Bounds<Pixels>>>,
+    toolbar_size: Rc<Cell<Size<Pixels>>>,
+    pending_reveal: Option<PendingReveal>,
+    reveal_highlight: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -296,7 +322,8 @@ impl TimelineView {
             }
         });
 
-        let subscriptions = vec![
+        let host = bachuc_plugin_host::host(cx);
+        let mut subscriptions = vec![
             cx.subscribe(&client, |this, _, event: &ClientEvent, cx| match event {
                 ClientEvent::TimelineChanged { agent_id }
                 | ClientEvent::PermissionRequested { agent_id }
@@ -335,6 +362,18 @@ impl TimelineView {
                     .update(cx, |client, cx| client.unview_agent(&agent_id, cx));
             }),
         ];
+        if let Some(host) = &host {
+            subscriptions.push(cx.subscribe(
+                host,
+                |this, _, event: &PluginHostEvent, cx| match event {
+                    // Both grow the timeline revision, which the sync compares.
+                    PluginHostEvent::TimelineTransformsChanged
+                    | PluginHostEvent::ContributionsChanged => this.sync(cx),
+                    PluginHostEvent::PluginStateChanged { .. } => cx.notify(),
+                    _ => {}
+                },
+            ));
+        }
 
         let id = agent_id.clone();
         client.update(cx, |client, cx| client.view_agent(&id, cx));
@@ -371,6 +410,17 @@ impl TimelineView {
             copied: None,
             clock: None,
             synced_at: None,
+            host,
+            projector: Projector::default(),
+            plugin_revision: 0,
+            labels_hash: None,
+            workspace_id: None,
+            plugin_views: HashMap::new(),
+            selection: None,
+            bounds: Rc::new(Cell::new(Bounds::default())),
+            toolbar_size: Rc::new(Cell::new(Size::default())),
+            pending_reveal: None,
+            reveal_highlight: None,
             _subscriptions: subscriptions,
         };
         this.sync(cx);
@@ -398,19 +448,35 @@ impl TimelineView {
             .iter()
             .find(|agent| agent.id == self.agent_id);
         let turn_active = agent.is_some_and(|agent| agent.status == "running");
-        if let Some(agent) = agent
-            && agent.cwd != self.cwd
-        {
-            self.cwd = agent.cwd.clone();
+        if let Some(agent) = agent {
+            if agent.cwd != self.cwd {
+                self.cwd = agent.cwd.clone();
+            }
+            if agent.workspace_id != self.workspace_id {
+                self.workspace_id = agent.workspace_id.clone();
+            }
         }
+        let labels: BTreeMap<String, String> =
+            client.agent_labels(&self.agent_id).unwrap_or_default();
+        let labels_hash = plugins::labels_hash(&labels);
+        let revision = self
+            .host
+            .as_ref()
+            .map_or(0, |host| host.read(cx).timeline_revision());
         let Some(state) = client.timeline(&self.agent_id) else {
             return;
         };
-        if self.version == Some(state.version) && self.turn_active == turn_active {
+        if self.version == Some(state.version)
+            && self.turn_active == turn_active
+            && self.plugin_revision == revision
+            && self.labels_hash == Some(labels_hash)
+        {
             return;
         }
         self.version = Some(state.version);
         self.turn_active = turn_active;
+        self.plugin_revision = revision;
+        self.labels_hash = Some(labels_hash);
         self.loaded = true;
         self.has_older = state.has_older;
         let permissions = state.pending_permissions.clone();
@@ -419,8 +485,41 @@ impl TimelineView {
         self.responding.retain(|id, _| pending(id));
         self.forms.retain(|id, _| pending(id));
         self.grouper.sync(&self.entries, turn_active);
-        let images = self.update_messages(cx);
-        self.update_hashes();
+        let projected = self.projector.sync(
+            &ProjectInput {
+                index: self.host.as_ref().map(|host| host.read(cx).index()),
+                revision,
+                agent_id: &self.agent_id,
+                labels: &labels,
+                turn_active,
+            },
+            &self.entries,
+            self.grouper.changed(),
+            self.grouper.shifted(),
+        );
+        // The entries to read again: the changed ones and the ones whose projection changed,
+        // or every entry when the transformers or labels changed.
+        let touched: Vec<usize> = if projected.full {
+            (0..self.entries.len()).collect()
+        } else {
+            let mut touched = self.grouper.changed().to_vec();
+            touched.extend(&projected.changed);
+            touched.sort_unstable();
+            touched.dedup();
+            touched
+        };
+        // A turn keeps its rows while its group is the same, so a projection that changed
+        // outside the grouper's changes rebuilds them.
+        if touched.len() > self.grouper.changed().len() {
+            self.rows_stale = true;
+        }
+        if projected.full {
+            self.plugin_views.clear();
+        } else if self.grouper.shifted() {
+            self.prune_plugin_views();
+        }
+        let images = self.update_messages(&touched, cx);
+        self.update_hashes(&touched);
         for source in images {
             self.load_image(&source, cx);
         }
@@ -501,7 +600,25 @@ impl TimelineView {
         self.apply_rows(rows);
         self.update_clock(cx);
         self.synced_at = Some(Instant::now());
+        self.run_pending_reveal(cx);
         cx.notify();
+    }
+
+    /// Drops the views of plugin items whose entries went.
+    fn prune_plugin_views(&mut self) {
+        let mut live: HashSet<String> = self
+            .projector
+            .item_ids()
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        live.extend(
+            self.entries
+                .iter()
+                .filter_map(|entry| plugins::daemon_item(&entry["item"]))
+                .map(|(_, id, _)| id),
+        );
+        self.plugin_views.retain(|id, _| live.contains(id));
     }
 
     /// Syncs again after a change made in this view, such as a toggle or an answer.
@@ -574,6 +691,13 @@ impl TimelineView {
         self.plan_toggled
             .contains(&format!("tool-{key}"))
             .hash(&mut hasher);
+        // A revision can change the renderers, so plugin rows draw again with it.
+        if let Some(projection) = self.projector.get(index) {
+            projection.hash.hash(&mut hasher);
+            self.plugin_revision.hash(&mut hasher);
+        } else if item_type(entry) == "plugin" {
+            self.plugin_revision.hash(&mut hasher);
+        }
         let mut has_diagram = false;
         if let Some(message) = self.messages.get(&key) {
             for segment in &message.segments {
@@ -599,9 +723,9 @@ impl TimelineView {
         }
     }
 
-    /// Hashes the entries the last grouper sync read again, and builds the diffs of the edit
-    /// and write calls among them.
-    fn update_hashes(&mut self) {
+    /// Hashes the `touched` entries again, and builds the diffs of the edit and write calls
+    /// among them. `touched` is in order and holds every entry past the old end.
+    fn update_hashes(&mut self, touched: &[usize]) {
         if self.grouper.shifted() {
             let live: HashSet<u64> = (0..self.entries.len())
                 .map(|index| self.grouper.key(index))
@@ -609,9 +733,12 @@ impl TimelineView {
             self.diffs.retain(|key, _| live.contains(key));
         }
         self.entry_hashes.truncate(self.entries.len());
-        for index in self.grouper.changed().to_vec() {
+        for &index in touched {
             let entry = &self.entries[index];
-            if grouping::edited_file_path(entry).is_some() {
+            // A diff changes only with its entry.
+            if grouping::edited_file_path(entry).is_some()
+                && self.grouper.changed().binary_search(&index).is_ok()
+            {
                 let lines = diff::entry_lines(entry);
                 let stats = diff::stats(&lines);
                 self.diffs.insert(
@@ -782,7 +909,7 @@ impl TimelineView {
 
     /// Splits each new or changed assistant entry into segments and updates its text states.
     /// Returns the image sources of the changed messages, which the caller loads.
-    fn update_messages(&mut self, cx: &mut Context<Self>) -> Vec<String> {
+    fn update_messages(&mut self, touched: &[usize], cx: &mut Context<Self>) -> Vec<String> {
         if self.grouper.shifted() {
             let live: HashSet<u64> = self
                 .entries
@@ -793,26 +920,32 @@ impl TimelineView {
             self.messages.retain(|key, _| live.contains(key));
         }
         let mut images = Vec::new();
-        for &index in self.grouper.changed() {
+        for &index in touched {
             let entry = &self.entries[index];
             if item_type(entry) != "assistant_message" {
                 continue;
             }
             let key = entry_key(entry);
             let seq_end = entry["seqEnd"].as_u64().unwrap_or(0);
+            let text = plugins::shown_text(entry, self.projector.get(index).map(|p| &**p));
+            let text_hash = {
+                let mut hasher = DefaultHasher::new();
+                text.hash(&mut hasher);
+                hasher.finish()
+            };
             if self
                 .messages
                 .get(&key)
-                .is_some_and(|message| message.seq_end == seq_end)
+                .is_some_and(|message| message.seq_end == seq_end && message.text_hash == text_hash)
             {
                 continue;
             }
-            let text = entry["item"]["text"].as_str().unwrap_or("");
+            let message_id = message_key(entry);
             let segments = markdown::segments(text);
-            let old_states = self
+            let (old_states, mut observers) = self
                 .messages
                 .remove(&key)
-                .map(|message| message.states)
+                .map(|message| (message.states, message.observers))
                 .unwrap_or_default();
             let mut old_states = old_states.into_iter();
             let states = segments
@@ -832,7 +965,14 @@ impl TimelineView {
                             state.update(cx, |state, cx| state.set_text(&text, cx));
                             state
                         }
-                        None => cx.new(|cx| TextViewState::markdown(&text, cx)),
+                        None => {
+                            let state = cx.new(|cx| TextViewState::markdown(&text, cx));
+                            let message_id = message_id.clone();
+                            observers.push(cx.observe(&state, move |this, state, cx| {
+                                this.text_state_changed(&message_id, state, cx)
+                            }));
+                            state
+                        }
                     })
                 })
                 .collect();
@@ -840,8 +980,10 @@ impl TimelineView {
                 key,
                 Message {
                     seq_end,
+                    text_hash,
                     segments,
                     states,
+                    observers,
                 },
             );
         }
@@ -938,6 +1080,7 @@ impl TimelineView {
             let request = request.clone();
             self.ensure_form(&request, window, cx);
         }
+        self.ensure_plugin_views(index, window, cx);
         let this = &*self;
         let Some(row) = this.rows.get(index) else {
             return div().into_any_element();
@@ -976,6 +1119,9 @@ impl TimelineView {
         let RowKind::Entry(index) = row.kind else {
             return None;
         };
+        if self.projector.is_hidden(index) {
+            return None;
+        }
         let is_user = self.grouper.is_user(index);
         if !is_user && !self.grouper.is_assistant(index) {
             return None;
@@ -1012,14 +1158,23 @@ impl TimelineView {
     }
 
     fn render_entry(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+        match self.projector.get(index) {
+            Some(projection) => self.render_projected(index, projection, cx),
+            None => self.render_source_entry(index, cx),
+        }
+    }
+
+    /// An entry as itself, with the text a plugin's kept source gave it.
+    fn render_source_entry(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let entry = &self.entries[index];
         let key = entry_key(entry);
         let item = &entry["item"];
         let t = tokens(cx);
         let base = ui_font_size(FONT_BASE, cx);
+        let shown = plugins::shown_text(entry, self.projector.get(index).map(|p| &**p));
         match item_type(entry) {
             "user_message" => {
-                let text = item["text"].as_str().unwrap_or("").to_string();
+                let text = shown.to_string();
                 let size = ui_font_size(FONT_CONTENT, cx);
                 let current = t.status_warning;
                 let highlights: Vec<_> = self
@@ -1065,7 +1220,7 @@ impl TimelineView {
                     .into_any_element()
             }
             "assistant_message" => {
-                let text = item["text"].as_str().unwrap_or("");
+                let text = shown;
                 v_flex()
                     .id(("message", key))
                     .role(Role::Article)
@@ -1182,6 +1337,7 @@ impl TimelineView {
                     .child(line())
                     .into_any_element()
             }
+            "plugin" => self.render_daemon_item(index, cx),
             other => {
                 let text = other.replace('_', " ");
                 div()
@@ -1681,22 +1837,40 @@ impl TimelineView {
                     .child(time),
             );
 
-        let notes = step
-            .note
-            .iter()
-            .flat_map(|&note| self.render_markdown(entry_key(&self.entries[note]), cx))
-            .collect::<Vec<_>>();
-        let edits = step
-            .edits
-            .iter()
-            .map(|&edit| self.render_edit(edit, cx))
-            .collect::<Vec<_>>();
+        let mut notes = Vec::new();
+        for &note in &step.note {
+            let key = entry_key(&self.entries[note]);
+            match self.projector.get(note) {
+                None => notes.extend(self.render_markdown(key, cx)),
+                Some(projection) => {
+                    for part in projection.parts() {
+                        match part {
+                            Part::Source => notes.extend(self.render_markdown(key, cx)),
+                            Part::Item(item) => notes.push(self.render_plugin_item(&item.id, cx)),
+                        }
+                    }
+                }
+            }
+        }
+        // Edits and plugin items, in call order (`turn/view.tsx`): a plugin item always shows,
+        // an edit call that a plugin did not replace keeps its edit row.
+        let mut edits = Vec::new();
+        for &index in &step.items {
+            let projection = self.projector.get(index).map(|p| &**p);
+            for part in plugins::step_parts(projection, step.edits.contains(&index)) {
+                edits.push(match part {
+                    StepPart::Edit => self.render_edit(index, cx),
+                    StepPart::Item(item) => self.render_plugin_item(&item.id, cx),
+                });
+            }
+        }
         // A picked step also lists its other calls, so each tool kind can open its details.
         let calls = if is_selected {
             step.items
                 .iter()
                 .filter(|index| !step.edits.contains(index))
                 .filter(|&&index| item_type(&self.entries[index]) == "tool_call")
+                .filter(|&&index| plugins::call_listed(self.projector.get(index).map(|p| &**p)))
                 // The step body has no stream padding, so the badge does not reach past it.
                 .map(|&index| {
                     div()
@@ -1863,7 +2037,14 @@ impl Render for TimelineView {
                 .into_any_element()
         };
         let lightbox = self.render_lightbox(cx);
-        base.child(body)
+        let bounds = self.bounds.clone();
+        // Records where the timeline is, so the selection toolbar can stay inside it.
+        let measure = canvas(move |area, _, _| bounds.set(area), |_, _, _, _| {})
+            .absolute()
+            .size_full();
+        base.child(measure)
+            .child(body)
+            .children(self.render_selection_toolbar(cx))
             .children(self.render_find_bar(window, cx))
             .children(lightbox)
     }

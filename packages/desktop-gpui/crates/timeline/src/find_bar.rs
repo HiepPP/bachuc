@@ -8,7 +8,7 @@ use bachuc_icons::IconName;
 use bachuc_theme::metrics::{
     BORDER_WIDTH_2, FONT_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3,
 };
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, Tokens, shadow, tokens, ui_font_size};
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::text::RangeHighlight;
@@ -44,6 +44,11 @@ fn focus_ring(color: Hsla) -> Div {
         .border(px(RING_WIDTH))
         .border_color(color)
         .rounded(px(RADIUS_MD + reach))
+}
+
+/// The ring color: `outlineColor: theme.colors.accent` in `control-geometry.ts` (Q-098).
+fn ring_color(t: &Tokens) -> Hsla {
+    t.accent
 }
 
 /// Where one match is: an entry, the markdown segment of an assistant entry (None for a user
@@ -350,7 +355,7 @@ impl TimelineView {
                                 .relative()
                                 .bg(t.surface2)
                                 .rounded(px(RADIUS_MD))
-                                .when(focused, |field| field.child(focus_ring(t.ring)))
+                                .when(focused, |field| field.child(focus_ring(ring_color(&t))))
                                 .child(
                                     div().flex_1().min_w_0().child(
                                         Input::new(&finder.input)
@@ -417,8 +422,18 @@ impl TimelineView {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob brings its own `test` attribute.
-    use super::{RING_OFFSET, RING_WIDTH, focus_ring};
+    use super::{RING_OFFSET, RING_WIDTH, focus_ring, ring_color};
+    use bachuc_theme::Tokens;
     use gpui_kit::{AbsoluteLength, DefiniteLength, Length, Styled as _, hsla, px};
+
+    /// Q-098: the find field's ring is the accent color, as Electron's, not the ring token.
+    #[test]
+    fn focus_ring_uses_the_accent_color() {
+        for t in [Tokens::light(), Tokens::claude_dark()] {
+            assert_eq!(ring_color(&t), t.accent);
+            assert_ne!(ring_color(&t), t.ring);
+        }
+    }
 
     /// Electron's find field outline: 2 px wide, 1 px outside the border box, in the given color.
     #[test]
