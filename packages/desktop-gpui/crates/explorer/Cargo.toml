@@ -1,0 +1,22 @@
+[package]
+name = "bachuc-explorer"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1"
+bachuc-client = { path = "../client" }
+bachuc-icons = { path = "../icons" }
+bachuc-theme = { path = "../theme" }
+# gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot; keep the same pin in every crate.
+# The tree-sitter features color the file viewer; other languages show plain text.
+gpui-kit = { version = "=0.7.3", features = [
+    "tree-sitter-bash",
+    "tree-sitter-javascript",
+    "tree-sitter-python",
+    "tree-sitter-rust",
+    "tree-sitter-tsx",
+    "tree-sitter-typescript",
+] }
+log = "0.4"
