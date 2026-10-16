@@ -27,7 +27,7 @@ build_dir_env: CARGO_TARGET_DIR
 - Builders run Claude with `bypassPermissions`, because nobody answers a permission. They still obey every rule in this file.
 - Builders carry the label `watchtower.task=<first TASK ID of the group>` (Q-037).
 - A test or UI checker agent never takes the user's mouse cursor (owner answer, 2026-10-16). Use only AX actions, AX reads, window screenshots, and keyboard input sent to the app. Record a line that needs the pointer (hover, drag, pointer scroll) as `UNVERIFIED (unattended): needs pointer`.
-- A tested app never comes to the front or covers the user's active app (owner answer, 2026-10-16). Launch it with `open -g`, and never activate or raise a window. Record a line that needs the app in front as `UNVERIFIED (unattended): needs foreground`.
+- A tested app never comes to the front or covers the user's active app (owner answer, 2026-10-16). Launch it with `open -g`, and never activate or raise a window. Record a line that needs the app in front as `UNVERIFIED (unattended): needs foreground`. One exception (Q-088): the TASK-155 CPU read and the missing dark-theme pairs may bring the app to the front, still without the cursor.
 - Builders run no screen check. They return each app screenshot, `cua_repl` step, AX tree read, and `measure.sh` read as `DEFERRED (UI checker)`.
 - Builders and the UI checker archive or kill every mock agent and terminal they create on live, except the run-start fixture.
 - Never push and never open a PR.
