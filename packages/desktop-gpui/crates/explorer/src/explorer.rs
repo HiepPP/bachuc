@@ -2,21 +2,23 @@
 //! the Files tree (`file-explorer-pane.tsx`) or the Changes tree (`changed-files-tree.tsx`).
 //!
 //! The view does not open anything itself. A click on a file emits `ExplorerEvent::OpenFile`, a
-//! click on a changed file emits `ExplorerEvent::OpenDiff`, and the app opens the viewer pane.
+//! click on a changed file emits `ExplorerDiffEvent::OpenAllDiffs`, a click on a file of a
+//! commit emits `ExplorerDiffEvent::OpenCommitDiff`, and the app opens the viewer pane.
 
-use crate::changes::{ChangeRow, ChangeTree};
-use crate::tree::{FileTree, RootState, Toggled, TreeRow};
+use crate::changes::{ChangeRow, CheckoutView};
+use crate::commits::{CommitRow, CommitsState, commit_rows, time_ago};
+use crate::diff_doc::Latest;
+use crate::tree::{FileTree, RootState, SortBy, Toggled, TreeRow};
 use crate::ui::{
-    CHANGE_ROW_HEIGHT, Change, FILE_ROW_HEIGHT, TRAILING_RAIL, TREE_ICON_GAP, centered_text,
-    change_icon, chevron, diff_stat, file_icon_element, loading_marker, state_message,
-    tree_padding_left,
+    CHANGE_ROW_HEIGHT, FILE_ROW_HEIGHT, TRAILING_RAIL, TREE_ICON_GAP, centered_text, change_icon,
+    chevron, diff_stat, file_icon_element, loading_marker, state_message, tree_padding_left,
 };
-use bachuc_client::{ChangedFile, Client, ClientEvent, DirectoryEvent};
+use bachuc_client::{Client, ClientEvent, CommitSummary, DirectoryEvent};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3, SPACE_4, TAB_BAR_HEIGHT,
 };
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{mono_font_family, tokens, ui_font_size};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -34,6 +36,16 @@ const TAB_HEIGHT: f32 = 26.;
 const TOOLBAR_HEIGHT: f32 = 36.;
 /// `SMALL_ICON_BUTTON_SIZE`, the hitbox of a toolbar icon button.
 const TOOLBAR_BUTTON: f32 = 20.;
+/// The Files sort trigger height (`sortTrigger`).
+const SORT_TRIGGER_HEIGHT: f32 = 24.;
+/// `CommitGraphNode`: the dot size, the rail width, and the short sha column.
+const COMMIT_DOT: f32 = 8.;
+const COMMIT_RAIL: f32 = 2.;
+const COMMIT_SHA_WIDTH: f32 = 70.;
+/// A commit row: 4 px above and below one 20 px line.
+const COMMIT_ROW_HEIGHT: f32 = 28.;
+/// The open Commits footer stops growing here and scrolls.
+const COMMITS_MAX_HEIGHT: f32 = 240.;
 
 /// What the Explorer tells its owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,6 +54,35 @@ pub enum ExplorerEvent {
     OpenFile { cwd: String, path: String },
     /// A changed file of the Changes tree was picked.
     OpenDiff { cwd: String, path: String },
+}
+
+/// The diff requests of the Changes tab, apart from `ExplorerEvent` so its owners keep matching
+/// that enum as before.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExplorerDiffEvent {
+    /// Open every uncommitted file in one diff, scrolled to `focus_path` when it is set.
+    OpenAllDiffs {
+        cwd: String,
+        focus_path: Option<String>,
+    },
+    /// Open the diff of one file of one commit.
+    OpenCommitDiff {
+        cwd: String,
+        sha: String,
+        path: String,
+    },
+}
+
+impl ExplorerDiffEvent {
+    /// The request for file `file` of `commit`; none when the commit has no such file.
+    pub fn commit_file(cwd: &str, commit: &CommitSummary, file: usize) -> Option<Self> {
+        let file = commit.files.get(file)?;
+        Some(ExplorerDiffEvent::OpenCommitDiff {
+            cwd: cwd.to_string(),
+            sha: commit.sha.clone(),
+            path: file.path.clone(),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,12 +96,9 @@ enum ChangesState {
     Idle,
     Loading,
     Failed(String),
-    /// The folder is not in a git repository (`branch` is none).
+    /// The folder is not in a git repository (`is_git` is false).
     NotGit,
-    Ready {
-        branch: String,
-        tree: ChangeTree,
-    },
+    Ready(CheckoutView),
 }
 
 pub struct Explorer {
@@ -72,6 +110,8 @@ pub struct Explorer {
     generation: u64,
     tree: FileTree,
     rows: Vec<TreeRow>,
+    sort: SortBy,
+    show_hidden: bool,
     selected_file: Option<String>,
     files_scroll: UniformListScrollHandle,
     changes: ChangesState,
@@ -80,12 +120,19 @@ pub struct Explorer {
     selected_change: Option<String>,
     changes_scroll: UniformListScrollHandle,
     /// The status request in flight or last applied; an older answer is dropped.
-    status_request: u64,
+    status_request: Latest,
+    /// The Commits footer starts closed, as Electron's does, and loads when it opens.
+    commits_open: bool,
+    commits: CommitsState,
+    commits_request: Latest,
+    /// The commits whose files show.
+    open_commits: HashSet<String>,
     watching: bool,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<ExplorerEvent> for Explorer {}
+impl EventEmitter<ExplorerDiffEvent> for Explorer {}
 
 impl Explorer {
     pub fn new(
@@ -103,6 +150,9 @@ impl Explorer {
                         && this.watching
                     {
                         this.request_status(cx);
+                        if this.commits_open {
+                            this.request_commits(cx);
+                        }
                     }
                 },
             ),
@@ -134,6 +184,9 @@ impl Explorer {
             generation: 0,
             tree: FileTree::new(),
             rows: Vec::new(),
+            sort: SortBy::Name,
+            // `explorerShowHiddenFiles` defaults to true.
+            show_hidden: true,
             selected_file: None,
             files_scroll: UniformListScrollHandle::new(),
             changes: ChangesState::Idle,
@@ -141,7 +194,11 @@ impl Explorer {
             collapsed: HashSet::new(),
             selected_change: None,
             changes_scroll: UniformListScrollHandle::new(),
-            status_request: 0,
+            status_request: Latest::default(),
+            commits_open: false,
+            commits: CommitsState::Loading,
+            commits_request: Latest::default(),
+            open_commits: HashSet::new(),
             watching: false,
             _subscriptions: subscriptions,
         };
@@ -164,10 +221,15 @@ impl Explorer {
         self.change_rows.clear();
         self.collapsed.clear();
         self.selected_change = None;
+        self.commits = CommitsState::Loading;
+        self.open_commits.clear();
         self.load_directory(crate::tree::ROOT, cx);
         if self.tab == ExplorerTab::Changes && self.visible {
             self.start_watching(cx);
             self.request_status(cx);
+            if self.commits_open {
+                self.request_commits(cx);
+            }
         }
         cx.notify();
     }
@@ -217,6 +279,9 @@ impl Explorer {
         }
         if self.watching {
             self.request_status(cx);
+            if self.commits_open {
+                self.request_commits(cx);
+            }
         }
     }
 
@@ -272,8 +337,18 @@ impl Explorer {
     }
 
     fn rebuild_rows(&mut self, cx: &mut Context<Explorer>) {
-        self.rows = self.tree.rows();
+        self.rows = self.tree.rows_with(self.sort, self.show_hidden);
         cx.notify();
+    }
+
+    fn cycle_sort(&mut self, cx: &mut Context<Explorer>) {
+        self.sort = self.sort.next();
+        self.rebuild_rows(cx);
+    }
+
+    fn toggle_hidden(&mut self, cx: &mut Context<Explorer>) {
+        self.show_hidden = !self.show_hidden;
+        self.rebuild_rows(cx);
     }
 
     fn click_file_row(&mut self, index: usize, cx: &mut Context<Explorer>) {
@@ -307,17 +382,16 @@ impl Explorer {
             cx.notify();
             return;
         }
-        self.status_request += 1;
-        let request = self.status_request;
+        let request = self.status_request.begin();
         let generation = self.generation;
         let cwd = self.cwd.clone();
         let task = self
             .client
-            .update(cx, |client, cx| client.checkout_status(&cwd, cx));
+            .update(cx, |client, cx| client.checkout_details(&cwd, cx));
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
-                if this.generation != generation || this.status_request != request {
+                if this.generation != generation || !this.status_request.is_current(request) {
                     return;
                 }
                 this.apply_status(result, cx);
@@ -329,22 +403,18 @@ impl Explorer {
 
     fn apply_status(
         &mut self,
-        result: anyhow::Result<bachuc_client::CheckoutStatus>,
+        result: anyhow::Result<bachuc_client::CheckoutDetails>,
         cx: &mut Context<Explorer>,
     ) {
         self.changes = match result {
             Err(error) => {
-                log::warn!("checkout_status: {error:#}");
+                log::warn!("checkout_details: {error:#}");
                 ChangesState::Failed(format!("{error:#}"))
             }
-            Ok(bachuc_client::CheckoutStatus {
-                branch: Some(branch),
-                files,
-            }) => ChangesState::Ready {
-                branch,
-                tree: ChangeTree::build(&files),
+            Ok(details) => match CheckoutView::new(details) {
+                Some(view) => ChangesState::Ready(view),
+                None => ChangesState::NotGit,
             },
-            Ok(_) => ChangesState::NotGit,
         };
         self.rebuild_change_rows();
         cx.notify();
@@ -352,9 +422,79 @@ impl Explorer {
 
     fn rebuild_change_rows(&mut self) {
         self.change_rows = match &self.changes {
-            ChangesState::Ready { tree, .. } => tree.rows(&self.collapsed),
+            ChangesState::Ready(view) => view.tree.rows(&self.collapsed),
             _ => Vec::new(),
         };
+    }
+
+    fn open_all_diffs(&mut self, focus_path: Option<String>, cx: &mut Context<Explorer>) {
+        cx.emit(ExplorerDiffEvent::OpenAllDiffs {
+            cwd: self.cwd.clone(),
+            focus_path,
+        });
+    }
+
+    // ----- commits -----
+
+    fn toggle_commits(&mut self, cx: &mut Context<Explorer>) {
+        self.commits_open = !self.commits_open;
+        if self.commits_open {
+            self.request_commits(cx);
+        }
+        cx.notify();
+    }
+
+    fn request_commits(&mut self, cx: &mut Context<Explorer>) {
+        if !self.client.read(cx).is_connected() {
+            // `ClientEvent::Connected` refreshes, which asks again.
+            return;
+        }
+        let request = self.commits_request.begin();
+        let generation = self.generation;
+        let cwd = self.cwd.clone();
+        let task = self
+            .client
+            .update(cx, |client, cx| client.commits(&cwd, cx));
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.generation != generation || !this.commits_request.is_current(request) {
+                    return;
+                }
+                if let Err(error) = &result {
+                    log::warn!("commits: {error:#}");
+                }
+                this.commits = CommitsState::from_result(result);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn click_commit_row(&mut self, row: CommitRow, cx: &mut Context<Explorer>) {
+        let CommitsState::Ready(commits) = &self.commits else {
+            return;
+        };
+        match row {
+            CommitRow::Commit { index } => {
+                let Some(commit) = commits.get(index) else {
+                    return;
+                };
+                if !self.open_commits.remove(&commit.sha) {
+                    self.open_commits.insert(commit.sha.clone());
+                }
+            }
+            CommitRow::File { commit, file } => {
+                let Some(event) = commits
+                    .get(commit)
+                    .and_then(|commit| ExplorerDiffEvent::commit_file(&self.cwd, commit, file))
+                else {
+                    return;
+                };
+                cx.emit(event);
+            }
+        }
+        cx.notify();
     }
 
     fn click_change_row(&mut self, index: usize, cx: &mut Context<Explorer>) {
@@ -370,18 +510,15 @@ impl Explorer {
                 self.rebuild_change_rows();
             }
             ChangeRow::File { index, .. } => {
-                let ChangesState::Ready { tree, .. } = &self.changes else {
+                let ChangesState::Ready(view) = &self.changes else {
                     return;
                 };
-                let Some(file) = tree.files().get(index) else {
+                let Some(file) = view.files.get(index) else {
                     return;
                 };
                 let path = file.path.clone();
                 self.selected_change = Some(path.clone());
-                cx.emit(ExplorerEvent::OpenDiff {
-                    cwd: self.cwd.clone(),
-                    path,
-                });
+                self.open_all_diffs(Some(path), cx);
             }
         }
         cx.notify();
@@ -463,28 +600,150 @@ impl Explorer {
                     .into_any_element()
             }
             RootState::Failed(message) => self.render_files_failed(message, cx),
-            RootState::Empty => {
-                centered_text("explorer-files-empty", "No files", false, cx).into_any_element()
-            }
-            RootState::Ready => div()
-                .id("explorer-files")
-                .role(Role::Tree)
-                .aria_label("Files")
+            RootState::Empty => v_flex()
                 .flex_1()
                 .min_h_0()
+                .child(self.render_files_toolbar(cx))
+                .child(centered_text("explorer-files-empty", "No files", false, cx))
+                .into_any_element(),
+            RootState::Ready if self.rows.is_empty() => v_flex()
+                .flex_1()
+                .min_h_0()
+                .child(self.render_files_toolbar(cx))
+                .child(centered_text(
+                    "explorer-files-empty",
+                    if self.tree.only_hidden() {
+                        "No visible files"
+                    } else {
+                        "No files"
+                    },
+                    false,
+                    cx,
+                ))
+                .into_any_element(),
+            RootState::Ready => v_flex()
+                .flex_1()
+                .min_h_0()
+                .child(self.render_files_toolbar(cx))
                 .child(
-                    uniform_list(
-                        "explorer-files-rows",
-                        self.rows.len(),
-                        cx.processor(Self::render_file_rows),
-                    )
-                    .track_scroll(&self.files_scroll)
-                    .size_full()
-                    .pt(px(SPACE_2))
-                    .pb(px(SPACE_4)),
+                    div()
+                        .id("explorer-files")
+                        .role(Role::Tree)
+                        .aria_label("Files")
+                        .flex_1()
+                        .min_h_0()
+                        .child(
+                            uniform_list(
+                                "explorer-files-rows",
+                                self.rows.len(),
+                                cx.processor(Self::render_file_rows),
+                            )
+                            .track_scroll(&self.files_scroll)
+                            .size_full()
+                            .pt(px(SPACE_2))
+                            .pb(px(SPACE_4)),
+                        ),
                 )
                 .into_any_element(),
         }
+    }
+
+    /// A 20 px icon button of a toolbar row, its glyph in the extra muted color.
+    fn toolbar_button(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        glyph: IconName,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let colors = tokens(cx);
+        div()
+            .id(id)
+            .role(Role::Button)
+            .aria_label(label)
+            .flex_shrink_0()
+            .size(px(TOOLBAR_BUTTON))
+            .rounded(px(RADIUS_MD))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .hover(|style| style.bg(colors.interaction_highlight))
+            .child(
+                icon(glyph)
+                    .with_size(px(ICON_SM))
+                    .text_color(colors.foreground_extra_muted),
+            )
+    }
+
+    /// The Files toolbar (`files-pane-header`): the sort trigger, then the hidden files toggle
+    /// and refresh. New file and New folder need a create request the client does not have, and
+    /// the Modified sort needs a modified time that `FileEntry` does not have.
+    fn render_files_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let colors = tokens(cx);
+        let sort_label = self.sort.label();
+        let (hidden_label, hidden_icon) = if self.show_hidden {
+            ("Hide hidden files", IconName::Eye)
+        } else {
+            ("Show hidden files", IconName::EyeOff)
+        };
+        h_flex()
+            .id("files-pane-header")
+            .role(Role::Toolbar)
+            .aria_label("Files")
+            .flex_shrink_0()
+            .h(px(TOOLBAR_HEIGHT))
+            .pr(px(TRAILING_RAIL - (TOOLBAR_BUTTON - ICON_SM) / 2.))
+            .justify_between()
+            .bg(colors.surface_sidebar)
+            .border_b_1()
+            .border_color(colors.border)
+            .child(
+                h_flex()
+                    .id("files-sort-trigger")
+                    .role(Role::Button)
+                    .aria_label(format!("Sort by {sort_label}"))
+                    .ml(px(SPACE_3 - SPACE_1))
+                    .px(px(SPACE_1))
+                    .h(px(SORT_TRIGGER_HEIGHT))
+                    .gap(px(SPACE_1))
+                    .rounded(px(RADIUS_MD))
+                    .cursor_pointer()
+                    .hover(|style| style.bg(colors.interaction_highlight))
+                    .on_click(cx.listener(|this, _, _, cx| this.cycle_sort(cx)))
+                    .child(
+                        div()
+                            .text_size(ui_font_size(FONT_SM, cx))
+                            .text_color(colors.foreground_muted)
+                            .child(sort_label),
+                    )
+                    .child(
+                        icon(IconName::ChevronDown)
+                            .with_size(px(12.))
+                            .text_color(colors.foreground_muted),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap(px(SPACE_1))
+                    .child(
+                        self.toolbar_button("files-hidden-toggle", hidden_label, hidden_icon, cx)
+                            .aria_selected(!self.show_hidden)
+                            .when(!self.show_hidden, |this| {
+                                this.bg(colors.interaction_highlight)
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_hidden(cx))),
+                    )
+                    .child(
+                        self.toolbar_button(
+                            "files-refresh",
+                            "Refresh files",
+                            IconName::RotateCw,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+                    ),
+            )
     }
 
     fn render_files_failed(&self, message: String, cx: &mut Context<Self>) -> AnyElement {
@@ -598,9 +857,13 @@ impl Explorer {
                 cx,
             )
             .into_any_element(),
-            ChangesState::Ready { branch, tree } => {
-                let header = self.render_changes_header(branch.clone(), tree.files(), cx);
-                let body = if tree.files().is_empty() {
+            ChangesState::Ready(view) => {
+                let added = view.files.iter().map(|file| file.additions).sum();
+                let removed = view.files.iter().map(|file| file.deletions).sum();
+                let has_files = !view.files.is_empty();
+                let header =
+                    self.render_changes_header(view.branch.clone(), added, removed, has_files, cx);
+                let body = if !has_files {
                     state_message("explorer-changes-empty", "No changes to display", false, cx)
                         .into_any_element()
                 } else {
@@ -622,29 +885,279 @@ impl Explorer {
                         )
                         .into_any_element()
                 };
+                let footer = self.render_commits(cx);
                 v_flex()
                     .flex_1()
                     .min_h_0()
                     .child(header)
                     .child(body)
+                    .child(footer)
                     .into_any_element()
             }
         }
     }
 
+    /// The Commits footer (`CommitsSection`): a header that opens and closes it, then the
+    /// branch commits, each opening to its files.
+    fn render_commits(&mut self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let colors = tokens(cx);
+        let open = self.commits_open;
+        let count = if open { self.commits.count() } else { None };
+        let header = h_flex()
+            .id("commits-section-header")
+            .role(Role::Button)
+            .aria_label("Commits")
+            .aria_expanded(open)
+            .flex_shrink_0()
+            .pl(px(tree_padding_left(0)))
+            .pr(px(SPACE_3))
+            .py(px(SPACE_2))
+            .gap(px(SPACE_2))
+            .cursor_pointer()
+            .hover(|style| style.bg(colors.surface_sidebar_hover))
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_commits(cx)))
+            .child(chevron(open, &colors))
+            .child(
+                div()
+                    .text_size(ui_font_size(FONT_BASE, cx))
+                    .text_color(colors.foreground)
+                    .child("Commits"),
+            )
+            .child(
+                div()
+                    .id("commits-section-count")
+                    .flex_1()
+                    .text_size(ui_font_size(FONT_SM, cx))
+                    .text_color(colors.foreground_muted)
+                    .when_some(count, |this, count| {
+                        this.role(Role::Label)
+                            .aria_label(format!("{count} workspace commits"))
+                            .child(count.to_string())
+                    }),
+            );
+        let message = |id: &'static str, text: String, error: bool| {
+            div()
+                .id(id)
+                .role(Role::Status)
+                .aria_label(text.clone())
+                .pl(px(SPACE_2))
+                .pr(px(SPACE_3))
+                .py(px(SPACE_2))
+                .text_size(ui_font_size(FONT_SM, cx))
+                .text_color(if error {
+                    colors.status_danger
+                } else {
+                    colors.foreground_muted
+                })
+                .child(text)
+                .into_any_element()
+        };
+        let body = if !open {
+            None
+        } else {
+            Some(match &self.commits {
+                CommitsState::Loading => message(
+                    "commits-section-skeleton",
+                    "Loading commits...".into(),
+                    false,
+                ),
+                CommitsState::Failed => message(
+                    "commits-section-error",
+                    "Failed to load commits".into(),
+                    true,
+                ),
+                CommitsState::Empty { base } => message(
+                    "commits-section-no-workspace-commits",
+                    format!("No commits ahead of {base} yet"),
+                    false,
+                ),
+                CommitsState::Ready(commits) => {
+                    let rows = commit_rows(commits, &self.open_commits);
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |elapsed| elapsed.as_secs() as i64);
+                    let elements: Vec<AnyElement> = rows
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(position, row)| {
+                            self.render_commit_row(position, *row, commits, now, cx)
+                        })
+                        .collect();
+                    div()
+                        .id("commits-section-list")
+                        .role(Role::List)
+                        .aria_label("Commits")
+                        .max_h(px(COMMITS_MAX_HEIGHT))
+                        .overflow_y_scroll()
+                        .pb(px(SPACE_1))
+                        .children(elements)
+                        .into_any_element()
+                }
+            })
+        };
+        v_flex()
+            .flex_shrink_0()
+            .border_t_1()
+            .border_color(colors.border)
+            .child(header)
+            .children(body)
+    }
+
+    fn render_commit_row(
+        &self,
+        position: usize,
+        row: CommitRow,
+        commits: &[CommitSummary],
+        now: i64,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let colors = tokens(cx);
+        let base = h_flex()
+            .id(("commit-row", position))
+            .role(Role::Button)
+            .h(px(COMMIT_ROW_HEIGHT))
+            .px(px(SPACE_2))
+            .gap(px(SPACE_2))
+            .cursor_pointer()
+            .hover(|style| style.bg(colors.surface_sidebar_hover))
+            .on_click(cx.listener(move |this, _, _, cx| this.click_commit_row(row, cx)));
+        Some(match row {
+            CommitRow::Commit { index } => {
+                let commit = commits.get(index)?;
+                let open = self.open_commits.contains(&commit.sha);
+                let (first, last) = (index == 0, index + 1 == commits.len());
+                // Local commits are rings; commits on the remote are filled dots.
+                let dot = div()
+                    .size(px(COMMIT_DOT))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(colors.accent)
+                    .bg(if commit.is_on_remote {
+                        colors.accent
+                    } else {
+                        colors.surface0
+                    });
+                let node = div()
+                    .relative()
+                    .w(px(COMMIT_DOT))
+                    .h_full()
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when(!(first && last), |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .left(px((COMMIT_DOT - COMMIT_RAIL) / 2.))
+                                .w(px(COMMIT_RAIL))
+                                .top(if first {
+                                    px(COMMIT_ROW_HEIGHT / 2.)
+                                } else {
+                                    px(0.)
+                                })
+                                .bottom(if last {
+                                    px(COMMIT_ROW_HEIGHT / 2.)
+                                } else {
+                                    px(0.)
+                                })
+                                .bg(colors.accent),
+                        )
+                    })
+                    .child(dot);
+                base.aria_label(format!("{} {}", commit.short_sha, commit.subject))
+                    .aria_expanded(open)
+                    .child(node)
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(SPACE_1))
+                            .child(
+                                div()
+                                    .w(px(COMMIT_SHA_WIDTH))
+                                    .flex_shrink_0()
+                                    .truncate()
+                                    .font_family(mono_font_family(cx))
+                                    .text_size(ui_font_size(FONT_SM, cx))
+                                    .text_color(colors.foreground_muted)
+                                    .child(commit.short_sha.clone()),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(ui_font_size(FONT_BASE, cx))
+                                    .text_color(colors.foreground)
+                                    .child(commit.subject.clone()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .text_size(ui_font_size(FONT_SM, cx))
+                            .text_color(colors.foreground_muted)
+                            .child(time_ago(&commit.author_date, now)),
+                    )
+                    .child(chevron(open, &colors))
+                    .into_any_element()
+            }
+            CommitRow::File { commit, file } => {
+                let entry = commits.get(commit)?.files.get(file)?;
+                let name = entry
+                    .path
+                    .rsplit_once('/')
+                    .map_or(entry.path.as_str(), |(_, name)| name)
+                    .to_string();
+                let change = match entry.status.as_deref() {
+                    Some("added") => crate::changes::Change::Added,
+                    Some("deleted") => crate::changes::Change::Deleted,
+                    _ => crate::changes::Change::Modified,
+                };
+                base.aria_label(format!(
+                    "{}, {}, +{}, -{}",
+                    entry.path,
+                    change.label(),
+                    entry.additions,
+                    entry.deletions
+                ))
+                .pl(px(tree_padding_left(1)))
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(px(TREE_ICON_GAP))
+                        .child(file_icon_element(&name))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(ui_font_size(FONT_BASE, cx))
+                                .text_color(colors.foreground.opacity(0.76))
+                                .child(name),
+                        ),
+                )
+                .child(diff_stat(entry.additions, entry.deletions, cx))
+                .child(change_icon(change, &colors))
+                .into_any_element()
+            }
+        })
+    }
+
     /// The two toolbar rows over the Changes tree (`ChangesRepositoryToolbar` and
-    /// `ChangesComparisonToolbar`): the branch, then the diff mode with the total count and the
-    /// refresh button. Branch switching and the other diff mode are out of scope, so the branch
-    /// and the mode show as passive labels without a menu.
+    /// `ChangesComparisonToolbar`): the branch, then the diff mode with the total count, the
+    /// Open Diff tab button, and the refresh button. Branch switching and the other diff mode
+    /// are out of scope, so the branch and the mode show as passive labels without a menu.
     fn render_changes_header(
         &self,
         branch: String,
-        files: &[ChangedFile],
+        added: u32,
+        removed: u32,
+        has_files: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let colors = tokens(cx);
-        let added = files.iter().map(|file| file.added).sum();
-        let removed = files.iter().map(|file| file.removed).sum();
         let toolbar_row = |id: &'static str| {
             h_flex()
                 .id(id)
@@ -689,25 +1202,25 @@ impl Explorer {
                             .child(label("changes-diff-mode", "Uncommitted".into()))
                             .child(diff_stat(added, removed, cx)),
                     )
+                    .when(has_files, |this| {
+                        this.child(
+                            self.toolbar_button(
+                                "changes-open-tab",
+                                "Open Diff tab",
+                                IconName::FileDiff,
+                                cx,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| this.open_all_diffs(None, cx))),
+                        )
+                    })
                     .child(
-                        div()
-                            .id("changes-refresh")
-                            .role(Role::Button)
-                            .aria_label("Refresh")
-                            .flex_shrink_0()
-                            .size(px(TOOLBAR_BUTTON))
-                            .rounded(px(RADIUS_MD))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .cursor_pointer()
-                            .hover(|style| style.bg(colors.interaction_highlight))
-                            .on_click(cx.listener(|this, _, _, cx| this.request_status(cx)))
-                            .child(
-                                icon(IconName::RotateCw)
-                                    .with_size(px(ICON_SM))
-                                    .text_color(colors.foreground_extra_muted),
-                            ),
+                        self.toolbar_button("changes-refresh", "Refresh", IconName::RotateCw, cx)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.request_status(cx);
+                                if this.commits_open {
+                                    this.request_commits(cx);
+                                }
+                            })),
                     ),
             )
     }
@@ -719,9 +1232,8 @@ impl Explorer {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let colors = tokens(cx);
-        let files: &[ChangedFile] = match &self.changes {
-            ChangesState::Ready { tree, .. } => tree.files(),
-            _ => &[],
+        let ChangesState::Ready(view) = &self.changes else {
+            return Vec::new();
         };
         range
             .filter_map(|index| {
@@ -783,10 +1295,11 @@ impl Explorer {
                         name,
                         depth,
                     } => {
-                        let file = files.get(*file_index)?;
+                        let file = view.files.get(*file_index)?;
                         let selected = self.selected_change.as_deref() == Some(file.path.as_str());
                         let group = SharedString::from(format!("explorer-change-row-{index}"));
-                        let label = format!("{}, +{}, -{}", file.path, file.added, file.removed);
+                        let label = view.label(*file_index);
+                        let change = view.change(*file_index);
                         base.id(("explorer-change-row", index))
                             .group(group.clone())
                             .role(Role::TreeItem)
@@ -820,10 +1333,8 @@ impl Explorer {
                                 h_flex()
                                     .flex_shrink_0()
                                     .gap(px(SPACE_2))
-                                    .child(diff_stat(file.added, file.removed, cx))
-                                    // ChangedFile does not say whether a file is new or deleted,
-                                    // so every row shows the modified mark.
-                                    .child(change_icon(Change::Modified, &colors)),
+                                    .child(diff_stat(file.additions, file.deletions, cx))
+                                    .child(change_icon(change, &colors)),
                             )
                     }
                 };

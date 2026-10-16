@@ -2,11 +2,11 @@
 //! placeholder, as `file-pane/pane.tsx` and its CodeMirror source view draw them. No editing.
 
 use crate::code::{code_font, code_text, gutter_width};
-use crate::syntax::{Run, SyntaxColors, highlight, language_for};
+use crate::syntax::{Run, ThemeSyntax, highlight, language_for};
 use crate::ui::{centered_text, file_meta_state};
 use bachuc_client::{Client, FileContent, FileKind};
 use bachuc_theme::metrics::{FONT_SM, RADIUS_SM, SPACE_2, SPACE_3, TAB_BAR_HEIGHT};
-use bachuc_theme::{scheme, tokens, ui_font_size};
+use bachuc_theme::{syntax_colors, tokens, ui_font_size};
 use gpui_kit::component::h_flex;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -40,12 +40,12 @@ struct TextDoc {
     longest: usize,
     size: u64,
     language: Option<&'static str>,
-    /// The scheme the runs were made for.
-    scheme: bachuc_theme::Scheme,
+    /// The syntax colors the runs were made for.
+    colors: ThemeSyntax,
 }
 
 impl TextDoc {
-    fn new(text: String, size: u64, path: &str, scheme: bachuc_theme::Scheme) -> TextDoc {
+    fn new(text: String, size: u64, path: &str, colors: ThemeSyntax) -> TextDoc {
         let mut starts = vec![0usize];
         starts.extend(text.match_indices('\n').map(|(at, _)| at + 1));
         let longest = (0..starts.len())
@@ -63,7 +63,7 @@ impl TextDoc {
             longest,
             size,
             language,
-            scheme,
+            colors,
         }
     }
 
@@ -243,7 +243,7 @@ impl FileView {
                     content.text.unwrap_or_default(),
                     size,
                     &self.path,
-                    scheme(cx),
+                    ThemeSyntax(syntax_colors(cx)),
                 );
                 State::Text(doc)
             }
@@ -282,9 +282,9 @@ impl FileView {
     }
 
     fn theme_changed(&mut self, cx: &mut Context<FileView>) {
-        let current = scheme(cx);
+        let current = ThemeSyntax(syntax_colors(cx));
         if let State::Text(doc) = &self.state
-            && doc.scheme != current
+            && doc.colors != current
         {
             self.start_highlight(cx);
         }
@@ -296,15 +296,14 @@ impl FileView {
         let State::Text(doc) = &mut self.state else {
             return;
         };
-        let scheme = scheme(cx);
-        doc.scheme = scheme;
+        let colors = ThemeSyntax(syntax_colors(cx));
+        doc.colors = colors;
         let Some(language) = doc.language else {
             doc.runs.clear();
             return;
         };
         let text = doc.text.clone();
         let load = self.load;
-        let colors = SyntaxColors::for_scheme(scheme);
         cx.spawn(async move |this, cx| {
             let runs = cx
                 .background_executor()
@@ -315,7 +314,7 @@ impl FileView {
                     return;
                 }
                 if let State::Text(doc) = &mut this.state
-                    && doc.scheme == scheme
+                    && doc.colors == colors
                 {
                     doc.runs = runs;
                     cx.notify();

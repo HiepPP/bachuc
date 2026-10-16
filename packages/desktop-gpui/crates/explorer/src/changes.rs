@@ -2,8 +2,89 @@
 //! and flattened into rows. A port of `packages/app/src/git/diff-tree.ts`, which owns the order
 //! and the compression; keep them in step.
 
-use bachuc_client::ChangedFile;
+use bachuc_client::{ChangedFile, ChangedFileDetails, CheckoutDetails};
 use std::collections::HashSet;
+
+/// How a changed file differs, as `FileChangeIcon` marks it. A rename is a modified file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    Added,
+    Deleted,
+    Modified,
+}
+
+impl Change {
+    pub fn of(is_new: bool, is_deleted: bool) -> Change {
+        if is_new {
+            Change::Added
+        } else if is_deleted {
+            Change::Deleted
+        } else {
+            Change::Modified
+        }
+    }
+
+    /// `newFile`, `deletedFile`, and `modifiedFile`.
+    pub fn label(self) -> &'static str {
+        match self {
+            Change::Added => "New",
+            Change::Deleted => "Deleted",
+            Change::Modified => "Modified",
+        }
+    }
+}
+
+/// The label of the branch toolbar when HEAD is detached (`branchUnknown`).
+pub const UNKNOWN_BRANCH: &str = "Unknown";
+
+/// What the Changes tab shows for a git checkout.
+#[derive(Debug)]
+pub struct CheckoutView {
+    /// The branch, or `UNKNOWN_BRANCH` for a detached HEAD.
+    pub branch: String,
+    pub tree: ChangeTree,
+    /// The files in daemon order; `ChangeRow::File` indexes point here too.
+    pub files: Vec<ChangedFileDetails>,
+}
+
+impl CheckoutView {
+    /// `None` when the folder is not in a git repository. A detached HEAD has no branch but is
+    /// still a git checkout.
+    pub fn new(details: CheckoutDetails) -> Option<CheckoutView> {
+        if !details.is_git {
+            return None;
+        }
+        let plain: Vec<ChangedFile> = details.files.iter().cloned().map(Into::into).collect();
+        Some(CheckoutView {
+            branch: details.branch.unwrap_or_else(|| UNKNOWN_BRANCH.to_string()),
+            tree: ChangeTree::build(&plain),
+            files: details.files,
+        })
+    }
+
+    pub fn change(&self, index: usize) -> Change {
+        self.files.get(index).map_or(Change::Modified, |file| {
+            Change::of(file.is_new, file.is_deleted)
+        })
+    }
+
+    /// The row label: the path, `old -> new` for a rename, then the counts.
+    pub fn label(&self, index: usize) -> String {
+        let Some(file) = self.files.get(index) else {
+            return String::new();
+        };
+        let path = match &file.old_path {
+            Some(old) if *old != file.path => format!("{old} -> {}", file.path),
+            _ => file.path.clone(),
+        };
+        format!(
+            "{path}, {}, +{}, -{}",
+            self.change(index).label(),
+            file.additions,
+            file.deletions
+        )
+    }
+}
 
 #[derive(Debug)]
 enum Node {

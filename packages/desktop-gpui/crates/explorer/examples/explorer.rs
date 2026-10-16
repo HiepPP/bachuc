@@ -5,11 +5,13 @@
 //!
 //! The folder is a directory the daemon can list (default `/tmp/gpui-bench`). The host is the
 //! live daemon, `ws://127.0.0.1:6768/ws`, unless `--url` says otherwise. `--changes` starts on
-//! the Changes tab; `--file` and `--diff` open a viewer at start. A click on a file or a changed
-//! file in the sidebar opens it in the right pane.
+//! the Changes tab; `--file` and `--diff` open a viewer at start. A click on a file, a changed
+//! file, or a commit file in the sidebar opens it in the right pane.
 
 use bachuc_client::{Client, HostConfig};
-use bachuc_explorer::{DiffView, Explorer, ExplorerEvent, ExplorerTab, FileView};
+use bachuc_explorer::{
+    DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerTab, FileView,
+};
 use bachuc_theme::{ThemeChoice, set_theme, tokens};
 use gpui_kit::component::h_flex;
 use gpui_kit::*;
@@ -53,6 +55,27 @@ impl Shell {
                     println!("open diff {path}");
                     this.open_diff(path.clone(), window, cx);
                 }
+            },
+        )
+        .detach();
+        cx.subscribe_in(
+            &explorer,
+            window,
+            |this: &mut Self, _, event: &ExplorerDiffEvent, window, cx| {
+                let client = this.client.clone();
+                let cwd = this.cwd.clone();
+                let view = match event.clone() {
+                    ExplorerDiffEvent::OpenAllDiffs { focus_path, .. } => {
+                        println!("open all diffs at {focus_path:?}");
+                        cx.new(|cx| DiffView::new_all(client, cwd, focus_path, window, cx))
+                    }
+                    ExplorerDiffEvent::OpenCommitDiff { sha, path, .. } => {
+                        println!("open commit diff {sha} {path}");
+                        cx.new(|cx| DiffView::new_commit(client, cwd, sha, path, window, cx))
+                    }
+                };
+                this.pane = Some(view.into());
+                cx.notify();
             },
         )
         .detach();

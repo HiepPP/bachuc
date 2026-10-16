@@ -115,57 +115,151 @@ impl SyntaxColors {
 
     /// The color of a tree-sitter capture name such as `function.method` or `string.escape`.
     fn color_of(&self, capture: &str) -> Option<Hsla> {
-        let starts = |prefix: &str| capture == prefix || capture.starts_with(&format!("{prefix}."));
-        Some(if starts("comment") {
-            self.comment
-        } else if starts("string.escape") || starts("escape") {
-            self.escape
-        } else if starts("string.regex") || starts("string.regexp") {
-            self.regexp
-        } else if starts("string") || starts("character") {
-            self.string
-        } else if starts("number") {
-            self.number
-        } else if starts("boolean") || starts("constant") || starts("none") {
-            self.literal
-        } else if starts("keyword") || starts("variable.builtin") || starts("variable.special") {
-            self.keyword
-        } else if starts("function") || starts("constructor") {
-            self.function
-        } else if starts("class") || starts("namespace") || starts("module") {
-            self.class
-        } else if starts("type") {
-            self.type_
-        } else if starts("tag") {
-            self.tag
-        } else if starts("attribute") {
-            self.attribute
-        } else if starts("property") || starts("variable.member") {
-            self.property
-        } else if starts("variable") {
-            self.variable
-        } else if starts("operator") {
-            self.operator
-        } else if starts("punctuation") {
-            self.punctuation
-        } else if starts("label") || starts("preproc") {
-            self.meta
-        } else if starts("title") || starts("text.title") {
-            self.heading
-        } else if starts("link") || starts("text.uri") || starts("text.reference") {
-            self.link
-        } else {
-            return None;
+        Some(match role_of(capture)? {
+            Role::Comment => self.comment,
+            Role::Escape => self.escape,
+            Role::Regexp => self.regexp,
+            Role::String => self.string,
+            Role::Number => self.number,
+            Role::Literal => self.literal,
+            Role::Keyword => self.keyword,
+            Role::Function => self.function,
+            Role::Class => self.class,
+            Role::Type => self.type_,
+            Role::Tag => self.tag,
+            Role::Attribute => self.attribute,
+            Role::Property => self.property,
+            Role::Variable => self.variable,
+            Role::Operator => self.operator,
+            Role::Punctuation => self.punctuation,
+            Role::Meta => self.meta,
+            Role::Heading => self.heading,
+            Role::Link => self.link,
         })
+    }
+}
+
+/// The highlight role of `colors.ts` that a tree-sitter capture takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Role {
+    Comment,
+    Escape,
+    Regexp,
+    String,
+    Number,
+    Literal,
+    Keyword,
+    Function,
+    Class,
+    Type,
+    Tag,
+    Attribute,
+    Property,
+    Variable,
+    Operator,
+    Punctuation,
+    Meta,
+    Heading,
+    Link,
+}
+
+fn role_of(capture: &str) -> Option<Role> {
+    let starts = |prefix: &str| capture == prefix || capture.starts_with(&format!("{prefix}."));
+    Some(if starts("comment") {
+        Role::Comment
+    } else if starts("string.escape") || starts("escape") {
+        Role::Escape
+    } else if starts("string.regex") || starts("string.regexp") {
+        Role::Regexp
+    } else if starts("string") || starts("character") {
+        Role::String
+    } else if starts("number") {
+        Role::Number
+    } else if starts("boolean") || starts("constant") || starts("none") {
+        Role::Literal
+    } else if starts("keyword") || starts("variable.builtin") || starts("variable.special") {
+        Role::Keyword
+    } else if starts("function") || starts("constructor") {
+        Role::Function
+    } else if starts("class") || starts("namespace") || starts("module") {
+        Role::Class
+    } else if starts("type") {
+        Role::Type
+    } else if starts("tag") {
+        Role::Tag
+    } else if starts("attribute") {
+        Role::Attribute
+    } else if starts("property") || starts("variable.member") {
+        Role::Property
+    } else if starts("variable") {
+        Role::Variable
+    } else if starts("operator") {
+        Role::Operator
+    } else if starts("punctuation") {
+        Role::Punctuation
+    } else if starts("label") || starts("preproc") {
+        Role::Meta
+    } else if starts("title") || starts("text.title") {
+        Role::Heading
+    } else if starts("link") || starts("text.uri") || starts("text.reference") {
+        Role::Link
+    } else {
+        return None;
+    })
+}
+
+fn color_style(color: Hsla) -> HighlightStyle {
+    HighlightStyle {
+        color: Some(color),
+        ..Default::default()
     }
 }
 
 impl HighlightStyleResolver for SyntaxColors {
     fn style(&self, name: &str) -> Option<HighlightStyle> {
-        self.color_of(name).map(|color| HighlightStyle {
-            color: Some(color),
-            ..Default::default()
+        self.color_of(name).map(color_style)
+    }
+}
+
+/// The colors of the syntax theme picked in Settings (`bachuc_theme::syntax_colors`), as a
+/// resolver for the highlighter.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThemeSyntax(pub bachuc_theme::SyntaxColors);
+
+impl ThemeSyntax {
+    pub fn color_of(&self, capture: &str) -> Option<Hsla> {
+        let c = &self.0;
+        Some(match role_of(capture)? {
+            Role::Comment => c.comment,
+            Role::Escape => c.escape,
+            Role::Regexp => c.regexp,
+            Role::String => c.string,
+            Role::Number => c.number,
+            Role::Literal => c.literal,
+            Role::Keyword => c.keyword,
+            Role::Function => c.function,
+            Role::Class => c.class,
+            Role::Type => c.r#type,
+            Role::Tag => c.tag,
+            Role::Attribute => c.attribute,
+            Role::Property => c.property,
+            Role::Variable => c.variable,
+            Role::Operator => c.operator,
+            Role::Punctuation => c.punctuation,
+            Role::Meta => c.meta,
+            Role::Heading => c.heading,
+            Role::Link => c.link,
         })
+    }
+}
+
+impl HighlightStyleResolver for ThemeSyntax {
+    fn style(&self, name: &str) -> Option<HighlightStyle> {
+        // The app's lezer grammars give a macro name no role, so `println!` keeps the text color.
+        if name == "function.macro" || name.starts_with("function.macro.") {
+            return None;
+        }
+        self.color_of(name).map(color_style)
     }
 }
 
@@ -174,7 +268,11 @@ pub type Run = (Range<usize>, HighlightStyle);
 
 /// Parses `text` as `language` and returns the colored ranges of each line, relative to the
 /// start of the line. Runs on any thread.
-pub fn highlight(language: &str, text: &str, colors: &SyntaxColors) -> Vec<Vec<Run>> {
+pub fn highlight(
+    language: &str,
+    text: &str,
+    colors: &impl HighlightStyleResolver,
+) -> Vec<Vec<Run>> {
     let mut highlighter = SyntaxHighlighter::new(language);
     let rope = Rope::from_str(text);
     highlighter.update(None, &rope, None);

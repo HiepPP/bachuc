@@ -55,6 +55,31 @@ pub enum Toggled {
     },
 }
 
+/// The order of the Files toolbar sort button. Electron also sorts by modified time, but
+/// `FileEntry` has no modified time, so the button cycles name and size only.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SortBy {
+    #[default]
+    Name,
+    Size,
+}
+
+impl SortBy {
+    pub fn next(self) -> SortBy {
+        match self {
+            SortBy::Name => SortBy::Size,
+            SortBy::Size => SortBy::Name,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SortBy::Name => "Name",
+            SortBy::Size => "Size",
+        }
+    }
+}
+
 /// Folders first, then names without regard to case, as `localeCompare` orders plain names.
 pub fn compare_entries(a: &FileEntry, b: &FileEntry) -> Ordering {
     b.is_dir
@@ -136,15 +161,41 @@ impl FileTree {
 
     /// The visible rows: the root entries, then the entries of each open folder under it.
     pub fn rows(&self) -> Vec<TreeRow> {
+        self.rows_with(SortBy::Name, true)
+    }
+
+    /// `rows` in the Files toolbar order, without dot entries unless `show_hidden`.
+    pub fn rows_with(&self, sort: SortBy, show_hidden: bool) -> Vec<TreeRow> {
         let mut rows = Vec::new();
-        self.push_rows(ROOT, 0, &mut rows);
+        self.push_rows(ROOT, 0, sort, show_hidden, &mut rows);
         rows
     }
 
-    fn push_rows(&self, path: &str, depth: usize, rows: &mut Vec<TreeRow>) {
+    /// True when the root listing has entries but the hidden filter leaves none.
+    pub fn only_hidden(&self) -> bool {
+        matches!(self.listings.get(ROOT), Some(Listing::Loaded(entries))
+            if !entries.is_empty() && entries.iter().all(|entry| entry.name.starts_with('.')))
+    }
+
+    fn push_rows(
+        &self,
+        path: &str,
+        depth: usize,
+        sort: SortBy,
+        show_hidden: bool,
+        rows: &mut Vec<TreeRow>,
+    ) {
         let Some(Listing::Loaded(entries)) = self.listings.get(path) else {
             return;
         };
+        let mut entries: Vec<&FileEntry> = entries
+            .iter()
+            .filter(|entry| show_hidden || !entry.name.starts_with('.'))
+            .collect();
+        if sort == SortBy::Size {
+            // Stable, so equal sizes keep the name order of the listing.
+            entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(b.size.cmp(&a.size)));
+        }
         for entry in entries {
             let expanded = entry.is_dir && self.expanded.contains(&entry.path);
             let loading = expanded
@@ -159,7 +210,7 @@ impl FileTree {
                 loading,
             });
             if expanded {
-                self.push_rows(&entry.path, depth + 1, rows);
+                self.push_rows(&entry.path, depth + 1, sort, show_hidden, rows);
             }
         }
     }

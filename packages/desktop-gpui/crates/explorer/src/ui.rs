@@ -1,6 +1,7 @@
 //! Small elements that the three views share: the centered state text, the file icon, the
 //! `+N -M` count, and the tree row look of `tree-primitives.tsx`.
 
+pub use crate::changes::Change;
 use crate::changes::format_count;
 use crate::file_icons::file_icon;
 use bachuc_icons::{IconName, icon};
@@ -182,14 +183,6 @@ pub fn diff_stat(added: u32, removed: u32, cx: &App) -> impl IntoElement + use<>
                 .text_color(colors.status_danger)
                 .child(format!("-{}", format_count(removed))),
         )
-}
-
-/// How a changed file differs, as `FileChangeIcon` marks it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Change {
-    Added,
-    Deleted,
-    Modified,
 }
 
 pub fn change_icon(change: Change, colors: &Tokens) -> impl IntoElement + use<> {
