@@ -651,6 +651,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bachuc-plugin-assistant-cite"
+version = "0.1.0"
+dependencies = [
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "form_urlencoded",
+ "gpui-kit",
+ "log",
+]
+
+[[package]]
+name = "bachuc-plugin-claude-look"
+version = "0.1.0"
+dependencies = [
+ "bachuc-plugin-host",
+ "gpui-kit",
+]
+
+[[package]]
 name = "bachuc-plugin-edit-diffs"
 version = "0.1.0"
 dependencies = [
@@ -676,6 +695,45 @@ dependencies = [
  "gpui-kit",
  "log",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bachuc-plugin-idle-runtime-closer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "gpui-kit",
+]
+
+[[package]]
+name = "bachuc-plugin-plugins-nav"
+version = "0.1.0"
+dependencies = [
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "gpui-kit",
+]
+
+[[package]]
+name = "bachuc-plugin-stop-orb"
+version = "0.1.0"
+dependencies = [
+ "bachuc-plugin-host",
+ "bachuc-theme",
+ "gpui-kit",
+]
+
+[[package]]
+name = "bachuc-plugin-thread-context-attach"
+version = "0.1.0"
+dependencies = [
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "gpui-kit",
  "serde_json",
 ]
 

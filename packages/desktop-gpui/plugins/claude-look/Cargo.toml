@@ -1,0 +1,10 @@
+[package]
+name = "bachuc-plugin-claude-look"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The native client of `hiep-plugins/plugins/claude-look` (ADR-0045). Never depends on a view crate.
+[dependencies]
+bachuc-plugin-host = { path = "../../crates/plugin-host" }
+gpui-kit.workspace = true
