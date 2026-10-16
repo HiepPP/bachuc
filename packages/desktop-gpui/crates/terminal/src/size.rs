@@ -1,7 +1,8 @@
 //! Pane size to cell grid, and a pane position to a cell. All values are in logical pixels.
 
-/// Space between the pane edge and the first cell, on every side.
-pub const PADDING: f32 = 4.0;
+/// Space between the pane edge and the first cell, on every side. The Electron pane has none
+/// (`HOST_DIV_STYLE` in `packages/app/src/components/terminal-emulator.tsx`).
+pub const PADDING: f32 = 0.0;
 
 /// Rows and columns that fit a pane of `width` x `height`. The result is at least 1 x 1.
 pub fn grid_size(width: f32, height: f32, cell_width: f32, cell_height: f32) -> (u16, u16) {
@@ -47,9 +48,9 @@ mod tests {
 
     #[test]
     fn the_grid_fills_the_pane_without_the_padding() {
-        // 8 px of padding leaves 792 x 392; 8 px cells and 16 px lines give 99 x 24 cells.
-        assert_eq!(grid_size(800.0, 400.0, 8.0, 16.0), (24, 99));
-        assert_eq!(grid_size(808.0, 400.0, 8.0, 16.0), (24, 100));
+        // 8 px cells and 16 px lines fill 800 x 400 with 100 x 25 cells; a partial cell is dropped.
+        assert_eq!(grid_size(800.0, 400.0, 8.0, 16.0), (25, 100));
+        assert_eq!(grid_size(807.0, 415.0, 8.0, 16.0), (25, 100));
     }
 
     #[test]
@@ -68,9 +69,9 @@ mod tests {
 
     #[test]
     fn a_position_maps_to_a_clamped_cell_and_side() {
-        assert_eq!(cell_at(4.0, 4.0, 8.0, 16.0, 24, 80), (0, 0, false));
+        assert_eq!(cell_at(0.0, 0.0, 8.0, 16.0, 24, 80), (0, 0, false));
         assert_eq!(
-            cell_at(4.0 + 8.0 * 3.0 + 5.0, 4.0 + 16.0 * 2.0, 8.0, 16.0, 24, 80),
+            cell_at(8.0 * 3.0 + 5.0, 16.0 * 2.0, 8.0, 16.0, 24, 80),
             (2, 3, true)
         );
         assert_eq!(cell_at(-50.0, -50.0, 8.0, 16.0, 24, 80), (0, 0, false));

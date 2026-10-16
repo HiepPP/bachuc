@@ -351,9 +351,13 @@ fn build_line(
             }
         }
 
-        let mut foreground = resolve(palette, cell.fg, true);
-        let mut background = resolve(palette, cell.bg, false);
-        if cell.flags.contains(Flags::INVERSE) {
+        // The Electron app keeps xterm.js `drawBoldTextInBrightColors` on, which brightens the
+        // color drawn as text, so with inverse it is the background value.
+        let bold = cell.flags.contains(Flags::BOLD);
+        let inverse = cell.flags.contains(Flags::INVERSE);
+        let mut foreground = resolve(palette, brighten(cell.fg, bold && !inverse), true);
+        let mut background = resolve(palette, brighten(cell.bg, bold && inverse), false);
+        if inverse {
             let (fg, bg) = (background, foreground);
             foreground = Some(fg.unwrap_or(palette.background));
             background = Some(bg.unwrap_or(palette.foreground));
@@ -363,7 +367,7 @@ fn build_line(
             background_color: background,
             ..Default::default()
         };
-        if cell.flags.contains(Flags::BOLD) {
+        if bold {
             style.font_weight = Some(FontWeight::BOLD);
         }
         if cell.flags.contains(Flags::ITALIC) {
@@ -433,6 +437,15 @@ fn resolve(palette: &Palette, color: Color, foreground: bool) -> Option<Hsla> {
         Color::Named(_) => None,
         Color::Indexed(index @ 0..=15) => Some(palette.ansi[index as usize]),
         Color::Indexed(index) => Some(from_bytes(indexed(index))),
+    }
+}
+
+/// ANSI colors 0-7 become their bright pair 8-15 when `bright` is set.
+fn brighten(color: Color, bright: bool) -> Color {
+    match color {
+        Color::Named(name) if bright && (name as usize) < 8 => Color::Indexed(name as u8 + 8),
+        Color::Indexed(index @ 0..=7) if bright => Color::Indexed(index + 8),
+        color => color,
     }
 }
 
@@ -685,6 +698,30 @@ mod tests {
         assert_eq!(after, Some(light.ansi[1]));
         emulator.reset(2, 10);
         assert_eq!(emulator.palette(), light);
+    }
+
+    #[test]
+    fn bold_text_draws_ansi_0_to_7_in_the_bright_color() {
+        let mut emulator = Emulator::new(2, 10);
+        // Plain cyan, bold cyan, bold 256-color green, bold bright red, bold inverse red.
+        emulator.feed(
+            b"\x1b[36mA\x1b[1mB\x1b[0;1;38;5;2mC\x1b[0;1;91mD\x1b[0;1;7;31mE\x1b[0m\x1b[2;1H",
+        );
+        let palette = emulator.palette();
+        let line = emulator.lines().next().unwrap().clone();
+        let style = |col: usize| {
+            line.runs
+                .iter()
+                .find(|(range, _)| range.contains(&col))
+                .unwrap()
+                .1
+        };
+        assert_eq!(style(0).color, Some(palette.ansi[6]));
+        assert_eq!(style(1).color, Some(palette.ansi[14]));
+        assert_eq!(style(2).color, Some(palette.ansi[10]));
+        assert_eq!(style(3).color, Some(palette.ansi[9]));
+        assert_eq!(style(4).color, Some(palette.background));
+        assert_eq!(style(4).background_color, Some(palette.ansi[1]));
     }
 
     #[test]
