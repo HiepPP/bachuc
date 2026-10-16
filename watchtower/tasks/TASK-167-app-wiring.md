@@ -16,6 +16,7 @@ Boundaries:
 - Subscribe to `TabMenuEvent`, and bind maximize to `toggle_maximize`.
 - Call `bachuc_settings::load_appearance` at startup as today; it now applies fonts and the syntax theme.
 - Keep the test `every_focus_target_in_this_crate_has_a_role` and every existing app test.
+- From the run (lead, 2026-10-16): a Changes row click now emits only `ExplorerDiffEvent::OpenAllDiffs` (Q-096), so the app must handle it or Changes opens nothing. Call `Workspace::set_item_kind` with the `TabKind` of each tab after open (Q-097), and bind the workspace `OpenTabMenu` action to the menu key and `shift-f10`. `Explorer` and `Workspace` now have two `EventEmitter` impls, so each `cx.subscribe` names its event type. Read [TASK-162-outcome.md](watchtower/tasks/TASK-162-outcome.md) and [TASK-165-outcome.md](watchtower/tasks/TASK-165-outcome.md) for the exact contracts.
 
 Files:
 
