@@ -345,6 +345,9 @@ impl DiffView {
                         .id(("diff-line", index))
                         .role(Role::Code)
                         .aria_label(format!("{kind} line {}: {label}", line.number.unwrap_or(0)))
+                        // The list lays each row out against the visible width, so the tint
+                        // reaches the right edge of the pane on short lines too.
+                        .min_w_full()
                         .h(px(LINE_HEIGHT))
                         .font_family(family)
                         .text_size(size)

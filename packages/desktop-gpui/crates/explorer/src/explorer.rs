@@ -11,10 +11,10 @@ use crate::ui::{
     change_icon, chevron, diff_stat, file_icon_element, loading_marker, state_message,
     tree_padding_left,
 };
-use bachuc_client::{ChangedFile, Client, DirectoryEvent};
+use bachuc_client::{ChangedFile, Client, ClientEvent, DirectoryEvent};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
-    FONT_BASE, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3, SPACE_4, TAB_BAR_HEIGHT,
+    FONT_BASE, FONT_SM, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3, SPACE_4, TAB_BAR_HEIGHT,
 };
 use bachuc_theme::{tokens, ui_font_size};
 use gpui_kit::component::theme::Theme;
@@ -30,6 +30,10 @@ const TAB_RAIL_INSET: f32 = 4.;
 const TAB_GAP: f32 = 4.;
 /// `HEADER_CONTROL_HEIGHT`, the height of one tab.
 const TAB_HEIGHT: f32 = 26.;
+/// `WORKSPACE_SECONDARY_HEADER_HEIGHT`, the height of a Changes toolbar row.
+const TOOLBAR_HEIGHT: f32 = 36.;
+/// `SMALL_ICON_BUTTON_SIZE`, the hitbox of a toolbar icon button.
+const TOOLBAR_BUTTON: f32 = 20.;
 
 /// What the Explorer tells its owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,7 +57,10 @@ enum ChangesState {
     Failed(String),
     /// The folder is not in a git repository (`branch` is none).
     NotGit,
-    Ready(ChangeTree),
+    Ready {
+        branch: String,
+        tree: ChangeTree,
+    },
 }
 
 pub struct Explorer {
@@ -96,6 +103,16 @@ impl Explorer {
                         && this.watching
                     {
                         this.request_status(cx);
+                    }
+                },
+            ),
+            // A request sent while the client connects fails with "not connected", so the views
+            // wait for the connection and list again after each one.
+            cx.subscribe(
+                &client,
+                |this: &mut Explorer, _, event: &ClientEvent, cx| {
+                    if let ClientEvent::Connected = event {
+                        this.refresh(cx);
                     }
                 },
             ),
@@ -225,6 +242,10 @@ impl Explorer {
 
     fn load_directory(&mut self, path: &str, cx: &mut Context<Explorer>) {
         self.tree.start_load(path);
+        if !self.client.read(cx).is_connected() {
+            // `ClientEvent::Connected` lists the root and the open folders.
+            return;
+        }
         let generation = self.generation;
         let cwd = self.cwd.clone();
         let path = path.to_string();
@@ -281,6 +302,11 @@ impl Explorer {
         if matches!(self.changes, ChangesState::Idle) {
             self.changes = ChangesState::Loading;
         }
+        if !self.client.read(cx).is_connected() {
+            // `ClientEvent::Connected` asks again.
+            cx.notify();
+            return;
+        }
         self.status_request += 1;
         let request = self.status_request;
         let generation = self.generation;
@@ -311,8 +337,14 @@ impl Explorer {
                 log::warn!("checkout_status: {error:#}");
                 ChangesState::Failed(format!("{error:#}"))
             }
-            Ok(status) if status.branch.is_none() => ChangesState::NotGit,
-            Ok(status) => ChangesState::Ready(ChangeTree::build(&status.files)),
+            Ok(bachuc_client::CheckoutStatus {
+                branch: Some(branch),
+                files,
+            }) => ChangesState::Ready {
+                branch,
+                tree: ChangeTree::build(&files),
+            },
+            Ok(_) => ChangesState::NotGit,
         };
         self.rebuild_change_rows();
         cx.notify();
@@ -320,7 +352,7 @@ impl Explorer {
 
     fn rebuild_change_rows(&mut self) {
         self.change_rows = match &self.changes {
-            ChangesState::Ready(tree) => tree.rows(&self.collapsed),
+            ChangesState::Ready { tree, .. } => tree.rows(&self.collapsed),
             _ => Vec::new(),
         };
     }
@@ -338,7 +370,7 @@ impl Explorer {
                 self.rebuild_change_rows();
             }
             ChangeRow::File { index, .. } => {
-                let ChangesState::Ready(tree) = &self.changes else {
+                let ChangesState::Ready { tree, .. } = &self.changes else {
                     return;
                 };
                 let Some(file) = tree.files().get(index) else {
@@ -566,28 +598,118 @@ impl Explorer {
                 cx,
             )
             .into_any_element(),
-            ChangesState::Ready(tree) if tree.files().is_empty() => {
-                state_message("explorer-changes-empty", "No changes to display", false, cx)
+            ChangesState::Ready { branch, tree } => {
+                let header = self.render_changes_header(branch.clone(), tree.files(), cx);
+                let body = if tree.files().is_empty() {
+                    state_message("explorer-changes-empty", "No changes to display", false, cx)
+                        .into_any_element()
+                } else {
+                    div()
+                        .id("explorer-changes")
+                        .role(Role::Tree)
+                        .aria_label("Changes")
+                        .flex_1()
+                        .min_h_0()
+                        .child(
+                            uniform_list(
+                                "explorer-changes-rows",
+                                self.change_rows.len(),
+                                cx.processor(Self::render_change_rows),
+                            )
+                            .track_scroll(&self.changes_scroll)
+                            .size_full()
+                            .pb(px(SPACE_4 * 2.)),
+                        )
+                        .into_any_element()
+                };
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(header)
+                    .child(body)
                     .into_any_element()
             }
-            ChangesState::Ready(_) => div()
-                .id("explorer-changes")
-                .role(Role::Tree)
-                .aria_label("Changes")
-                .flex_1()
-                .min_h_0()
-                .child(
-                    uniform_list(
-                        "explorer-changes-rows",
-                        self.change_rows.len(),
-                        cx.processor(Self::render_change_rows),
-                    )
-                    .track_scroll(&self.changes_scroll)
-                    .size_full()
-                    .pb(px(SPACE_4 * 2.)),
-                )
-                .into_any_element(),
         }
+    }
+
+    /// The two toolbar rows over the Changes tree (`ChangesRepositoryToolbar` and
+    /// `ChangesComparisonToolbar`): the branch, then the diff mode with the total count and the
+    /// refresh button. Branch switching and the other diff mode are out of scope, so the branch
+    /// and the mode show as passive labels without a menu.
+    fn render_changes_header(
+        &self,
+        branch: String,
+        files: &[ChangedFile],
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let colors = tokens(cx);
+        let added = files.iter().map(|file| file.added).sum();
+        let removed = files.iter().map(|file| file.removed).sum();
+        let toolbar_row = |id: &'static str| {
+            h_flex()
+                .id(id)
+                .role(Role::Toolbar)
+                .flex_shrink_0()
+                .h(px(TOOLBAR_HEIGHT))
+                .pl(px(SPACE_2))
+                // A bare glyph's hitbox overhangs its ink, so the glyph sits on the trailing rail.
+                .pr(px(TRAILING_RAIL - (TOOLBAR_BUTTON - ICON_SM) / 2.))
+                .gap(px(SPACE_2))
+                .bg(colors.surface_sidebar)
+                .border_b_1()
+                .border_color(colors.border)
+        };
+        let label = |id: &'static str, text: SharedString| {
+            div()
+                .id(id)
+                .role(Role::Label)
+                .aria_label(text.clone())
+                .min_w_0()
+                .p(px(SPACE_1))
+                .truncate()
+                .text_size(ui_font_size(FONT_SM, cx))
+                .text_color(colors.foreground_muted)
+                .child(text)
+        };
+        v_flex()
+            .flex_shrink_0()
+            .child(
+                toolbar_row("changes-repository-header")
+                    .aria_label("Repository")
+                    .child(label("changes-branch", branch.into())),
+            )
+            .child(
+                toolbar_row("changes-header")
+                    .aria_label("Diff")
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(SPACE_1))
+                            .child(label("changes-diff-mode", "Uncommitted".into()))
+                            .child(diff_stat(added, removed, cx)),
+                    )
+                    .child(
+                        div()
+                            .id("changes-refresh")
+                            .role(Role::Button)
+                            .aria_label("Refresh")
+                            .flex_shrink_0()
+                            .size(px(TOOLBAR_BUTTON))
+                            .rounded(px(RADIUS_MD))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_pointer()
+                            .hover(|style| style.bg(colors.interaction_highlight))
+                            .on_click(cx.listener(|this, _, _, cx| this.request_status(cx)))
+                            .child(
+                                icon(IconName::RotateCw)
+                                    .with_size(px(ICON_SM))
+                                    .text_color(colors.foreground_extra_muted),
+                            ),
+                    ),
+            )
     }
 
     fn render_change_rows(
@@ -598,7 +720,7 @@ impl Explorer {
     ) -> Vec<AnyElement> {
         let colors = tokens(cx);
         let files: &[ChangedFile] = match &self.changes {
-            ChangesState::Ready(tree) => tree.files(),
+            ChangesState::Ready { tree, .. } => tree.files(),
             _ => &[],
         };
         range
