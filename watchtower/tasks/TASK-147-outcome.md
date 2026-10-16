@@ -66,6 +66,69 @@ Not run. DEFERRED (UI checker). Values the code uses, from `sidebar-workspace-li
 ## Lessons
 
 - A gpui-kit `Icon` has no `group_hover`; wrap it in a `div` and put the group style on the div.
-- A popup menu anchor must implement `Selectable` and `DropdownMenu`; `KebabButton` in `src/sidebar.rs` is a working template.
-- Dialogs need `window.open_dialog` / `open_alert_dialog` from `WindowExt`; the Root view of the app must render the dialog layer (TASK-155 owns the Root).
+- A popup menu anchor must implement `Selectable` and `DropdownMenu`; `KebabButton` in `src/sidebar.rs` is the template. Never put a mouse-down listener that calls `stop_propagation` on the trigger: GPUI runs the child's listener before the popover wrapper's, so the menu never opens (fixed in Fix Round 1).
+- Dialogs need `window.open_dialog` / `open_alert_dialog` from `WindowExt`. `gpui_kit::open_window` wraps the view in the gpui-base `Root`, which already draws the dialog, notification, and popover plugin layers; the app adds no layer.
 - The sidebar listens to `ClientEvent::{Connected, Disconnected, AgentsChanged}` and `DirectoryEvent::ProjectsChanged`; `Sidebar` needs a strong `Entity<Client>`.
+
+## UI Checks
+
+Run by the UI checker on 2026-10-16, working tree on HEAD 5afebcedd, bundle `BachucSidebar` rebuilt before the run, light theme. Screenshots: `/tmp/gpui-ui-check/C/` (`gpui-sidebar.jpg`, `gpui-sidebar-top.jpg`, `gpui-kebab.jpg`, `gpui-after-measure.jpg`, `ref-sidebar.jpg`).
+
+Setup: the live daemon on 6768 was not listening and AUTORUN forbids starting it, so the example ran against the reference daemon: `BachucSidebar.app --args ws://127.0.0.1:6770/ws`. Both apps then show the same project and workspace data.
+
+### Parity (light) -> FAIL, 4 mismatches. Dark theme not run.
+
+| Element                             | Reference (Electron)                                                                | GPUI                                                                             | Result                              |
+| ----------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------- |
+| Sidebar width, background           | 320, `#f4f4f6`                                                                      | 320, `#f4f4f6`                                                                   | match                               |
+| Workspace row pitch                 | 38 px                                                                               | 38 px                                                                            | match                               |
+| Workspace row dot, title            | muted dot, 14 px title at x 40                                                      | muted dot, 14 px title at x 40                                                   | match                               |
+| Hover row                           | light fill, kebab at the right                                                      | light fill `#fafafa`, kebab at x 297                                             | match                               |
+| Project row                         | letter box, name, about 41 px to the first row                                      | letter box, name, 40 px to the first row                                         | match within 2 px                   |
+| Project order                       | `.claude`, App, calendar-ref, eva, git-replay, hiep-paseo-plugin ... (alphabetical) | wp-test, `.claude`, vorgange, quant-with-wqu, request-hub, hiep-paseo-plugin ... | MISMATCH (order)                    |
+| Project letter-box color            | `.claude` brown `#a06030`, eva blue, calendar-ref red-brown                         | `.claude` indigo `#626bac`, eva purple, wp-test olive                            | MISMATCH (identity colors differ)   |
+| Row right side                      | diff counts `+55 -35` in green and red                                              | nothing                                                                          | MISMATCH (diff counts missing)      |
+| Second line of a workspace row      | PR number, state, and checks (`83733 Merged · passed`)                              | none                                                                             | MISMATCH (PR line missing)          |
+| Navigation rows, Workspaces heading | New workspace, History, Search, Schedules, heading, display menu                    | only Search                                                                      | by design (Gaps above), not counted |
+
+### Live rename, pin, mark unread, archive -> UNVERIFIED
+
+The live daemon (6768) is down, and the checker does not start it. The workspace kebab (`Workspace actions`) also did not open a menu in the example: a coordinate click at the kebab, and a click by AX index, both left the window unchanged (hover fill only, no menu in the AX tree). The menu may need the Root popup layer that the example lacks (see the Lessons above); this is not proven. No action reached any daemon.
+
+### AX tree -> PASS
+
+`container Sidebar`, `outline Projects and workspaces`, `button Search`, project rows (`button <project>` with a `button Project actions` after each), workspace rows (`button <title>` with a `button Workspace actions`), `button Settings`, and `splitter (settable, float) Resize sidebar, Value: 320`. Selected and expanded state were not visible in the printed tree.
+
+### Idle CPU -> PASS, streaming CPU -> UNVERIFIED
+
+`measure.sh 60 sb="pids:62676"` idle, tree rendered, window kept in front by an `open` loop every 3 s: 0.7 CPU% (limit 1.0), 110 MB RSS, 49 MB footprint. A screenshot after the read shows the full window, no cut. The streaming read (limit 3.0) was not run: the reference daemon has no mock provider ("Provider mock is not configured") and live is down.
+
+### Cleanup
+
+The example and the reference app were quit; the lock was released; 6767 untouched; nothing was created or archived.
+
+## Fix Round 1
+
+Fix builder, 2026-10-16, working tree on HEAD 63c06b67e. Files: `crates/sidebar/src/model.rs`, `crates/sidebar/src/sidebar.rs`, `crates/sidebar/tests/model.rs`. The public API (`Sidebar::new`, `set_selected_workspace`, `SidebarEvent`) is unchanged. New public model functions: `natural_compare`, `diff_stat`, `format_diff_count`.
+
+| UI check line            | Cause                                                                                                                                                                                                                                                                                                                           | Fix                                                                                                                                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kebab opens no menu      | The kebab's own `on_mouse_down` called `stop_propagation`. GPUI registers a parent's mouse listeners before its children (`gpui-pre div.rs:2589` vs `2615`) and runs bubble listeners in reverse (`window.rs:5958`), so the popover wrapper's toggle never ran. An AX press synthesizes the same mouse down (`window.rs:7056`). | Removed the listener. The gpui-base `Popover` mouse-down stops propagation itself, so the row still does not take the click. The example needed no Root change: `gpui_kit::open_window` already wraps the view in `Root`, which draws the plugin layers.  |
+| Project order            | GPUI kept the daemon order.                                                                                                                                                                                                                                                                                                     | `build_rows` sorts like `workspace-structure.ts:101-112,213-224`: projects by name, then id; workspaces by name, then id; `localeCompare` numeric and base sensitivity ported as `natural_compare`.                                                       |
+| Project letter-box color | Electron hashes the project view key: the daemon `projectKey` (`remote:github.com/hieppp/claude-setting` gives orange for `.claude`), or `[serverId, projectId]`. GPUI hashes the project id, which gives indigo.                                                                                                               | Not fixable in this crate: `ProjectNode` has no `projectKey` and the client has no server id. The hash function is already exact (test added with the real `.claude` key). See questions.                                                                 |
+| Diff counts missing      | `WorkspaceNode` has no `diffStat`.                                                                                                                                                                                                                                                                                              | The row reads `checkout_status` once per shown cwd, and again on `CheckoutChanged` for that cwd or when a running workspace stops. It draws `+N -M` in `status_success` and `status_danger`, small type, 4 px gap, compact format like `formatDiffCount`. |
+| PR and checks line       | The PR panel is out of scope (CONTEXT.md).                                                                                                                                                                                                                                                                                      | By design, not built.                                                                                                                                                                                                                                     |
+
+Differences that stay:
+
+- Diff counts are the uncommitted changes. Electron's `diffStat` is a shortstat against the base ref, so a branch with commits ahead of its base shows a bigger number there. They match for a main checkout (`~/.claude`: both +55 -35).
+- A clean checkout shows nothing; Electron shows `+0 -0` when the daemon sends a zero `diffStat`.
+- Pinned rows keep the tree order; Electron sorts them by `pinnedAt`, newest first, which the client does not expose.
+- A user drag order (`applyStoredOrdering`) is not ported; GPUI has no drag reorder.
+
+Verified:
+
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-sidebar` -> PASS, 16 tests (new: sort order with the reference names, `natural_compare`, diff totals and compact format, `.claude` key color).
+- `packages/desktop-gpui/cargo.sh fmt --check -p bachuc-sidebar` -> PASS.
+- `cargo.sh clippy -p bachuc-sidebar --all-targets` -> PASS, no sidebar warnings. With `-D warnings` it stops first on `crates/protocol/build.rs:128` and `:300` (another crate, not changed here).
+- Kebab menu opens by click and AX press, project order, diff counts on rows -> DEFERRED (UI checker).

@@ -47,4 +47,4 @@ build_dir_env: CARGO_TARGET_DIR
 
 ## Known Failures
 
-- None yet.
+- `bachuc-command` test `search_500_items_stays_under_16_ms_per_keystroke`: a timing test that fails under a high load average (41 ms at load 5.5). Confirm by: `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-command --test search` alone -> pass.

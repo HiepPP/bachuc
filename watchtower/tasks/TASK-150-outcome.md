@@ -132,3 +132,45 @@ The spec's Questions note (pill order) was not settled: both apps show model, th
 ### Cleanup
 
 The example and the reference app were quit; the lock was released; 6767 untouched; no agent or terminal was created; no prompt was sent.
+
+## Fix Round 1
+
+Run on 2026-10-16 against the 4 parity mismatches in `## UI Checks`. Code checks only; screen checks are DEFERRED (UI checker).
+
+### Changed
+
+- `packages/desktop-gpui/crates/composer/src/composer.rs`: placeholder, model pill logo, mode pill hiding, slash menu order, anchor, and detail card.
+- `packages/desktop-gpui/crates/composer/src/slash.rs`: client commands first; `arrow_delta`; tests.
+- `packages/desktop-gpui/crates/composer/assets/claude.svg` (new): Electron `ClaudeIcon` path, with `{FILL}` and `{OPACITY}` placeholders.
+
+### Mismatches
+
+| Mismatch          | Fix                                                                                                                               | State |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| Placeholder       | `composer.placeholders.desktop`: "Message the agent, tag @files, or use /commands and /skills"; AX label stays "Message"          | fixed |
+| Model pill icon   | Claude agents get the Claude logo (SVG image in `foreground_muted`, rebuilt on a theme change); other providers keep `Bot`        | fixed |
+| Mode pill at rest | Hidden while the agent reports no modes, as `AgentModeControl` returns null; the reference was a closed agent, not an empty input | fixed |
+| Lightning button  | Not fixed: it is an agent feature toggle (`features`, icon `zap`), and `bachuc_client` exposes no agent features                  | open  |
+| Slash menu order  | Client commands first, then daemon commands (`mergeSlashCommandSources`); rows draw reversed, best match at the bottom, selected  | fixed |
+| Slash menu anchor | List pins to the bottom on each query change; Up moves away from the bottom row; the scroll follows the selection                 | fixed |
+| Slash detail box  | Separate box above the list with the selected `/name` and full description (`Autocomplete` `detailCard`)                          | fixed |
+| Slash menu style  | `surface1`, 1 px `border_accent`, radius 8, shadow md, rows min 36 / 12 / 8, list max 220                                         | fixed |
+
+`STOP_RED` stays a literal: `bachuc_theme` has `#dc2626` only as the light terminal red `ansi[1]` (dark is `#e07070`), while Electron uses `palette.red[600]` in both themes.
+
+### Verified
+
+- `CARGO_BUILD_JOBS=4 cargo.sh test -p bachuc-composer` -> PASS: 23 passed (new: client order, alias hiding, arrow direction, logo fill).
+- `cargo.sh fmt --check -p bachuc-composer` -> PASS.
+- `CARGO_BUILD_JOBS=4 cargo.sh clippy -p bachuc-composer --all-targets` -> PASS: no composer warning (2 pre-existing warnings in `crates/protocol/build.rs`).
+- Public API unchanged: `Composer::new`, `agent_id`, `focus`, `attachment_count`, `ComposerEvent`.
+- Parity re-check of placeholder, model logo, mode pill, slash menu -> DEFERRED (UI checker).
+
+### Questions
+
+- The lightning button needs agent features (id, icon, value, set) in `bachuc_client`; then the composer can draw `DesktopFeatureItem` toggles after the mode pill.
+- Provider logos other than Claude (Codex, Copilot, OpenCode, Pi) are filled SVGs that `bachuc_icons` does not carry; the composer falls back to `Bot`. They belong in `bachuc_icons` as a provider icon set, then the composer's `claude.svg` can go.
+
+### Lessons
+
+- A filled, non-lucide SVG draws through `img(Arc<Image>)` with `ImageFormat::Svg`; gpui rasterizes it at 2x the SVG's own size, so the asset sets `width`/`height` 56 for a crisp 14 px icon.
