@@ -762,6 +762,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bachuc-plugin-thread-branch"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "bachuc-theme",
+ "base64 0.22.1",
+ "chrono",
+ "gpui-kit",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bachuc-plugin-thread-context-attach"
 version = "0.1.0"
 dependencies = [
