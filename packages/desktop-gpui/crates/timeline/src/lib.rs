@@ -1291,7 +1291,7 @@ impl TimelineView {
     ///
     /// Spacing follows the app's block model: a message splits into blocks at blank lines, a
     /// paragraph keeps `marginBottom: 12` and each block 12 more (`message.tsx`), so blocks sit
-    /// 24 apart. A fence adds `marginVertical: 12`, padding 12, and a 1.45 line height
+    /// 24 apart. A fence adds 12 above (`fence_spacing`), padding 12, and a 1.45 line height
     /// (`highlighted-code-block.tsx`). Also returns the fence highlighter, one `Arc` per theme,
     /// so a code block highlights once rather than on every frame.
     fn markdown_style(&self, cx: &App) -> (RichTextStyle, CodeHighlighter) {
@@ -1307,9 +1307,7 @@ impl TimelineView {
         corners.corner_radii.bottom_left = Some(radius.into());
         corners.corner_radii.bottom_right = Some(radius.into());
         let code = code_font_size(FONT_CODE, cx);
-        let code_block = corners
-            .clone()
-            .mt(px(SPACE_3))
+        let code_block = fence_spacing(corners.clone())
             .p(px(SPACE_3))
             .font_family(mono_font_family(cx))
             .text_size(code)
@@ -1965,6 +1963,14 @@ fn format_duration(ms: i64) -> String {
     }
 }
 
+/// The fence's `marginTop: 12`. The text view stacks its blocks in block flow, where taffy
+/// collapses an h1 or h2 bottom margin with a fence's top margin (24 and 12 give 24), as CSS
+/// does. The web stream stacks blocks in flex columns, which add them (36). A relative offset
+/// with the same space below moves the fence as a margin would, and no margin collapses with it.
+fn fence_spacing(style: StyleRefinement) -> StyleRefinement {
+    style.relative().top(px(SPACE_3)).mb(px(SPACE_3))
+}
+
 /// One heading level of `markdown-styles.ts`: its `FONT_SIZE` tier over the base size, scaled
 /// to the content size and rounded, bold for h1 and h2 with a rule under them, semibold below.
 /// The top margin becomes padding, so it replaces the text view's own section gap. A heading
@@ -2037,11 +2043,14 @@ mod tests {
     // Not `super::*`: the gpui glob brings its own `test` attribute.
     use super::tool_view::{code_styles, fence_language};
     use super::{
-        StepCounts, counts_text, format_clock, format_duration, format_elapsed, heading_style,
-        toggle,
+        BLOCK_GAP, StepCounts, counts_text, fence_spacing, format_clock, format_duration,
+        format_elapsed, heading_style, toggle,
     };
     use bachuc_theme::Scheme;
-    use gpui_kit::{AbsoluteLength, FontWeight, Hsla, Length, hsla, px, rgb};
+    use bachuc_theme::metrics::SPACE_3;
+    use gpui_kit::{
+        AbsoluteLength, DefiniteLength, FontWeight, Hsla, Length, StyleRefinement, hsla, px, rgb,
+    };
     use std::collections::HashSet;
 
     /// Expanding a tool badge flips its key; the crash fix keeps this state path and changes only
@@ -2090,6 +2099,41 @@ mod tests {
         assert_eq!(h2.margin.bottom, Some(Length::Definite(px(24.).into())));
         let h3 = heading_style(3, px(15.), border);
         assert_eq!(h3.padding.bottom, Some(px(20.).into()));
+    }
+
+    fn length_px(length: Option<Length>) -> f32 {
+        match length {
+            None => 0.,
+            Some(Length::Definite(DefiniteLength::Absolute(AbsoluteLength::Pixels(value)))) => {
+                value / px(1.)
+            }
+            Some(other) => panic!("not a pixel length: {other:?}"),
+        }
+    }
+
+    /// The space under an h2 rule and under a paragraph before a fence. The text view's block
+    /// flow collapses adjoining margins (the larger wins); padding and a relative offset add.
+    #[test]
+    fn fence_gaps_match_the_web_stream() {
+        let border = hsla(0., 0., 0.5, 1.);
+        let heading = heading_style(2, px(15.), border);
+        let fence = fence_spacing(StyleRefinement::default());
+        let fence_margin = length_px(fence.margin.top);
+        let fence_offset = length_px(fence.inset.top);
+        // The offset is undone below, so the blocks after the fence keep their place.
+        assert_eq!(length_px(fence.margin.bottom), fence_offset);
+
+        // Web: h2 `marginBottom: 12`, the block's 12, and the fence's `marginVertical: 12`, in
+        // flex columns that add them: 36 under the 1 px rule, 37 from the rule's top.
+        let web = SPACE_3 * 3.;
+        let collapsed = length_px(heading.margin.bottom).max(fence_margin);
+        assert_eq!(collapsed + fence_offset, web, "heading rule to fence");
+        // A paragraph's gap is padding, which never collapses.
+        assert_eq!(
+            BLOCK_GAP + fence_margin + fence_offset,
+            web,
+            "paragraph to fence"
+        );
     }
 
     #[test]
