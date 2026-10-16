@@ -583,6 +583,7 @@ name = "bachuc-composer"
 version = "0.1.0"
 dependencies = [
  "bachuc-client",
+ "bachuc-command",
  "bachuc-icons",
  "bachuc-theme",
  "base64 0.22.1",

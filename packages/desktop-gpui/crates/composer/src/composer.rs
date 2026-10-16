@@ -12,10 +12,11 @@ use crate::slash::{
 use bachuc_client::{
     AgentControls, Client, ClientEvent, QueuedPrompt, SlashCommand, ThinkingControls,
 };
+use bachuc_command::{Shortcut, display_combos, load_shortcuts};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, RADIUS_2XL, RADIUS_LG, RADIUS_MD, SPACE_1,
-    SPACE_1_5, SPACE_2, SPACE_3,
+    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, RADIUS_2XL, RADIUS_LG, RADIUS_MD,
+    SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4,
 };
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
 use gpui_kit::component::input::{InputEvent, Position, Textarea, TextareaState};
@@ -42,6 +43,11 @@ const SLASH_MAX_HEIGHT: f32 = 220.;
 /// Electron's `ClaudeIcon`, a filled logo. `bachuc_icons` carries only lucide stroke icons, so
 /// the composer draws it as an SVG image with the fill color written in.
 const CLAUDE_LOGO: &str = include_str!("../assets/claude.svg");
+/// The left and right editor padding of an `XSmall` gpui-kit textarea. The input box takes it
+/// back with a negative margin, so text starts at the surface padding as in Electron.
+const INPUT_INSET: f32 = 4.;
+/// The shortcut whose chord the focus hint shows.
+const FOCUS_ACTION: &str = "message-input.focus";
 
 /// What a `Composer` tells its owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,6 +116,8 @@ pub struct Composer {
     logo: Option<(Hsla, Arc<Image>)>,
     /// The row limit the input was last given, from the window height.
     max_rows: usize,
+    /// "⌘L to focus", shown while the input is empty and unfocused; None when unassigned.
+    focus_hint: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -124,14 +132,19 @@ impl Composer {
     ) -> Composer {
         let max_rows = max_input_rows(f32::from(window.viewport_size().height), FONT_CONTENT);
         let input = cx.new(|cx| {
+            // No placeholder here: gpui-kit draws it in the theme's muted color at the input
+            // size, and Electron draws it in `surface4` at `sm`. The view draws its own.
             TextareaState::new(window, cx)
                 .auto_grow(1, max_rows)
-                .placeholder(PLACEHOLDER)
                 .submit_on_enter(true)
         });
         let watched = Watched::read(client.read(cx), &agent_id);
         let weak = cx.weak_entity();
+        let input_focus = input.read(cx).focus_handle(cx);
         let subscriptions = vec![
+            // The focus hint shows only while the input is unfocused.
+            cx.on_focus(&input_focus, window, |_, _, cx| cx.notify()),
+            cx.on_blur(&input_focus, window, |_, _, cx| cx.notify()),
             cx.subscribe_in(
                 &input,
                 window,
@@ -187,6 +200,7 @@ impl Composer {
             slash_scroll: ScrollHandle::new(),
             logo: None,
             max_rows,
+            focus_hint: focus_hint(&load_shortcuts()),
             _subscriptions: subscriptions,
         }
     }
@@ -240,6 +254,10 @@ impl Composer {
                     Ok(commands) => {
                         this.commands = commands;
                         this.commands_state = CommandsState::Loaded;
+                        // The menu opened with the client commands only; pin the full list
+                        // to the bottom with the best match selected, as a query change does.
+                        this.slash_active = 0;
+                        this.slash_scroll.scroll_to_bottom();
                     }
                     Err(error) => {
                         log::debug!("no slash commands for {}: {error}", this.agent_id);
@@ -535,6 +553,18 @@ fn filled_svg(template: &str, color: Hsla) -> String {
         .replace("{OPACITY}", &format!("{:.3}", rgba.a.clamp(0., 1.)))
 }
 
+/// `composer.input.focusHint` with the first combo of the focus shortcut, or None when the
+/// shortcut is unassigned, as `FocusHint` renders nothing then.
+fn focus_hint(shortcuts: &[Shortcut]) -> Option<String> {
+    let chord = shortcuts
+        .iter()
+        .find(|shortcut| shortcut.action == FOCUS_ACTION)?
+        .chord
+        .as_deref()?;
+    let combo = display_combos(chord).into_iter().next()?;
+    Some(format!("{combo} to focus"))
+}
+
 /// The text to send, or `None` when there is nothing to send: blank text and no image.
 fn outgoing_text(value: &str, images: usize) -> Option<String> {
     can_send(value, images).then(|| value.trim_end().to_string())
@@ -645,6 +675,14 @@ impl RenderOnce for PillTrigger {
                 Glyph::Image(image) => img(image).flex_none().size(px(GLYPH)).into_any_element(),
             })
             .child(div().truncate().max_w(px(160.)).child(self.label))
+            // `ComboboxTrigger` draws a 14 px muted chevron 1 px low after the toolbar value.
+            .child(
+                div().flex_none().mt(px(1.)).child(
+                    icon(IconName::ChevronDown)
+                        .with_size(px(ICON_SM))
+                        .text_color(t.foreground_muted),
+                ),
+            )
     }
 }
 
@@ -778,10 +816,12 @@ impl Composer {
         // The `detailCard` of `Autocomplete`: the selected command in full, in its own box.
         let selected = &matches[active];
         let detail = (!selected.description.is_empty()).then(|| {
+            // React Native Web text has the CSS `normal` line height, about 1.2.
             v_flex()
                 .gap(px(SPACE_1))
                 .px(px(SPACE_3))
                 .py(px(SPACE_3))
+                .line_height(relative(1.2))
                 .bg(t.surface1)
                 .border_1()
                 .border_color(t.border_accent)
@@ -801,14 +841,15 @@ impl Composer {
                         .child(selected.description.clone()),
                 )
         });
-        // Above the surface, as an overlay: it takes no height from the layout.
+        // Above the surface, as an overlay: it takes no height from the layout. The gap is the
+        // `AutocompletePopover` `OFFSET_FROM_ANCHOR`.
         Some(
             v_flex()
                 .absolute()
                 .bottom_full()
                 .left_0()
                 .right_0()
-                .pb(px(SPACE_1))
+                .pb(px(SPACE_3))
                 .gap(px(SPACE_1))
                 .children(detail)
                 .child(
@@ -847,9 +888,15 @@ impl Render for Composer {
 
         let t = tokens(cx);
         let running = self.watched.running();
-        let sendable = can_send(&self.value(cx), self.attachments.len());
+        let value = self.value(cx);
+        let empty = value.is_empty();
+        let sendable = can_send(&value, self.attachments.len());
         let primary = primary_action(sendable, running);
         let content_size = ui_font_size(FONT_CONTENT, cx);
+        let small_size = ui_font_size(FONT_SM, cx);
+        let input_line = px(line_height(f32::from(content_size)));
+        let focused = self.input.read(cx).focus_handle(cx).is_focused(window);
+        let focus_hint = self.focus_hint.clone().filter(|_| empty && !focused);
         let matches = self.slash_matches(cx);
         let model_glyph = self.model_glyph(t.foreground_muted);
         let weak = cx.weak_entity();
@@ -991,66 +1038,110 @@ impl Render for Composer {
             PrimaryAction::None => None,
         };
 
-        v_flex()
+        // `XSmall` gives the editor no top or bottom padding and 4 px at the sides; the margin
+        // takes the sides back. The placeholder and the focus hint draw over the input, as the
+        // Electron `::placeholder` rule (`sm`, `surface4`, the input line height) and
+        // `focusHintText` do.
+        let input_box = div()
             .relative()
+            .mx(px(-INPUT_INSET))
+            .child(
+                Textarea::new(&self.input)
+                    .xsmall()
+                    .w_full()
+                    .appearance(false)
+                    .bordered(false)
+                    .text_size(content_size)
+                    .text_color(t.foreground)
+                    .line_height(input_line)
+                    .accessibility_id("composer-input")
+                    .aria_label("Message")
+                    .on_paste(move |item, _, cx| {
+                        weak.update(cx, |this, cx| this.paste(item, cx))
+                            .unwrap_or(false)
+                    }),
+            )
+            .when(empty, |input_box| {
+                input_box.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left(px(INPUT_INSET))
+                        .right(px(INPUT_INSET))
+                        .truncate()
+                        .text_size(small_size)
+                        .line_height(input_line)
+                        .text_color(t.surface4)
+                        .child(PLACEHOLDER),
+                )
+            })
+            .when_some(focus_hint, |input_box, hint| {
+                input_box.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .right(px(INPUT_INSET))
+                        .text_size(small_size)
+                        .text_color(t.foreground_muted)
+                        .opacity(0.5)
+                        .child(hint),
+                )
+            });
+
+        // `inputAreaContainer`: 16 px at the sides and bottom, the content centered at 820 px.
+        div()
             .w_full()
-            .gap(px(SPACE_2))
-            .children(self.slash_menu(&matches, cx))
-            .children(queue)
+            .flex()
+            .justify_center()
+            .px(px(SPACE_4))
+            .pb(px(SPACE_4))
             .child(
                 v_flex()
-                    .gap(px(SPACE_1_5))
-                    .px(px(SPACE_3))
-                    .py(px(SPACE_2))
-                    .bg(t.surface1)
-                    .border_1()
-                    .border_color(t.border_accent)
-                    .rounded(px(RADIUS_2XL))
-                    .children(chips)
+                    .relative()
+                    .w_full()
+                    .max_w(px(MAX_CONTENT_WIDTH))
+                    .gap(px(SPACE_2))
+                    .children(self.slash_menu(&matches, cx))
+                    .children(queue)
                     .child(
-                        Textarea::new(&self.input)
-                            .w_full()
-                            .appearance(false)
-                            .bordered(false)
-                            .text_size(content_size)
-                            .text_color(t.foreground)
-                            .line_height(px(line_height(f32::from(content_size))))
-                            .accessibility_id("composer-input")
-                            .aria_label("Message")
-                            .on_paste(move |item, _, cx| {
-                                weak.update(cx, |this, cx| this.paste(item, cx))
-                                    .unwrap_or(false)
-                            }),
-                    )
-                    .child(
-                        h_flex()
-                            .mx(px(-6.))
-                            .items_center()
-                            .justify_between()
+                        v_flex()
+                            .gap(px(SPACE_1_5))
+                            .px(px(SPACE_3))
+                            .py(px(SPACE_2))
+                            .bg(t.surface1)
+                            .border_1()
+                            .border_color(t.border_accent)
+                            .rounded(px(RADIUS_2XL))
+                            .children(chips)
+                            .child(input_box)
                             .child(
                                 h_flex()
-                                    .min_w_0()
-                                    .flex_1()
+                                    .mx(px(-6.))
                                     .items_center()
+                                    .justify_between()
                                     .child(
-                                        round_button(
-                                            "composer-attach",
-                                            IconName::Plus,
-                                            "Attach images",
-                                            CONTROL,
-                                            None,
-                                            t.foreground_muted,
-                                            t.surface2,
-                                        )
-                                        .on_click(
-                                            cx.listener(|this, _, window, cx| {
-                                                this.pick_images(window, cx)
-                                            }),
-                                        ),
+                                        h_flex()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .items_center()
+                                            .child(
+                                                round_button(
+                                                    "composer-attach",
+                                                    IconName::Plus,
+                                                    "Attach images",
+                                                    CONTROL,
+                                                    None,
+                                                    t.foreground_muted,
+                                                    t.surface2,
+                                                )
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.pick_images(window, cx)
+                                                })),
+                                            )
+                                            .children(self.pills(model_glyph)),
                                     )
-                                    .children(self.pills(model_glyph)),
-                            )
-                            .children(primary_button),
+                                    .children(primary_button),
+                            ),
                     ),
             )
     }
@@ -1059,8 +1150,21 @@ impl Render for Composer {
 #[cfg(test)]
 mod tests {
     // Named imports: `use super::*` would bring in GPUI's `test` macro over `#[test]`.
-    use super::{CLAUDE_LOGO, filled_svg, outgoing_text, pill_label};
+    use super::{CLAUDE_LOGO, FOCUS_ACTION, filled_svg, focus_hint, outgoing_text, pill_label};
+    use bachuc_command::default_shortcuts;
     use gpui_kit::{Hsla, Rgba};
+
+    #[test]
+    fn the_focus_hint_shows_the_focus_chord() {
+        let mut shortcuts = default_shortcuts();
+        assert_eq!(focus_hint(&shortcuts).as_deref(), Some("⌘L to focus"));
+        for shortcut in &mut shortcuts {
+            if shortcut.action == FOCUS_ACTION {
+                shortcut.chord = None;
+            }
+        }
+        assert_eq!(focus_hint(&shortcuts), None);
+    }
 
     #[test]
     fn the_logo_takes_the_fill_color() {
