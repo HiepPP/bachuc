@@ -576,6 +576,7 @@ name = "bachuc-composer"
 version = "0.1.0"
 dependencies = [
  "bachuc-client",
+ "bachuc-icons",
  "bachuc-theme",
  "base64 0.22.1",
  "gpui-kit",
@@ -598,6 +599,18 @@ dependencies = [
  "objc2-web-kit",
  "raw-window-handle",
  "serde_json",
+]
+
+[[package]]
+name = "bachuc-explorer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-theme",
+ "gpui-kit",
+ "log",
 ]
 
 [[package]]
@@ -637,6 +650,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "bachuc-settings"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-client",
+ "bachuc-command",
+ "bachuc-icons",
+ "bachuc-theme",
+ "futures",
+ "gpui-kit",
+ "log",
+ "serde_json",
+ "tungstenite",
+ "uuid",
+]
+
+[[package]]
+name = "bachuc-sidebar"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-theme",
+ "gpui-kit",
+ "log",
+]
+
+[[package]]
 name = "bachuc-terminal"
 version = "0.1.0"
 dependencies = [
@@ -664,6 +706,8 @@ version = "0.1.0"
 dependencies = [
  "bachuc-client",
  "bachuc-diagram",
+ "bachuc-explorer",
+ "bachuc-icons",
  "bachuc-theme",
  "chrono",
  "gpui-kit",

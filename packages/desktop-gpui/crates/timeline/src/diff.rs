@@ -65,17 +65,24 @@ pub fn line_diff(old: &str, new: &str) -> Vec<DiffLine> {
         .collect()
 }
 
+/// The diff of an edit detail: its unified diff, or a line diff of its old and new strings.
+pub fn detail_lines(detail: &Value) -> Vec<DiffLine> {
+    let mut lines = match detail["unifiedDiff"].as_str() {
+        Some(diff) if !diff.is_empty() => parse_unified(diff),
+        _ => line_diff(
+            detail["oldString"].as_str().unwrap_or(""),
+            detail["newString"].as_str().unwrap_or(""),
+        ),
+    };
+    lines.truncate(MAX_LINES);
+    lines
+}
+
 /// The diff lines of an edit or write entry, cut at [`MAX_LINES`].
 pub fn entry_lines(entry: &Value) -> Vec<DiffLine> {
     let detail = &entry["item"]["detail"];
     let mut lines = match detail["type"].as_str() {
-        Some("edit") => match detail["unifiedDiff"].as_str() {
-            Some(diff) if !diff.is_empty() => parse_unified(diff),
-            _ => line_diff(
-                detail["oldString"].as_str().unwrap_or(""),
-                detail["newString"].as_str().unwrap_or(""),
-            ),
-        },
+        Some("edit") => detail_lines(detail),
         Some("write") => detail["content"]
             .as_str()
             .unwrap_or("")
@@ -86,6 +93,49 @@ pub fn entry_lines(entry: &Value) -> Vec<DiffLine> {
     };
     lines.truncate(MAX_LINES);
     lines
+}
+
+/// The line number each line shows, as `numberRows` of the edit-diffs plugin: a removed line
+/// shows its old number and the others their new one. Numbers start at each hunk header; a write
+/// (only added lines, no header) counts from 1, and a line diff without headers shows none.
+pub fn numbers(lines: &[DiffLine]) -> Vec<Option<u32>> {
+    let is_write = lines.iter().all(|line| line.kind == LineKind::Add);
+    let (mut old, mut new) = if is_write {
+        (None, Some(1))
+    } else {
+        (None, None)
+    };
+    lines
+        .iter()
+        .map(|line| match line.kind {
+            LineKind::Hunk => {
+                (old, new) = hunk_starts(&line.text).unzip();
+                None
+            }
+            LineKind::Remove => {
+                let number = old;
+                old = old.map(|n| n + 1);
+                number
+            }
+            LineKind::Add | LineKind::Context => {
+                let number = new;
+                new = new.map(|n| n + 1);
+                if line.kind == LineKind::Context {
+                    old = old.map(|n| n + 1);
+                }
+                number
+            }
+        })
+        .collect()
+}
+
+/// The old and new start lines of `@@ -a,b +c,d @@`.
+fn hunk_starts(header: &str) -> Option<(u32, u32)> {
+    let mut parts = header.split_whitespace().skip(1);
+    let start = |part: Option<&str>, sign: char| -> Option<u32> {
+        part?.strip_prefix(sign)?.split(',').next()?.parse().ok()
+    };
+    Some((start(parts.next(), '-')?, start(parts.next(), '+')?))
 }
 
 /// Added and removed line counts.

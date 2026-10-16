@@ -1,6 +1,7 @@
-//! Splits message markdown into text and diagram blocks. Closed ` ```mermaid ` fences and
-//! display math (`$$...$$`) render through `bachuc-diagram` as images (ADR-0037); the rest
-//! stays markdown for gpui-kit's text view.
+//! Splits message markdown into text, diagram, and image blocks. Closed ` ```mermaid ` fences
+//! and display math (`$$...$$`) render through `bachuc-diagram` as images (ADR-0037). A line
+//! that holds only `![alt](path)` with a local path is an image the view reads through the host,
+//! as `AssistantMarkdownImage` does; the rest stays markdown for gpui-kit's text view.
 
 use std::sync::Arc;
 
@@ -11,13 +12,25 @@ use gpui_kit::Image;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Segment {
     Markdown(String),
-    Diagram { kind: DiagramKind, source: String },
+    Diagram {
+        kind: DiagramKind,
+        source: String,
+    },
+    /// A local image: `source` is the path as written.
+    Image {
+        alt: String,
+        source: String,
+    },
 }
 
 /// What a row draws for one segment.
 #[derive(Clone, Debug)]
 pub enum Block {
     Markdown(String),
+    LocalImage {
+        alt: String,
+        source: String,
+    },
     Image {
         image: Arc<Image>,
         label: &'static str,
@@ -89,6 +102,15 @@ pub fn segments(text: &str) -> Vec<Segment> {
             continue;
         }
         let trimmed = line.trim();
+        if let Some((alt, source)) = local_image(trimmed) {
+            if !markdown.trim().is_empty() {
+                output.push(Segment::Markdown(std::mem::take(&mut markdown)));
+            }
+            markdown.clear();
+            output.push(Segment::Image { alt, source });
+            index += 1;
+            continue;
+        }
         if let Some(rest) = trimmed.strip_prefix("$$") {
             // `$$ x $$` on one line, or `$$` lines around the formula.
             if let Some(inner) = rest.strip_suffix("$$") {
@@ -139,6 +161,10 @@ pub fn blocks(
         .iter()
         .map(|segment| match segment {
             Segment::Markdown(text) => Block::Markdown(text.clone()),
+            Segment::Image { alt, source } => Block::LocalImage {
+                alt: alt.clone(),
+                source: source.clone(),
+            },
             Segment::Diagram { kind, source } => match render(*kind, source) {
                 DiagramState::Ready(image) => Block::Image {
                     image,
@@ -154,6 +180,29 @@ pub fn blocks(
             },
         })
         .collect()
+}
+
+/// `![alt](source)` or `![alt](source "title")` filling the whole line, with a local source.
+/// A web, data, or blob source stays markdown.
+fn local_image(line: &str) -> Option<(String, String)> {
+    let rest = line.strip_prefix("![")?;
+    let (alt, rest) = rest.split_once("](")?;
+    let inner = rest.strip_suffix(')')?;
+    // `<path with spaces>` or a bare path, then an optional quoted title.
+    let (source, title) = match inner.strip_prefix('<') {
+        Some(bracketed) => bracketed.split_once('>')?,
+        None => inner.split_once(char::is_whitespace).unwrap_or((inner, "")),
+    };
+    let title = title.trim();
+    if !title.is_empty() && !(title.starts_with('"') && title.ends_with('"')) {
+        return None;
+    }
+    let lower = source.to_lowercase();
+    let remote = ["http:", "https:", "data:", "blob:"]
+        .iter()
+        .any(|scheme| lower.starts_with(scheme));
+    (!source.is_empty() && !remote && !alt.contains(']'))
+        .then(|| (alt.to_string(), source.to_string()))
 }
 
 /// The source of a failed diagram as a fenced code block.
@@ -234,6 +283,30 @@ mod tests {
     fn math_block_inside_a_code_fence_stays_code() {
         let text = "```text\n$$x$$\n```\n";
         assert_eq!(segments(text), vec![Segment::Markdown(text.into())]);
+    }
+
+    #[test]
+    fn a_local_image_line_becomes_an_image_and_a_web_image_stays_markdown() {
+        let text = "Here:\n\n![chart](/tmp/gpui-bench/chart.png)\n\n![logo](https://x.io/a.png)\n";
+        assert_eq!(
+            segments(text),
+            vec![
+                Segment::Markdown("Here:\n\n".into()),
+                Segment::Image {
+                    alt: "chart".into(),
+                    source: "/tmp/gpui-bench/chart.png".into()
+                },
+                Segment::Markdown("\n![logo](https://x.io/a.png)\n".into()),
+            ]
+        );
+        let titled = "![a](<docs/a b.png> \"Title\")";
+        assert_eq!(
+            segments(titled),
+            vec![Segment::Image {
+                alt: "a".into(),
+                source: "docs/a b.png".into()
+            }]
+        );
     }
 
     #[test]

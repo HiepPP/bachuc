@@ -7,6 +7,9 @@ publish = false
 [dependencies]
 bachuc-client = { path = "../client" }
 bachuc-diagram = { path = "../diagram" }
+# Syntax colors of code and diffs in tool details, shared with the file viewer.
+bachuc-explorer = { path = "../explorer" }
+bachuc-icons = { path = "../icons" }
 bachuc-theme = { path = "../theme" }
 # gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot; keep the same pin in every crate.
 # The tree-sitter features highlight fenced code in the markdown answer.

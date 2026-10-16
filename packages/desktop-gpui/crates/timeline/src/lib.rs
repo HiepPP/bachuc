@@ -1,44 +1,100 @@
 //! `bachuc-timeline`: the timeline of one agent as a virtualized GPUI list. Each turn draws as
 //! an always-open step list with its answer below (ADR-0018, ADR-0019, ADR-0021); mermaid and
-//! display math blocks show as images from `bachuc-diagram` (ADR-0037).
+//! display math blocks show as images from `bachuc-diagram` (ADR-0037). Rows follow the
+//! Electron agent panel: `message.tsx`, `tool-calls/detail-level/turn/view.tsx`, the tool detail
+//! views, the permission cards, and the pane find bar.
 
+mod card_view;
+pub mod cards;
 pub mod diff;
+pub mod find;
+mod find_bar;
 pub mod grouping;
+mod image_view;
+pub mod links;
 pub mod markdown;
+mod tool_view;
+pub mod tools;
 
+pub use image_view::{display_size, image_dimensions, read_target};
+pub use tool_view::{change_bar, display_path, edit_status_label};
+
+use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bachuc_client::{Client, ClientEvent};
 use bachuc_diagram::{DiagramReady, DiagramRenderer, image_size};
-use bachuc_theme::{TurnLabel, scheme, turn_label_colors};
-use gpui_kit::base::StyledExt as _;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use bachuc_explorer::syntax::Run;
+use bachuc_icons::{IconName, icon};
+use bachuc_theme::metrics::{
+    FONT_BASE, FONT_CODE, FONT_CONTENT, ICON_MD, ICON_XS, MAX_CONTENT_WIDTH, RADIUS_2XL,
+    RADIUS_BASE, RADIUS_LG, RADIUS_MD, RADIUS_SM, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
+};
+use bachuc_theme::{
+    TurnLabel, code_font_size, mono_font_family, scheme, tokens, turn_label_colors, ui_font_size,
+};
 use gpui_kit::component::text::{TextView, TextViewState};
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::Value;
 
-use diff::{DiffLine, LineKind};
+use card_view::FormState;
+use diff::DiffLine;
+use find_bar::FindState;
 use grouping::{SharedRow, StepCounts, TurnGroup, TurnGrouper, TurnStep, entry_key, item_type};
+use image_view::ImageLoad;
 use markdown::{Block, Segment};
+
+/// What the timeline asks of the app.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TimelineEvent {
+    /// A file link or a tool row's open-file button: the app opens the file pane. `path` is
+    /// absolute, or relative to `cwd`.
+    OpenFile {
+        cwd: String,
+        path: String,
+        line: Option<u32>,
+    },
+}
 
 /// Rows within this many of the top load the page before the first entry.
 const LOAD_OLDER_WITHIN: usize = 2;
-/// The running step's segment and number.
-const RUNNING_COLOR: u32 = 0x256ABF;
 /// The smallest share of the strip one step gets, so short steps stay visible.
 const MIN_SEGMENT_SHARE: f32 = 0.04;
+/// Opacity of the strip segments of the steps that are not selected.
+const DIMMED_OPACITY: f32 = 0.3;
 const STRIP_WIDTH: f32 = 170.;
+const STRIP_HEIGHT: f32 = 8.;
 /// Live box lines of the running step's last command.
 const OUTPUT_LINES: usize = 2;
-const MAX_THOUGHT_CHARS: usize = 400;
 /// A clock tick this soon after a sync redraw adds no change, so it draws nothing.
 const CLOCK_SKIP_AFTER_SYNC: Duration = Duration::from_millis(250);
+/// The turn step list sizes of `turn/view.tsx` that have no metric.
+const TURN_TITLE_SIZE: f32 = 13.5;
+const TURN_CLOCK_SIZE: f32 = 12.5;
+const TURN_SUMMARY_SIZE: f32 = 13.;
+const STEP_LABEL_SIZE: f32 = 10.;
+const STEP_COUNTS_SIZE: f32 = 12.5;
+const STEP_TIME_SIZE: f32 = 11.5;
+const STEP_NUMBER: f32 = 20.;
+const STEP_BODY_LEFT: f32 = 34.;
+const STEP_BODY_RIGHT: f32 = 52.;
+const STEP_TIME_WIDTH: f32 = 40.;
+const STEP_GAP: f32 = 6.;
+const STEP_LIST_TOP: f32 = 16.;
+const LIVE_LINE_HEIGHT: f32 = 19.;
+const RULE_TOP: f32 = 22.;
+const RULE_BOTTOM: f32 = 18.;
+/// The user bubble's line height, as `fontSize.content * 1.4`.
+const USER_LINE_HEIGHT: f32 = 1.4;
+/// `STREAM_METADATA_FONT_SIZE`, the compaction marker text.
+const METADATA_SIZE: f32 = 13.;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum RowKey {
@@ -78,19 +134,27 @@ struct Message {
     states: Vec<Option<Entity<TextViewState>>>,
 }
 
+/// Syntax runs per line, as `bachuc_explorer::syntax::highlight` returns them.
+type LineRuns = Rc<Vec<Vec<Run>>>;
+
 /// The diff lines of one edit or write call and their added and removed counts.
 #[derive(Default)]
 struct Diff {
     lines: Vec<DiffLine>,
     stats: (usize, usize),
+    /// Syntax runs and the scheme they were colored for, made on the first draw.
+    runs: RefCell<Option<(bachuc_theme::Scheme, LineRuns)>>,
 }
 
 /// The timeline of one agent. Create it with `cx.new(|cx| TimelineView::new(...))`.
 pub struct TimelineView {
     client: Entity<Client>,
     agent_id: String,
+    /// The agent folder: links resolve under it and images read from it.
+    cwd: String,
     diagrams: Entity<DiagramRenderer>,
     list: ListState,
+    focus: FocusHandle,
     /// The entries the rows point into: a copy of the client's, so a sync between two
     /// `TimelineChanged` events cannot move them under the rows.
     entries: Vec<Value>,
@@ -111,12 +175,35 @@ pub struct TimelineView {
     diffs: HashMap<u64, Rc<Diff>>,
     /// Edits whose diff the user hid; diffs are open by default (ADR-0019).
     hidden_diffs: HashSet<u64>,
-    /// Permission requests answered from this view, waiting for the daemon to resolve them.
-    answered: HashSet<String>,
+    /// Tool badges the user opened.
+    expanded: HashSet<u64>,
+    /// The step the user picked in the strip or the list, by its entry key.
+    selected_step: Option<u64>,
+    /// Plan cards folded or opened against their default, by permission id or `tool-<key>`.
+    plan_toggled: HashSet<String>,
+    /// Question forms being filled in, by permission id.
+    forms: HashMap<String, FormState>,
+    /// Permissions answered from this view, waiting for the daemon to resolve them, with the
+    /// action that answered.
+    responding: HashMap<String, String>,
+    /// Message images by source.
+    images: HashMap<String, ImageLoad>,
+    lightbox: Option<Arc<Image>>,
+    finder: Option<FindState>,
+    /// Syntax runs of open code sections, by text.
+    syntax_cache: RefCell<HashMap<u64, LineRuns>>,
     clock: Option<Task<()>>,
     /// When the last sync redrew the view.
     synced_at: Option<Instant>,
     _subscriptions: Vec<Subscription>,
+}
+
+impl EventEmitter<TimelineEvent> for TimelineView {}
+
+impl Focusable for TimelineView {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
 }
 
 impl TimelineView {
@@ -163,6 +250,12 @@ impl TimelineView {
                 }
                 cx.notify();
             }),
+            cx.observe_global::<gpui_kit::component::theme::Theme>(|this, cx| {
+                // Syntax colors follow the scheme, and font sizes change row heights.
+                this.syntax_cache.borrow_mut().clear();
+                this.list.remeasure();
+                cx.notify();
+            }),
             cx.on_release(|this, cx| {
                 let agent_id = this.agent_id.clone();
                 this.client
@@ -176,8 +269,10 @@ impl TimelineView {
         let mut this = TimelineView {
             client,
             agent_id,
+            cwd: String::new(),
             diagrams,
             list,
+            focus: cx.focus_handle(),
             entries: Vec::new(),
             grouper: TurnGrouper::default(),
             entry_hashes: Vec::new(),
@@ -190,7 +285,15 @@ impl TimelineView {
             messages: HashMap::new(),
             diffs: HashMap::new(),
             hidden_diffs: HashSet::new(),
-            answered: HashSet::new(),
+            expanded: HashSet::new(),
+            selected_step: None,
+            plan_toggled: HashSet::new(),
+            forms: HashMap::new(),
+            responding: HashMap::new(),
+            images: HashMap::new(),
+            lightbox: None,
+            finder: None,
+            syntax_cache: RefCell::new(HashMap::new()),
             clock: None,
             synced_at: None,
             _subscriptions: subscriptions,
@@ -215,11 +318,16 @@ impl TimelineView {
     /// Reads the client's timeline and updates the rows that changed.
     fn sync(&mut self, cx: &mut Context<Self>) {
         let client = self.client.read(cx);
-        let turn_active = client
+        let agent = client
             .agents()
             .iter()
-            .find(|agent| agent.id == self.agent_id)
-            .is_some_and(|agent| agent.status == "running");
+            .find(|agent| agent.id == self.agent_id);
+        let turn_active = agent.is_some_and(|agent| agent.status == "running");
+        if let Some(agent) = agent
+            && agent.cwd != self.cwd
+        {
+            self.cwd = agent.cwd.clone();
+        }
         let Some(state) = client.timeline(&self.agent_id) else {
             return;
         };
@@ -232,11 +340,15 @@ impl TimelineView {
         self.has_older = state.has_older;
         let permissions = state.pending_permissions.clone();
         copy_changed(&mut self.entries, &state.entries);
-        self.answered
-            .retain(|id| permissions.iter().any(|request| request["id"] == **id));
+        let pending = |id: &String| permissions.iter().any(|request| request["id"] == **id);
+        self.responding.retain(|id, _| pending(id));
+        self.forms.retain(|id, _| pending(id));
         self.grouper.sync(&self.entries, turn_active);
-        self.update_messages(cx);
+        let images = self.update_messages(cx);
         self.update_hashes();
+        for source in images {
+            self.load_image(&source, cx);
+        }
 
         // A turn whose group did not change keeps its rows; its `Rc` stays alive in the old
         // rows, so no new group can take its address.
@@ -268,8 +380,7 @@ impl TimelineView {
         rows.extend(permissions.into_iter().map(|request| {
             let id = request["id"].as_str().unwrap_or("").to_string();
             let mut hasher = DefaultHasher::new();
-            id.hash(&mut hasher);
-            self.answered.contains(&id).hash(&mut hasher);
+            self.hash_permission(&id, &mut hasher);
             ViewRow {
                 key: RowKey::Permission(id),
                 fingerprint: hasher.finish(),
@@ -283,6 +394,12 @@ impl TimelineView {
         self.update_clock(cx);
         self.synced_at = Some(Instant::now());
         cx.notify();
+    }
+
+    /// Syncs again after a change made in this view, such as a toggle or an answer.
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.version = None;
+        self.sync(cx);
     }
 
     /// Splices the rows that changed into the list and keeps the row at the top in place.
@@ -345,13 +462,33 @@ impl TimelineView {
         key.hash(&mut hasher);
         entry["seqEnd"].as_u64().hash(&mut hasher);
         self.hidden_diffs.contains(&key).hash(&mut hasher);
-        let has_diagram = self.messages.get(&key).is_some_and(|message| {
-            message
-                .segments
-                .iter()
-                .any(|segment| matches!(segment, Segment::Diagram { .. }))
-        });
+        self.expanded.contains(&key).hash(&mut hasher);
+        self.plan_toggled
+            .contains(&format!("tool-{key}"))
+            .hash(&mut hasher);
+        let mut has_diagram = false;
+        if let Some(message) = self.messages.get(&key) {
+            for segment in &message.segments {
+                match segment {
+                    Segment::Diagram { .. } => has_diagram = true,
+                    Segment::Image { source, .. } => {
+                        self.images.get(source).map(image_phase).hash(&mut hasher);
+                    }
+                    Segment::Markdown(_) => {}
+                }
+            }
+        }
         (hasher.finish(), has_diagram)
+    }
+
+    /// Hashes the entries of `keys` again and rebuilds every turn's rows on the next sync.
+    fn rehash_keys(&mut self, keys: &[u64]) {
+        for index in 0..self.entries.len() {
+            if keys.contains(&self.grouper.key(index)) {
+                self.entry_hashes[index] = self.hash_entry(index);
+                self.rows_stale = true;
+            }
+        }
     }
 
     /// Hashes the entries the last grouper sync read again, and builds the diffs of the edit
@@ -369,8 +506,14 @@ impl TimelineView {
             if grouping::edited_file_path(entry).is_some() {
                 let lines = diff::entry_lines(entry);
                 let stats = diff::stats(&lines);
-                self.diffs
-                    .insert(entry_key(entry), Rc::new(Diff { lines, stats }));
+                self.diffs.insert(
+                    entry_key(entry),
+                    Rc::new(Diff {
+                        lines,
+                        stats,
+                        runs: RefCell::new(None),
+                    }),
+                );
             }
             let hash = self.hash_entry(index);
             match self.entry_hashes.get_mut(index) {
@@ -396,6 +539,10 @@ impl TimelineView {
     /// A turn takes one list item for its header and one per step, so a long turn lays out
     /// only the steps on screen.
     fn push_turn_rows(&self, group: &Rc<TurnGroup>, rows: &mut Vec<ViewRow>) {
+        let selected = group
+            .steps
+            .iter()
+            .position(|step| Some(self.grouper.key(step.id)) == self.selected_step);
         // The header is one line of title, clock, strip, and summary: a step body leaves its
         // height alone.
         let mut hasher = DefaultHasher::new();
@@ -403,6 +550,7 @@ impl TimelineView {
         group.step_count.hash(&mut hasher);
         group.running_step.hash(&mut hasher);
         group.changed_files.hash(&mut hasher);
+        selected.hash(&mut hasher);
         let key = self.grouper.key(group.run.items[0]);
         rows.push(ViewRow {
             key: RowKey::Turn(key),
@@ -422,6 +570,7 @@ impl TimelineView {
             }
             (step.label as u8).hash(&mut hasher);
             step.is_running.hash(&mut hasher);
+            (selected == Some(position)).hash(&mut hasher);
             // The last step draws the rule under a finished turn.
             (position + 1 == group.steps.len() && !group.is_loading).hash(&mut hasher);
             let key = self.grouper.key(step.id);
@@ -462,7 +611,8 @@ impl TimelineView {
     }
 
     /// Splits each new or changed assistant entry into segments and updates its text states.
-    fn update_messages(&mut self, cx: &mut Context<Self>) {
+    /// Returns the image sources of the changed messages, which the caller loads.
+    fn update_messages(&mut self, cx: &mut Context<Self>) -> Vec<String> {
         if self.grouper.shifted() {
             let live: HashSet<u64> = self
                 .entries
@@ -472,6 +622,7 @@ impl TimelineView {
                 .collect();
             self.messages.retain(|key, _| live.contains(key));
         }
+        let mut images = Vec::new();
         for &index in self.grouper.changed() {
             let entry = &self.entries[index];
             if item_type(entry) != "assistant_message" {
@@ -498,15 +649,20 @@ impl TimelineView {
                 .iter()
                 .map(|segment| {
                     let previous = old_states.next().flatten();
-                    let Segment::Markdown(text) = segment else {
-                        return None;
+                    let text = match segment {
+                        Segment::Markdown(text) => links::linkify_code_spans(text),
+                        Segment::Image { source, .. } => {
+                            images.push(source.clone());
+                            return None;
+                        }
+                        Segment::Diagram { .. } => return None,
                     };
                     Some(match previous {
                         Some(state) => {
-                            state.update(cx, |state, cx| state.set_text(text, cx));
+                            state.update(cx, |state, cx| state.set_text(&text, cx));
                             state
                         }
-                        None => cx.new(|cx| TextViewState::markdown(text, cx)),
+                        None => cx.new(|cx| TextViewState::markdown(&text, cx)),
                     })
                 })
                 .collect();
@@ -519,6 +675,7 @@ impl TimelineView {
                 },
             );
         }
+        images
     }
 
     /// Ticks once a second while a turn runs, for its clock and the running step's time.
@@ -558,25 +715,63 @@ impl TimelineView {
             self.hidden_diffs.insert(key);
         }
         // Only the edit's hash changes; the rows rebuild from the cached hashes.
-        if let Some(index) = (0..self.entries.len()).find(|&index| self.grouper.key(index) == key) {
-            self.entry_hashes[index] = self.hash_entry(index);
-            self.rows_stale = true;
+        self.rehash_keys(&[key]);
+        self.refresh(cx);
+    }
+
+    fn toggle_expanded(&mut self, key: u64, cx: &mut Context<Self>) {
+        if !self.expanded.remove(&key) {
+            self.expanded.insert(key);
         }
-        self.version = None;
-        self.sync(cx);
+        self.rehash_keys(&[key]);
+        self.refresh(cx);
     }
 
-    fn respond(&mut self, request_id: String, allow: bool, cx: &mut Context<Self>) {
-        let agent_id = self.agent_id.clone();
-        self.client.update(cx, |client, cx| {
-            client.respond_permission(&agent_id, &request_id, allow, cx)
-        });
-        self.answered.insert(request_id);
-        self.version = None;
-        self.sync(cx);
+    /// Picks a step, or clears the pick when it is picked already. A pick from the strip
+    /// scrolls the step into view.
+    fn select_step(&mut self, key: u64, reveal: bool, cx: &mut Context<Self>) {
+        self.selected_step = (self.selected_step != Some(key)).then_some(key);
+        self.rows_stale = true;
+        self.refresh(cx);
+        if reveal
+            && self.selected_step.is_some()
+            && let Some(row) = self
+                .rows
+                .iter()
+                .position(|row| row.key == RowKey::Step(key))
+        {
+            self.list.scroll_to_reveal_item(row);
+        }
     }
 
-    fn render_row(&mut self, index: usize, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    /// A click on a link in a message: a file opens through the app, a web link in the browser.
+    fn open_link(&mut self, href: &str, cx: &mut Context<Self>) {
+        match links::resolve_click(href, &self.cwd) {
+            links::LinkClick::File(target) => cx.emit(TimelineEvent::OpenFile {
+                cwd: self.cwd.clone(),
+                path: target.path,
+                line: target.line_start,
+            }),
+            links::LinkClick::External(url) => cx.open_url(&url),
+            links::LinkClick::Ignored => {}
+        }
+    }
+
+    fn render_row(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if let Some(ViewRow {
+            kind: RowKind::Permission(request),
+            ..
+        }) = self.rows.get(index)
+            && cards::is_question(request)
+        {
+            let request = request.clone();
+            self.ensure_form(&request, window, cx);
+        }
         let this = &*self;
         let Some(row) = this.rows.get(index) else {
             return div().into_any_element();
@@ -585,14 +780,22 @@ impl TimelineView {
             RowKind::Entry(entry) => this.render_entry(*entry, cx),
             RowKind::TurnHeader(group) => this.render_turn_header(index, group, cx),
             RowKind::Step(group, position) => this.render_step(*position, group, cx),
-            RowKind::Permission(request) => this.render_permission(index, request, cx),
+            RowKind::Permission(request) => this.render_permission(request, cx),
         };
+        // `streamItemWrapper`: the content column, at most 820 wide, centered.
         div()
             .id(("row", index))
             .w_full()
-            .px_4()
-            .py_1p5()
-            .child(content)
+            .flex()
+            .justify_center()
+            .px(px(SPACE_4))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(MAX_CONTENT_WIDTH))
+                    .px(px(SPACE_2))
+                    .child(content),
+            )
             .into_any_element()
     }
 
@@ -600,23 +803,50 @@ impl TimelineView {
         let entry = &self.entries[index];
         let key = entry_key(entry);
         let item = &entry["item"];
-        let theme = cx.theme().clone();
+        let t = tokens(cx);
+        let base = ui_font_size(FONT_BASE, cx);
         match item_type(entry) {
             "user_message" => {
                 let text = item["text"].as_str().unwrap_or("").to_string();
+                let size = ui_font_size(FONT_CONTENT, cx);
+                let current = t.status_warning;
+                let highlights: Vec<_> = self
+                    .user_matches(key)
+                    .into_iter()
+                    .map(|(range, is_current)| {
+                        let color = if is_current {
+                            current
+                        } else {
+                            current.opacity(0.35)
+                        };
+                        (
+                            range,
+                            HighlightStyle {
+                                background_color: Some(color),
+                                ..Default::default()
+                            },
+                        )
+                    })
+                    .collect();
                 h_flex()
                     .justify_end()
+                    .py(px(SPACE_4))
                     .child(
                         div()
                             .id(("user", key))
                             .role(Role::Article)
                             .aria_label(format!("User message: {}", preview(&text)))
-                            .max_w(relative(0.8))
-                            .px_3()
-                            .py_2()
-                            .rounded_lg()
-                            .bg(theme.secondary)
-                            .child(text),
+                            .min_w_0()
+                            .flex_shrink(1.)
+                            .px(px(SPACE_4))
+                            .py(px(SPACE_4))
+                            .rounded(px(RADIUS_2XL))
+                            .rounded_tr(px(RADIUS_SM))
+                            .bg(t.surface3)
+                            .text_color(t.foreground)
+                            .text_size(size)
+                            .line_height(size * USER_LINE_HEIGHT)
+                            .child(StyledText::new(text).with_highlights(highlights)),
                     )
                     .into_any_element()
             }
@@ -626,104 +856,134 @@ impl TimelineView {
                     .id(("message", key))
                     .role(Role::Article)
                     .aria_label(format!("Assistant message: {}", preview(text)))
-                    .gap_2()
+                    .py(px(SPACE_3))
+                    .gap(px(SPACE_2))
                     .children(self.render_markdown(key, cx))
                     .into_any_element()
             }
-            "reasoning" => {
-                let text: String = item["text"]
-                    .as_str()
-                    .unwrap_or("")
-                    .chars()
-                    .take(MAX_THOUGHT_CHARS)
-                    .collect();
-                div()
-                    .id(("thought", key))
-                    .role(Role::Note)
-                    .aria_label("Thought")
-                    .italic()
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
-                    .child(text)
-                    .into_any_element()
-            }
-            "tool_call" => {
-                let name = item["name"].as_str().unwrap_or("tool");
-                let status = item["status"].as_str().unwrap_or("");
-                let plan = (item["detail"]["type"] == "plan")
-                    .then(|| item["detail"]["text"].as_str().unwrap_or("").to_string());
-                v_flex()
-                    .id(("tool", key))
-                    .role(Role::Group)
-                    .aria_label(format!("Tool call {name}, {status}"))
-                    .gap_1()
-                    .p_2()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(theme.border)
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_family(theme.mono_font_family.clone())
-                            .text_color(theme.muted_foreground)
-                            .child(format!("{name} · {status}")),
-                    )
-                    .children(plan.map(|plan| {
-                        TextView::markdown(ElementId::Name(format!("plan-{key}").into()), plan)
-                    }))
-                    .into_any_element()
-            }
+            "reasoning" => self.render_thought(index, cx),
+            "tool_call" => div()
+                .mb(px(SPACE_1))
+                .child(self.render_tool_call(index, cx))
+                .into_any_element(),
             "todo" => {
                 let items = item["items"].as_array().cloned().unwrap_or_default();
+                let done = items
+                    .iter()
+                    .filter(|task| task["completed"] == true)
+                    .count();
                 v_flex()
                     .id(("todo", key))
                     .role(Role::List)
-                    .aria_label("Tasks")
-                    .gap_0p5()
-                    .text_sm()
-                    .children(items.iter().enumerate().map(|(position, task)| {
-                        let done = task["completed"].as_bool().unwrap_or(false);
-                        let text = task["text"].as_str().unwrap_or("").to_string();
+                    .aria_label(format!("Tasks, {done} of {} done", items.len()))
+                    .my(px(SPACE_2))
+                    .p(px(SPACE_3))
+                    .gap(px(SPACE_1))
+                    .rounded(px(RADIUS_LG))
+                    .border_1()
+                    .border_color(t.border)
+                    .bg(t.surface1)
+                    .text_size(base)
+                    .child(
                         div()
+                            .text_color(t.foreground_muted)
+                            .child(format!("{done}/{} tasks", items.len())),
+                    )
+                    .children(items.iter().enumerate().map(|(position, task)| {
+                        let completed = task["completed"] == true;
+                        let text = task["text"].as_str().unwrap_or("").to_string();
+                        h_flex()
                             .id(("task", position))
                             .role(Role::ListItem)
                             .aria_label(text.clone())
-                            .text_color(if done {
-                                theme.muted_foreground
-                            } else {
-                                theme.foreground
-                            })
-                            .child(format!("{} {text}", if done { "☑" } else { "☐" }))
+                            .gap(px(SPACE_2))
+                            .items_center()
+                            .child(
+                                icon(if completed {
+                                    IconName::CircleCheck
+                                } else {
+                                    IconName::Circle
+                                })
+                                .with_size(px(ICON_XS))
+                                .text_color(t.foreground_muted),
+                            )
+                            .child(
+                                div()
+                                    .text_color(if completed {
+                                        t.foreground_muted
+                                    } else {
+                                        t.foreground
+                                    })
+                                    .when(completed, |text| text.line_through())
+                                    .child(text),
+                            )
                     }))
                     .into_any_element()
             }
-            "error" => div()
-                .id(("error", key))
-                .role(Role::Alert)
-                .aria_label("Error")
-                .text_sm()
-                .text_color(theme.danger)
-                .child(item["message"].as_str().unwrap_or("").to_string())
-                .into_any_element(),
-            other => {
-                let text = match other {
-                    "notification" => item["message"].as_str().unwrap_or("").to_string(),
-                    "compaction" => "Context compacted".to_string(),
-                    _ => other.replace('_', " "),
+            "error" => notification(
+                ("error", key),
+                Role::Alert,
+                IconName::CircleX,
+                t.destructive,
+                t.tint_danger,
+                item["message"].as_str().unwrap_or("").to_string(),
+                base,
+            ),
+            "notification" => {
+                let message = item["message"].as_str().unwrap_or("").to_string();
+                let (name, color, tint) = match item["level"].as_str() {
+                    Some("error") => (IconName::CircleX, t.destructive, t.tint_danger),
+                    Some("warning") => (IconName::TriangleAlert, t.status_warning, t.tint_warning),
+                    _ => (IconName::Info, t.foreground_muted, t.surface2),
                 };
+                notification(("note", key), Role::Note, name, color, tint, message, base)
+            }
+            "compaction" => {
+                let line = || div().flex_1().h(px(1.)).bg(t.border);
+                h_flex()
+                    .id(("compaction", key))
+                    .role(Role::Note)
+                    .aria_label("Context compacted")
+                    .items_center()
+                    .gap(px(SPACE_2))
+                    .py(px(SPACE_3))
+                    .px(px(SPACE_4))
+                    .child(line())
+                    .child(
+                        h_flex()
+                            .gap(px(SPACE_2))
+                            .items_center()
+                            .child(
+                                icon(IconName::Scissors)
+                                    .with_size(px(ICON_XS))
+                                    .text_color(t.foreground_extra_muted),
+                            )
+                            .child(
+                                div()
+                                    .text_size(ui_font_size(METADATA_SIZE, cx))
+                                    .text_color(t.foreground_muted)
+                                    .child("Context compacted"),
+                            ),
+                    )
+                    .child(line())
+                    .into_any_element()
+            }
+            other => {
+                let text = other.replace('_', " ");
                 div()
                     .id(("note", key))
                     .role(Role::Note)
                     .aria_label(text.clone())
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
+                    .text_size(base)
+                    .text_color(t.foreground_muted)
                     .child(text)
                     .into_any_element()
             }
         }
     }
 
-    /// The blocks of one assistant entry: markdown, diagram images, or diagram fallbacks.
+    /// The blocks of one assistant entry: markdown, images, diagram images, or diagram
+    /// fallbacks.
     fn render_markdown(&self, key: u64, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(message) = self.messages.get(&key) else {
             return Vec::new();
@@ -732,15 +992,34 @@ impl TimelineView {
         let blocks = markdown::blocks(&message.segments, |kind, source| {
             diagrams.update(cx, |renderer, cx| renderer.render(kind, source, cx))
         });
-        let theme = cx.theme().clone();
+        let t = tokens(cx);
+        let size = ui_font_size(FONT_CONTENT, cx);
+        let view = cx.weak_entity();
         blocks
             .into_iter()
             .enumerate()
             .map(|(position, block)| match block {
                 Block::Markdown(_) => match &message.states[position] {
-                    Some(state) => TextView::new(state).selectable(true).into_any_element(),
+                    Some(state) => {
+                        let view = view.clone();
+                        div()
+                            .text_size(size)
+                            .child(TextView::new(state).selectable(true).on_link_click(
+                                move |href, _, _, cx| {
+                                    let href = href.to_string();
+                                    let _ = view.update(cx, |this, cx| this.open_link(&href, cx));
+                                },
+                            ))
+                            .into_any_element()
+                    }
                     None => div().into_any_element(),
                 },
+                Block::LocalImage { alt, source } => self.render_image(
+                    ElementId::Name(format!("image-{key}-{position}").into()),
+                    &alt,
+                    &source,
+                    cx,
+                ),
                 Block::Image { image, label } => {
                     let size = image_size(&image);
                     div()
@@ -755,23 +1034,23 @@ impl TimelineView {
                     .id(("diagram", position))
                     .role(Role::Image)
                     .aria_label(format!("{label}, rendering"))
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
+                    .text_size(ui_font_size(FONT_BASE, cx))
+                    .text_color(t.foreground_muted)
                     .child(format!("Rendering {}...", label.to_lowercase()))
                     .into_any_element(),
                 Block::Code { markdown, error } => v_flex()
                     .id(("diagram", position))
                     .role(Role::Group)
                     .aria_label("Diagram source, failed to render")
-                    .gap_1()
+                    .gap(px(SPACE_1))
                     .child(TextView::markdown(
                         ElementId::Name(format!("fallback-{key}-{position}").into()),
                         markdown,
                     ))
                     .child(
                         div()
-                            .text_xs()
-                            .text_color(theme.danger)
+                            .text_size(code_font_size(FONT_CODE, cx))
+                            .text_color(t.destructive)
                             .child(error.lines().next().unwrap_or("").to_string()),
                     )
                     .into_any_element(),
@@ -785,7 +1064,8 @@ impl TimelineView {
         group: &TurnGroup,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = cx.theme().clone();
+        let t = tokens(cx);
+        let mono = mono_font_family(cx);
         let now = chrono::Utc::now().timestamp_millis();
         let started_at = group.run.started_at;
         let last_end = group
@@ -824,74 +1104,108 @@ impl TimelineView {
             plural(group.step_count, "step", "steps")
         };
         let files = &group.changed_files;
-        let mut summary = steps_text.clone();
-        if files.len() == 1 {
-            summary.push_str(&format!(" · {}", short_path(&files[0])));
-        } else if files.len() > 1 {
-            summary.push_str(&format!(" · {}", plural(files.len(), "file", "files")));
-        }
 
         let weights: Vec<f32> = durations
             .iter()
             .map(|&ms| (ms as f32).max(total as f32 * MIN_SEGMENT_SHARE).max(1.))
             .collect();
         let weight_sum: f32 = weights.iter().sum();
-        let scheme = scheme(cx);
+        let selected = group
+            .steps
+            .iter()
+            .map(|step| self.grouper.key(step.id))
+            .find(|key| Some(*key) == self.selected_step);
         let strip = h_flex()
             .id(("strip", row))
             .role(Role::Group)
             .aria_label(format!("{} step strip", group.step_count))
             .w(px(STRIP_WIDTH))
-            .h(px(8.))
+            .h(px(STRIP_HEIGHT))
             .gap(px(2.))
             .rounded(px(3.))
             .overflow_hidden()
             .flex_none()
-            .children(group.steps.iter().zip(&weights).map(|(step, weight)| {
-                let color: Hsla = if step.is_running {
-                    rgb(RUNNING_COLOR).into()
-                } else {
-                    turn_label_colors(step.label, scheme).segment
-                };
-                div()
-                    .h_full()
-                    .flex_shrink(1.)
-                    .w(px(STRIP_WIDTH * weight / weight_sum))
-                    .bg(color)
-            }));
+            .children(group.steps.iter().zip(&weights).enumerate().map(
+                |(position, (step, weight))| {
+                    // The segment color is the same in both schemes.
+                    let color: Hsla = if step.is_running {
+                        t.dot_running
+                    } else {
+                        turn_label_colors(step.label, bachuc_theme::Scheme::Light).segment
+                    };
+                    let key = self.grouper.key(step.id);
+                    let dimmed = selected.is_some_and(|picked| picked != key);
+                    div()
+                        .id(("segment", key))
+                        .role(Role::Button)
+                        .aria_label(format!("Step {}", position + 1))
+                        .h_full()
+                        .flex_shrink(1.)
+                        .w(px(STRIP_WIDTH * weight / weight_sum))
+                        .bg(color)
+                        .when(dimmed, |segment| segment.opacity(DIMMED_OPACITY))
+                        .cursor_pointer()
+                        .on_click(
+                            cx.listener(move |this, _, _, cx| this.select_step(key, true, cx)),
+                        )
+                },
+            ));
+
+        let summary_size = ui_font_size(TURN_SUMMARY_SIZE, cx);
+        let summary = h_flex()
+            .ml_auto()
+            .flex_shrink(1.)
+            .min_w_0()
+            .gap_1()
+            .text_size(summary_size)
+            .text_color(t.foreground_muted)
+            .child(steps_text)
+            .when(!files.is_empty(), |line| line.child("·"))
+            .when(files.len() == 1, |line| {
+                line.child(
+                    div()
+                        .truncate()
+                        .font_family(mono)
+                        .text_size(code_font_size(FONT_CODE, cx))
+                        .text_color(t.foreground)
+                        .child(short_path(&files[0])),
+                )
+            })
+            .when(files.len() > 1, |line| {
+                line.child(plural(files.len(), "file", "files"))
+            })
+            .when(!files.is_empty() && additions + deletions > 0, |line| {
+                line.child(
+                    div()
+                        .text_color(t.status_success)
+                        .child(format!("+{additions}")),
+                )
+                .child(
+                    div()
+                        .text_color(t.status_danger)
+                        .child(format!("−{deletions}")),
+                )
+            });
 
         let header = h_flex()
-            .gap_3()
+            .gap(px(SPACE_3))
             .items_center()
-            .child(div().text_sm().font_semibold().child(title))
+            .child(
+                div()
+                    .text_size(ui_font_size(TURN_TITLE_SIZE, cx))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(t.foreground)
+                    .child(title),
+            )
             .children(group.is_loading.then(|| {
                 div()
-                    .text_xs()
-                    .font_family(theme.mono_font_family.clone())
-                    .text_color(theme.muted_foreground)
+                    .font_family(mono)
+                    .text_size(code_font_size(TURN_CLOCK_SIZE, cx))
+                    .text_color(t.foreground_muted)
                     .child(format_clock(now - started_at))
             }))
             .child(strip)
-            .child(
-                h_flex()
-                    .ml_auto()
-                    .gap_1()
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
-                    .child(summary)
-                    .when(!files.is_empty() && additions + deletions > 0, |line| {
-                        line.child(
-                            div()
-                                .text_color(theme.success)
-                                .child(format!("+{additions}")),
-                        )
-                        .child(
-                            div()
-                                .text_color(theme.danger)
-                                .child(format!("−{deletions}")),
-                        )
-                    }),
-            );
+            .child(summary);
 
         div()
             .id(("turn", row))
@@ -901,8 +1215,7 @@ impl TimelineView {
                 if group.is_loading { "working" } else { "done" },
                 plural(group.step_count, "step", "steps")
             ))
-            .pt_2()
-            .pb_2()
+            .pt(px(SPACE_2))
             .child(header)
             .into_any_element()
     }
@@ -915,12 +1228,14 @@ impl TimelineView {
     ) -> AnyElement {
         let step = &group.steps[position];
         let run_started_at = group.run.started_at;
-        let is_last_of_finished = position + 1 == group.steps.len() && !group.is_loading;
-        let theme = cx.theme().clone();
+        let is_first = position == 0;
+        let is_last = position + 1 == group.steps.len();
+        let is_last_of_finished = is_last && !group.is_loading;
+        let t = tokens(cx);
+        let mono = mono_font_family(cx);
         let colors = turn_label_colors(step.label, scheme(cx));
-        let running: Hsla = rgb(RUNNING_COLOR).into();
         let (text_color, border_color) = if step.is_running {
-            (running, running)
+            (t.dot_running, t.dot_running)
         } else {
             (colors.text, colors.border)
         };
@@ -930,24 +1245,39 @@ impl TimelineView {
             .ended_at
             .map_or("now".to_string(), |end| format_clock(end - run_started_at));
         let step_key = entry_key(&self.entries[step.id]);
+        let is_selected = self.selected_step == Some(step_key);
+        let small = code_font_size(STEP_LABEL_SIZE, cx);
 
+        let mut aria = format!("Step {}, {label}", position + 1);
+        if !counts.is_empty() {
+            aria.push_str(&format!(", {counts}"));
+        }
+        // Only the header line is a button: a press in a diff or a note must not pick the step.
         let header = h_flex()
-            .gap_3()
+            .id(("step-header", step_key))
+            .role(Role::Button)
+            .aria_label(aria)
+            .aria_selected(is_selected)
+            .gap(px(SPACE_3))
             .items_center()
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| this.select_step(step_key, false, cx)))
             .child(
                 div()
-                    .size(px(20.))
+                    .size(px(STEP_NUMBER))
+                    .mr(px(2.))
                     .flex_none()
                     .rounded_full()
                     .border_1()
+                    .when(step.is_running, |number| number.border(px(1.5)))
                     .border_color(border_color)
-                    .bg(theme.background)
+                    .bg(t.surface0)
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_size(px(10.))
-                    .font_semibold()
-                    .font_family(theme.mono_font_family.clone())
+                    .text_size(small)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .font_family(mono)
                     .text_color(text_color)
                     .child((position + 1).to_string()),
             )
@@ -955,32 +1285,34 @@ impl TimelineView {
                 h_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap_1p5()
+                    .gap(px(SPACE_1 + 2.))
                     .items_baseline()
                     .child(
                         div()
-                            .text_size(px(10.))
-                            .font_semibold()
-                            .font_family(theme.mono_font_family.clone())
+                            .text_size(small)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .font_family(mono)
                             .text_color(text_color)
                             .child(label.to_uppercase()),
                     )
                     .when(!counts.is_empty(), |meta| {
                         meta.child(
                             div()
-                                .text_sm()
-                                .text_color(theme.muted_foreground)
+                                .truncate()
+                                .text_size(ui_font_size(STEP_COUNTS_SIZE, cx))
+                                .text_color(t.foreground_muted)
                                 .child(counts.clone()),
                         )
                     }),
             )
             .child(
                 div()
-                    .w(px(40.))
+                    .w(px(STEP_TIME_WIDTH))
                     .text_right()
-                    .text_xs()
-                    .font_family(theme.mono_font_family.clone())
-                    .text_color(theme.muted_foreground)
+                    .font_family(mono)
+                    .text_size(code_font_size(STEP_TIME_SIZE, cx))
+                    .line_height(px(STEP_NUMBER))
+                    .text_color(t.foreground_muted)
                     .child(time),
             );
 
@@ -994,117 +1326,84 @@ impl TimelineView {
             .iter()
             .map(|&edit| self.render_edit(edit, cx))
             .collect::<Vec<_>>();
+        // A picked step also lists its other calls, so each tool kind can open its details.
+        let calls = if is_selected {
+            step.items
+                .iter()
+                .filter(|index| !step.edits.contains(index))
+                .filter(|&&index| item_type(&self.entries[index]) == "tool_call")
+                // The step body has no stream padding, so the badge does not reach past it.
+                .map(|&index| {
+                    div()
+                        .mx(px(tool_view::BADGE_BLEED))
+                        .child(self.render_tool_call(index, cx))
+                        .into_any_element()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let live = step.is_running.then(|| self.render_live_box(step, cx));
 
-        let mut aria = format!("Step {}, {label}", position + 1);
-        if !counts.is_empty() {
-            aria.push_str(&format!(", {counts}"));
-        }
+        // The rail joins the step numbers, from the middle of the first to the middle of the
+        // last.
+        let rail = div()
+            .absolute()
+            .left(px(STEP_NUMBER / 2.))
+            .w(px(1.))
+            .bg(t.border)
+            .top(px(if is_first {
+                STEP_LIST_TOP + STEP_NUMBER / 2.
+            } else {
+                0.
+            }))
+            .when(is_last, |rail| rail.h(px(SPACE_1 + STEP_NUMBER / 2.)))
+            .when(!is_last, |rail| rail.bottom_0());
+
         v_flex()
             .id(("step", step_key))
-            .role(Role::ListItem)
-            .aria_label(aria)
-            .gap(px(3.))
-            .py_1()
-            .child(header)
+            .relative()
+            .when(is_first, |row| row.pt(px(STEP_LIST_TOP)))
+            .when(!(is_first && is_last), |row| row.child(rail))
             .child(
                 v_flex()
-                    .min_w_0()
+                    .relative()
                     .gap(px(3.))
-                    .ml(px(34.))
-                    .mr(px(52.))
-                    .children(notes)
-                    .children(edits)
-                    .children(live),
+                    .mx(px(-STEP_GAP))
+                    .px(px(STEP_GAP))
+                    .py(px(SPACE_1))
+                    .mb(px(STEP_GAP))
+                    .rounded(px(RADIUS_BASE))
+                    .when(is_selected, |row| row.bg(t.surface2))
+                    .child(header)
+                    .child(
+                        v_flex()
+                            .min_w_0()
+                            .gap(px(3.))
+                            .ml(px(STEP_BODY_LEFT))
+                            .mr(px(STEP_BODY_RIGHT))
+                            .children(notes)
+                            .children(edits)
+                            .children(calls)
+                            .children(live),
+                    ),
             )
             .when(is_last_of_finished, |step| {
-                step.child(div().mt_3().h(px(1.)).w_full().bg(theme.border))
+                step.child(
+                    div()
+                        .mt(px(RULE_TOP - STEP_GAP))
+                        .mb(px(RULE_BOTTOM))
+                        .h(px(1.))
+                        .w_full()
+                        .bg(t.border),
+                )
             })
-            .into_any_element()
-    }
-
-    /// An edit or write call: its file row toggles the diff below it.
-    fn render_edit(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
-        let entry = &self.entries[index];
-        let key = entry_key(entry);
-        let path = grouping::edited_file_path(entry).unwrap_or("").to_string();
-        let diff = self.diffs.get(&key).cloned().unwrap_or_default();
-        let (additions, deletions) = diff.stats;
-        let hidden = self.hidden_diffs.contains(&key);
-        let file_row = h_flex()
-            .id(("edit-file", key))
-            .role(Role::Button)
-            .aria_label(format!(
-                "{} diff of {}",
-                if hidden { "Show" } else { "Hide" },
-                short_path(&path)
-            ))
-            .aria_expanded(!hidden)
-            .cursor_pointer()
-            .gap_2()
-            .px_2()
-            .py_1()
-            .text_xs()
-            .font_family(theme.mono_font_family.clone())
-            .child(div().flex_1().min_w_0().truncate().child(short_path(&path)))
-            .child(
-                div()
-                    .text_color(theme.success)
-                    .child(format!("+{additions}")),
-            )
-            .child(
-                div()
-                    .text_color(theme.danger)
-                    .child(format!("−{deletions}")),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| this.toggle_diff(key, cx)));
-        let (foreground, muted) = (theme.foreground, theme.muted_foreground);
-        let border = theme.border;
-        let mono = theme.mono_font_family.clone();
-        let body = (!hidden).then(|| {
-            let added = theme.success.opacity(0.15);
-            let removed = theme.danger.opacity(0.15);
-            v_flex()
-                .id(("diff", key))
-                .role(Role::Group)
-                .aria_label(format!(
-                    "Diff of {}, {additions} added, {deletions} removed",
-                    short_path(&path)
-                ))
-                .border_t_1()
-                .border_color(border)
-                .py_1()
-                .text_xs()
-                .font_family(mono)
-                .children(diff.lines.iter().map(move |line| {
-                    let (sign, bg, color) = match line.kind {
-                        LineKind::Add => ("+", added, foreground),
-                        LineKind::Remove => ("-", removed, foreground),
-                        LineKind::Context => (" ", transparent_black(), foreground),
-                        LineKind::Hunk => ("", transparent_black(), muted),
-                    };
-                    h_flex()
-                        .px_2()
-                        .bg(bg)
-                        .text_color(color)
-                        .child(div().w(px(12.)).flex_none().child(sign))
-                        .child(div().flex_1().min_w_0().child(line.text.clone()))
-                }))
-        });
-        v_flex()
-            .rounded_md()
-            .border_1()
-            .border_color(theme.border)
-            .overflow_hidden()
-            .child(file_row)
-            .children(body)
             .into_any_element()
     }
 
     /// The running step's last call: its command and the last lines of its output.
     fn render_live_box(&self, step: &TurnStep, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
+        let t = tokens(cx);
         let Some(&last) = step.items.last() else {
             return div().into_any_element();
         };
@@ -1114,7 +1413,7 @@ impl TimelineView {
         let command = if is_shell {
             format!("$ {}", detail["command"].as_str().unwrap_or(""))
         } else {
-            item["name"].as_str().unwrap_or("").to_string()
+            tools::presentation(item, &self.cwd).name
         };
         let output = if is_shell {
             detail["output"].as_str().unwrap_or("")
@@ -1127,136 +1426,122 @@ impl TimelineView {
             .id(("live", entry_key(&self.entries[last])))
             .role(Role::Status)
             .aria_label(format!("Running {command}"))
-            .mt_1p5()
-            .px_2p5()
-            .py_1p5()
-            .rounded_lg()
+            .mt(px(SPACE_1 + 2.))
+            .px(px(SPACE_2 + 2.))
+            .py(px(7.))
+            .rounded(px(RADIUS_LG))
             .border_1()
-            .border_color(theme.border)
-            .text_xs()
-            .font_family(theme.mono_font_family.clone())
-            .child(div().truncate().child(command))
+            .border_color(t.border)
+            .font_family(mono_font_family(cx))
+            .text_size(code_font_size(FONT_CODE, cx))
+            .line_height(px(LIVE_LINE_HEIGHT))
+            .child(div().truncate().text_color(t.foreground).child(command))
             .children(shown.into_iter().map(|line| {
                 div()
                     .truncate()
-                    .text_color(theme.muted_foreground)
+                    .text_color(t.foreground_muted)
                     .child(line.to_string())
             }))
-            .into_any_element()
-    }
-
-    fn render_permission(&self, row: usize, request: &Value, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
-        let id = request["id"].as_str().unwrap_or("").to_string();
-        let title = request["title"]
-            .as_str()
-            .or_else(|| request["name"].as_str())
-            .unwrap_or("Permission")
-            .to_string();
-        let description = request["description"].as_str().map(str::to_string);
-        let input = &request["input"];
-        let detail = ["command", "file_path", "filePath", "plan", "url"]
-            .iter()
-            .find_map(|key| input[*key].as_str())
-            .map(str::to_string);
-        let answered = self.answered.contains(&id);
-        let allow_id = id.clone();
-        let deny_id = id.clone();
-        v_flex()
-            .id(("permission", row))
-            .role(Role::Group)
-            .aria_label(format!("Permission request: {title}"))
-            .gap_2()
-            .p_3()
-            .rounded_lg()
-            .border_1()
-            .border_color(theme.warning)
-            .child(div().text_sm().font_semibold().child(title))
-            .children(description.map(|text| {
-                div()
-                    .text_sm()
-                    .text_color(theme.muted_foreground)
-                    .child(text)
-            }))
-            .children(detail.map(|text| {
-                div()
-                    .text_xs()
-                    .font_family(theme.mono_font_family.clone())
-                    .p_2()
-                    .rounded_md()
-                    .bg(theme.muted)
-                    .child(text)
-            }))
-            .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        Button::new(("allow", row))
-                            .label("Allow")
-                            .primary()
-                            .small()
-                            .disabled(answered)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.respond(allow_id.clone(), true, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new(("deny", row))
-                            .label("Deny")
-                            .outline()
-                            .small()
-                            .disabled(answered)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.respond(deny_id.clone(), false, cx)
-                            })),
-                    )
-                    .when(answered, |buttons| {
-                        buttons.child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("Waiting for the agent..."),
-                        )
-                    }),
-            )
             .into_any_element()
     }
 }
 
 impl Render for TimelineView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
+        let t = tokens(cx);
         let base = div()
             .id("timeline")
-            .role(Role::List)
-            .aria_label("Timeline")
+            .key_context("Timeline")
+            .track_focus(&self.focus)
+            .relative()
             .size_full()
-            .bg(theme.background)
-            .text_color(theme.foreground);
-        if self.rows.is_empty() {
+            .bg(t.surface0)
+            .text_color(t.foreground)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" && this.lightbox.take().is_some() {
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }));
+        let body = if self.rows.is_empty() {
             let text = if self.loaded {
-                "No messages yet"
+                "Start chatting with this agent..."
             } else {
                 "Loading timeline..."
             };
-            return base.child(
-                div()
-                    .id("timeline-empty")
-                    .role(Role::Status)
-                    .aria_label(text)
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(theme.muted_foreground)
-                    .child(text),
-            );
-        }
-        base.child(
-            list(self.list.clone(), cx.processor(Self::render_row))
+            div()
+                .id("timeline-empty")
+                .role(Role::Status)
+                .aria_label(text)
                 .size_full()
-                .py_2(),
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(ui_font_size(FONT_BASE, cx))
+                .text_color(t.foreground_muted)
+                .child(text)
+                .into_any_element()
+        } else {
+            div()
+                .id("timeline-list")
+                .role(Role::List)
+                .aria_label("Timeline")
+                .size_full()
+                .child(
+                    list(self.list.clone(), cx.processor(Self::render_row))
+                        .size_full()
+                        .py(px(SPACE_4)),
+                )
+                .into_any_element()
+        };
+        let lightbox = self.render_lightbox(cx);
+        base.child(body)
+            .children(self.render_find_bar(cx))
+            .children(lightbox)
+    }
+}
+
+/// `Notification`: an icon and the message on a tinted box.
+fn notification(
+    id: impl Into<ElementId>,
+    role: Role,
+    name: IconName,
+    color: Hsla,
+    tint: Hsla,
+    message: String,
+    size: Pixels,
+) -> AnyElement {
+    h_flex()
+        .id(id)
+        .role(role)
+        .aria_label(message.clone())
+        .mb(px(SPACE_1))
+        .items_start()
+        .gap(px(SPACE_2))
+        .px(px(SPACE_3))
+        .py(px(10.))
+        .rounded(px(RADIUS_MD))
+        .bg(tint)
+        .text_size(size)
+        .line_height(px(20.))
+        .child(
+            div()
+                .h(px(20.))
+                .flex_none()
+                .flex()
+                .items_center()
+                .child(icon(name).with_size(px(ICON_MD)).text_color(color)),
         )
+        .child(div().flex_1().child(message))
+        .into_any_element()
+}
+
+/// Which load phase an image is in, for the row hash.
+fn image_phase(load: &ImageLoad) -> u8 {
+    match load {
+        ImageLoad::Loading => 0,
+        ImageLoad::Ready { .. } => 1,
+        ImageLoad::Failed(_) => 2,
     }
 }
 

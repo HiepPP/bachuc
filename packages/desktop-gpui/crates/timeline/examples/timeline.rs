@@ -3,14 +3,17 @@
 //! Usage: timeline <agent id or id prefix> [ws url]
 //! The url defaults to the live daemon, `ws://127.0.0.1:6768/ws`. A password comes from
 //! `BACHUC_PASSWORD`. With `BACHUC_TIMELINE_TRACE` set, it prints each client event with the
-//! viewed timeline's version to stderr.
+//! viewed timeline's version to stderr. Cmd+F opens the find bar. Each `TimelineEvent` prints to
+//! stderr, for example `OpenFile { cwd: "/tmp/gpui-bench", path: "/tmp/gpui-bench/a.ts",
+//! line: Some(12) }` after a click on a file link.
 //! Bundle: `packages/desktop-gpui/bundle.sh example timeline BachucTimeline io.github.hieppp.bachuc-timeline`
 
 use bachuc_client::{Client, ClientEvent, HostConfig};
 use bachuc_diagram::DiagramRenderer;
-use bachuc_timeline::TimelineView;
-use gpui_kit::component::ActiveTheme as _;
+use bachuc_timeline::{TimelineEvent, TimelineView};
 use gpui_kit::*;
+
+actions!(timeline_example, [Find]);
 
 struct Shell {
     client: Entity<Client>,
@@ -18,7 +21,8 @@ struct Shell {
     wanted: String,
     timeline: Option<Entity<TimelineView>>,
     status: String,
-    _subscription: Subscription,
+    focus: FocusHandle,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl Shell {
@@ -64,9 +68,15 @@ impl Shell {
                         Some(agent_id) => {
                             let client = client.clone();
                             let diagrams = this.diagrams.clone();
-                            this.timeline = Some(cx.new(|cx| {
+                            let timeline = cx.new(|cx| {
                                 TimelineView::new(client, agent_id, diagrams, window, cx)
-                            }));
+                            });
+                            let events =
+                                cx.subscribe(&timeline, |_, _, event: &TimelineEvent, _| {
+                                    eprintln!("{event:?}");
+                                });
+                            this._subscriptions.push(events);
+                            this.timeline = Some(timeline);
                         }
                         None => this.status = format!("Agent {} not found", this.wanted),
                     }
@@ -75,13 +85,16 @@ impl Shell {
             }
             cx.notify();
         });
+        let focus = cx.focus_handle();
+        focus.focus(window, cx);
         Self {
             client,
             diagrams,
             wanted,
             timeline: None,
             status: "Connecting...".into(),
-            _subscription: subscription,
+            focus,
+            _subscriptions: vec![subscription],
         }
     }
 }
@@ -89,16 +102,23 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _ = &self.client;
-        let theme = cx.theme().clone();
+        let colors = bachuc_theme::tokens(cx);
+        let root = div()
+            .size_full()
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &Find, window, cx| {
+                if let Some(timeline) = &this.timeline {
+                    timeline.update(cx, |timeline, cx| timeline.find(window, cx));
+                }
+            }));
         match &self.timeline {
-            Some(timeline) => div().size_full().child(timeline.clone()),
-            None => div()
-                .size_full()
+            Some(timeline) => root.child(timeline.clone()),
+            None => root
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(theme.background)
-                .text_color(theme.muted_foreground)
+                .bg(colors.surface0)
+                .text_color(colors.foreground_muted)
                 .child(self.status.clone()),
         }
     }
@@ -110,25 +130,28 @@ fn main() {
     let url = args
         .next()
         .unwrap_or_else(|| "ws://127.0.0.1:6768/ws".into());
-    gpui_kit::application().run(move |cx| {
-        gpui_kit::init(cx);
-        bachuc_theme::init(cx);
-        cx.activate(true);
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(900.), px(760.)),
-                cx,
-            ))),
-            titlebar: Some(TitlebarOptions {
-                title: Some("Bachuc timeline".into()),
+    gpui_kit::application()
+        .with_assets(bachuc_icons::Assets)
+        .run(move |cx| {
+            gpui_kit::init(cx);
+            bachuc_theme::init(cx);
+            cx.bind_keys([KeyBinding::new("cmd-f", Find, None)]);
+            cx.activate(true);
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                    None,
+                    size(px(900.), px(760.)),
+                    cx,
+                ))),
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Bachuc timeline".into()),
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
-        gpui_kit::open_window(options, cx, |window, cx| {
-            cx.new(|cx| Shell::new(url.clone(), wanted.clone(), window, cx))
-        })
-        .expect("open window");
-    });
+            };
+            gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| Shell::new(url.clone(), wanted.clone(), window, cx))
+            })
+            .expect("open window");
+        });
 }
