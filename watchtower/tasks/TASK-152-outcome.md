@@ -139,3 +139,26 @@ Electron scopes these bindings; here they are all global, and the app (TASK-155)
 - AX roles and labels are unchanged.
 
 Verified: `cargo.sh test -p bachuc-command` -> PASS (28 tests: 15 + 4 + 9); `cargo.sh fmt --check -p bachuc-command` -> PASS; `cargo.sh clippy -p bachuc-command --all-targets -- -D warnings` -> PASS. Parity at rest and with a query -> DEFERRED (UI checker).
+
+### Re-check 1
+
+Run by the UI checker on commit 2071e6104, 2026-10-16. The `BachucCommand` bundle was rebuilt at 11:54, after the commit (the earlier bundle predated it). Reference: the in-place Electron build on 6770, light theme, `Cmd+K` in workspace gpui-bench. Both windows 1200 wide in the screenshot; panel 640 x 560 in both. Screenshots: `/tmp/gpui-ui-check/H/ref-rest-recheck.jpg`, `ref-query-recheck.jpg`, `gpui-rest-recheck.jpg`, `gpui-query-recheck.jpg`. Pixel positions come from the screenshots. Reference rows with subtitles and workspace or agent kinds are by design and not counted.
+
+Parity line (rest and query `set`) -> FAIL, one mismatch (3 px, over the 2 px limit).
+
+| Element                    | Reference (Electron)                      | GPUI                                           | Result            |
+| -------------------------- | ----------------------------------------- | ---------------------------------------------- | ----------------- |
+| Header height              | 50 (panel top y 48, border y 98)          | 53 (panel top y 80, border y 133)              | MISMATCH (3 px)   |
+| Search input text inset    | 17 px (text x 297, panel left 280)        | 17 px (text x 297, panel left 280)             | match             |
+| First section label centre | about 17.5 px below the header border     | about 15.5 px below the header border          | match within 2 px |
+| First row top              | 33 px below the header border             | 33 px below the header border                  | match             |
+| Active row                 | `#fbfbfb`, x 281 to 919, full panel width | `#fafafa`, x 281 to 919, full panel width      | match             |
+| Shortcut hint              | right-aligned, badge ends x 903           | right-aligned, badge ends x 903                | match             |
+| Icon rail                  | one rail, titles at x 325                 | one rail, titles at x 325 with or without icon | match             |
+| Section divider (query)    | full panel width, x 280 to 920, `#e1e1e1` | full panel width, x 280 to 920, `#e1e1e1`      | match             |
+| Panel, border, radius, bg  | 640 x 560, white, 1 px `#e4e4e6`          | same                                           | match             |
+| Backdrop                   | black at 0.5, pixel `#7e7e7e`             | `#7e7e7e`                                      | match             |
+
+The earlier mismatches for the input inset, the active row width, the hint position, the icon rail, and the divider are fixed. Header height remains 3 px taller (53 vs 50), so the first row and the whole list sit 3 px lower than the reference relative to the panel top.
+
+Cleanup: the example and the reference app were quit; 6767 untouched.

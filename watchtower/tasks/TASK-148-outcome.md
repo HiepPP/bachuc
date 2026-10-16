@@ -86,7 +86,7 @@ Built from `workspace-desktop-tabs-row.tsx`, `resize-handle.tsx`, and `trailing-
 - `#[derive(IntoElement)]` works through gpui-kit: its macros rewrite `gpui::` paths to the facade.
 - A gpui-kit `DropdownMenu` trigger must be `Styled + Selectable + InteractiveElement`; `ChromeButton` in `src/workspace.rs` wraps a `Stateful<Div>` for that, so a lean icon button can open a menu without the ten-element `Button`.
 
-## UI Checks
+## UI Checks (earlier partial run, superseded by the section at the end)
 
 Run by the UI checker on commit b449e19f0, 2026-10-16, light theme. Screenshots are in `/tmp/gpui-ui-check/D/` (JPEG data with a `.png` name): `ref-7.png`, `gpui-1.png`, `gpui-2-hover.png`, `gpui-4-splitright.png`, `gpui-6-three.png`, `gpui-6d.png`, `gpui-7b.png`, `gpui-10b.png`, `gpui-11-tabdrag.png`.
 
@@ -136,3 +136,43 @@ Notes:
 ### Cleanup
 
 The example app was quit. The reference app left one terminal in `/tmp/gpui-bench` on 6770 (`Terminal 1`), created by the checker for the J check; it is killed with that check.
+
+## UI Checks
+
+Run by the UI checker on HEAD 5afebcedd plus the working tree, bundle `BachucWorkspace` rebuilt 2026-10-16, light theme (dark not run). Screenshots: `/tmp/gpui-ui-check/D/` (`ref-tabbar.jpg`, `gpui-tabbar.jpg`, `gpui-splitright.jpg`, `gpui-splitdown.jpg`, `gpui-dragdiv-v.jpg`, `gpui-dh-1100-432.jpg`, `gpui-tabdrag.jpg`, `gpui-after-measure.jpg`). Reference: the in-place Electron build on 6770, workspace gpui-bench with one empty "New tab" tab. Both windows are 1200 points wide in the screenshot.
+
+### Tab bar parity -> PASS
+
+| Element                         | GPUI example                                    | Reference                              | Result                                 |
+| ------------------------------- | ----------------------------------------------- | -------------------------------------- | -------------------------------------- |
+| Bar height incl. bottom border  | 35 rows (y 33 to 67, border `#e4e4e6`)          | 36 rows (y 36 to 71, border `#e4e4e6`) | match (1 px)                           |
+| Chip height, fill               | 28 rows, `#f4f4f6`                              | 28 rows, `#f4f4f6`                     | match                                  |
+| Chip top offset from bar top    | 2 px                                            | 4 px                                   | match within 2 px                      |
+| Chip left offset, icon, label   | icon 9 px, label 26 px from chip left           | icon 9 to 10 px, label 26 px           | match                                  |
+| Active label color              | `#161618` family                                | `#1a1a1c` family                       | match                                  |
+| Close X on hover                | shows at the chip right on hover, `#7c7b80`     | shows at the chip right on hover       | match                                  |
+| New-tab plus, ellipsis          | plus after the last chip, ellipsis at the right | same places                            | match                                  |
+| Bar background                  | `#ffffff`                                       | `#ffffff`                              | match                                  |
+| Tooltip, context menu, maximize | not built                                       | present                                | known gap, listed in Parity list above |
+
+The reference was not compared for an inactive tab or a different label width (one tab only). The 1 px bar height and 2 px chip offset sit at the limit; the source spec says bar 36, padding 4.
+
+### Split and drag actions -> PASS
+
+- Split right (`cmd-\`): a second group right of the first with `Text pane 4` and a vertical divider.
+- Split down (`cmd-shift-\`): the focused right group split into `Text pane 4` over `Text pane 5` with a horizontal divider (three groups).
+- Drag the vertical divider from x 599 to 420: the divider moved to x 420 (35%) with the 3 px accent line while hovered.
+- Drag the horizontal divider from y 432 to y 250: the divider moved to y 250. Limit: a drag that starts on the line itself (y 431) did nothing in five tries; it started to work 1 px below the line. The first vertical drag at x 600 and the first at x 599 also did nothing before one at 599 to 601 worked, so the grab band sits 1 to 2 px off the drawn line.
+- Drag `Text pane 1` from the left bar to the top-right bar: the tab joined the right-top group after `Text pane 4` and became active; the left group activated `Text pane 2`.
+
+### Accessibility tree -> PASS
+
+Each group is a `tab group` named `Tabs`. Each tab is a `tab` (settable, boolean) named `Text pane N` with `Value` on or off and a `button Close Text pane N`; the modified tab has an `image Modified`. Each group has `button New tab` and `button More actions`. Dividers are `splitter Resize panes left and right` and `splitter Resize panes up and down`.
+
+### Idle CPU with three groups -> PASS
+
+`measure.sh 60 ws="pids:58653"` with three groups and the window kept in front by an `open` loop every 3 s: 0.6 CPU% (limit 1.0), 96 MB RSS, 42 MB footprint. A screenshot after the read shows the full window, no cut (Q-069).
+
+### Cleanup
+
+The example and the reference app were quit; the lock was released; 6767 untouched; no terminal or agent left by this check.

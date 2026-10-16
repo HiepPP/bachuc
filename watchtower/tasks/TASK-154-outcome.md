@@ -81,3 +81,20 @@ Verified:
 - `cargo.sh test -p bachuc-terminal` -> 32 pass (31 earlier + 1 new).
 - `cargo.sh fmt --check -p bachuc-terminal` -> exit 0. `cargo.sh build -p bachuc-terminal --examples` -> no warning in the terminal crate.
 - Bold cyan and green brightness and left padding vs the reference app: DEFERRED (UI checker).
+
+### Re-check 1
+
+Run by the UI checker on commit a59d730c6 (bundle `BachucTerminal` built 2026-10-16 10:59), 2026-10-16, light theme. Screenshots: `/tmp/gpui-ui-check/J/gpui-colors-recheck.jpg`, `/tmp/gpui-ui-check/J/ref-colors-recheck.jpg`. Both ran `printf '\e[1;36mbold-cyan \e[1;32mbold-green \e[31mred\e[0m'` and `ls --color /` in `/tmp/gpui-bench`. The reference app was relaunched fresh (the restored one had no `git` on its PATH and its shells exited at once) and its full window painted, so the capture is not clipped.
+
+| Element                   | GPUI (sampled glyph core)      | Reference (sampled glyph core) | Result                                          |
+| ------------------------- | ------------------------------ | ------------------------------ | ----------------------------------------------- |
+| Bold cyan                 | `#3ba2b4` (darkest `#19a9bc`)  | `#449dae` (darkest `#3f97aa`)  | match; both lighter than normal cyan `#0891b2`  |
+| Bold green                | `#4fab71`                      | `#55a874`                      | match; both lighter than normal green `#16a34a` |
+| Red (`\e[31m`)            | `#c2595a`                      | `#bb5d60`                      | match                                           |
+| Prompt arrow (bold green) | `#47b16d`                      | `#53b17a`                      | match                                           |
+| Magenta `ls` entries      | purple, same hue               | purple, same hue               | match                                           |
+| Left padding              | text starts at pane edge, 0 px | text starts at pane edge, 0 px | match                                           |
+
+Sampled values come from JPEG glyph strokes, so both apps differ by a few units. The earlier mismatches (bold brightening, 4 px padding) are fixed. PASS.
+
+Setup notes: `/tmp/gpui-bench` did not exist after the crash; the checker recreated it as an empty folder. The reference daemon keeps one dead `Terminal 1` record that `terminal kill` reports as killed but still lists; it has no process.

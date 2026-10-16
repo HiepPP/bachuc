@@ -82,3 +82,53 @@ Known differences from Electron, by design or limit:
 ## Questions
 
 - Pill order: the spec says "mode, model, and thinking, in the Electron order". The code uses the order Electron renders: model, thinking, mode. Change `Composer::pills` if the checker finds a different order on screen.
+
+## UI Checks
+
+Run by the UI checker on 2026-10-16, working tree on HEAD 5afebcedd, bundle `BachucComposer` rebuilt before the run, light theme. Screenshots: `/tmp/gpui-ui-check/F/`.
+
+Setup limit: the live daemon (6768) was down and the checker does not start it. The reference daemon on 6770 has no mock provider ("Provider mock is not configured") and the checker creates no Claude agent there (only mock agents on 6770). The example ran against the existing closed Claude agent `380c019` ("hi", Opus 5.5, low, `~/Projects/eva`) on 6770: `BachucComposer.app --args ws://127.0.0.1:6770/ws 380c019`. The checker typed text but sent nothing. Starting the example moved that agent from `closed` to `idle` on the 6770 daemon (the client attaches to it); nothing else changed.
+
+### Primary button states -> PARTIAL: idle and Send PASS, Stop UNVERIFIED
+
+Idle and empty: no Send or Stop button in the AX tree and none on screen. After typing `hello`: a green round `Send` button (accent) at the right. After select-all and delete: the button is gone again (0 Send or Stop buttons). Stop needs a running turn, which needs a mock agent on live.
+
+### Slash menu with daemon commands -> PARTIAL
+
+Typing `/` opened the menu above the input with 153 daemon commands (AX `menu Slash commands (showing 0-100 of 153 items)`), first row selected; this shows that commands load for a Claude agent. Picking a command and sending it was not run (sending would resume a real agent and write to the reference data); `npm run cli -- logs` was not checked. UNVERIFIED: pick and send.
+
+### Live send, steer, queue, cancel, thinking pill change -> UNVERIFIED
+
+All four need a running mock agent or a live Claude agent on 6768; the daemon is down. Not run.
+
+### Parity (light, input idle and with `/`) -> FAIL, 4 mismatches
+
+Window sizes differ (example 720 x 600, reference 1200 x 800 with a 820 px composer), so only structure and styles are compared.
+
+| Element                   | Reference (Electron)                                                                            | GPUI                                                                    | Result                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------- |
+| Surface                   | rounded card, 1 px border, white input row, grey toolbar row                                    | rounded card, 1 px border, grey bg                                      | match within the sampled look |
+| Placeholder               | "Message the agent, tag @files, or use /commands and /skills"                                   | "Message"                                                               | MISMATCH                      |
+| Attach button             | round plus at the left of the pills                                                             | round plus at the left of the pills                                     | match                         |
+| Model pill icon           | Claude sparkle                                                                                  | generic bot icon                                                        | MISMATCH                      |
+| Mode pill at rest         | not shown while the input is empty and unfocused                                                | shown at rest, greyed, label `auto`                                     | MISMATCH                      |
+| Mode pill with text       | shield icon, "Auto mode", plus a lightning button                                               | shield icon, "Auto mode"; no lightning button                           | MISMATCH (lightning)          |
+| Send button               | green round, white up arrow                                                                     | green round, white up arrow                                             | match                         |
+| Slash menu list           | rows anchored at the bottom, newest or last row selected, `/exit` first in a separate box above | rows from the top in command order, first row selected, no separate box | MISMATCH (order and anchor)   |
+| Slash row text            | name, muted description on the same line                                                        | name, muted description on the same line                                | match                         |
+| Extra row above the input | diff counts `+742 -0`                                                                           | none                                                                    | not counted (agent panel row) |
+| Voice buttons             | microphone and waveform                                                                         | none                                                                    | not counted (out of scope)    |
+
+The spec's Questions note (pill order) was not settled: both apps show model, thinking, mode, in that order.
+
+### Accessibility tree -> PASS
+
+`text entry area (settable) Message` (id `composer-input`), `button Attach images`, `button Model: Opus 5.5`, `button Thinking: Low`, `button Mode: auto` (later `Mode: Auto mode`), `button Send`, and `menu Slash commands (showing 0-100 of 153 items)` with each row `(selected)` or plain and labelled `/name, description`. The menu items' selected state is exposed.
+
+### CPU and memory -> PARTIAL
+
+`measure.sh 60 comp="pids:82268"` with the text `typing sample` in the input, no stream, window kept in front by an `open` loop every 3 s: 1.2 CPU% (limit 10.0), 121 MB RSS, 101 MB footprint (limit 250). A screenshot after the read shows the full window, no cut. The required condition (a mock stream with typing) was not run.
+
+### Cleanup
+
+The example and the reference app were quit; the lock was released; 6767 untouched; no agent or terminal was created; no prompt was sent.
