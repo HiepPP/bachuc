@@ -6,12 +6,23 @@
 //! write the tokens into the gpui-kit theme, so gpui-kit components use the same colors.
 
 pub mod metrics;
+mod syntax;
 mod tokens;
 
+pub use syntax::{ROLES as SYNTAX_ROLES, SyntaxColors, SyntaxThemeId, syntax_colors_for};
 pub use tokens::Tokens;
 
 use gpui_kit::component::theme::{Theme, ThemeMode};
-use gpui_kit::{App, BoxShadow, Global, Hsla, Pixels, Rgba, Window, point, px};
+use gpui_kit::{App, BoxShadow, Global, Hsla, Pixels, Rgba, SharedString, Window, point, px};
+
+/// The Electron desktop default of `contentFontSize` (`FONT_SIZE.content`).
+pub const DEFAULT_CONTENT_FONT_SIZE: f32 = metrics::FONT_CONTENT;
+/// `MIN_CONTENT_FONT_SIZE` and `MAX_CONTENT_FONT_SIZE` in `use-settings/storage.ts`.
+pub const MIN_CONTENT_FONT_SIZE: f32 = 10.;
+pub const MAX_CONTENT_FONT_SIZE: f32 = 21.;
+
+/// The family gpui-kit uses for the interface when no family is set.
+const SYSTEM_UI_FONT: &str = ".SystemUIFont";
 
 /// Which theme the app shows. `System` follows the system appearance: `Light` when it is light
 /// and `ClaudeDark` when it is dark.
@@ -27,6 +38,11 @@ struct State {
     choice: ThemeChoice,
     interface_scale: f32,
     code_scale: f32,
+    /// Installed families only; `None` is the default family.
+    ui_family: Option<SharedString>,
+    code_family: Option<SharedString>,
+    content_size: f32,
+    syntax: SyntaxThemeId,
     light: Tokens,
     dark: Tokens,
 }
@@ -39,6 +55,10 @@ fn state(cx: &mut App) -> &mut State {
             choice: ThemeChoice::System,
             interface_scale: 1.,
             code_scale: 1.,
+            ui_family: None,
+            code_family: None,
+            content_size: DEFAULT_CONTENT_FONT_SIZE,
+            syntax: SyntaxThemeId::default(),
             light: Tokens::light(),
             dark: Tokens::claude_dark(),
         });
@@ -93,6 +113,95 @@ pub fn mono_font_family(cx: &App) -> &'static str {
         .into_iter()
         .find(|name| installed.iter().any(|font| font == name))
         .unwrap_or("Menlo")
+}
+
+/// Sets the interface and code font families. `None`, an empty name, or a family that is not
+/// installed selects the default: the system font for the interface and [`mono_font_family`]
+/// for code. Nothing is persisted.
+pub fn set_font_families(ui: Option<SharedString>, code: Option<SharedString>, cx: &mut App) {
+    let installed = cx.text_system().all_font_names();
+    let state = state(cx);
+    state.ui_family = installed_family(ui, &installed);
+    state.code_family = installed_family(code, &installed);
+    apply(cx);
+}
+
+/// The interface family: the one set with [`set_font_families`], else the system font.
+pub fn ui_font_family(cx: &App) -> SharedString {
+    cx.try_global::<State>()
+        .and_then(|state| state.ui_family.clone())
+        .unwrap_or_else(|| SYSTEM_UI_FONT.into())
+}
+
+/// The code family: the one set with [`set_font_families`], else [`mono_font_family`].
+pub fn code_font_family(cx: &App) -> SharedString {
+    cx.try_global::<State>()
+        .and_then(|state| state.code_family.clone())
+        .unwrap_or_else(|| mono_font_family(cx).into())
+}
+
+/// The families that a picker can offer, sorted and without duplicates or hidden system names.
+pub fn installed_font_families(cx: &App) -> Vec<SharedString> {
+    let mut names: Vec<String> = cx
+        .text_system()
+        .all_font_names()
+        .into_iter()
+        .filter(|name| !name.starts_with('.'))
+        .collect();
+    names.sort_unstable_by_key(|name| name.to_lowercase());
+    names.dedup();
+    names.into_iter().map(SharedString::from).collect()
+}
+
+/// `requested` when it names an installed family, else `None` (the default).
+fn installed_family(requested: Option<SharedString>, installed: &[String]) -> Option<SharedString> {
+    let requested = requested?;
+    let name = requested.trim();
+    installed
+        .iter()
+        .any(|font| font == name)
+        .then(|| name.to_string().into())
+}
+
+/// Sets the content font size in px, as `contentFontSize` does: the whole number below it,
+/// clamped to 10-21. A value that is not finite selects the default. Nothing is persisted.
+pub fn set_content_font_size(px: f32, cx: &mut App) {
+    state(cx).content_size = clamp_content_font_size(px);
+    apply(cx);
+}
+
+/// The content font size for message bodies, the composer input, and Markdown.
+pub fn content_font_size(cx: &App) -> Pixels {
+    px(cx
+        .try_global::<State>()
+        .map_or(DEFAULT_CONTENT_FONT_SIZE, |state| state.content_size))
+}
+
+fn clamp_content_font_size(size: f32) -> f32 {
+    if size.is_finite() {
+        size.floor()
+            .clamp(MIN_CONTENT_FONT_SIZE, MAX_CONTENT_FONT_SIZE)
+    } else {
+        DEFAULT_CONTENT_FONT_SIZE
+    }
+}
+
+/// Sets the syntax theme. It follows the light or dark app theme through [`syntax_colors`].
+/// Nothing is persisted.
+pub fn set_syntax_theme(id: SyntaxThemeId, cx: &mut App) {
+    state(cx).syntax = id;
+    apply(cx);
+}
+
+/// The syntax theme on screen; `One` until [`set_syntax_theme`] runs.
+pub fn syntax_theme(cx: &App) -> SyntaxThemeId {
+    cx.try_global::<State>()
+        .map_or_else(SyntaxThemeId::default, |state| state.syntax)
+}
+
+/// The syntax palette of [`syntax_theme`] for the app theme on screen.
+pub fn syntax_colors(cx: &App) -> SyntaxColors {
+    syntax_colors_for(syntax_theme(cx), scheme(cx))
 }
 
 /// `sm`, `md`, or `lg` from the `shadow` object of the theme on screen.
@@ -186,14 +295,16 @@ fn apply(cx: &mut App) {
     let t = tokens(cx);
     let interface = ui_font_size(metrics::FONT_BASE, cx);
     let code = code_font_size(metrics::FONT_CODE, cx);
-    let mono = mono_font_family(cx);
+    let ui_family = ui_font_family(cx);
+    let code_family = code_font_family(cx);
     let clear = gpui_kit::transparent_black();
     Theme::update(cx, |theme| {
         theme.radius = px(metrics::RADIUS_MD);
         theme.radius_lg = px(metrics::RADIUS_LG);
         theme.font_size = interface;
+        theme.font_family = ui_family;
         theme.mono_font_size = code;
-        theme.mono_font_family = mono.into();
+        theme.mono_font_family = code_family;
 
         let c = &mut theme.colors;
         c.background = t.surface0;
@@ -434,6 +545,41 @@ mod tests {
                 "{what}: got {channels:?}, want {expected:?}"
             );
         }
+    }
+
+    fn installed() -> Vec<String> {
+        vec!["Menlo".into(), "Inter".into()]
+    }
+
+    #[test]
+    fn an_installed_family_is_kept_and_trimmed() {
+        assert_eq!(
+            installed_family(Some(" Inter ".into()), &installed()),
+            Some("Inter".into())
+        );
+    }
+
+    #[test]
+    fn a_missing_empty_or_unset_family_falls_back_to_the_default() {
+        assert_eq!(
+            installed_family(Some("Nope Sans".into()), &installed()),
+            None
+        );
+        assert_eq!(installed_family(Some("  ".into()), &installed()), None);
+        assert_eq!(installed_family(None, &installed()), None);
+    }
+
+    #[test]
+    fn content_size_is_floored_and_clamped_as_in_electron() {
+        assert_eq!(clamp_content_font_size(15.), 15.);
+        assert_eq!(clamp_content_font_size(15.9), 15.);
+        assert_eq!(clamp_content_font_size(3.), MIN_CONTENT_FONT_SIZE);
+        assert_eq!(clamp_content_font_size(99.), MAX_CONTENT_FONT_SIZE);
+        assert_eq!(clamp_content_font_size(f32::NAN), DEFAULT_CONTENT_FONT_SIZE);
+        assert_eq!(
+            clamp_content_font_size(f32::INFINITY),
+            DEFAULT_CONTENT_FONT_SIZE
+        );
     }
 
     #[test]
