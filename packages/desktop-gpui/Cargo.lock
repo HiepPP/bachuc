@@ -703,6 +703,7 @@ dependencies = [
  "anyhow",
  "bachuc-client",
  "bachuc-icons",
+ "bachuc-plugin-host",
  "bachuc-theme",
  "futures",
  "gpui-kit",

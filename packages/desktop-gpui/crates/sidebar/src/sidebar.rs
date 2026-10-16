@@ -7,12 +7,20 @@
 
 use crate::model::{
     Facts, Group, ProjectRow, Row, RowShape, StatusBucket, ViewState, WorkspaceRow,
-    archive_prompt_for_stat, build_rows, changed_range, clamp_width, format_diff_count,
-    identity_color, project_initial, workspace_label,
+    archive_prompt_for_stat, changed_range, clamp_width, format_diff_count, identity_color,
+    project_initial, workspace_label,
+};
+use crate::plugin::{
+    NavPress, NavRow, WheelGesture, added_sidebar_project, filtered_rows, is_horizontal, nav_press,
+    nav_rows, pick_title, run_in_order, slide_frame, submenu_row_label, submenu_trailing,
+    visible_projects, wheel_deltas,
 };
 use crate::ring::{FRAME as RING_FRAME, Knockout, RunningRing};
-use bachuc_client::{Client, ClientEvent, DirectoryEvent};
+use bachuc_client::{Client, ClientEvent, DirectoryEvent, ProjectNode};
 use bachuc_icons::{IconName, icon};
+use bachuc_plugin_host::{
+    PluginHost, PluginHostEvent, ProjectMenuItem, SidebarProject, SwipeDirection, ViewFactory,
+};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_MD, ICON_SM, ICON_XS, RADIUS_BASE, RADIUS_LG, RADIUS_MD,
     SIDEBAR_WIDTH, SPACE_0_5, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
@@ -24,12 +32,13 @@ use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::theme::Theme;
-use gpui_kit::component::{Selectable, Sizable as _, WindowExt as _, h_flex};
+use gpui_kit::component::{Selectable, Side, Sizable as _, WindowExt as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How far the list draws beyond the visible rows.
 const OVERDRAW: f32 = 400.;
@@ -70,6 +79,38 @@ pub enum SidebarEvent {
 }
 
 impl EventEmitter<SidebarEvent> for Sidebar {}
+
+/// What the plugin parts of the sidebar ask the app to do. A second type keeps the match on
+/// [`SidebarEvent`] exhaustive in the app.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SidebarPluginEvent {
+    /// A nav row without an action asks for its plugin surface.
+    OpenSurface {
+        plugin_id: String,
+        surface_id: String,
+    },
+    /// The Add project button added a project and every filter took notice.
+    ProjectAdded { project_id: String, cwd: String },
+}
+
+impl EventEmitter<SidebarPluginEvent> for Sidebar {}
+
+/// A plugin section view, built once per contribution.
+struct SectionView {
+    plugin_id: &'static str,
+    id: &'static str,
+    view: AnyView,
+}
+
+/// A filter slide in flight (`slide.tsx`). The list changes at the end of the out phase.
+struct Slide {
+    started: Instant,
+    direction: SwipeDirection,
+    generation: u64,
+}
+
+/// The list swaps its rows at this point of a slide.
+const SLIDE_APPLY: Duration = Duration::from_millis(65);
 
 #[derive(Clone, Copy)]
 struct ResizeDrag;
@@ -142,11 +183,21 @@ pub struct Sidebar {
     width: f32,
     rings: HashMap<String, Entity<RunningRing>>,
     archiving: HashSet<String>,
+    host: Option<Entity<PluginHost>>,
+    sections: Vec<SectionView>,
+    /// (plugin id, surface id) of the open plugin page, for the active nav row.
+    active_surface: Option<(String, String)>,
+    wheel: WheelGesture,
+    wheel_epoch: Instant,
+    slide: Option<Slide>,
+    slide_generation: u64,
+    adding: bool,
     _subscriptions: Vec<Subscription>,
+    _host_subscription: Option<Subscription>,
 }
 
 impl Sidebar {
-    pub fn new(client: Entity<Client>, _window: &mut Window, cx: &mut Context<Sidebar>) -> Sidebar {
+    pub fn new(client: Entity<Client>, window: &mut Window, cx: &mut Context<Sidebar>) -> Sidebar {
         let subscriptions = vec![
             cx.subscribe(&client, |this, _, event: &ClientEvent, cx| match event {
                 ClientEvent::Connected
@@ -172,10 +223,141 @@ impl Sidebar {
             width: SIDEBAR_WIDTH,
             rings: HashMap::new(),
             archiving: HashSet::new(),
+            host: None,
+            sections: Vec::new(),
+            active_surface: None,
+            wheel: WheelGesture::default(),
+            wheel_epoch: Instant::now(),
+            slide: None,
+            slide_generation: 0,
+            adding: false,
             _subscriptions: subscriptions,
+            _host_subscription: None,
         };
+        sidebar.attach_host(window, cx);
         sidebar.refresh(cx);
         sidebar
+    }
+
+    /// Marks the plugin page the app shows (plugin id, surface id), or none. The nav row of that
+    /// surface draws as hovered.
+    pub fn set_active_surface(
+        &mut self,
+        surface: Option<(String, String)>,
+        cx: &mut Context<Sidebar>,
+    ) {
+        if self.active_surface != surface {
+            self.active_surface = surface;
+            cx.notify();
+        }
+    }
+
+    /// Follows the plugin host once the app has created it. Reads contributions only from the
+    /// host index.
+    fn attach_host(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.host.is_some() {
+            return;
+        }
+        let Some(host) = bachuc_plugin_host::host(cx) else {
+            return;
+        };
+        self._host_subscription = Some(cx.subscribe_in(
+            &host,
+            window,
+            |this, _, event: &PluginHostEvent, window, cx| match event {
+                PluginHostEvent::ContributionsChanged => {
+                    this.sync_sections(window, cx);
+                    this.refresh(cx);
+                    cx.notify();
+                }
+                // A filter, a menu item, or a disabled state may change.
+                PluginHostEvent::PluginStateChanged { .. } => {
+                    this.refresh(cx);
+                    cx.notify();
+                }
+                PluginHostEvent::SidebarFilterChanged {
+                    direction: Some(direction),
+                } => this.start_slide(*direction, cx),
+                PluginHostEvent::SidebarFilterChanged { direction: None } => {
+                    this.finish_slide(cx);
+                    this.refresh(cx);
+                    cx.notify();
+                }
+                _ => {}
+            },
+        ));
+        self.host = Some(host);
+        self.sync_sections(window, cx);
+        self.refresh(cx);
+    }
+
+    /// Builds the view of each new section and drops the views of sections that went.
+    fn sync_sections(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(host) = &self.host else {
+            return;
+        };
+        let wanted: Vec<(&'static str, &'static str, ViewFactory<()>)> = host
+            .read(cx)
+            .index()
+            .sidebar_sections()
+            .iter()
+            .map(|section| {
+                (
+                    section.plugin_id,
+                    section.value.id,
+                    section.value.view.clone(),
+                )
+            })
+            .collect();
+        let mut old = std::mem::take(&mut self.sections);
+        self.sections = wanted
+            .into_iter()
+            .map(|(plugin_id, id, factory)| {
+                match old
+                    .iter()
+                    .position(|section| section.plugin_id == plugin_id && section.id == id)
+                {
+                    Some(at) => old.swap_remove(at),
+                    None => SectionView {
+                        plugin_id,
+                        id,
+                        view: factory((), window, cx),
+                    },
+                }
+            })
+            .collect();
+    }
+
+    /// Applies a pending filter change at once and drops the slide.
+    fn finish_slide(&mut self, cx: &mut Context<Self>) {
+        if self.slide.take().is_some() {
+            self.slide_generation += 1;
+            self.refresh(cx);
+        }
+    }
+
+    /// Slides the list out, swaps the rows, and slides the new list in. A second change during
+    /// a slide applies the first one at once.
+    fn start_slide(&mut self, direction: SwipeDirection, cx: &mut Context<Self>) {
+        self.finish_slide(cx);
+        self.slide_generation += 1;
+        let generation = self.slide_generation;
+        self.slide = Some(Slide {
+            started: Instant::now(),
+            direction,
+            generation,
+        });
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SLIDE_APPLY).await;
+            this.update(cx, |this, cx| {
+                if this.slide.as_ref().map(|slide| slide.generation) == Some(generation) {
+                    this.refresh(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
     }
 
     /// Marks the workspace the app shows, or none.
@@ -198,7 +380,33 @@ impl Sidebar {
             Vec::new()
         } else {
             let facts = Facts::read(client, client.projects(), client.agents());
-            build_rows(client.projects(), client.agents(), &facts, &self.state)
+            let filters = self
+                .host
+                .as_ref()
+                .map_or(&[][..], |host| host.read(cx).index().project_filters());
+            // A hidden project drops its workspaces, pinned ones included. The selection and the
+            // open tab are the app's, so a hidden selected workspace stays selected.
+            let visible: Cow<[ProjectNode]> = if filters.is_empty() {
+                Cow::Borrowed(client.projects())
+            } else {
+                let app: &App = cx;
+                Cow::Owned(visible_projects(
+                    client.projects(),
+                    &facts.project_keys,
+                    |project| {
+                        filters
+                            .iter()
+                            .all(|filter| (filter.value.is_visible)(project, app))
+                    },
+                ))
+            };
+            filtered_rows(
+                client.projects(),
+                &visible,
+                client.agents(),
+                &facts,
+                &self.state,
+            )
         };
         if rows == self.rows {
             return;
@@ -365,6 +573,136 @@ impl Sidebar {
             .into_any_element()
     }
 
+    // ---- plugins ----
+
+    /// Runs the press on a plugin nav row. The row is read again from the index, so a press on
+    /// a row that just went does nothing.
+    fn press_nav(
+        &mut self,
+        plugin_id: &'static str,
+        id: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(host) = &self.host else {
+            return;
+        };
+        let items = host.read(cx).index().sidebar_items();
+        let rows = nav_rows(items, self.selected.as_deref(), None);
+        let Some((row, item)) = rows
+            .iter()
+            .zip(items)
+            .find(|(row, _)| row.plugin_id == plugin_id && row.id == id)
+        else {
+            return;
+        };
+        let press = nav_press(row);
+        let surface_id = row.surface.to_string();
+        let handler = item
+            .value
+            .action
+            .as_ref()
+            .map(|action| action.on_press.clone());
+        match (press, handler) {
+            (NavPress::Action, Some(handler)) => handler(self.selected.clone(), window, cx),
+            (NavPress::OpenSurface, _) => cx.emit(SidebarPluginEvent::OpenSurface {
+                plugin_id: plugin_id.to_string(),
+                surface_id,
+            }),
+            _ => {}
+        }
+    }
+
+    /// Feeds a wheel event over the project list to the swipe gesture and calls every filter's
+    /// `on_swipe` once per gesture. A horizontal scroll never scrolls the list.
+    fn on_wheel(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        let Some(host) = &self.host else {
+            return;
+        };
+        let filters = host.read(cx).index().project_filters();
+        if !filters.iter().any(|filter| filter.value.on_swipe.is_some()) {
+            return;
+        }
+        let (dx, dy) = wheel_deltas(event.delta);
+        if is_horizontal(dx, dy) {
+            cx.stop_propagation();
+        }
+        // A pressed button means a drag is in flight, so the swipe must not switch under it.
+        if event.modifiers.control || cx.has_active_drag() {
+            return;
+        }
+        let now = self.wheel_epoch.elapsed().as_secs_f64() * 1000.;
+        let Some(direction) = self.wheel.push(dx, dy, now) else {
+            return;
+        };
+        let handlers: Vec<_> = host
+            .read(cx)
+            .index()
+            .project_filters()
+            .iter()
+            .filter_map(|filter| filter.value.on_swipe.clone())
+            .collect();
+        for handler in handlers {
+            handler(direction, cx);
+        }
+    }
+
+    /// Picks a folder, adds it as a project, and tells every filter about it, in index order.
+    /// A filter error shows its text and stops the rest; the project stays added.
+    fn add_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.adding {
+            return;
+        }
+        self.adding = true;
+        cx.notify();
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Add project".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let folder = match picked.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                _ => None,
+            };
+            let outcome = match folder {
+                Some(folder) => {
+                    let cwd = folder.to_string_lossy().into_owned();
+                    add_project_and_notify(&this, &cwd, cx).await
+                }
+                None => Ok(None),
+            };
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.adding = false;
+                match outcome {
+                    Ok(Some(added)) => cx.emit(SidebarPluginEvent::ProjectAdded {
+                        project_id: added.0,
+                        cwd: added.1,
+                    }),
+                    Ok(None) => {}
+                    Err(text) => window.push_notification(SharedString::from(text), cx),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The heading over the project list: the first plugin filter title, else "Workspaces".
+    fn section_title(&self, cx: &App) -> SharedString {
+        let filters = self
+            .host
+            .as_ref()
+            .map_or(&[][..], |host| host.read(cx).index().project_filters());
+        pick_title(
+            filters
+                .iter()
+                .map(|filter| filter.value.title.as_ref().and_then(|title| title(cx))),
+        )
+        .unwrap_or_else(|| "Workspaces".into())
+    }
+
     // ---- rows ----
 
     fn render_row(&mut self, ix: usize, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -375,7 +713,10 @@ impl Sidebar {
         let last = ix + 1 == self.rows.len();
         let body = match &row {
             Row::PinnedHeader { collapsed, .. } => self.render_pinned_header(*collapsed, &t, cx),
-            Row::SectionTitle => render_section_title(&t, cx),
+            Row::SectionTitle => {
+                let title = self.section_title(cx);
+                render_section_title(title, &t, cx)
+            }
             Row::Project(project) => self.render_project(ix, project, &t, cx),
             Row::Workspace(workspace) => self.render_workspace(ix, workspace, &t, cx),
             Row::ShowMore {
@@ -396,11 +737,16 @@ impl Sidebar {
             } => PINNED_BLOCK_GAP,
             _ => 0.,
         };
-        // The list container pads 8 px at the sides, and 16 px under the last row.
+        // The list container pads 8 px at the sides, and 16 px under the last row. A row
+        // takes the wheel after the list registers its own handler, so it can keep a
+        // horizontal swipe from scrolling the list.
         div()
             .w_full()
             .px(px(SPACE_2))
             .pb(px(below + if last { SPACE_4 } else { 0. }))
+            .on_scroll_wheel(
+                cx.listener(|this, event: &ScrollWheelEvent, _, cx| this.on_wheel(event, cx)),
+            )
             .child(body)
             .into_any_element()
     }
@@ -532,6 +878,11 @@ impl Sidebar {
             );
         let root = project.root.clone();
         let weak = cx.weak_entity();
+        let plugin_project = SidebarProject {
+            view_key: project.color_key.clone(),
+            name: project.name.clone(),
+            project_ids: vec![project.id.clone()],
+        };
         let kebab = kebab(
             ("project-kebab", ix),
             "Project actions",
@@ -539,14 +890,17 @@ impl Sidebar {
             RADIUS_MD,
             group.clone(),
             t,
-            move |menu, _, _| {
-                menu.min_w(px(220.)).item(menu_item(
+            move |menu, window, cx| {
+                let menu = menu.min_w(px(220.)).check_side(Side::Right).item(menu_item(
                     "Copy path",
                     IconName::Copy,
                     weak.clone(),
                     root.clone(),
                     |this, path, window, cx| this.copy_path(path, window, cx),
-                ))
+                ));
+                // Plugin items follow "Copy path"; they are read each time the menu opens.
+                let items = plugin_menu_items(&plugin_project, cx);
+                add_plugin_items(menu, items, window, cx)
             },
         );
         div()
@@ -813,21 +1167,136 @@ impl Sidebar {
                         .child("Search"),
                 ),
             )
+            .children(self.render_plugin_nav(t, cx))
+    }
+
+    /// The rows of the active plugins after Search, in index order (`PluginSidebarItemRow`).
+    fn render_plugin_nav(&self, t: &Tokens, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let Some(host) = &self.host else {
+            return Vec::new();
+        };
+        let active = self
+            .active_surface
+            .as_ref()
+            .map(|(plugin, surface)| (plugin.as_str(), surface.as_str()));
+        nav_rows(
+            host.read(cx).index().sidebar_items(),
+            self.selected.as_deref(),
+            active,
+        )
+        .into_iter()
+        .enumerate()
+        .map(|(ix, row)| self.render_nav_row(ix, row, t, cx))
+        .collect()
+    }
+
+    fn render_nav_row(
+        &self,
+        ix: usize,
+        row: NavRow,
+        t: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let hover = t.surface_sidebar_hover;
+        let foreground = t.foreground;
+        let (plugin_id, id) = (row.plugin_id, row.id);
+        let enabled = !row.disabled;
+        div()
+            .px(px(SPACE_2))
+            .child(
+                div()
+                    .id(("sidebar-plugin-nav", ix))
+                    .role(Role::Button)
+                    .aria_label(row.label.clone())
+                    .when(row.disabled, |this| {
+                        this.aria_description("Disabled: no workspace is open")
+                    })
+                    .min_h(px(28.))
+                    .px(px(SPACE_2))
+                    .py(px(SPACE_1))
+                    .rounded(px(RADIUS_LG))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(SPACE_2))
+                    .text_size(ui_font_size(FONT_BASE, cx))
+                    .text_color(if row.active {
+                        foreground
+                    } else {
+                        t.foreground_muted
+                    })
+                    .when(row.active, |this| this.bg(hover))
+                    .when(row.disabled, |this| this.opacity(0.5))
+                    .when(enabled, |this| {
+                        this.cursor_pointer()
+                            .hover(move |style| style.bg(hover).text_color(foreground))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.press_nav(plugin_id, id, window, cx)
+                            }))
+                    })
+                    .child(icon(row.icon).with_size(px(ICON_SM)))
+                    .child(div().min_w_0().truncate().child(row.label)),
+            )
+            .into_any_element()
+    }
+
+    /// The sections of the active plugins, between the project list and the footer. They add no
+    /// padding or border of their own.
+    fn render_sections(&self) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .flex_shrink_0()
+            .children(self.sections.iter().map(|section| section.view.clone()))
+    }
+
+    /// `FooterAddProjectButton`.
+    fn render_add_project(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
+        let hover = t.surface_sidebar_hover;
+        let foreground = t.foreground;
+        div()
+            .id("sidebar-add-project")
+            .role(Role::Button)
+            .aria_label("Add project")
+            .min_w_0()
+            .min_h(px(32.))
+            .flex_1()
+            .px(px(SPACE_2))
+            .py(px(SPACE_1_5))
+            .rounded(px(RADIUS_LG))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(SPACE_2))
+            .text_size(ui_font_size(FONT_BASE, cx))
+            .text_color(t.foreground_muted)
+            .when(self.adding, |this| this.opacity(0.5))
+            .when(!self.adding, |this| {
+                this.cursor_pointer()
+                    .hover(move |style| style.bg(hover).text_color(foreground))
+                    .on_click(cx.listener(|this, _, window, cx| this.add_project(window, cx)))
+            })
+            .child(icon(IconName::FolderPlus).with_size(px(ICON_SM)))
+            .child(div().min_w_0().truncate().child("Add project"))
     }
 
     fn render_footer(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .flex_shrink_0()
-            .justify_end()
+            .justify_between()
+            .items_center()
+            .gap(px(SPACE_2))
             .px(px(SPACE_2))
             .py(px(SPACE_3))
             .border_t_1()
             .border_color(t.border)
+            .child(self.render_add_project(t, cx))
             .child(
                 div()
                     .id("sidebar-settings")
                     .role(Role::Button)
                     .aria_label("Settings")
+                    .flex_shrink_0()
                     .w(px(28.))
                     .h(px(28.))
                     .flex()
@@ -895,12 +1364,13 @@ fn ring_key(row: &Row) -> Option<String> {
     }
 }
 
-fn render_section_title(t: &Tokens, cx: &mut Context<Sidebar>) -> AnyElement {
-    // `workspacesSectionHeader`: the title with the display menu, which is out of scope.
+fn render_section_title(title: SharedString, t: &Tokens, cx: &mut Context<Sidebar>) -> AnyElement {
+    // `workspacesSectionHeader`: the title with the display menu, which is out of scope. A
+    // plugin filter title replaces "Workspaces".
     div()
         .id("sidebar-workspaces-title")
         .role(Role::Heading)
-        .aria_label("Workspaces")
+        .aria_label(title.clone())
         .flex()
         .flex_row()
         .items_center()
@@ -910,7 +1380,7 @@ fn render_section_title(t: &Tokens, cx: &mut Context<Sidebar>) -> AnyElement {
         .py(px(SPACE_1))
         .text_size(ui_font_size(FONT_SM, cx))
         .text_color(t.foreground_muted)
-        .child("Workspaces")
+        .child(div().min_w_0().truncate().child(title))
         .into_any_element()
 }
 
@@ -1103,6 +1573,94 @@ fn menu_item(
         })
 }
 
+/// The items every project menu contribution adds for `project`, in index order.
+fn plugin_menu_items(project: &SidebarProject, cx: &App) -> Vec<ProjectMenuItem> {
+    let Some(host) = bachuc_plugin_host::host(cx) else {
+        return Vec::new();
+    };
+    host.read(cx)
+        .index()
+        .project_menus()
+        .iter()
+        .flat_map(|menu| (menu.value.items)(project, cx))
+        .collect()
+}
+
+/// Adds plugin items: title only, no icon. `disabled` greys an item, `checked` ends it with a
+/// check, and an item with children opens a submenu that ends with its checked child's title.
+fn add_plugin_items(
+    mut menu: PopupMenu,
+    items: Vec<ProjectMenuItem>,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    for item in items {
+        if item.items.is_empty() || item.disabled {
+            let on_select = item.on_select.clone();
+            menu = menu.item(
+                PopupMenuItem::new(item.title.clone())
+                    .disabled(item.disabled)
+                    .checked(item.checked)
+                    .on_click(move |_, window, cx| {
+                        if let Some(on_select) = &on_select {
+                            on_select((), window, cx);
+                        }
+                    }),
+            );
+        } else {
+            let label = submenu_row_label(&item.title, submenu_trailing(&item.items));
+            let children = item.items.clone();
+            menu = menu.submenu(label, window, cx, move |sub, window, cx| {
+                add_plugin_items(sub.check_side(Side::Right), children.clone(), window, cx)
+            });
+        }
+    }
+    menu
+}
+
+/// Adds the project and runs every filter's `on_project_added` in index order. Returns the
+/// project id and the folder, or the text of the first error.
+async fn add_project_and_notify(
+    this: &WeakEntity<Sidebar>,
+    cwd: &str,
+    cx: &mut AsyncWindowContext,
+) -> Result<Option<(String, String)>, String> {
+    let task = this
+        .update(cx, |this, cx| {
+            this.client
+                .update(cx, |client, cx| client.add_project(cwd, cx))
+        })
+        .map_err(|error| error.to_string())?;
+    let added = task.await.map_err(|error| error.to_string())?;
+    let project = added_sidebar_project(&added);
+    let filters = this
+        .update(cx, |this, cx| {
+            this.host
+                .as_ref()
+                .map(|host| {
+                    host.read(cx)
+                        .index()
+                        .project_filters()
+                        .iter()
+                        .filter_map(|filter| filter.value.on_project_added.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        })
+        .map_err(|error| error.to_string())?;
+    let cx = cx.clone();
+    let steps = filters.into_iter().map(|filter| {
+        let project = project.clone();
+        let mut cx = cx.clone();
+        move || async move {
+            let task = cx.update(|_, app| filter(project, app))?;
+            task.await
+        }
+    });
+    run_in_order(steps).await?;
+    Ok(Some((added.id, cwd.to_string())))
+}
+
 /// `SidebarWorkspaceMenuItems`, in the Electron order, for the items whose target is in scope.
 fn workspace_menu(menu: PopupMenu, weak: &WeakEntity<Sidebar>, row: &WorkspaceRow) -> PopupMenu {
     let mut menu = menu.min_w(px(260.)).item(menu_item(
@@ -1192,8 +1750,22 @@ fn kebab(
 }
 
 impl Render for Sidebar {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The app may create the plugin host after the sidebar.
+        self.attach_host(window, cx);
         let t = tokens(cx);
+        let frame = self.slide.as_ref().and_then(|slide| {
+            slide_frame(
+                slide.direction,
+                slide.started.elapsed().as_secs_f32() * 1000.,
+            )
+        });
+        if frame.is_some() {
+            window.request_animation_frame();
+        } else {
+            self.slide = None;
+        }
+        let width = self.width;
         let tree = div()
             .id("sidebar-tree")
             .role(Role::Tree)
@@ -1201,7 +1773,17 @@ impl Render for Sidebar {
             .flex_1()
             .min_h_0()
             .pt(px(SPACE_0_5))
-            .child(list(self.list.clone(), cx.processor(Self::render_row)).size_full());
+            .overflow_hidden()
+            .child(
+                // Offset with `left`, as Electron does, and only while a slide runs.
+                div()
+                    .size_full()
+                    .relative()
+                    .when_some(frame, |this, frame| {
+                        this.left(px(frame.offset * width)).opacity(frame.opacity)
+                    })
+                    .child(list(self.list.clone(), cx.processor(Self::render_row)).size_full()),
+            );
         div()
             .id("sidebar")
             .role(Role::Navigation)
@@ -1228,6 +1810,7 @@ impl Render for Sidebar {
             ))
             .child(self.render_nav(&t, cx))
             .child(tree)
+            .child(self.render_sections())
             .child(self.render_footer(&t, cx))
             // The handle hangs 5 px outside the sidebar, so it paints above its neighbor.
             .child(deferred(self.render_resize_handle(&t)).with_priority(1))
