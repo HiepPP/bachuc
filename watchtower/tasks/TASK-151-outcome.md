@@ -101,3 +101,50 @@ Defect found (not in the spec list): the Files tab opens with "not connected" an
 ### Cleanup
 
 The example and the reference app were quit; the lock was released; 6767 untouched. The checker created no agent or terminal. `/tmp/gpui-bench` (now a git repo with edits) and `/tmp/gpui-plain` remain in `/tmp`.
+
+## Fix Round 1
+
+Status: DONE for code checks; the screen re-check is DEFERRED (UI checker). Public API unchanged (`Explorer::new`, `set_cwd`, `set_visible`, `ExplorerEvent`, `FileView::new`, `DiffView::new`).
+
+Changed: `src/explorer.rs`, `src/diff_view.rs`.
+
+Fixed:
+
+- Files tab "not connected": `Explorer::new` listed the root before the client connected, and nothing listed it again. Now `load_directory` and `request_status` wait while `Client::is_connected()` is false, and `ClientEvent::Connected` runs `refresh` (root, open folders, and the status when watched). A reconnect also refreshes.
+- Changes header: two 36 px toolbar rows on `surface_sidebar` with a bottom border, as `ChangesRepositoryToolbar` and `ChangesComparisonToolbar` draw them: the branch name, then `Uncommitted` with the total `+N -M` and a 20 px refresh button (`RotateCw`, 14 px, `foreground_extra_muted`, `interaction_highlight` on hover). Shown only for a git folder, also over the "No changes to display" state. AX: toolbars `Repository` and `Diff`, labels, and button `Refresh`.
+- Diff tint width: each diff row has `min_w_full`, so the addition and deletion tints reach the right edge of the pane.
+
+Left as is, with the reason:
+
+- Branch and `Uncommitted` show as passive labels without the chevron menu: branch switching is out of scope, and the client has no base-ref diff mode. The `...` options menu of the Changes header is left out for the same reason.
+- `Commits` footer and the Files toolbar: not in the spec (commit is out of scope; the Parity list already lists the toolbar).
+- New-file mark: `ChangedFile` has no new or deleted flag. The daemon payload has `isNew` and `isDeleted` (`crates/client/src/files.rs` `changed_files` drops them). Needs a client field.
+- Diff syntax colors: the checked diff was `README.md`. Markdown has no grammar in the crate (spec and CONTEXT limit it to rust, typescript, tsx, javascript, python, bash, json); `.rs` and the other listed languages color in the diff through the same highlighter as the file view. Markdown needs the gpui-kit `tree-sitter-markdown` feature, a new dependency.
+- One scroll with a header per file: `DiffView::new` takes one path (the TASK-155 contract), so the view shows one file.
+
+Verified:
+
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-explorer` -> PASS, 21 tests.
+- `cargo.sh clippy -p bachuc-explorer --all-targets` -> PASS, no warning in the crate.
+- `cargo.sh fmt --check -p bachuc-explorer` -> PASS.
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh build -p bachuc-app` -> PASS.
+- Files tab after connect, Changes header, and full-width tint versus the reference -> DEFERRED (UI checker).
+
+Lessons: a request sent before `ClientEvent::Connected` fails with "not connected" and is not retried by the client; a view that loads in its constructor must wait for `Connected`. In a `uniform_list` with `Unconstrained` sizing, a row with `min_w_full` fills the visible width, because the list lays each row out against it.
+
+### Re-check 1
+
+Run by the UI checker on commit 705b30487 (HEAD d552985b8), 2026-10-16. Bundle `BachucExplorer` rebuilt before the run; example `--url ws://127.0.0.1:6770/ws` on the reference daemon (live 6768 is down). The `/tmp/gpui-bench` repo still has the three edits (`README.md`, `src/main.rs`, `src/extra.rs`). Reference: the in-place Electron build, workspace gpui-bench, Explorer sidebar open, Claude dark theme. Both Explorer panels are 320 wide. Screenshots: `/tmp/gpui-ui-check/G/` (`gpui-files-r2.png`, `gpui-changes-r2.png`, `gpui-diff-r2.png`, `gpui-diff-rs-r2.png`, `gpui-files-dark-r2.png`, `ref-explorer-r2.png`, `ref-files-dark-r2.png`).
+
+| Line                                   | Result | Evidence                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Files tab loads after connect          | PASS   | First tab at start: AX `outline Files` with rows `.git`, `src`, `README.md`, no "not connected" and no Retry. After Files -> Changes -> Files the rows are listed again at once.                                                                                                                                                                                                                         |
+| Changes header has branch, Uncommitted | PASS   | AX toolbars `Repository` (text `main`) and `Diff` (text `Uncommitted`, button `Refresh`); on screen `main` and `Uncommitted +6 -0` with a refresh icon. Row centres: branch 54, Uncommitted 90 (reference 53 and 89).                                                                                                                                                                                    |
+| Diff tints span the pane               | PASS   | README.md lines 4 and 5: tint `(43,53,44)` at x 700 and at x 1190, the right edge of the pane (reference `(42,54,44)` at 700 and `(41,54,44)` at 870, its right edge). The `main.rs` diff also fills the whole row.                                                                                                                                                                                      |
+| Parity, dark: surfaces                 | PASS   | Panel bg `(26,25,23)` both; border `(43,42,40)` vs `(43,41,42)`; diff pane bg `(31,31,31)` both; header rows 36 px both; Changes row pitch 32 both (src 124, extra.rs 156, main.rs 188, README.md 220 vs 125, 157, 189, 221); counts colors green and red as in the reference.                                                                                                                           |
+| Parity, dark: Files list               | FAIL   | Rows are 29 px pitch in both, but the reference has a toolbar row under the tabs (`Name` sort, new file, new folder, hidden toggle, refresh). GPUI has none, so its first row sits 36 px higher (`.git` centre y 59 below the content top vs 95). Known, listed in the Parity list.                                                                                                                      |
+| Parity, dark: Changes footer, mark     | FAIL   | Reference has a `Commits` footer and a green "added" mark on `extra.rs`; GPUI has neither (orange modified mark on every row). Known (no `isNew` in `ChangedFile`).                                                                                                                                                                                                                                      |
+| Parity, dark: diff layout              | FAIL   | Reference shows all three files in one scroll with a header row per file; GPUI shows one file per click. Known (`DiffView::new` takes one path).                                                                                                                                                                                                                                                         |
+| Parity, dark: diff syntax colors       | FAIL   | `main.rs`: reference keywords (`fn`, `let`) purple `(177,131,193)`, fn name blue `(120,163,205)`, string olive green; GPUI keywords salmon `(224,135,127)` and `(156,67,61)`, fn name lavender `(135,104,171)`, string light blue `(128,164,196)`. `README.md`: reference colors the `# gpui-bench` heading blue, GPUI draws plain text (no markdown grammar, known). The palette is a visible mismatch. |
+
+Cleanup: the example was quit; 6767 untouched; no agent or terminal created. The reference app stays on the Claude theme and the Files tab of gpui-bench until the end of the run; the checker restores the theme.

@@ -162,3 +162,46 @@ Parity line (rest and query `set`) -> FAIL, one mismatch (3 px, over the 2 px li
 The earlier mismatches for the input inset, the active row width, the hint position, the icon rail, and the divider are fixed. Header height remains 3 px taller (53 vs 50), so the first row and the whole list sit 3 px lower than the reference relative to the panel top.
 
 Cleanup: the example and the reference app were quit; 6767 untouched.
+
+## Fix Round 2
+
+2026-10-16, against Re-check 1 of 2071e6104. Changed `src/center.rs` only. Uncommitted.
+
+Cause of the 53 px header: `Input` has an inherent `h()` that sets only a multi-line height, and it shadows `Styled::h`. Round 1's `.h(...)` did nothing for the single-line field, so the frame kept gpui-kit `input_h(Medium)`, which is `h_8` = 2 rem. `Root` sets the rem to the theme font size (14 px), so the frame was 28 px: 12 + 28 + 12 + 1 = 53. The screenshots agree: the placeholder glyph sits 21 px below the panel top in both apps, and the extra 3 px is below the text.
+
+Box by box (Electron `styles.header` and `styles.input`, gpui-kit 0.7.3 `input/input.rs` and gpui-base `input/base/element.rs`):
+
+| Box            | Electron                         | GPUI now                                          |
+| -------------- | -------------------------------- | ------------------------------------------------- |
+| Header padding | `spacing[3]` = 12 top and bottom | `py(SPACE_3)` = 12                                |
+| Input padding  | `spacing[1]` = 4 top and bottom  | `py(SPACE_1)` = 4                                 |
+| Text line      | `normal` at 14 px = 17           | `round(14 x 1.2)` = 17 (GPUI rounds line heights) |
+| Input frame    | 25                               | `Styled::h` 25 (was Medium `h_8` = 28)            |
+| Bottom border  | 1                                | `border_b_1` = 1                                  |
+| Header         | 50                               | 50, also set as the header `h`                    |
+
+Fix: the frame height goes through `Styled::h` explicitly, and the header and input sizes come from `input_line_height`, `input_height`, and `header_height`. The header div also takes `header_height` as its height, so a later change in the input cannot grow it. Unit test `center::tests::header_matches_the_electron_50_px_header` checks 17, 25, and 50 at FONT_BASE.
+
+Verified: `CARGO_BUILD_JOBS=4 cargo.sh test -p bachuc-command` -> PASS (29 tests: 16 + 4 + 9, including `search_500_items_stays_under_16_ms_per_keystroke`); `cargo.sh fmt --check -p bachuc-command` -> PASS; `cargo.sh clippy -p bachuc-command --all-targets -- -D warnings` -> PASS. Header height 50 on screen -> DEFERRED (UI checker).
+
+Lesson: a gpui-kit `Input` builder method can shadow a `Styled` method of the same name (`h`, `h_full`). Call `Styled::h(input, ...)` for a single-line height.
+
+### Re-check 2
+
+Run by the UI checker on commit d552985b8, 2026-10-16. The `BachucCommand` bundle was rebuilt before the run. Reference: the in-place Electron build on 6770, light theme, `Cmd+K` in workspace eva. Both screenshots are 1200 wide; panel 640 x 560 in both. Screenshots: `/tmp/gpui-ui-check/H/ref-rest-r2.png`, `gpui-rest-r2.png`, `ref-query-r2.png`, `gpui-query-r2.png`. Pixel rows were read from the files.
+
+Parity line (rest and query `set`) -> PASS. Header height is 50 in both, so the last mismatch of Re-check 1 is fixed.
+
+| Element                  | Reference (Electron)               | GPUI                               | Result            |
+| ------------------------ | ---------------------------------- | ---------------------------------- | ----------------- |
+| Header height            | 50 (panel top y 48, border y 98)   | 50 (panel top y 80, border y 130)  | match             |
+| Overlay top offset       | 48 from the content top            | 48 (y 80 minus title bar 32)       | match             |
+| First row top            | 33 px below the header border      | 33 px below the header border      | match             |
+| Search input text inset  | 17 px (text x 297, panel left 280) | 17 px (text x 297, panel left 280) | match             |
+| First section label      | centre 18 px below the border      | centre 16 px below the border      | match within 2 px |
+| Section divider to label | 17 px (rest)                       | 19 px (query)                      | match within 2 px |
+| Active row               | `(251,251,251)`, full panel width  | `(251,251,251)`, full panel width  | match             |
+| Shortcut hint            | right-aligned, badge ends x 903    | right-aligned, badge ends x 903    | match             |
+| Panel, border, backdrop  | 640 x 560, `(228,228,230)` border  | same                               | match             |
+
+Cleanup: the example was quit. The checker typed `set` into the reference composer by mistake (the palette had not taken focus on one attempt) and cleared it; nothing was sent. 6767 untouched.

@@ -88,3 +88,30 @@ The view wrote only `hosts.json`, `appearance.json`, and `shortcuts.json` in `Ba
 ### Cleanup
 
 The example and the reference app were quit; the lock was released; the host file and folder were restored; no request was sent to 6767 by the checker (the example listed the release host but its client connected only to the 6770 URL given on the command line; the Hosts pane showed a "Connected" badge only on the 6770 host).
+
+## Fix Round 1
+
+Fix builder, 2026-10-16, on HEAD 5afebcedd plus the crate edits below. Only `crates/settings` changed; the public API (`Settings::new`, `SettingsEvent`, `load_appearance`, `appearance::{Appearance, load_from, save_to, apply}`) is unchanged.
+
+### Changed
+
+- `src/ui.rs`: `page_title` (26 px `4xl`, medium, 4 px left inset, 24 px below, `Role::Heading`), `MenuTrigger` (a `Selectable` + `DropdownMenu` anchor), `select_trigger` (`DropdownTrigger` size `sm`: 32 px, 12 px padding, `RADIUS_XL`, `border_accent` outline, leading icon, value, chevron), and `more_trigger` (32 px `...` button).
+- Page title: every pane starts with its section label as the page title: Hosts, Appearance, Shortcuts, Providers, Projects. The project editor shows "Projects", as Electron does.
+- Theme control: the three radio chips became one dropdown. The trigger shows the current theme icon and label ("Theme: <label>" for AX). The menu is 200 px, anchored top right, with Light, Claude dark, and System, and a check on the current one.
+- Shortcut rows: 12 px padding (was 16) and a 32 px menu slot, so a row is 57 px (12 + 32 + 12 + 1 border). The pencil, X, and reset buttons became a `...` menu, `Actions for <name>`, with Bind or Rebind, Clear when a chord is set, and Reset to default when overridden. Done and Cancel stay inline while recording.
+- Group G lesson: `ProjectEditor` sent `read_project_config` in its constructor. It now reads only when the client is connected, and stays in the loading state otherwise. A `ClientEvent::Connected` subscription reads again, unless a loaded draft is on screen. The Hosts, Providers, and Projects list panes read only cached client state and send no request.
+- `src/hosts.rs`: two clippy "redundant reference in `format!` argument" warnings removed; no behavior change.
+
+### Not fixed (reported as questions)
+
+- Fonts rows Interface font, Code font, Content size, and Highlight theme: `bachuc_theme` has no font family, content size, or syntax theme setting (`set_font_scale` takes interface and code only). A row that stores a value nothing applies would mislead, so the rows stay out.
+- Sidebar App and Host groups: the owner scoped the sections to five pages, so the mismatch is by scope.
+- `bachuc_theme::metrics` has no `FONT_4XL`; `ui.rs` holds a local `FONT_4XL = 26.` from `theme.ts`.
+
+### Verified
+
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-settings` -> PASS: 26 unit tests and 4 `project_config` tests.
+- `cargo.sh fmt -p bachuc-settings --check` -> PASS.
+- `cargo.sh clippy -p bachuc-settings --tests --examples` -> PASS, no errors. One pre-existing warning remains: `too_many_arguments` on `AppearancePane::size_row`.
+- `CARGO_BUILD_JOBS=4 cargo.sh build -p bachuc-app` -> PASS.
+- Parity recheck of the page title, theme dropdown, and 57 px shortcut rows -> DEFERRED (UI checker).
