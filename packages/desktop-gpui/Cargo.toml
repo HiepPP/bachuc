@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "plugins/*"]
 
 [workspace.dependencies]
 # gpui-kit pins GPUI to the gpui-pre 0.3.9 snapshot. Every crate uses this one entry, so
@@ -9,6 +9,8 @@ members = ["crates/*"]
 gpui-kit = { version = "=0.7.3", features = [
     "tree-sitter-bash",
     "tree-sitter-javascript",
+    "tree-sitter-markdown",
+    "tree-sitter-markdown-inline",
     "tree-sitter-python",
     "tree-sitter-rust",
     "tree-sitter-tsx",
