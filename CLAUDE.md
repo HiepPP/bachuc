@@ -21,7 +21,7 @@ The fork's product brand is Bachuc, and its release home is `~/.bachuc`. Other i
 
 This fork is dedicated to one user; it is not meant for other Paseo users. Put each feature where it runs natively with the fewest bugs, per [ADR-0017](watchtower/decisions/ADR-0017-native-host-features-over-thin-host-changes.md):
 
-- "Code a plugin" means editing `hiep-plugins/plugins/<plugin-id>`, not core plugin code in `packages/*` or `plugin-examples/`. Read `hiep-plugins/AGENTS.md` first. `hiep-plugins` is the only plugin source; the old repo `~/Projects/hiep-paseo-plugin` is frozen, so never edit it or install from it.
+- "Code a plugin" means editing `hiep-plugins/plugins/<plugin-id>` (the server part), not core plugin code in `packages/*` or `plugin-examples/`. Its GPUI client is the crate `packages/desktop-gpui/plugins/<plugin-id>`; its React client is frozen. `plugin reload` reloads only the server part, so a GPUI client change needs a GPUI build ([rules](docs/plugins.md#gpui-native-clients)). Read `hiep-plugins/AGENTS.md` first. `hiep-plugins` is the only plugin source; the old repo `~/Projects/hiep-paseo-plugin` is frozen, so never edit it or install from it.
 - Build a feature in the host (`packages/*`) when it needs app internals such as the stream model, layout, navigation, or a hot path, or when a plugin would need a new plugin API. Use a plugin for a self-contained extra that the existing plugin APIs already cover. Upstream merge cost is not a reason to pick a plugin; the fork has moved too far from upstream.
 - Plugins may require the fork version; supporting stock Paseo is not a goal.
 - Install and reload these plugins in **release** (`PASEO_HOME=~/.bachuc paseo plugin ...`) and **live** (`npm run cli -- plugin ...`).
@@ -51,7 +51,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/providers.md](docs/providers.md)                               | Adding a new agent provider end-to-end                                                                                         |
 | [docs/forge-providers.md](docs/forge-providers.md)                   | Adding a git forge: registry/manifest, drop-in checklist, self-host/GHES, the two facts tiers                                  |
 | [docs/custom-providers.md](docs/custom-providers.md)                 | Custom provider config: Z.AI, Alibaba/Qwen, ACP agents, profiles, custom binaries                                              |
-| [docs/plugins.md](docs/plugins.md)                                   | Local plugin manifest, directory source config, RPCs, native surfaces, and attachment sources                                  |
+| [docs/plugins.md](docs/plugins.md)                                   | Local plugin manifest, directory source config, RPCs, native surfaces, attachment sources, GPUI clients                        |
 | [docs/service-proxy.md](docs/service-proxy.md)                       | Service proxy: exposing workspace scripts at public URLs, DNS setup, reverse proxy config                                      |
 | [docs/development.md](docs/development.md)                           | Dev server, build sync gotchas, CLI reference, agent state, Playwright MCP                                                     |
 | [docs/rpc-namespacing.md](docs/rpc-namespacing.md)                   | WebSocket RPC naming convention — dotted namespaces and `.request`/`.response` pairs                                           |

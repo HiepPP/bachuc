@@ -1,10 +1,10 @@
 # GPUI parity audit
 
-Date: 2026-10-16. Branch `feat/bachuc-gpui`. Reference: the in-place Electron build on 6770. Mock agents only; release (6767) was not touched.
+Date: 2026-10-17. Branch `feat/bachuc-gpui`. Reference: the in-place Electron build on 6770. Mock agents only; release (6767) was not touched.
 
 ## How to read this report
 
-- Values come from the latest UI check of each element (TASK-147 to TASK-155). A re-check replaces an earlier failure.
+- Values come from the latest UI check of each element (TASK-147 to TASK-155). A re-check replaces an earlier failure. The code of TASK-168 to TASK-191 (composer tracks, New workspace screen, plugin clients) passed code tests only; its UI checks are deferred, so those rows are `UNVERIFIED`.
 - This audit took no new screenshots. The existing pairs in `packages/desktop-gpui/docs/parity/` cover every surface that has a reference. A background GPUI window does not draw (Q-069), and the owner forbids bringing a tested app to the front. A surface with no pair is `UNVERIFIED`.
 - Dark theme: only the sidebar and the Explorer Files tab have a dark pair. Other dark rows are `UNVERIFIED (no reference capture)`.
 - Pair names are `<surface>-<theme>-gpui.png` and `<surface>-<theme>-electron.png`.
@@ -80,26 +80,36 @@ Date: 2026-10-16. Branch `feat/bachuc-gpui`. Reference: the in-place Electron bu
 
 ## Composer
 
-| Element                       | Theme | Electron                          | GPUI                          | Result                      | Crate    | Pair                   |
-| ----------------------------- | ----- | --------------------------------- | ----------------------------- | --------------------------- | -------- | ---------------------- |
-| Card width and inset          | light | x 350 to 1170 in the 880 px pane  | x 350 to 1170                 | match                       | composer | `composer-light`       |
-| Placeholder text, size, color | light | 12 px, light grey, x 12 from edge | same                          | match                       | composer | `composer-light`       |
-| Model pill, Claude sparkle    | light | sparkle                           | sparkle                       | match                       | composer | `composer-light`       |
-| Pill chevrons                 | light | down chevron after each label     | down chevron after each label | match                       | composer | `composer-light`       |
-| Focus hint                    | light | `⌘L to focus`, 13 px from edge    | 14 px from edge               | match                       | composer | `composer-light`       |
-| Slash menu order, anchor      | light | `/exit` selected at the bottom    | same                          | match                       | composer | `composer-slash-light` |
-| Slash detail card             | light | 61 px high, 6 px gap              | 60 px high, 5 px gap          | match                       | composer | `composer-slash-light` |
-| Slash row                     | light | 36 px                             | 36 px                         | match                       | composer | `composer-slash-light` |
-| Mode pill menu                | light | 5 modes, check on current         | 5 modes, check on current     | match                       | composer | none                   |
-| Send button                   | light | green round                       | green round                   | match                       | composer | none                   |
-| Image pill                    | light | -                                 | not run                       | UNVERIFIED (needs pointer)  | composer | none                   |
-| Running state (Stop)          | -     | -                                 | needs a running mock agent    | UNVERIFIED (live down)      | composer | none                   |
-| Send, steer, queue, cancel    | -     | -                                 | not run                       | UNVERIFIED (live down)      | composer | none                   |
-| Lightning toggle              | light | present                           | none                          | MISMATCH (Q-079)            | composer | `composer-light`       |
-| Diff-count row above input    | light | `+742 -0`                         | none                          | MISMATCH (follow-up needed) | composer | `composer-light`       |
-| @file mentions                | light | present                           | none                          | MISMATCH (Q-080)            | composer | none                   |
-| Microphone, waveform          | light | present                           | none                          | out of scope (dictation)    | composer | `composer-light`       |
-| Dark composer                 | dark  | not captured                      | not paired                    | UNVERIFIED (no reference)   | composer | none                   |
+| Element                               | Theme | Electron                          | GPUI                          | Result                         | Crate    | Pair                   |
+| ------------------------------------- | ----- | --------------------------------- | ----------------------------- | ------------------------------ | -------- | ---------------------- |
+| Card width and inset                  | light | x 350 to 1170 in the 880 px pane  | x 350 to 1170                 | match                          | composer | `composer-light`       |
+| Placeholder text, size, color         | light | 12 px, light grey, x 12 from edge | same                          | match                          | composer | `composer-light`       |
+| Model pill, Claude sparkle            | light | sparkle                           | sparkle                       | match                          | composer | `composer-light`       |
+| Pill chevrons                         | light | down chevron after each label     | down chevron after each label | match                          | composer | `composer-light`       |
+| Focus hint                            | light | `⌘L to focus`, 13 px from edge    | 14 px from edge               | match                          | composer | `composer-light`       |
+| Slash menu order, anchor              | light | `/exit` selected at the bottom    | same                          | match                          | composer | `composer-slash-light` |
+| Slash detail card                     | light | 61 px high, 6 px gap              | 60 px high, 5 px gap          | match                          | composer | `composer-slash-light` |
+| Slash row                             | light | 36 px                             | 36 px                         | match                          | composer | `composer-slash-light` |
+| Mode pill menu                        | light | 5 modes, check on current         | 5 modes, check on current     | match                          | composer | none                   |
+| Send button                           | light | green round                       | green round                   | match                          | composer | none                   |
+| Image pill                            | light | -                                 | not run                       | UNVERIFIED (needs pointer)     | composer | none                   |
+| Running state (Stop)                  | -     | -                                 | needs a running mock agent    | UNVERIFIED (live down)         | composer | none                   |
+| Send, steer, queue, cancel            | -     | -                                 | not run                       | UNVERIFIED (live down)         | composer | none                   |
+| Lightning toggle                      | light | present                           | built as a `fast_mode` toggle | UNVERIFIED (UI check deferred) | composer | `composer-light`       |
+| Diff-count pill above input           | light | `+742 -0`                         | built (`diff_stat_pill.rs`)   | UNVERIFIED (UI check deferred) | composer | `composer-light`       |
+| Track strip (tasks, subagents, queue) | light | present                           | built (`tracks.rs`)           | UNVERIFIED (UI check deferred) | composer | none                   |
+| Plugin pills, stop orb                | light | present                           | built (`plugin_slots.rs`)     | UNVERIFIED (UI check deferred) | composer | none                   |
+| @file mentions                        | light | present                           | none                          | MISMATCH (Q-080)               | composer | none                   |
+| Microphone, waveform                  | light | present                           | none                          | out of scope (dictation)       | composer | `composer-light`       |
+| Dark composer                         | dark  | not captured                      | not paired                    | UNVERIFIED (no reference)      | composer | none                   |
+
+## New workspace and plugins
+
+| Element                                   | Theme | Electron                  | GPUI                       | Result                         | Crate | Pair |
+| ----------------------------------------- | ----- | ------------------------- | -------------------------- | ------------------------------ | ----- | ---- |
+| New workspace screen, draft composer      | light | title, chip row, composer | built (`new_workspace.rs`) | UNVERIFIED (UI check deferred) | app   | none |
+| Plugin surfaces (15 native clients)       | light | React clients             | linked in `plugins.rs`     | UNVERIFIED (UI check deferred) | app   | none |
+| Plugin rows, settings screens, live reads | -     | -                         | not run                    | UNVERIFIED (live down)         | app   | none |
 
 ## Explorer
 
@@ -170,7 +180,7 @@ Highest user impact first.
 
 1. Heading directly before a code block, `bachuc-timeline`: GPUI 25 to 26 px, Electron 37 px, an 11 to 12 px gap, in the agent text the owner reads most. Q-086 is open.
 2. Header right buttons, `bachuc-app`: Electron has the VS Code split button and the `Commit` split button; GPUI has a `...` menu and a panel toggle. Follow-up needed (Commit menu needs the PR panel, which is out of scope).
-3. Composer controls, `bachuc-composer`: lightning toggle (Q-079), diff-count row `+742 -0` (follow-up needed: `WorkspaceSummary` has no diff stat), @file mentions (Q-080).
+3. Composer controls, `bachuc-composer`: @file mentions are still missing (Q-080). The lightning toggle, the diff-count pill, the track strip, and the plugin pills are built and wait for a UI check against Electron 6770.
 4. Explorer, `bachuc-explorer`: no Files toolbar (36 px, so the first row sits 36 px higher), no `Commits` footer, no "added" mark (Q-081), one file per diff tab (Q-082). Follow-up needed for the toolbar and footer.
 5. Diff syntax colors, `bachuc-explorer`: dark `fn` salmon `(224,135,127)` against Electron purple `(177,131,193)`; fn name lavender `(135,104,171)` against blue `(120,163,205)`. Markdown has no grammar. Follow-up needed.
 6. Settings, `bachuc-settings`: four Fonts rows missing (Q-083), App and Host sidebar groups missing (Q-084), three themes against eight.
@@ -186,7 +196,6 @@ Per [CONTEXT.md](../../../watchtower/CONTEXT.md) Decisions. The Electron app has
 
 | Surface                     | Status       |
 | --------------------------- | ------------ |
-| Plugin surfaces             | out of scope |
 | Electron browser pane       | out of scope |
 | Daemon management           | out of scope |
 | Schedules                   | out of scope |
@@ -198,7 +207,6 @@ Per [CONTEXT.md](../../../watchtower/CONTEXT.md) Decisions. The Electron app has
 | Status-grouped sidebar list | out of scope |
 | Sidebar display options     | out of scope |
 | Drag-to-split               | out of scope |
-| New workspace screen        | out of scope |
 | Open project flow           | out of scope |
 | Skills picker               | out of scope |
 | Send-behavior setting       | out of scope |
