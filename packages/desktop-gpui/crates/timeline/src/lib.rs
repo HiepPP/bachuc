@@ -19,7 +19,6 @@ mod tool_view;
 pub mod tools;
 
 pub use image_view::{display_size, image_dimensions, read_target};
-pub use tool_view::{change_bar, display_path, edit_status_label};
 
 use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
@@ -51,7 +50,6 @@ use gpui_kit::*;
 use serde_json::Value;
 
 use card_view::FormState;
-use diff::DiffLine;
 use find_bar::FindState;
 use grouping::{
     SharedRow, StepCounts, TurnGroup, TurnGrouper, TurnStep, entry_key, item_type, message_key,
@@ -212,15 +210,6 @@ type LineRuns = Rc<Vec<Vec<Run>>>;
 /// The colored ranges of a markdown fence.
 type CodeHighlighter = Arc<dyn Fn(&CodeBlock) -> Vec<Run> + Send + Sync>;
 
-/// The diff lines of one edit or write call and their added and removed counts.
-#[derive(Default)]
-struct Diff {
-    lines: Vec<DiffLine>,
-    stats: (usize, usize),
-    /// Syntax runs and the colors they were made with, made on the first draw.
-    runs: RefCell<Option<(bachuc_theme::SyntaxColors, LineRuns)>>,
-}
-
 /// The timeline of one agent. Create it with `cx.new(|cx| TimelineView::new(...))`.
 pub struct TimelineView {
     client: Entity<Client>,
@@ -245,11 +234,9 @@ pub struct TimelineView {
     loaded: bool,
     turn_active: bool,
     messages: HashMap<u64, Message>,
-    /// Diffs of edit and write calls by entry key, built when the entry changes rather than on
-    /// every frame.
-    diffs: HashMap<u64, Rc<Diff>>,
-    /// Edits whose diff the user hid; diffs are open by default (ADR-0019).
-    hidden_diffs: HashSet<u64>,
+    /// Added and removed line counts of edit and write calls by entry key and `seqEnd`, for the
+    /// turn header. Counted when a header draws, not in a sync.
+    edit_stats: RefCell<HashMap<u64, (Option<u64>, (usize, usize))>>,
     /// Tool badges the user opened.
     expanded: HashSet<u64>,
     /// The step the user picked in the strip or the list, by its entry key.
@@ -395,8 +382,7 @@ impl TimelineView {
             loaded: false,
             turn_active: false,
             messages: HashMap::new(),
-            diffs: HashMap::new(),
-            hidden_diffs: HashSet::new(),
+            edit_stats: RefCell::default(),
             expanded: HashSet::new(),
             selected_step: None,
             plan_toggled: HashSet::new(),
@@ -686,7 +672,6 @@ impl TimelineView {
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         entry["seqEnd"].as_u64().hash(&mut hasher);
-        self.hidden_diffs.contains(&key).hash(&mut hasher);
         self.expanded.contains(&key).hash(&mut hasher);
         self.plan_toggled
             .contains(&format!("tool-{key}"))
@@ -713,6 +698,22 @@ impl TimelineView {
         (hasher.finish(), has_diagram)
     }
 
+    /// The added and removed line counts of an edit or write entry, counted once per `seqEnd`.
+    fn edit_stats(&self, index: usize) -> (usize, usize) {
+        let entry = &self.entries[index];
+        let key = self.grouper.key(index);
+        let seq_end = entry["seqEnd"].as_u64();
+        let mut cache = self.edit_stats.borrow_mut();
+        if let Some((at, stats)) = cache.get(&key)
+            && *at == seq_end
+        {
+            return *stats;
+        }
+        let stats = diff::stats(&diff::entry_lines(entry));
+        cache.insert(key, (seq_end, stats));
+        stats
+    }
+
     /// Hashes the entries of `keys` again and rebuilds every turn's rows on the next sync.
     fn rehash_keys(&mut self, keys: &[u64]) {
         for index in 0..self.entries.len() {
@@ -723,33 +724,19 @@ impl TimelineView {
         }
     }
 
-    /// Hashes the `touched` entries again, and builds the diffs of the edit and write calls
-    /// among them. `touched` is in order and holds every entry past the old end.
+    /// Hashes the `touched` entries again. `touched` is in order and holds every entry past the
+    /// old end.
     fn update_hashes(&mut self, touched: &[usize]) {
         if self.grouper.shifted() {
             let live: HashSet<u64> = (0..self.entries.len())
                 .map(|index| self.grouper.key(index))
                 .collect();
-            self.diffs.retain(|key, _| live.contains(key));
+            self.edit_stats
+                .get_mut()
+                .retain(|key, _| live.contains(key));
         }
         self.entry_hashes.truncate(self.entries.len());
         for &index in touched {
-            let entry = &self.entries[index];
-            // A diff changes only with its entry.
-            if grouping::edited_file_path(entry).is_some()
-                && self.grouper.changed().binary_search(&index).is_ok()
-            {
-                let lines = diff::entry_lines(entry);
-                let stats = diff::stats(&lines);
-                self.diffs.insert(
-                    entry_key(entry),
-                    Rc::new(Diff {
-                        lines,
-                        stats,
-                        runs: RefCell::new(None),
-                    }),
-                );
-            }
             let hash = self.hash_entry(index);
             match self.entry_hashes.get_mut(index) {
                 Some(slot) => *slot = hash,
@@ -1020,13 +1007,6 @@ impl TimelineView {
                 }
             }));
         }
-    }
-
-    fn toggle_diff(&mut self, key: u64, cx: &mut Context<Self>) {
-        toggle(&mut self.hidden_diffs, key);
-        // Only the edit's hash changes; the rows rebuild from the cached hashes.
-        self.rehash_keys(&[key]);
-        self.refresh(cx);
     }
 
     fn toggle_expanded(&mut self, key: u64, cx: &mut Context<Self>) {
@@ -1607,11 +1587,7 @@ impl TimelineView {
             .steps
             .iter()
             .flat_map(|step| step.edits.iter())
-            .map(|&edit| {
-                self.diffs
-                    .get(&self.grouper.key(edit))
-                    .map_or((0, 0), |diff| diff.stats)
-            })
+            .map(|&edit| self.edit_stats(edit))
             .fold((0, 0), |sum, stats| (sum.0 + stats.0, sum.1 + stats.1));
 
         let title = if group.is_loading {
@@ -1853,13 +1829,17 @@ impl TimelineView {
             }
         }
         // Edits and plugin items, in call order (`turn/view.tsx`): a plugin item always shows,
-        // an edit call that a plugin did not replace keeps its edit row.
+        // and an edit call that no plugin replaced shows as its tool call, always open to view.
         let mut edits = Vec::new();
         for &index in &step.items {
             let projection = self.projector.get(index).map(|p| &**p);
             for part in plugins::step_parts(projection, step.edits.contains(&index)) {
                 edits.push(match part {
-                    StepPart::Edit => self.render_edit(index, cx),
+                    // The step body has no stream padding, so the badge does not reach past it.
+                    StepPart::ToolCall => div()
+                        .mx(px(tool_view::BADGE_BLEED))
+                        .child(self.render_tool_call(index, cx))
+                        .into_any_element(),
                     StepPart::Item(item) => self.render_plugin_item(&item.id, cx),
                 });
             }

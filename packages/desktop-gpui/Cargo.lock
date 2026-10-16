@@ -649,6 +649,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bachuc-plugin-edit-diffs"
+version = "0.1.0"
+dependencies = [
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "bachuc-theme",
+ "gpui-kit",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bachuc-plugin-host"
 version = "0.1.0"
 dependencies = [

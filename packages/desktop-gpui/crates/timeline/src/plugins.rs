@@ -204,16 +204,16 @@ pub fn shown_text<'a>(entry: &'a Value, projection: Option<&'a Projection>) -> &
 /// One part of a step item's drawing.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum StepPart<'a> {
-    /// The built-in edit row.
-    Edit,
+    /// The call's tool call row. Edit diffs are the edit-diffs plugin's items.
+    ToolCall,
     Item(&'a ProjectedItem),
 }
 
-/// What a step draws for one of its items, as `turn/view.tsx`: plugin items always, the edit
-/// row for a kept edit call, nothing for another kept call (it stays a count and shows in a
-/// picked step's call list).
+/// What a step draws for one of its items, as `turn/view.tsx`: plugin items always, the tool
+/// call row for a kept edit call, nothing for another kept call (it stays a count and shows in
+/// a picked step's call list).
 pub fn step_parts(projection: Option<&Projection>, is_edit: bool) -> Vec<StepPart<'_>> {
-    let source = || is_edit.then_some(StepPart::Edit);
+    let source = || is_edit.then_some(StepPart::ToolCall);
     match projection {
         None => source().into_iter().collect(),
         Some(projection) => projection

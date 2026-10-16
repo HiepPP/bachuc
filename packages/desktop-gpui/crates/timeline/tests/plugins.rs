@@ -11,7 +11,7 @@ use bachuc_plugin_host::{
     TimelinePhase, TimelineRenderInput, TimelineRenderer, TimelineTransformInput,
     TimelineTransformResult, TimelineTransformer,
 };
-use bachuc_timeline::grouping::{TurnGrouper, group_turns};
+use bachuc_timeline::grouping::{Row, TurnGrouper, group_turns};
 use bachuc_timeline::plugins::{
     Part, ProjectInput, Projector, RevealPlan, StepPart, assistant_selection, call_listed,
     daemon_item, item_id, phase_of, renderer_for_item, reveal_plan, shown_text, step_parts,
@@ -193,7 +193,7 @@ fn items_without_a_source_replace_the_entry() {
     .unwrap();
     assert!(!projection.is_hidden());
     assert_eq!(projection.parts(), vec![Part::Item(&projection.items[0])]);
-    // In a step, the plugin item takes the edit row's place, and the call leaves the call list.
+    // In a step, the plugin item takes the call's place, and the call leaves the call list.
     assert_eq!(
         step_parts(Some(&projection), true),
         vec![StepPart::Item(&projection.items[0])]
@@ -258,10 +258,10 @@ fn a_last_source_keeps_the_call_unchanged_after_the_items() {
         projection.parts(),
         vec![Part::Item(&projection.items[0]), Part::Source]
     );
-    // The kept edit keeps its edit row, after the item; a kept call stays in the call list.
+    // The kept edit keeps its tool call row, after the item; a kept call stays in the call list.
     assert_eq!(
         step_parts(Some(&projection), true),
-        vec![StepPart::Item(&projection.items[0]), StepPart::Edit]
+        vec![StepPart::Item(&projection.items[0]), StepPart::ToolCall]
     );
     assert!(call_listed(Some(&projection)));
 }
@@ -417,11 +417,29 @@ fn daemon_items_use_only_their_own_plugins_renderer() {
     assert_eq!(daemon_item(&json!({ "type": "tool_call" })), None);
 }
 
+/// Without the edit-diffs plugin, an edit call in a step draws as its tool call row, always;
+/// another call stays a count.
 #[test]
-fn steps_without_a_projection_keep_todays_rule() {
-    assert_eq!(step_parts(None, true), vec![StepPart::Edit]);
+fn an_edit_call_without_a_projection_draws_as_a_tool_call_in_its_step() {
+    assert_eq!(step_parts(None, true), vec![StepPart::ToolCall]);
     assert_eq!(step_parts(None, false), vec![]);
     assert!(call_listed(None));
+    let entries = vec![user(1, "go"), call(2, "completed"), assistant(3, "done")];
+    let rows = group_turns(&entries, false);
+    let step = rows
+        .iter()
+        .find_map(|row| match row {
+            Row::Turn(group) => group.steps.first(),
+            Row::Item(_) => None,
+        })
+        .expect("a turn step");
+    assert_eq!(step.edits, vec![1]);
+    let parts: Vec<StepPart> = step
+        .items
+        .iter()
+        .flat_map(|&index| step_parts(None, step.edits.contains(&index)))
+        .collect();
+    assert_eq!(parts, vec![StepPart::ToolCall]);
 }
 
 /// A label that turns the transformer off projects every entry again once, then only the

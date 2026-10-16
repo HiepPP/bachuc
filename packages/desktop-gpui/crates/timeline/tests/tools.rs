@@ -5,7 +5,6 @@
 use bachuc_icons::IconName;
 use bachuc_timeline::diff::{DiffLine, LineKind, numbers};
 use bachuc_timeline::tools::{Section, has_details, presentation, sections};
-use bachuc_timeline::{change_bar, display_path, edit_status_label};
 use serde_json::json;
 
 const CWD: &str = "/Users/test/project";
@@ -94,27 +93,6 @@ fn edit_shows_its_diff_and_counts_lines_like_the_edit_row() {
         ("Edit", IconName::Pencil)
     );
     assert_eq!(shown.summary.as_deref(), Some("a.rs"));
-    assert_eq!(
-        edit_status_label(&call("Edit", "running", json!({"type": "edit"}))).as_deref(),
-        Some("Editing")
-    );
-    assert_eq!(
-        edit_status_label(&call("Edit", "failed", json!({"type": "edit"}))).as_deref(),
-        Some("Edit failed")
-    );
-    assert_eq!(
-        edit_status_label(&call("Edit", "completed", json!({"type": "edit"}))),
-        None
-    );
-    assert_eq!(
-        change_bar(3, 1),
-        [true, true, true, true, true, false, false]
-    );
-    assert_eq!(
-        change_bar(100, 1),
-        [true, true, true, true, true, true, false]
-    );
-    assert_eq!(change_bar(0, 0), Vec::<bool>::new());
 }
 
 #[test]
@@ -137,11 +115,6 @@ fn write_shows_the_new_file_full_bleed_numbered_from_one() {
         numbers(&[added("a = 1"), added("b = 2")]),
         [Some(1), Some(2)]
     );
-    assert_eq!(
-        edit_status_label(&call("Write", "running", json!({"type": "write"}))).as_deref(),
-        Some("Writing")
-    );
-    assert_eq!(display_path("/private/tmp/x/new.py", "/tmp/x"), "new.py");
 }
 
 #[test]

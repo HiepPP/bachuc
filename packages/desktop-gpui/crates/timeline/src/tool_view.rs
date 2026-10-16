@@ -1,6 +1,6 @@
 //! Tool call badges and their detail views, as `ExpandableBadge` and `ToolCall` in
 //! `packages/app/src/components/message.tsx` and `ToolCallDetailsContent` in
-//! `tool-call-details.tsx`, and the edit rows of a step, as the edit-diffs plugin draws them.
+//! `tool-call-details.tsx`. Edit rows are the edit-diffs plugin's (`bachuc-plugin-edit-diffs`).
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -22,10 +22,10 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::Value;
 
-use crate::diff::{self, DiffLine, LineKind};
+use crate::diff::{DiffLine, LineKind};
 use crate::grouping::entry_key;
 use crate::tools::{self, Section};
-use crate::{LineRuns, TimelineEvent, TimelineView, short_path};
+use crate::{LineRuns, TimelineEvent, TimelineView};
 
 /// The badge reaches past the stream padding, as `marginHorizontal: -13`.
 pub(crate) const BADGE_BLEED: f32 = 13.;
@@ -35,55 +35,11 @@ pub(crate) const CODE_LINE_HEIGHT: f32 = 18.;
 pub(crate) const TOOL_DETAIL_MAX_HEIGHT: f32 = 400.;
 /// Lines one code section lays out; the rest is cut so a huge output stays cheap to draw.
 const MAX_CODE_LINES: usize = 2000;
-/// The edit-diffs plugin: change bar squares, their size, and the diff height.
-const CHANGE_BAR_SQUARES: usize = 7;
-const BAR_SQUARE: f32 = 7.;
-const MAX_DIFF_HEIGHT: f32 = 480.;
-const EDIT_PATH_SIZE: f32 = 12.5;
-const EDIT_STAT_SIZE: f32 = 13.;
-/// The diff line tints of `diff-viewer.tsx` and the edit-diffs plugin, over the status tokens.
+/// The diff line tints of `diff-viewer.tsx`, over the status tokens.
 const ADD_TINT: f32 = 0.15;
 const REMOVE_TINT: f32 = 0.1;
 /// The label of a running tool call, as `labelLoading`.
 const LOADING_OPACITY: f32 = 0.72;
-
-/// `changeBar`: the squares split by the added share; a side that changed keeps one square.
-pub fn change_bar(added: usize, removed: usize) -> Vec<bool> {
-    let total = added + removed;
-    if total == 0 {
-        return Vec::new();
-    }
-    let mut add = ((added as f32 / total as f32) * CHANGE_BAR_SQUARES as f32).round() as usize;
-    if added > 0 && removed > 0 {
-        add = add.clamp(1, CHANGE_BAR_SQUARES - 1);
-    }
-    (0..CHANGE_BAR_SQUARES).map(|index| index < add).collect()
-}
-
-/// The edit row status word, as `headerLabel` of the edit-diffs plugin. A completed call has
-/// none.
-pub fn edit_status_label(item: &Value) -> Option<String> {
-    let is_write = item["detail"]["type"] == "write";
-    let verb = if is_write { "Write" } else { "Edit" };
-    match item["status"].as_str().unwrap_or("") {
-        "running" | "executing" => Some(if is_write { "Writing" } else { "Editing" }.into()),
-        "failed" => Some(format!("{verb} failed")),
-        "canceled" => Some(format!("{verb} canceled")),
-        _ => None,
-    }
-}
-
-/// A path under the agent folder without the folder, as `displayPath`.
-pub fn display_path(path: &str, cwd: &str) -> String {
-    let root = cwd.trim_end_matches('/');
-    if root.is_empty() {
-        return path.to_string();
-    }
-    [format!("{root}/"), format!("/private{root}/")]
-        .iter()
-        .find_map(|prefix| path.strip_prefix(prefix.as_str()))
-        .map_or_else(|| path.to_string(), str::to_string)
-}
 
 /// The tree-sitter language of a fence info string such as `rust` or `ts {1,3}`, with the
 /// aliases of `highlighted-code-block.tsx`.
@@ -649,255 +605,6 @@ impl TimelineView {
                     .child(styled_line(&line.text, line_runs))
             })),
         )
-    }
-
-    /// An edit or write call in a step, as the edit-diffs plugin's `EditDiffRow`: a header
-    /// button that hides or shows the diff, an open-file button, and the diff.
-    pub(crate) fn render_edit(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        let t = tokens(cx);
-        let entry = &self.entries[index];
-        let key = entry_key(entry);
-        let item = &entry["item"];
-        let path = crate::grouping::edited_file_path(entry)
-            .unwrap_or("")
-            .to_string();
-        let shown_path = display_path(&path, &self.cwd);
-        let diff = self.diffs.get(&key).cloned().unwrap_or_default();
-        let (added, removed) = diff.stats;
-        let expanded = !self.hidden_diffs.contains(&key);
-        let failed = item["status"] == "failed";
-        let mono = mono_font_family(cx);
-        let stat = ui_font_size(EDIT_STAT_SIZE, cx);
-        let status = edit_status_label(item);
-
-        let toggle = h_flex()
-            .id(("edit-toggle", key))
-            .role(Role::Button)
-            .aria_label(format!(
-                "{} diff of {}",
-                if expanded { "Hide" } else { "Show" },
-                short_path(&path)
-            ))
-            .aria_expanded(expanded)
-            .flex_shrink(1.)
-            .min_w_0()
-            .gap(px(SPACE_2))
-            .items_center()
-            .cursor_pointer()
-            .on_click(cx.listener(move |this, _, _, cx| this.toggle_diff(key, cx)))
-            .child(
-                div().w(px(ICON_SM)).flex_none().child(
-                    icon(if expanded {
-                        IconName::ChevronDown
-                    } else {
-                        IconName::ChevronRight
-                    })
-                    .with_size(px(ICON_SM))
-                    .text_color(t.foreground_muted),
-                ),
-            )
-            .child(
-                div()
-                    .flex_shrink(1.)
-                    .min_w_0()
-                    .truncate()
-                    .font_family(mono)
-                    .text_size(code_font_size(EDIT_PATH_SIZE, cx))
-                    .text_color(if failed {
-                        t.status_danger
-                    } else {
-                        t.foreground
-                    })
-                    .child(shown_path),
-            )
-            .child(
-                h_flex()
-                    .gap(px(2.))
-                    .children(change_bar(added, removed).into_iter().map(|is_add| {
-                        div().size(px(BAR_SQUARE)).rounded(px(1.5)).bg(if is_add {
-                            t.status_success
-                        } else {
-                            t.status_danger
-                        })
-                    })),
-            )
-            .when(added > 0, |row| {
-                row.child(
-                    div()
-                        .text_size(stat)
-                        .text_color(t.status_success)
-                        .child(format!("+{added}")),
-                )
-            })
-            .when(removed > 0, |row| {
-                row.child(
-                    div()
-                        .text_size(stat)
-                        .text_color(t.status_danger)
-                        .child(format!("−{removed}")),
-                )
-            })
-            .children(status.map(|status| {
-                div()
-                    .text_size(stat)
-                    .text_color(if failed {
-                        t.status_danger
-                    } else {
-                        t.foreground_muted
-                    })
-                    .child(status)
-            }));
-        let cwd = self.cwd.clone();
-        let open_path = path.clone();
-        let header = h_flex()
-            .gap(px(SPACE_1))
-            .items_center()
-            .child(toggle)
-            .child(
-                icon_button(
-                    ("edit-open", key),
-                    "Open file",
-                    IconName::FileSymlink,
-                    t.foreground_muted,
-                    &t,
-                )
-                .on_click(cx.listener(move |_, _, _, cx| {
-                    cx.emit(TimelineEvent::OpenFile {
-                        cwd: cwd.clone(),
-                        path: open_path.clone(),
-                        line: None,
-                    })
-                })),
-            );
-
-        let body = expanded.then(|| {
-            let error = tools::presentation(item, &self.cwd).error;
-            let numbers = diff::numbers(&diff.lines);
-            let width = numbers
-                .iter()
-                .flatten()
-                .max()
-                .map_or(1, |n| n.to_string().len());
-            // The edit draws on every frame it is on screen, so its runs are made once.
-            let colors = syntax_colors(cx);
-            let cached = diff
-                .runs
-                .borrow()
-                .as_ref()
-                .filter(|(at, _)| *at == colors)
-                .map(|(_, runs)| runs.clone());
-            let runs = cached.unwrap_or_else(|| {
-                let runs = Rc::new(self.diff_runs(&diff.lines, Some(&path), cx));
-                *diff.runs.borrow_mut() = Some((colors, runs.clone()));
-                runs
-            });
-            let runs = runs.iter().cloned();
-            let code = code_font_size(FONT_CODE, cx);
-            let mut seen_hunk = false;
-            let rows: Vec<AnyElement> = diff
-                .lines
-                .iter()
-                .zip(numbers)
-                .zip(runs)
-                .filter_map(|((line, number), line_runs)| {
-                    if line.kind == LineKind::Hunk {
-                        // The first hunk needs no separator.
-                        let first = !seen_hunk;
-                        seen_hunk = true;
-                        return (!first).then(|| {
-                            div()
-                                .pl(px(SPACE_2))
-                                .text_color(t.foreground_muted)
-                                .child(format!("{:>width$}", "⋮"))
-                                .into_any_element()
-                        });
-                    }
-                    let (prefix, prefix_color, bg) = match line.kind {
-                        LineKind::Add => {
-                            ("+ ", t.status_success, t.status_success.opacity(ADD_TINT))
-                        }
-                        LineKind::Remove => {
-                            ("- ", t.status_danger, t.status_danger.opacity(REMOVE_TINT))
-                        }
-                        _ => ("  ", t.foreground_muted, transparent_black()),
-                    };
-                    let color = if line.kind == LineKind::Context {
-                        t.foreground_muted
-                    } else {
-                        t.foreground
-                    };
-                    Some(
-                        h_flex()
-                            .pr(px(SPACE_3))
-                            .bg(bg)
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .px(px(SPACE_2))
-                                    .text_color(t.foreground_muted)
-                                    .child(format!(
-                                        "{:>width$}",
-                                        number.map_or(String::new(), |n| n.to_string())
-                                    )),
-                            )
-                            .child(div().text_color(prefix_color).child(prefix))
-                            .child(
-                                div()
-                                    .text_color(color)
-                                    .child(styled_line(&line.text, line_runs)),
-                            )
-                            .into_any_element(),
-                    )
-                })
-                .collect();
-            div()
-                .id(("diff", key))
-                .role(Role::Group)
-                .aria_label(format!(
-                    "Diff of {}, {added} added, {removed} removed",
-                    short_path(&path)
-                ))
-                .mt(px(SPACE_1 + 2.))
-                .rounded(px(RADIUS_LG))
-                .border_1()
-                .border_color(t.border)
-                .overflow_hidden()
-                .bg(t.surface1)
-                .children(error.map(|error| {
-                    div()
-                        .p(px(SPACE_2))
-                        .text_size(stat)
-                        .text_color(t.status_danger)
-                        .child(error)
-                }))
-                .child(if rows.is_empty() {
-                    div()
-                        .p(px(SPACE_2))
-                        .text_size(stat)
-                        .text_color(t.foreground_muted)
-                        .child("No changes to show.")
-                        .into_any_element()
-                } else {
-                    div()
-                        .id(("diff-body", key))
-                        .max_h(px(MAX_DIFF_HEIGHT))
-                        .overflow_scroll()
-                        .py(px(SPACE_1 + 2.))
-                        .font_family(mono)
-                        .text_size(code)
-                        .line_height(px(CODE_LINE_HEIGHT))
-                        .whitespace_nowrap()
-                        .children(rows)
-                        .into_any_element()
-                })
-        });
-        v_flex()
-            .id(("edit", key))
-            .role(Role::Group)
-            .aria_label(format!("Edit of {}", short_path(&path)))
-            .child(header)
-            .children(body)
-            .into_any_element()
     }
 }
 
