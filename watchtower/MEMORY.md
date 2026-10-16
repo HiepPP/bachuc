@@ -292,3 +292,18 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the lefthook format hook checks staged `*.md` and `*.json` everywhere, so the vendored `packages/desktop-gpui/vendor/gpui-base` needed an `ignorePatterns` entry in `.oxfmtrc.json`.
 - Source: TASK-166 commit, 2026-10-16.
 - Use next time: add a vendored folder to `.oxfmtrc.json` before its first commit.
+
+### 2026-10-17 - Plan 20261016-gpui-parity-follow-ups, plugin ports
+
+- Learned: in a file with `use gpui_kit::*`, a test module with `use super::*` picks up GPUI's test macro, which shadows `#[test]` and hits the recursion limit.
+- Source: TASK-181 and TASK-184 outcomes.
+- Use next time: in those files, import test helpers by name instead of `use super::*`.
+- Learned: a Verify grep for forbidden crate names in a plugin `Cargo.toml` also matches the crate's own `bachuc-plugin-<id>` name, so three builders marked it UNSATISFIABLE.
+- Source: TASK-189, TASK-190, and TASK-194 outcomes.
+- Use next time: scope that grep to the `[dependencies]` section.
+- Learned: in a debug build, a small `HashMap` costs about 18 us per build-and-lookup pass; a sorted `Vec` costs 3 us. One 40-task overview derive went from 643 ms to 153 ms per 1,000 runs after the switch.
+- Source: TASK-194 outcome.
+- Use next time: prefer sorted vectors for small per-frame or per-derive maps in GPUI crates.
+- Learned: each crate tested alone with `-p` gets its own gpui-kit build, because cargo unifies features per package selection; `target/debug` held 6 gpui-kit variants.
+- Source: TASK-170 and TASK-181 outcomes.
+- Use next time: watch free disk during a long run, and clean the dev profile only when no builder runs.
