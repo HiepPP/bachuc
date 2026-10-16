@@ -5,13 +5,16 @@
 //! Views read colors with [`tokens`] and sizes from [`metrics`]. [`init`] and [`set_theme`] also
 //! write the tokens into the gpui-kit theme, so gpui-kit components use the same colors.
 
+mod custom;
 pub mod metrics;
 mod syntax;
 mod tokens;
 
+pub use custom::{CustomTheme, CustomThemeColors, active_custom, next_builtin_choice};
 pub use syntax::{ROLES as SYNTAX_ROLES, SyntaxColors, SyntaxThemeId, syntax_colors_for};
 pub use tokens::Tokens;
 
+use custom::CustomState;
 use gpui_kit::component::theme::{Theme, ThemeMode};
 use gpui_kit::{App, BoxShadow, Global, Hsla, Pixels, Rgba, SharedString, Window, point, px};
 
@@ -45,6 +48,8 @@ struct State {
     syntax: SyntaxThemeId,
     light: Tokens,
     dark: Tokens,
+    /// Plugin themes. The active one wins over `choice`.
+    custom: CustomState,
 }
 
 impl Global for State {}
@@ -61,6 +66,7 @@ fn state(cx: &mut App) -> &mut State {
             syntax: SyntaxThemeId::default(),
             light: Tokens::light(),
             dark: Tokens::claude_dark(),
+            custom: CustomState::default(),
         });
     }
     cx.global_mut::<State>()
@@ -68,6 +74,12 @@ fn state(cx: &mut App) -> &mut State {
 
 /// The tokens of the theme on screen.
 pub fn tokens(cx: &App) -> Tokens {
+    if let Some(active) = cx
+        .try_global::<State>()
+        .and_then(|state| state.custom.active())
+    {
+        return active.tokens;
+    }
     match (cx.try_global::<State>(), scheme(cx)) {
         (Some(state), Scheme::Light) => state.light,
         (Some(state), Scheme::Dark) => state.dark,
@@ -76,10 +88,57 @@ pub fn tokens(cx: &App) -> Tokens {
     }
 }
 
-/// Switches the theme and writes its tokens into the gpui-kit theme.
+/// Switches the theme and writes its tokens into the gpui-kit theme. A selected plugin theme
+/// still wins over the choice.
 pub fn set_theme(choice: ThemeChoice, cx: &mut App) {
     state(cx).choice = choice;
     resync(None, cx);
+}
+
+/// The cycle-theme shortcut: goes to the next built-in theme and leaves the selected plugin
+/// theme, if any. Returns the new choice.
+pub fn cycle_builtin_theme(cx: &mut App) -> ThemeChoice {
+    let state = state(cx);
+    state.choice = custom::cycle_builtin(state.choice, &mut state.custom);
+    let choice = state.choice;
+    resync(None, cx);
+    choice
+}
+
+/// Replaces the plugin theme list. The theme on screen is written again only when the active
+/// plugin theme or its colors changed.
+pub fn set_custom_themes(themes: Vec<CustomTheme>, cx: &mut App) {
+    if state(cx).custom.set_themes(themes) {
+        resync(None, cx);
+    }
+}
+
+/// The plugin theme list.
+pub fn custom_themes(cx: &App) -> Vec<CustomTheme> {
+    cx.try_global::<State>()
+        .map(|state| state.custom.themes().to_vec())
+        .unwrap_or_default()
+}
+
+/// Stores the selected plugin theme id. `None` returns to the [`ThemeChoice`]. An id that the
+/// list does not hold yet stays stored, and applies when the list holds it.
+pub fn set_custom_theme(id: Option<SharedString>, cx: &mut App) {
+    if state(cx).custom.select(id) {
+        resync(None, cx);
+    }
+}
+
+/// The stored plugin theme id, whether or not the list holds it.
+pub fn custom_theme(cx: &App) -> Option<SharedString> {
+    cx.try_global::<State>()
+        .and_then(|state| state.custom.selected().cloned())
+}
+
+/// The selected plugin theme when the list holds it.
+pub fn active_custom_theme(cx: &App) -> Option<CustomTheme> {
+    cx.try_global::<State>()
+        .and_then(|state| state.custom.active())
+        .map(|active| active.theme.clone())
 }
 
 /// Sets the Appearance font sizes as factors of the defaults: 1.0 is 14 px for the interface
@@ -268,7 +327,8 @@ pub fn init(cx: &mut App) {
             if let Some(window) = window {
                 window
                     .observe_window_appearance(|window, cx| {
-                        if state(cx).choice == ThemeChoice::System {
+                        let state = state(cx);
+                        if state.choice == ThemeChoice::System && state.custom.active().is_none() {
                             resync(Some(window), cx);
                         }
                     })
@@ -282,10 +342,16 @@ pub fn init(cx: &mut App) {
 /// Picks the gpui-kit mode for the choice, then writes the tokens over the colors that the mode
 /// loaded.
 fn resync(window: Option<&mut Window>, cx: &mut App) {
-    match state(cx).choice {
-        ThemeChoice::Light => Theme::change(ThemeMode::Light, None, cx),
-        ThemeChoice::ClaudeDark => Theme::change(ThemeMode::Dark, None, cx),
-        ThemeChoice::System => Theme::sync_system_appearance(window, cx),
+    let state = state(cx);
+    let custom_scheme = state.custom.active().map(|active| active.theme.scheme);
+    match (custom_scheme, state.choice) {
+        (Some(Scheme::Light), _) | (None, ThemeChoice::Light) => {
+            Theme::change(ThemeMode::Light, None, cx)
+        }
+        (Some(Scheme::Dark), _) | (None, ThemeChoice::ClaudeDark) => {
+            Theme::change(ThemeMode::Dark, None, cx)
+        }
+        (None, ThemeChoice::System) => Theme::sync_system_appearance(window, cx),
     }
     apply(cx);
 }
