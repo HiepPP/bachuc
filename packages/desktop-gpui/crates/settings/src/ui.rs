@@ -30,12 +30,13 @@ pub fn column() -> Div {
 }
 
 /// The page heading at the top of the column (`pageTitle` in `settings-screen.tsx`).
-pub fn page_title(title: &'static str, cx: &App) -> Stateful<Div> {
+pub fn page_title(title: impl Into<SharedString>, cx: &App) -> Stateful<Div> {
     let colors = tokens(cx);
+    let title = title.into();
     div()
         .id("page-title")
         .role(Role::Heading)
-        .aria_label(title)
+        .aria_label(title.clone())
         .ml(px(SPACE_1))
         .mb(px(SPACE_6))
         .text_size(ui_font_size(FONT_4XL, cx))
@@ -94,6 +95,23 @@ pub fn select_trigger(
     label: impl Into<SharedString>,
     cx: &App,
 ) -> MenuTrigger {
+    let leading = leading.map(|name| {
+        icon(name)
+            .with_size(px(bachuc_theme::metrics::ICON_MD))
+            .text_color(tokens(cx).foreground_muted)
+            .into_any_element()
+    });
+    select_trigger_with(id, leading, value, label, cx)
+}
+
+/// [`select_trigger`] with any leading element, such as a [`swatch`].
+pub fn select_trigger_with(
+    id: impl Into<ElementId>,
+    leading: Option<AnyElement>,
+    value: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> MenuTrigger {
     let colors = tokens(cx);
     let base = div()
         .id(id)
@@ -111,11 +129,7 @@ pub fn select_trigger(
         .border_color(colors.border_accent)
         .cursor_pointer()
         .hover(|style| style.opacity(0.85))
-        .children(leading.map(|name| {
-            icon(name)
-                .with_size(px(bachuc_theme::metrics::ICON_MD))
-                .text_color(colors.foreground_muted)
-        }))
+        .children(leading)
         .child(
             div()
                 .max_w(px(220.))
@@ -136,6 +150,17 @@ pub fn select_trigger(
         open: false,
         open_fill: colors.surface2,
     }
+}
+
+/// `ThemeSwatch`: a 16 px round dot of a theme's background with a 1 px `border` ring.
+pub fn swatch(color: Hsla, cx: &App) -> Div {
+    div()
+        .size(px(bachuc_theme::metrics::ICON_MD))
+        .flex_shrink_0()
+        .rounded_full()
+        .border_1()
+        .border_color(tokens(cx).border)
+        .bg(color)
 }
 
 /// The 32 px `...` button of a row menu (`ShortcutActionsMenu`). Chain

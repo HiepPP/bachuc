@@ -680,6 +680,7 @@ dependencies = [
  "bachuc-client",
  "bachuc-command",
  "bachuc-icons",
+ "bachuc-plugin-host",
  "bachuc-theme",
  "futures",
  "gpui-kit",

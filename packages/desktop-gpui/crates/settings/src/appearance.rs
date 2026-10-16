@@ -5,8 +5,8 @@
 use anyhow::{Context as _, Result};
 use bachuc_theme::{
     DEFAULT_CONTENT_FONT_SIZE, MAX_CONTENT_FONT_SIZE, MIN_CONTENT_FONT_SIZE, SyntaxThemeId,
-    ThemeChoice, metrics, set_content_font_size, set_font_families, set_font_scale,
-    set_syntax_theme, set_theme,
+    ThemeChoice, metrics, set_content_font_size, set_custom_theme, set_font_families,
+    set_font_scale, set_syntax_theme, set_theme,
 };
 use gpui_kit::{App, SharedString};
 use serde_json::{Map, Value, json};
@@ -38,6 +38,9 @@ pub struct Appearance {
     pub ui_font: Option<String>,
     pub code_font: Option<String>,
     pub syntax_theme: SyntaxThemeId,
+    /// The selected plugin theme, `<plugin_id>/theme/<id>` (`pluginThemeId` in Electron). The id
+    /// stays in the file while its plugin is off; the stored `theme` applies then.
+    pub plugin_theme: Option<String>,
 }
 
 impl Default for Appearance {
@@ -50,7 +53,25 @@ impl Default for Appearance {
             ui_font: None,
             code_font: None,
             syntax_theme: SyntaxThemeId::default(),
+            plugin_theme: None,
         }
+    }
+}
+
+/// `appearance` with a built-in theme picked: the plugin theme selection is cleared.
+pub fn with_builtin_theme(appearance: &Appearance, theme: ThemeChoice) -> Appearance {
+    Appearance {
+        theme,
+        plugin_theme: None,
+        ..appearance.clone()
+    }
+}
+
+/// `appearance` with a plugin theme picked. The built-in choice stays for when the plugin goes.
+pub fn with_plugin_theme(appearance: &Appearance, id: &str) -> Appearance {
+    Appearance {
+        plugin_theme: Some(id.to_string()),
+        ..appearance.clone()
     }
 }
 
@@ -165,6 +186,7 @@ pub fn load_from(dir: &Path) -> Appearance {
     {
         appearance.syntax_theme = id;
     }
+    appearance.plugin_theme = family("pluginThemeId");
     appearance
 }
 
@@ -183,6 +205,9 @@ pub fn save_to(dir: &Path, appearance: &Appearance) -> Result<()> {
         value.insert("codeFont".into(), json!(name));
     }
     value.insert("syntaxTheme".into(), json!(appearance.syntax_theme.id()));
+    if let Some(id) = &appearance.plugin_theme {
+        value.insert("pluginThemeId".into(), json!(id));
+    }
     let value = Value::Object(value);
     let temp = dir.join(format!("{FILE}.tmp"));
     std::fs::write(
@@ -210,6 +235,7 @@ pub fn apply(appearance: &Appearance, cx: &mut App) {
     );
     set_content_font_size(appearance.content_size, cx);
     set_syntax_theme(appearance.syntax_theme, cx);
+    set_custom_theme(appearance.plugin_theme.clone().map(SharedString::from), cx);
 }
 
 /// Reads `appearance.json` from `~/Library/Application Support/BachucGpui` and applies it. Call
@@ -394,6 +420,84 @@ mod tests {
             save_to(&dir, &saved).unwrap();
             assert_eq!(load_from(&dir).theme, theme);
         }
+    }
+
+    #[test]
+    fn a_file_without_a_plugin_theme_loads_as_before() {
+        let dir = temp_dir("appearance-no-plugin-theme");
+        std::fs::write(dir.join(FILE), r#"{"theme":"light","interfaceSize":16}"#).unwrap();
+        assert_eq!(load_from(&dir).plugin_theme, None);
+        save_to(&dir, &load_from(&dir)).unwrap();
+        let text = std::fs::read_to_string(dir.join(FILE)).unwrap();
+        assert!(!text.contains("pluginThemeId"), "{text}");
+    }
+
+    #[test]
+    fn the_plugin_theme_id_loads_and_survives_a_reload() {
+        let dir = temp_dir("appearance-plugin-theme");
+        std::fs::write(
+            dir.join(FILE),
+            r#"{"theme":"claude-dark","pluginThemeId":"claude-look/theme/claude-light"}"#,
+        )
+        .unwrap();
+        let loaded = load_from(&dir);
+        assert_eq!(loaded.theme, ThemeChoice::ClaudeDark);
+        assert_eq!(
+            loaded.plugin_theme.as_deref(),
+            Some("claude-look/theme/claude-light")
+        );
+        save_to(&dir, &loaded).unwrap();
+        assert_eq!(load_from(&dir), loaded);
+        std::fs::write(dir.join(FILE), r#"{"pluginThemeId":4}"#).unwrap();
+        assert_eq!(load_from(&dir).plugin_theme, None);
+    }
+
+    #[test]
+    fn a_plugin_theme_whose_plugin_is_off_stays_in_the_file_on_another_save() {
+        let dir = temp_dir("appearance-plugin-theme-kept");
+        std::fs::write(
+            dir.join(FILE),
+            r#"{"pluginThemeId":"claude-look/theme/claude-light"}"#,
+        )
+        .unwrap();
+        let mut next = load_from(&dir);
+        next.interface_size = 17.;
+        save_to(&dir, &next).unwrap();
+        let reloaded = load_from(&dir);
+        assert_eq!(reloaded.interface_size, 17.);
+        assert_eq!(
+            reloaded.plugin_theme.as_deref(),
+            Some("claude-look/theme/claude-light")
+        );
+        assert_eq!(
+            reloaded.theme,
+            ThemeChoice::System,
+            "the stored choice applies"
+        );
+    }
+
+    #[test]
+    fn picking_a_built_in_theme_clears_the_plugin_theme() {
+        let dir = temp_dir("appearance-plugin-theme-clear");
+        let picked = with_plugin_theme(&Appearance::default(), "claude-look/theme/claude-light");
+        assert_eq!(
+            picked.theme,
+            ThemeChoice::System,
+            "the built-in choice stays"
+        );
+        save_to(&dir, &picked).unwrap();
+        assert!(
+            std::fs::read_to_string(dir.join(FILE))
+                .unwrap()
+                .contains("pluginThemeId")
+        );
+        let light = with_builtin_theme(&load_from(&dir), ThemeChoice::Light);
+        assert_eq!(light.theme, ThemeChoice::Light);
+        assert_eq!(light.plugin_theme, None);
+        save_to(&dir, &light).unwrap();
+        let text = std::fs::read_to_string(dir.join(FILE)).unwrap();
+        assert!(!text.contains("pluginThemeId"), "{text}");
+        assert_eq!(load_from(&dir), light);
     }
 
     #[test]

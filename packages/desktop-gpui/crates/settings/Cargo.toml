@@ -9,6 +9,7 @@ anyhow = "1"
 bachuc-client = { path = "../client" }
 bachuc-command = { path = "../command" }
 bachuc-icons = { path = "../icons" }
+bachuc-plugin-host = { path = "../plugin-host" }
 bachuc-theme = { path = "../theme" }
 gpui-kit.workspace = true
 log = "0.4"

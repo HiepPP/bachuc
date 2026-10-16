@@ -3,13 +3,17 @@
 
 use crate::appearance::{
     Appearance, CODE_RANGE, CONTENT_RANGE, DEFAULT_FAMILY, INTERFACE_RANGE, apply, family_choice,
-    family_label, load_from, parse_size, save_to, theme_label,
+    family_label, load_from, parse_size, save_to, theme_label, with_builtin_theme,
+    with_plugin_theme,
 };
 use crate::appearance_preview::preview;
+use crate::plugins::{ThemeItem, TriggerChoice, plugin_themes, theme_items, trigger_choice};
 use crate::ui::{
     card, column, error_text, page_title, row, row_text, scroll_page, section, select_trigger,
+    select_trigger_with, swatch,
 };
 use bachuc_icons::{IconName, icon};
+use bachuc_plugin_host::PluginHostEvent;
 use bachuc_theme::metrics::{FONT_BASE, ICON_MD, RADIUS_MD, SPACE_2, SPACE_3, SPACE_4};
 use bachuc_theme::{SyntaxThemeId, ThemeChoice, installed_font_families, tokens, ui_font_size};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -80,6 +84,13 @@ impl AppearancePane {
         let code =
             cx.new(|cx| InputState::new(window, cx).default_value(size_text(current.code_size)));
         let mut subscriptions = vec![cx.observe_global::<Theme>(|_, cx| cx.notify())];
+        if let Some(host) = bachuc_plugin_host::host(cx) {
+            subscriptions.push(cx.subscribe(&host, |_, _, event: &PluginHostEvent, cx| {
+                if matches!(event, PluginHostEvent::ContributionsChanged) {
+                    cx.notify();
+                }
+            }));
+        }
         for (input, which) in [
             (&interface, Size::Interface),
             (&content, Size::Content),
@@ -118,10 +129,14 @@ impl AppearancePane {
     }
 
     fn set_theme(&mut self, theme: ThemeChoice, cx: &mut Context<Self>) {
-        if self.current.theme != theme {
-            let mut next = self.current.clone();
-            next.theme = theme;
-            self.persist(next, cx);
+        if self.current.theme != theme || self.current.plugin_theme.is_some() {
+            self.persist(with_builtin_theme(&self.current, theme), cx);
+        }
+    }
+
+    fn set_plugin_theme(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.current.plugin_theme.as_deref() != Some(id) {
+            self.persist(with_plugin_theme(&self.current, id), cx);
         }
     }
 
@@ -262,41 +277,76 @@ impl AppearancePane {
     /// `ThemeRow`: a dropdown with the current theme; the menu checks the picked one.
     fn theme_dropdown(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let current = self.current.theme;
-        let label = theme_label(current);
+        let themes = plugin_themes(cx);
+        let selected = self.current.plugin_theme.as_deref();
+        let shown = trigger_choice(current, selected, &themes);
+        let label = shown.label();
+        let id = "theme-trigger";
+        let accessibility = format!("Theme: {label}");
+        let trigger = match &shown {
+            TriggerChoice::Builtin(theme) => {
+                select_trigger(id, Some(theme_icon(*theme)), label, accessibility, cx)
+            }
+            TriggerChoice::Plugin { swatch: color, .. } => select_trigger_with(
+                id,
+                Some(swatch(*color, cx).into_any_element()),
+                label,
+                accessibility,
+                cx,
+            ),
+        };
+        let items = theme_items(current, selected, &themes, &THEMES);
         let weak = cx.weak_entity();
-        select_trigger(
-            "theme-trigger",
-            Some(theme_icon(current)),
-            label,
-            format!("Theme: {label}"),
-            cx,
-        )
-        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
-            THEMES.into_iter().fold(
+        trigger.dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+            items.iter().cloned().fold(
                 menu.min_w(px(200.)).check_side(Side::Right),
-                |menu, theme| {
+                |menu, item| {
                     let weak = weak.clone();
                     // An element item: `PopupMenuItem::icon` forces an extra-small icon and the
                     // menu sets `text_sm`; the Electron rows use a 16 px icon and 14 px text.
-                    menu.item(
-                        PopupMenuItem::element(move |_, cx| {
-                            h_flex()
-                                .flex_1()
-                                .items_center()
-                                .gap(px(SPACE_2))
-                                .text_size(ui_font_size(FONT_BASE, cx))
-                                .child(
-                                    icon(theme_icon(theme))
-                                        .with_size(px(ICON_MD))
-                                        .text_color(tokens(cx).foreground_muted),
-                                )
-                                .child(theme_label(theme))
-                        })
-                        .checked(theme == current)
-                        .on_click(move |_, _, cx| {
-                            weak.update(cx, |this, cx| this.set_theme(theme, cx)).ok();
-                        }),
-                    )
+                    match item {
+                        ThemeItem::Separator => menu.separator(),
+                        ThemeItem::Builtin { theme, checked } => menu.item(
+                            PopupMenuItem::element(move |_, cx| {
+                                h_flex()
+                                    .flex_1()
+                                    .items_center()
+                                    .gap(px(SPACE_2))
+                                    .text_size(ui_font_size(FONT_BASE, cx))
+                                    .child(
+                                        icon(theme_icon(theme))
+                                            .with_size(px(ICON_MD))
+                                            .text_color(tokens(cx).foreground_muted),
+                                    )
+                                    .child(theme_label(theme))
+                            })
+                            .checked(checked)
+                            .on_click(move |_, _, cx| {
+                                weak.update(cx, |this, cx| this.set_theme(theme, cx)).ok();
+                            }),
+                        ),
+                        ThemeItem::Plugin {
+                            id,
+                            name,
+                            swatch: color,
+                            checked,
+                        } => menu.item(
+                            PopupMenuItem::element(move |_, cx| {
+                                h_flex()
+                                    .flex_1()
+                                    .items_center()
+                                    .gap(px(SPACE_2))
+                                    .text_size(ui_font_size(FONT_BASE, cx))
+                                    .child(swatch(color, cx))
+                                    .child(div().flex_1().truncate().child(name.clone()))
+                            })
+                            .checked(checked)
+                            .on_click(move |_, _, cx| {
+                                weak.update(cx, |this, cx| this.set_plugin_theme(&id, cx))
+                                    .ok();
+                            }),
+                        ),
+                    }
                 },
             )
         })

@@ -6,18 +6,25 @@ use crate::pane_hosts::{HostsChanged, HostsPane};
 use crate::pane_projects::ProjectsPane;
 use crate::pane_providers::ProvidersPane;
 use crate::pane_shortcuts::{ShortcutsChanged, ShortcutsPane};
-use crate::ui::LINE_HEIGHT_NORMAL;
-use bachuc_client::Client;
+use crate::plugins::{
+    GROUP_LABEL, ScreenId, ScreenRow, UNAVAILABLE, page_header, page_state, prune_views,
+    screen_rows, state_text,
+};
+use crate::ui::{LINE_HEIGHT_NORMAL, column, note, page_title, scroll_page};
+use bachuc_client::{Client, ClientEvent};
 use bachuc_icons::{IconName, icon};
+use bachuc_plugin_host::{Contributed, PluginHostEvent, SettingsScreen, ViewFactory};
 use bachuc_theme::metrics::{
-    FONT_BASE, ICON_MD, RADIUS_LG, SETTINGS_DETAIL_MIN_WIDTH, SETTINGS_SIDEBAR_WIDTH, SPACE_0_5,
-    SPACE_2,
+    FONT_BASE, FONT_SM, ICON_MD, RADIUS_LG, SETTINGS_DETAIL_MIN_WIDTH, SETTINGS_SIDEBAR_WIDTH,
+    SPACE_0_5, SPACE_1, SPACE_2, SPACE_3,
 };
 use bachuc_theme::{tokens, ui_font_size};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 /// What the settings view tells the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,8 +76,22 @@ impl Section {
     }
 }
 
+/// The open page: one of the fixed sections or a plugin screen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Page {
+    Section(Section),
+    Plugin(ScreenId),
+}
+
 pub struct Settings {
-    section: Section,
+    page: Page,
+    client: Entity<Client>,
+    /// The screens of the active plugins, read from the host index when its contributions
+    /// change.
+    screens: Vec<Contributed<SettingsScreen>>,
+    /// The view of each opened plugin screen, with the factory that built it.
+    views: HashMap<ScreenId, (ViewFactory<()>, AnyView)>,
+    scroll: ScrollHandle,
     hosts: Entity<HostsPane>,
     appearance: Entity<AppearancePane>,
     shortcuts: Entity<ShortcutsPane>,
@@ -91,8 +112,8 @@ impl Settings {
         let appearance = cx.new(|cx| AppearancePane::new(window, cx));
         let shortcuts = cx.new(ShortcutsPane::new);
         let providers = cx.new(|cx| ProvidersPane::new(client.clone(), cx));
-        let projects = cx.new(|cx| ProjectsPane::new(client, cx));
-        let subscriptions = vec![
+        let projects = cx.new(|cx| ProjectsPane::new(client.clone(), cx));
+        let mut subscriptions = vec![
             cx.subscribe(&hosts, |_, _, _: &HostsChanged, cx| {
                 cx.emit(SettingsEvent::HostsChanged)
             }),
@@ -100,9 +121,40 @@ impl Settings {
                 cx.emit(SettingsEvent::ShortcutsChanged)
             }),
             cx.observe_global::<Theme>(|_, cx| cx.notify()),
+            // A plugin page shows the offline text while the client is not connected.
+            cx.subscribe(&client, |_, _, event: &ClientEvent, cx| {
+                if matches!(
+                    event,
+                    ClientEvent::Connected | ClientEvent::Disconnected { .. }
+                ) {
+                    cx.notify();
+                }
+            }),
         ];
+        let mut screens = Vec::new();
+        if let Some(host) = bachuc_plugin_host::host(cx) {
+            screens = host.read(cx).index().settings_screens().to_vec();
+            subscriptions.push(
+                cx.subscribe(
+                    &host,
+                    |this, host, event: &PluginHostEvent, cx| match event {
+                        PluginHostEvent::ContributionsChanged => {
+                            this.screens = host.read(cx).index().settings_screens().to_vec();
+                            prune_views(&mut this.views, &screen_rows(&this.screens));
+                            cx.notify();
+                        }
+                        PluginHostEvent::PluginStateChanged { .. } => cx.notify(),
+                        _ => {}
+                    },
+                ),
+            );
+        }
         Settings {
-            section: Section::Hosts,
+            page: Page::Section(Section::Hosts),
+            client,
+            screens,
+            views: HashMap::new(),
+            scroll: ScrollHandle::new(),
             hosts,
             appearance,
             shortcuts,
@@ -120,20 +172,39 @@ impl Settings {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.section = Section::Projects;
+        self.page = Page::Section(Section::Projects);
         self.projects
             .update(cx, |projects, cx| projects.open(root, name, window, cx));
         cx.notify();
     }
 
-    fn nav_row(&self, section: Section, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// Shows the settings screen `settings_id` of the plugin `plugin_id`. An id that the host
+    /// index lacks shows the unavailable text.
+    pub fn open_plugin_screen(
+        &mut self,
+        plugin_id: &str,
+        settings_id: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.page = Page::Plugin(ScreenId::new(plugin_id, settings_id));
+        cx.notify();
+    }
+
+    fn nav_row(
+        &self,
+        id: ElementId,
+        icon_name: IconName,
+        label: SharedString,
+        page: Page,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let colors = tokens(cx);
-        let selected = self.section == section;
-        let label = section.label();
+        let selected = self.page == page;
         div()
-            .id(("settings-section", section as usize))
+            .id(id)
             .role(Role::Tab)
-            .aria_label(label)
+            .aria_label(label.clone())
             .aria_selected(selected)
             .min_h(px(28.))
             .px(px(SPACE_2))
@@ -147,13 +218,14 @@ impl Settings {
             .when(selected, |this| this.bg(colors.surface_sidebar_hover))
             .hover(|style| style.bg(colors.surface_sidebar_hover))
             .child(
-                icon(section.icon())
+                icon(icon_name)
                     .with_size(px(ICON_MD))
                     .text_color(colors.foreground_muted),
             )
             .child(
                 div()
                     .flex_1()
+                    .truncate()
                     .text_size(ui_font_size(FONT_BASE, cx))
                     .text_color(if selected {
                         colors.foreground
@@ -163,25 +235,101 @@ impl Settings {
                     .child(label),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.section = section;
+                this.page = page.clone();
                 cx.notify();
             }))
+    }
+
+    /// The page of a plugin screen: the header, then the screen's view or the text of its
+    /// state. The view is built once per screen and kept until the contribution goes.
+    fn plugin_page(
+        &mut self,
+        id: &ScreenId,
+        rows: &[ScreenRow],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let connected = self.client.read(cx).is_connected();
+        let state = page_state(connected, rows, id);
+        let body: AnyElement = match state_text(state) {
+            Some(text) => note(text, cx).into_any_element(),
+            None => match self.screen_view(id, window, cx) {
+                Some(view) => view.into_any_element(),
+                None => note(UNAVAILABLE, cx).into_any_element(),
+            },
+        };
+        scroll_page(
+            "plugin-screen-pane",
+            &self.scroll,
+            column()
+                .child(page_title(page_header(rows, id), cx))
+                .child(body),
+            cx,
+        )
+        .into_any_element()
+    }
+
+    /// The cached view of a screen, built again when the plugin contributed again.
+    fn screen_view(
+        &mut self,
+        id: &ScreenId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyView> {
+        let factory = self
+            .screens
+            .iter()
+            .find(|screen| screen.plugin_id == id.plugin_id && screen.value.id == id.screen_id)?
+            .value
+            .view
+            .clone();
+        if let Some((built_by, view)) = self.views.get(id)
+            && Rc::ptr_eq(built_by, &factory)
+        {
+            return Some(view.clone());
+        }
+        let view = factory((), window, cx);
+        self.views.insert(id.clone(), (factory, view.clone()));
+        Some(view)
     }
 }
 
 impl Render for Settings {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = tokens(cx);
         let rows: Vec<Stateful<Div>> = Section::ALL
             .into_iter()
-            .map(|section| self.nav_row(section, cx))
+            .map(|section| {
+                self.nav_row(
+                    ("settings-section", section as usize).into(),
+                    section.icon(),
+                    section.label().into(),
+                    Page::Section(section),
+                    cx,
+                )
+            })
             .collect();
-        let pane: AnyElement = match self.section {
-            Section::Hosts => self.hosts.clone().into_any_element(),
-            Section::Appearance => self.appearance.clone().into_any_element(),
-            Section::Shortcuts => self.shortcuts.clone().into_any_element(),
-            Section::Providers => self.providers.clone().into_any_element(),
-            Section::Projects => self.projects.clone().into_any_element(),
+        let screen_rows = screen_rows(&self.screens);
+        let plugin_rows: Vec<Stateful<Div>> = screen_rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                self.nav_row(
+                    ("settings-plugin-screen", index).into(),
+                    row.icon,
+                    row.title.clone(),
+                    Page::Plugin(row.id.clone()),
+                    cx,
+                )
+            })
+            .collect();
+        let pane: AnyElement = match self.page.clone() {
+            Page::Section(Section::Hosts) => self.hosts.clone().into_any_element(),
+            Page::Section(Section::Appearance) => self.appearance.clone().into_any_element(),
+            Page::Section(Section::Shortcuts) => self.shortcuts.clone().into_any_element(),
+            Page::Section(Section::Providers) => self.providers.clone().into_any_element(),
+            Page::Section(Section::Projects) => self.projects.clone().into_any_element(),
+            Page::Plugin(id) => self.plugin_page(&id, &screen_rows, window, cx),
         };
         h_flex()
             .id("settings")
@@ -239,7 +387,29 @@ impl Render for Settings {
                             .aria_label("Sections")
                             .gap(px(SPACE_0_5))
                             .children(rows),
-                    ),
+                    )
+                    .when(!plugin_rows.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .id("settings-plugins-label")
+                                .role(Role::Heading)
+                                .aria_label(GROUP_LABEL)
+                                .mt(px(SPACE_3))
+                                .mb(px(SPACE_1))
+                                .px(px(SPACE_2))
+                                .text_size(ui_font_size(FONT_SM, cx))
+                                .text_color(colors.foreground_muted)
+                                .child(GROUP_LABEL),
+                        )
+                        .child(
+                            v_flex()
+                                .id("settings-plugin-screens")
+                                .role(Role::TabList)
+                                .aria_label("Plugin screens")
+                                .gap(px(SPACE_0_5))
+                                .children(plugin_rows),
+                        )
+                    }),
             )
             .child(
                 div()
