@@ -5,7 +5,9 @@
 use std::ops::Range;
 
 use bachuc_icons::IconName;
-use bachuc_theme::metrics::{FONT_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3};
+use bachuc_theme::metrics::{
+    BORDER_WIDTH_2, FONT_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3,
+};
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -23,6 +25,26 @@ const WIDGET_WIDTH: f32 = 340.;
 const FIELD_HEIGHT: f32 = 28.;
 /// The other matches show at this share of the current match's color.
 const OTHER_MATCH_ALPHA: f32 = 0.35;
+/// `CONTROL_FOCUS_RING_WIDTH` and `CONTROL_FOCUS_RING_OFFSET` of `control-geometry.ts`: a 2 px
+/// outline, 1 px outside the field's border box.
+const RING_WIDTH: f32 = BORDER_WIDTH_2;
+const RING_OFFSET: f32 = 1.;
+
+/// The outline of a focused field, drawn as a border on a box that reaches past the field by the
+/// ring offset and width. GPUI has no outline, and the box takes no pointer events because it has
+/// no handler. Its corners follow the field's radius, as a CSS outline does.
+fn focus_ring(color: Hsla) -> Div {
+    let reach = RING_WIDTH + RING_OFFSET;
+    div()
+        .absolute()
+        .top(px(-reach))
+        .right(px(-reach))
+        .bottom(px(-reach))
+        .left(px(-reach))
+        .border(px(RING_WIDTH))
+        .border_color(color)
+        .rounded(px(RADIUS_MD + reach))
+}
 
 /// Where one match is: an entry, the markdown segment of an assistant entry (None for a user
 /// message), and the byte range in its rendered text.
@@ -49,8 +71,12 @@ impl TimelineView {
         if self.finder.is_none() {
             let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find in pane"));
             let weak = cx.weak_entity();
+            let input_focus = input.focus_handle(cx);
             let subscriptions =
                 vec![
+                    // The focus ring shows while the input has focus.
+                    cx.on_focus_in(&input_focus, window, |_, _, cx| cx.notify()),
+                    cx.on_focus_out(&input_focus, window, |_, _, _, cx| cx.notify()),
                     cx.subscribe_in(&input, window, |this, input, event: &InputEvent, _, cx| {
                         match event {
                             InputEvent::Change => {
@@ -278,9 +304,14 @@ impl TimelineView {
     }
 
     /// The bar over the top right of the pane.
-    pub(crate) fn render_find_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_find_bar(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let finder = self.finder.as_ref()?;
         let t = tokens(cx);
+        let focused = finder.input.focus_handle(cx).is_focused(window);
         let count = finder.matches.len();
         let text = status(&finder.query, count, finder.current);
         let can_step = count > 0;
@@ -316,8 +347,10 @@ impl TimelineView {
                                 .gap(px(SPACE_2))
                                 .items_center()
                                 .px(px(SPACE_2))
+                                .relative()
                                 .bg(t.surface2)
                                 .rounded(px(RADIUS_MD))
+                                .when(focused, |field| field.child(focus_ring(t.ring)))
                                 .child(
                                     div().flex_1().min_w_0().child(
                                         Input::new(&finder.input)
@@ -378,5 +411,40 @@ impl TimelineView {
                 )
                 .into_any_element(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Not `super::*`: the gpui glob brings its own `test` attribute.
+    use super::{RING_OFFSET, RING_WIDTH, focus_ring};
+    use gpui_kit::{AbsoluteLength, DefiniteLength, Length, Styled as _, hsla, px};
+
+    /// Electron's find field outline: 2 px wide, 1 px outside the border box, in the given color.
+    #[test]
+    fn focus_ring_is_two_pixels_wide_outside_the_field() {
+        assert_eq!((RING_WIDTH, RING_OFFSET), (2., 1.));
+        let color = hsla(0., 0., 0.1, 1.);
+        let mut ring = focus_ring(color);
+        let style = ring.style();
+        assert_eq!(
+            style.border_widths.top,
+            Some(AbsoluteLength::Pixels(px(2.)))
+        );
+        assert_eq!(style.border_color, Some(color));
+        let reach = Some(Length::Definite(DefiniteLength::Absolute(
+            AbsoluteLength::Pixels(px(-3.)),
+        )));
+        for side in [
+            style.inset.top,
+            style.inset.right,
+            style.inset.bottom,
+            style.inset.left,
+        ] {
+            assert_eq!(
+                side, reach,
+                "the ring reaches width + offset past the field"
+            );
+        }
     }
 }

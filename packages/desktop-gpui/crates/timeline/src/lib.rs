@@ -37,7 +37,8 @@ use bachuc_theme::metrics::{
     SPACE_3, SPACE_4, SPACE_6, SPACE_8,
 };
 use bachuc_theme::{
-    TurnLabel, code_font_size, mono_font_family, scheme, tokens, turn_label_colors, ui_font_size,
+    TurnLabel, code_font_size, content_font_size, mono_font_family, scheme, syntax_colors, tokens,
+    turn_label_colors, ui_font_size,
 };
 use gpui_kit::base::text::{CodeBlock, TextView as RichText, TextViewStyle as RichTextStyle};
 use gpui_kit::component::text::{TextView, TextViewState};
@@ -104,6 +105,16 @@ const USER_TRAILING_ROW: f32 = SPACE_2 + 24.;
 /// The space between two markdown blocks: the paragraph's `marginBottom: 12` and the block
 /// container's 12.
 const BLOCK_GAP: f32 = SPACE_6;
+/// GPUI's default line height over the font size (`phi`). It gives a line box of
+/// `round(15 * 1.618)` = 24 at the content size, as a whole number, where the web's line boxes
+/// are fractional.
+const BODY_LINE_HEIGHT: f32 = 1.618;
+/// The 1 px that GPUI's whole-pixel line box adds to each paragraph over the web's (a pitch of
+/// 48 against 47 at the content size, which drifted reply text 1 px per block). It comes out of
+/// the paragraph gap, so every block boundary moves up as much as the line box moved it down.
+const LINE_BOX_ROUNDING: f32 = 1.;
+/// The gap under a paragraph in the text view: `BLOCK_GAP` less the line box rounding.
+const PARAGRAPH_GAP: f32 = BLOCK_GAP - LINE_BOX_ROUNDING;
 /// A fence's line height over its size, as `splitFenceStyle`.
 const FENCE_LINE_HEIGHT: f32 = 1.45;
 /// `STREAM_METADATA_FONT_SIZE`, the compaction marker and turn footer text.
@@ -195,8 +206,8 @@ type CodeHighlighter = Arc<dyn Fn(&CodeBlock) -> Vec<Run> + Send + Sync>;
 struct Diff {
     lines: Vec<DiffLine>,
     stats: (usize, usize),
-    /// Syntax runs and the scheme they were colored for, made on the first draw.
-    runs: RefCell<Option<(bachuc_theme::Scheme, LineRuns)>>,
+    /// Syntax runs and the colors they were made with, made on the first draw.
+    runs: RefCell<Option<(bachuc_theme::SyntaxColors, LineRuns)>>,
 }
 
 /// The timeline of one agent. Create it with `cx.new(|cx| TimelineView::new(...))`.
@@ -1196,7 +1207,8 @@ impl TimelineView {
             diagrams.update(cx, |renderer, cx| renderer.render(kind, source, cx))
         });
         let t = tokens(cx);
-        let size = ui_font_size(FONT_CONTENT, cx);
+        let size = content_font_size(cx);
+        let line_height = px(body_line_height(size / px(1.)));
         let view = cx.weak_entity();
         let (style, highlighter) = self.markdown_style(cx);
         let copy_color = t.foreground_muted;
@@ -1237,7 +1249,11 @@ impl TimelineView {
                                         cx.write_to_clipboard(ClipboardItem::new_string(code));
                                     })
                             });
-                        div().text_size(size).child(text).into_any_element()
+                        div()
+                            .text_size(size)
+                            .line_height(line_height)
+                            .child(text)
+                            .into_any_element()
                     }
                     None => div().into_any_element(),
                 },
@@ -1291,7 +1307,7 @@ impl TimelineView {
     ///
     /// Spacing follows the app's block model: a message splits into blocks at blank lines, a
     /// paragraph keeps `marginBottom: 12` and each block 12 more (`message.tsx`), so blocks sit
-    /// 24 apart. A fence adds 12 above (`fence_spacing`), padding 12, and a 1.45 line height
+    /// 24 apart, less the 1 px that GPUI's whole-pixel line box adds (`PARAGRAPH_GAP`). A fence adds 12 above (`fence_spacing`), padding 12, and a 1.45 line height
     /// (`highlighted-code-block.tsx`). Also returns the fence highlighter, one `Arc` per theme,
     /// so a code block highlights once rather than on every frame.
     fn markdown_style(&self, cx: &App) -> (RichTextStyle, CodeHighlighter) {
@@ -1315,7 +1331,7 @@ impl TimelineView {
         let table_head = StyleRefinement::default()
             .bg(theme.table_head)
             .text_color(theme.table_head_foreground);
-        let content = ui_font_size(FONT_CONTENT, cx);
+        let content = content_font_size(cx);
         let border = t.border;
         let style = RichTextStyle::default()
             .with_foreground(theme.foreground)
@@ -1324,7 +1340,7 @@ impl TimelineView {
             .with_selection(theme.selection)
             .with_code_background(t.surface2)
             .with_border(theme.border)
-            .with_paragraph_gap(rems(BLOCK_GAP / FONT_BASE))
+            .with_paragraph_gap(rems(PARAGRAPH_GAP / FONT_BASE))
             .with_code_block(code_block)
             .with_table(corners)
             .with_table_head(table_head)
@@ -1334,12 +1350,14 @@ impl TimelineView {
             })
             .with_dark(theme.is_dark())
             .with_heading(move |level| heading_style(level, content, border));
-        let scheme = scheme(cx);
+        // Read when the style is built, not per flush; a syntax theme change writes the theme
+        // global, which drops this cache.
+        let colors = syntax_colors(cx);
         let highlighter: CodeHighlighter = Arc::new(move |block: &CodeBlock| {
             block
                 .lang()
                 .and_then(|info| tool_view::fence_language(&info))
-                .map(|language| tool_view::code_styles(language, &block.code(), scheme))
+                .map(|language| tool_view::code_styles(language, &block.code(), colors))
                 .unwrap_or_default()
         });
         let style = (style, highlighter);
@@ -1794,7 +1812,7 @@ impl TimelineView {
 }
 
 impl Render for TimelineView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = tokens(cx);
         let base = div()
             .id("timeline")
@@ -1846,7 +1864,7 @@ impl Render for TimelineView {
         };
         let lightbox = self.render_lightbox(cx);
         base.child(body)
-            .children(self.render_find_bar(cx))
+            .children(self.render_find_bar(window, cx))
             .children(lightbox)
     }
 }
@@ -1963,6 +1981,18 @@ fn format_duration(ms: i64) -> String {
     }
 }
 
+/// The body line box in whole pixels. GPUI rounds a line height to whole pixels, and the text
+/// view needs the same number the paragraph pitch is built from.
+fn body_line_height(content: f32) -> f32 {
+    (content * BODY_LINE_HEIGHT).round()
+}
+
+/// Distance between the tops of two paragraphs of one line: the line box and the gap under it.
+#[cfg(test)]
+fn paragraph_pitch(content: f32) -> f32 {
+    body_line_height(content) + PARAGRAPH_GAP
+}
+
 /// The fence's `marginTop: 12`. The text view stacks its blocks in block flow, where taffy
 /// collapses an h1 or h2 bottom margin with a fence's top margin (24 and 12 give 24), as CSS
 /// does. The web stream stacks blocks in flex columns, which add them (36). A relative offset
@@ -2043,11 +2073,12 @@ mod tests {
     // Not `super::*`: the gpui glob brings its own `test` attribute.
     use super::tool_view::{code_styles, fence_language};
     use super::{
-        BLOCK_GAP, StepCounts, counts_text, fence_spacing, format_clock, format_duration,
-        format_elapsed, heading_style, toggle,
+        BLOCK_GAP, PARAGRAPH_GAP, StepCounts, body_line_height, counts_text, fence_spacing,
+        format_clock, format_duration, format_elapsed, heading_style, paragraph_pitch, toggle,
     };
-    use bachuc_theme::Scheme;
+    use bachuc_theme::metrics::FONT_CONTENT;
     use bachuc_theme::metrics::SPACE_3;
+    use bachuc_theme::{Scheme, SyntaxThemeId, syntax_colors_for};
     use gpui_kit::{
         AbsoluteLength, DefiniteLength, FontWeight, Hsla, Length, StyleRefinement, hsla, px, rgb,
     };
@@ -2076,7 +2107,11 @@ mod tests {
     #[test]
     fn fence_colors_follow_the_one_theme() {
         let code = r#"fn main() { println!("hi"); }"#;
-        let styles = code_styles("rust", code, Scheme::Light);
+        let styles = code_styles(
+            "rust",
+            code,
+            syntax_colors_for(SyntaxThemeId::One, Scheme::Light),
+        );
         let color_at = |at: usize| {
             styles
                 .iter()
@@ -2089,6 +2124,35 @@ mod tests {
         assert_eq!(color_at(21), one(0x50a14f), "\"hi\" is a string");
         // The app's grammar gives a macro name no role, so it keeps the text color.
         assert_eq!(color_at(12), None, "println has no color");
+    }
+
+    /// A syntax theme switch recolors code: the same source takes the new theme's colors.
+    #[test]
+    fn syntax_themes_give_different_code_colors() {
+        let code = r#"fn main() { println!("hi"); }"#;
+        let keyword_color = |theme| {
+            let colors = syntax_colors_for(theme, Scheme::Light);
+            let styles = code_styles("rust", code, colors);
+            let found = styles
+                .iter()
+                .find(|(range, _)| range.contains(&0))
+                .and_then(|(_, style)| style.color);
+            assert_eq!(found, Some(colors.keyword), "fn takes the keyword color");
+            found
+        };
+        assert_ne!(
+            keyword_color(SyntaxThemeId::One),
+            keyword_color(SyntaxThemeId::Dracula)
+        );
+    }
+
+    /// The web's paragraph pitch at the content size is 47; the whole-pixel line box of GPUI
+    /// gave 48, which drifted reply text 1 px per block.
+    #[test]
+    fn paragraph_pitch_matches_the_web_stream() {
+        assert_eq!(body_line_height(FONT_CONTENT), 24.);
+        assert_eq!(PARAGRAPH_GAP, BLOCK_GAP - 1.);
+        assert_eq!(paragraph_pitch(FONT_CONTENT), 47.);
     }
 
     #[test]
