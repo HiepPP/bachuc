@@ -115,3 +115,71 @@ Fix builder, 2026-10-16, on HEAD 5afebcedd plus the crate edits below. Only `cra
 - `cargo.sh clippy -p bachuc-settings --tests --examples` -> PASS, no errors. One pre-existing warning remains: `too_many_arguments` on `AppearancePane::size_row`.
 - `CARGO_BUILD_JOBS=4 cargo.sh build -p bachuc-app` -> PASS.
 - Parity recheck of the page title, theme dropdown, and 57 px shortcut rows -> DEFERRED (UI checker).
+
+### Re-check 1
+
+Run by the UI checker on 2026-10-16, HEAD 9fec90f18 (includes fix commit dd8b40192). Bundle `BachucSettings` rebuilt before the run, light theme, example on `ws://127.0.0.1:6770/ws` (live is down). Reference: in-place Electron build on 6770, opened by path (an installed release app with the same bundle id runs at the same time; the checker did not touch it). Both windows 1200 wide; the GPUI window has a native title bar (32 px), the reference overlays it, so offsets are from the window top. Screenshots: `/tmp/gpui-ui-check/I/` (`gpui-*-r3.png`, `ref-*-r2.png`). `hosts.json` was backed up (`backup2/`) and is unchanged after the run; no file was added to the BachucGpui folder.
+
+| Line                            | Result    | Evidence                                                                                                                                                                                                                                                                     |
+| ------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Page title on each pane         | PASS      | Hosts, Appearance, Shortcuts show a large heading ("Appearance" y 78, reference y 76; "Shortcuts" 109 px wide, reference 112 px).                                                                                                                                            |
+| Page title spacing              | FAIL      | Title to section label: GPUI 53 px (title y 78, label y 131), reference 45 px (y 76, label y 121). 8 px.                                                                                                                                                                     |
+| Theme dropdown trigger          | PASS      | One dropdown with icon, "System", chevron: 118 x 32 px in both, right inset 17 px from the card in both.                                                                                                                                                                     |
+| Theme dropdown menu             | FAIL      | Same width (about 200) and 28 px row pitch, check on the current row. GPUI items use a smaller font and icon (about 12 px; reference 14 px, 16 px icon). Items by scope: Light, Claude dark, System (reference adds a rule and Zinc, Midnight, Claude, Ghostty, Pure black). |
+| Shortcut rows 57 px, `...` menu | PASS      | Rows at y 182, 239, 296: 57 px pitch, equal to the reference (171, 228, 285). Chord badge and `...` button on the right in both. The `...` menu opens Rebind and Clear, 28 px rows, in both.                                                                                 |
+| Sidebar row pitch               | FAIL      | GPUI Hosts, Appearance, Shortcuts at y 94, 127, 160 (33 px pitch); reference nav rows at 131, 161, 191 (30 px pitch). 3 px per row.                                                                                                                                          |
+| Fonts rows, row height          | FAIL      | Fonts card rows are 79 px (Interface size y 275 to 354); reference rows are 69 px (y 328 to 397). Input style also differs: GPUI white with border, reference grey fill, no border.                                                                                          |
+| Fonts rows, missing rows        | known gap | Interface font, Content size, Code font, Highlight theme (Q-083). Recorded, not failed.                                                                                                                                                                                      |
+| Settings sidebar groups         | known gap | App and Host groups (Q-084). Recorded, not failed.                                                                                                                                                                                                                           |
+
+Cleanup: the example was quit; the lock was released; 6767 untouched. In the reference, one stray Escape left Settings and a click opened the existing closed Claude thread "Check Claude CLI computer use with separate cursor" (view only; nothing sent).
+
+## Fix Round 2
+
+Fix builder, 2026-10-16, on HEAD e034a125d plus the crate edits below. Only `crates/settings` changed; `Settings::new`, `SettingsEvent`, and `load_appearance` are unchanged.
+
+### Cause
+
+GPUI's default line height is 1.618 of the font size. The Electron settings text uses the browser `normal` line height, about 1.2 (14 px text gets a 17 px line, 12 px text gets 15 px). The page title spacing, the sidebar row pitch, and the Fonts row height all came from that extra line height.
+
+### Changed
+
+- `src/ui.rs`: new `LINE_HEIGHT_NORMAL = 1.2`.
+- `src/settings.rs`: the Settings root sets `line_height(relative(LINE_HEIGHT_NORMAL))`, and every pane inherits it. Expected results: sidebar rows 28 px (the `minHeight`) plus a 2 px gap, so a 30 px pitch. Title to section label is about 45 px (the title line is 31 px, not 42 px). Card rows with a title and hint are 16 + 36 + 16 + 1 = 69 px. Shortcut rows stay at 57 px, because their 32 px slot is taller than the text.
+- `src/pane_appearance.rs`, size inputs (`sizeInput`): 64 x 36 px (`Styled::h`), `surface2` fill, 1 px `border` color, `RADIUS_MD`, 12 px horizontal padding, 14 px right-aligned text. The `px` unit is 14 px with an 8 px gap.
+- `src/pane_appearance.rs`, theme menu: the items are `PopupMenuItem::element` rows with a 16 px icon, an 8 px gap, and 14 px text. `PopupMenuItem::icon` forces an extra-small icon, and the menu item sets `text_sm` (about 12 px). The check stays on the right. The items stay Light, Claude dark, and System (by scope).
+
+### Not changed
+
+- The Shortcuts `...` menu still uses plain `PopupMenuItem::new` items (12 px text). Re-check 1 marked it PASS, so it stays out of this round.
+- The source sets a 1 px `colors.border` (`#e4e4e7`) border on the size input. Re-check 1 reported "no border" for the reference, so the edge is faint there. The border follows the source.
+
+### Verified
+
+- GitNexus `impact` on `size_row`, `theme_dropdown`, and `Settings` render -> UNKNOWN (the index has no symbols for this crate). `rg` shows that `size_row` and `theme_dropdown` are private to `pane_appearance.rs`.
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-settings` -> PASS: 26 unit tests and 4 `project_config` tests.
+- `cargo.sh fmt -p bachuc-settings --check` -> PASS (after `cargo.sh fmt`).
+- `CARGO_BUILD_JOBS=4 cargo.sh clippy -p bachuc-settings --tests --examples` -> PASS, no errors. The pre-existing `too_many_arguments` warning on `size_row` remains.
+- `CARGO_BUILD_JOBS=4 cargo.sh build -p bachuc-app` -> PASS.
+- Recheck of title spacing (45 px), theme menu text and icons (14 and 16 px), sidebar pitch (30 px), and Fonts rows (69 px, grey input) -> DEFERRED (UI checker).
+
+### Lessons
+
+- A view that copies Electron text layout sets `line_height(relative(1.2))` at its root. GPUI's 1.618 default makes text rows taller than the Electron rows.
+- `PopupMenuItem::icon` always draws an extra-small icon, and menu rows set `text_sm`. For Electron-sized rows, use `PopupMenuItem::element` with your own icon and `text_size`.
+
+### Re-check 2
+
+Run by the UI checker on 2026-10-16, HEAD abf2569f1 (includes fix commit 90399f699). Bundle `BachucSettings` rebuilt before the run, light theme, example on `ws://127.0.0.1:6770/ws` (live is down). Reference: the in-place Electron build on 6770. The GPUI window is 1200 x 832 (32 px title bar), the reference 1200 x 800, so offsets are between elements, not from the window top. The pointer and foreground owner rules arrived mid-run: the GPUI clicks ran before them, and the reference theme menu was not reopened (its capture is `ref-theme-menu-r2.png` from Re-check 1). Screenshots: `/tmp/gpui-ui-check/I/` (`gpui-appearance-r4.png`, `gpui-theme-menu-r4.png`, `ref-appearance-r4.png`, `*-input-z.png`).
+
+| Line                        | Result | Evidence                                                                                                                                                                                                                                                   |
+| --------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Page title to section label | PASS   | "Appearance" title y 72, "Theme" label y 118: 46 px. Reference y 76 and 121: 45 px.                                                                                                                                                                        |
+| Theme menu text and icons   | PASS   | Items Light, Claude dark, System: text 14 px ("Claude dark" 76 px wide; "System" x 922 to 970 in both apps), 16 px icon box at x 897 to 915 in both, row pitch 28 in both, check on System. Menu left edge 887 vs 885. Reference extra items by scope.     |
+| Settings sidebar row pitch  | PASS   | Hosts, Appearance, Shortcuts at y 92, 122, 152: 30 px. Reference rows 30 px.                                                                                                                                                                               |
+| Fonts rows height           | PASS   | Interface size y 288, Code size y 357: 69 px. Reference rows 69 px (y 363, 432).                                                                                                                                                                           |
+| Size input fill and border  | PASS   | GPUI input 64 x 36, `#F4F4F6` fill, 1 px border `#E4E4E4`. The reference input has a 1 px border too: `#E3E3E5` at the left edge (zoom `ref-input-z.png`). The source value `#e4e4e7` matches. Re-check 1 "no border" was a faint edge, not a missing one. |
+
+Remaining gaps are unchanged: Interface font, Content size, Code font, Highlight theme rows (Q-083), and the App and Host sidebar groups (Q-084).
+
+Cleanup: the example and the reference app were quit; the lock was released; `hosts.json` was not changed by this group; no file was added to the BachucGpui folder; 6767 untouched.
