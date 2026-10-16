@@ -85,11 +85,11 @@ impl RenderOnce for MenuTrigger {
     }
 }
 
-/// `DropdownTrigger` size `sm`: the selected value after `leading`, then a chevron, in the
-/// outline button chrome. Chain `.dropdown_menu_with_anchor` on it.
+/// `DropdownTrigger` size `sm`: the selected value after `leading` (if any), then a chevron, in
+/// the outline button chrome. Chain `.dropdown_menu_with_anchor` on it.
 pub fn select_trigger(
     id: impl Into<ElementId>,
-    leading: IconName,
+    leading: Option<IconName>,
     value: impl Into<SharedString>,
     label: impl Into<SharedString>,
     cx: &App,
@@ -111,13 +111,15 @@ pub fn select_trigger(
         .border_color(colors.border_accent)
         .cursor_pointer()
         .hover(|style| style.opacity(0.85))
-        .child(
-            icon(leading)
+        .children(leading.map(|name| {
+            icon(name)
                 .with_size(px(bachuc_theme::metrics::ICON_MD))
-                .text_color(colors.foreground_muted),
-        )
+                .text_color(colors.foreground_muted)
+        }))
         .child(
             div()
+                .max_w(px(220.))
+                .truncate()
                 .text_size(ui_font_size(FONT_BASE, cx))
                 .text_color(colors.foreground)
                 .child(value.into()),
