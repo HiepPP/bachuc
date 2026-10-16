@@ -74,13 +74,11 @@ pub fn validate_host(
             _ => return Err(HostError::InvalidUrl),
         }
     }
+    let scheme = url[..scheme_end].to_ascii_lowercase();
     let url = if path.is_empty() {
-        format!(
-            "{}://{authority}/ws",
-            &url[..scheme_end].to_ascii_lowercase()
-        )
+        format!("{scheme}://{authority}/ws")
     } else {
-        format!("{}://{rest}", &url[..scheme_end].to_ascii_lowercase())
+        format!("{scheme}://{rest}")
     };
     for (index, host) in hosts.iter().enumerate() {
         if Some(index) == editing {

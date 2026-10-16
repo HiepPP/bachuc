@@ -1,6 +1,6 @@
 //! The Providers pane: which providers the daemon reports, and their models. Read only.
 
-use crate::ui::{card, column, note, row, row_text, scroll_page, section, tag};
+use crate::ui::{card, column, note, page_title, row, row_text, scroll_page, section, tag};
 use bachuc_client::{Client, ProviderSummary};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{FONT_SM, ICON_SM, SPACE_1, SPACE_4};
@@ -158,7 +158,9 @@ impl Render for ProvidersPane {
         scroll_page(
             "providers-pane",
             &self.scroll,
-            column().child(section("Providers", None, body, cx)),
+            column()
+                .child(page_title("Providers", cx))
+                .child(section("Providers", None, body, cx)),
             cx,
         )
     }

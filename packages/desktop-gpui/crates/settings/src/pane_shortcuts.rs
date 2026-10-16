@@ -4,12 +4,15 @@
 use crate::bindings::{
     Section, combo_from_keystroke, conflict, is_overridden, reset, reset_all, section_of, set_chord,
 };
-use crate::ui::{card, column, error_text, row, scroll_page, section};
+use crate::ui::{card, column, error_text, more_trigger, page_title, row, scroll_page, section};
 use bachuc_command::{Shortcut, display_combos, load_shortcuts_from, save_overrides_to};
-use bachuc_icons::IconName;
-use bachuc_theme::metrics::{FONT_BASE, FONT_SM, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_2};
+use bachuc_icons::{IconName, icon};
+use bachuc_theme::metrics::{
+    CONTROL_SM, FONT_BASE, FONT_SM, ICON_SM, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_2, SPACE_3,
+};
 use bachuc_theme::{tokens, ui_font_size};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -18,6 +21,9 @@ use std::path::PathBuf;
 
 /// The stored shortcuts changed. The app rebinds its keys.
 pub struct ShortcutsChanged;
+
+/// A row menu item: start, clear, or reset the shortcut of an action.
+type RowAction = fn(&mut ShortcutsPane, &str, &mut Context<ShortcutsPane>);
 
 struct Capture {
     action: String,
@@ -239,46 +245,38 @@ impl ShortcutsPane {
                 )
                 .into_any_element()
         } else {
-            let bind = {
-                let action = action.clone();
-                crate::ui::icon_button(
-                    ("shortcut-bind", index),
-                    IconName::Pencil,
-                    if shortcut.chord.is_some() {
-                        format!("Rebind {label}")
-                    } else {
-                        format!("Bind {label}")
-                    },
-                    cx,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| this.start(&action, cx)))
-            };
-            let clear = {
-                let action = action.clone();
-                crate::ui::icon_button(
-                    ("shortcut-clear", index),
-                    IconName::X,
-                    format!("Clear {label}"),
-                    cx,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| this.clear(&action, cx)))
-            };
-            let restore = {
-                let action = action.clone();
-                crate::ui::icon_button(
-                    ("shortcut-reset", index),
-                    IconName::Undo2,
-                    format!("Reset {label} to default"),
-                    cx,
-                )
-                .on_click(cx.listener(move |this, _, _, cx| this.reset(&action, cx)))
-            };
-            h_flex()
-                .gap(px(SPACE_1))
-                .child(bind)
-                .when(shortcut.chord.is_some(), |this| this.child(clear))
-                .when(overridden, |this| this.child(restore))
-                .into_any_element()
+            // `ShortcutActionsMenu`: Bind or Rebind, then Clear when a chord is set, then Reset
+            // when it differs from the default.
+            let has_chord = shortcut.chord.is_some();
+            let weak = cx.weak_entity();
+            let menu = more_trigger(
+                ("shortcut-actions", index),
+                format!("Actions for {label}"),
+                cx,
+            )
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+                let item = |text: &'static str, name: IconName, run: RowAction| {
+                    let (weak, action) = (weak.clone(), action.clone());
+                    PopupMenuItem::new(text)
+                        .icon(icon(name).with_size(px(ICON_SM)))
+                        .on_click(move |_, _, cx| {
+                            weak.update(cx, |this, cx| run(this, &action, cx)).ok();
+                        })
+                };
+                menu.min_w(px(220.))
+                    .item(item(
+                        if has_chord { "Rebind" } else { "Bind" },
+                        IconName::Pencil,
+                        Self::start,
+                    ))
+                    .when(has_chord, |menu| {
+                        menu.item(item("Clear", IconName::X, Self::clear))
+                    })
+                    .when(overridden, |menu| {
+                        menu.item(item("Reset to default", IconName::Undo2, Self::reset))
+                    })
+            });
+            div().size(px(CONTROL_SM)).child(menu).into_any_element()
         };
 
         v_flex()
@@ -287,6 +285,8 @@ impl ShortcutsPane {
             .aria_label(label.clone())
             .child(
                 row(first, cx)
+                    .px(px(SPACE_3))
+                    .py(px(SPACE_3))
                     .when(capturing.is_some(), |this| this.bg(colors.surface2))
                     .child(
                         div()
@@ -298,13 +298,18 @@ impl ShortcutsPane {
                             .child(label),
                     )
                     .child(
-                        v_flex()
-                            .items_end()
-                            .gap(px(SPACE_1))
-                            .child(keys)
-                            .children(clash.map(|text| error_text(text, cx))),
-                    )
-                    .child(actions),
+                        h_flex()
+                            .items_center()
+                            .gap(px(SPACE_2))
+                            .child(
+                                v_flex()
+                                    .items_end()
+                                    .gap(px(SPACE_1))
+                                    .child(keys)
+                                    .children(clash.map(|text| error_text(text, cx))),
+                            )
+                            .child(actions),
+                    ),
             )
             .into_any_element()
     }
@@ -317,7 +322,9 @@ impl Render for ShortcutsPane {
             .iter()
             .any(|s| is_overridden(&self.shortcuts, &s.action));
         let shortcuts = self.shortcuts.clone();
-        let mut body = column().children(self.error.clone().map(|error| error_text(error, cx)));
+        let mut body = column()
+            .child(page_title("Shortcuts", cx))
+            .children(self.error.clone().map(|error| error_text(error, cx)));
         for (position, group) in Section::ALL.into_iter().enumerate() {
             let rows: Vec<AnyElement> = shortcuts
                 .iter()

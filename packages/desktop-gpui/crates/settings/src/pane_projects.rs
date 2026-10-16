@@ -6,10 +6,10 @@ use crate::config::{
     script_errors, script_hint,
 };
 use crate::ui::{
-    callout, card, column, error_text, field_label, icon_button, note, row, row_text, scroll_page,
-    section,
+    callout, card, column, error_text, field_label, icon_button, note, page_title, row, row_text,
+    scroll_page, section,
 };
-use bachuc_client::Client;
+use bachuc_client::{Client, ClientEvent};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_SM, SPACE_1, SPACE_2, SPACE_3, SPACE_4, WEIGHT_MEDIUM,
@@ -128,19 +128,40 @@ impl ProjectEditor {
             write_error: None,
             scroll: ScrollHandle::new(),
             task: None,
-            _subscriptions: vec![cx.observe_global::<Theme>(|_, cx| cx.notify())],
+            _subscriptions: Vec::new(),
         };
+        editor._subscriptions = vec![
+            cx.observe_global::<Theme>(|_, cx| cx.notify()),
+            // A request sent before `Connected` fails and is not retried. A reconnect reads
+            // the file again unless a loaded draft is on screen; a stale write still reports.
+            cx.subscribe_in(
+                &editor.client,
+                window,
+                |this: &mut ProjectEditor, _, event: &ClientEvent, window, cx| {
+                    if matches!(event, ClientEvent::Connected) && !matches!(this.load, Load::Ready)
+                    {
+                        this.reload(window, cx);
+                    }
+                },
+            ),
+        ];
         editor.reload(window, cx);
         editor
     }
 
-    /// Reads `paseo.json` again and discards the draft.
+    /// Reads `paseo.json` again and discards the draft. Before `Connected`, it only shows the
+    /// loading state; the `Connected` subscription reads it.
     fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.load = Load::Loading;
         self.write_error = None;
         self.saved = false;
         self.editing = None;
         self.removing = None;
+        if !self.client.read(cx).is_connected() {
+            self.task = None;
+            cx.notify();
+            return;
+        }
         let root = self.root.clone();
         let read = self
             .client
@@ -723,8 +744,9 @@ impl Render for ProjectEditor {
                     .font_weight(FontWeight(WEIGHT_MEDIUM))
                     .child(self.name.clone()),
             );
+        let page = column().child(page_title("Projects", cx)).child(header);
         let body = match &self.load {
-            Load::Loading => column().child(header).child(
+            Load::Loading => page.child(
                 div()
                     .id("project-loading")
                     .role(Role::Status)
@@ -734,7 +756,7 @@ impl Render for ProjectEditor {
             ),
             Load::Failed(detail) => {
                 let (title, text) = failure_copy(detail);
-                column().child(header).child(
+                page.child(
                     callout(cx)
                         .id("project-read-failed")
                         .role(Role::Alert)
@@ -744,7 +766,7 @@ impl Render for ProjectEditor {
                         .child(self.callout_buttons(cx, false)),
                 )
             }
-            Load::Ready => column().child(header).child(self.render_form(cx)),
+            Load::Ready => page.child(self.render_form(cx)),
         };
         scroll_page("project-editor", &self.scroll, body, cx)
     }
@@ -839,7 +861,9 @@ impl Render for ProjectsPane {
         scroll_page(
             "projects-pane",
             &self.scroll,
-            column().child(section("Projects", None, body, cx)),
+            column()
+                .child(page_title("Projects", cx))
+                .child(section("Projects", None, body, cx)),
             cx,
         )
         .into_any_element()

@@ -3,13 +3,17 @@
 
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_SM, ICON_SM, RADIUS_BASE, RADIUS_LG, RADIUS_MD, SETTINGS_CONTENT_WIDTH,
-    SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
+    CONTROL_SM, FONT_BASE, FONT_SM, ICON_SM, RADIUS_BASE, RADIUS_LG, RADIUS_MD, RADIUS_XL,
+    SETTINGS_CONTENT_WIDTH, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6, WEIGHT_MEDIUM,
 };
 use bachuc_theme::{tokens, ui_font_size};
-use gpui_kit::component::{Sizable as _, h_flex, v_flex};
+use gpui_kit::component::menu::DropdownMenu;
+use gpui_kit::component::{Selectable, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+
+/// `theme.fontSize["4xl"]`, the page title size. `bachuc_theme::metrics` stops at `FONT_2XL`.
+const FONT_4XL: f32 = 26.;
 
 /// The content column of a pane: centered, 720 px at most, padded 16 px (24 px above).
 pub fn column() -> Div {
@@ -19,6 +23,143 @@ pub fn column() -> Div {
         .mx_auto()
         .p(px(SPACE_4))
         .pt(px(SPACE_6))
+}
+
+/// The page heading at the top of the column (`pageTitle` in `settings-screen.tsx`).
+pub fn page_title(title: &'static str, cx: &App) -> Stateful<Div> {
+    let colors = tokens(cx);
+    div()
+        .id("page-title")
+        .role(Role::Heading)
+        .aria_label(title)
+        .ml(px(SPACE_1))
+        .mb(px(SPACE_6))
+        .text_size(ui_font_size(FONT_4XL, cx))
+        .font_weight(FontWeight(WEIGHT_MEDIUM))
+        .text_color(colors.foreground)
+        .child(title)
+}
+
+/// The anchor of a gpui-kit dropdown menu. The menu marks it selected while it is open, and it
+/// keeps its `open` fill then.
+#[derive(IntoElement)]
+pub struct MenuTrigger {
+    base: Stateful<Div>,
+    open: bool,
+    open_fill: Hsla,
+}
+
+impl Selectable for MenuTrigger {
+    fn selected(mut self, selected: bool) -> Self {
+        self.open = selected;
+        self
+    }
+
+    fn is_selected(&self) -> bool {
+        self.open
+    }
+}
+
+impl Styled for MenuTrigger {
+    fn style(&mut self) -> &mut StyleRefinement {
+        self.base.style()
+    }
+}
+
+impl InteractiveElement for MenuTrigger {
+    fn interactivity(&mut self) -> &mut Interactivity {
+        self.base.interactivity()
+    }
+}
+
+impl DropdownMenu for MenuTrigger {}
+
+impl RenderOnce for MenuTrigger {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let fill = self.open_fill;
+        self.base.when(self.open, |base| base.bg(fill))
+    }
+}
+
+/// `DropdownTrigger` size `sm`: the selected value after `leading`, then a chevron, in the
+/// outline button chrome. Chain `.dropdown_menu_with_anchor` on it.
+pub fn select_trigger(
+    id: impl Into<ElementId>,
+    leading: IconName,
+    value: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> MenuTrigger {
+    let colors = tokens(cx);
+    let base = div()
+        .id(id)
+        .role(Role::Button)
+        .aria_label(label)
+        .h(px(CONTROL_SM))
+        .px(px(SPACE_3))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(SPACE_2))
+        .flex_shrink_0()
+        .rounded(px(RADIUS_XL))
+        .border_1()
+        .border_color(colors.border_accent)
+        .cursor_pointer()
+        .hover(|style| style.opacity(0.85))
+        .child(
+            icon(leading)
+                .with_size(px(bachuc_theme::metrics::ICON_MD))
+                .text_color(colors.foreground_muted),
+        )
+        .child(
+            div()
+                .text_size(ui_font_size(FONT_BASE, cx))
+                .text_color(colors.foreground)
+                .child(value.into()),
+        )
+        .child(
+            div().pt(px(1.)).child(
+                icon(IconName::ChevronDown)
+                    .with_size(px(ICON_SM))
+                    .text_color(colors.foreground_muted),
+            ),
+        );
+    MenuTrigger {
+        base,
+        open: false,
+        open_fill: colors.surface2,
+    }
+}
+
+/// The 32 px `...` button of a row menu (`ShortcutActionsMenu`). Chain
+/// `.dropdown_menu_with_anchor` on it.
+pub fn more_trigger(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> MenuTrigger {
+    let colors = tokens(cx);
+    let fg = colors.foreground;
+    let base = div()
+        .id(id)
+        .role(Role::Button)
+        .aria_label(label)
+        .size(px(CONTROL_SM))
+        .flex()
+        .items_center()
+        .justify_center()
+        .flex_shrink_0()
+        .rounded(px(RADIUS_LG))
+        .cursor_pointer()
+        .text_color(colors.foreground_muted)
+        .hover(move |style| style.bg(colors.surface2).text_color(fg))
+        .child(icon(IconName::MoreHorizontal).with_size(px(ICON_SM)));
+    MenuTrigger {
+        base,
+        open: false,
+        open_fill: colors.surface2,
+    }
 }
 
 /// A scrolling pane that holds `body`, normally a `column`.

@@ -4,18 +4,34 @@
 use crate::appearance::{
     Appearance, CODE_RANGE, INTERFACE_RANGE, apply, load_from, parse_size, save_to, theme_label,
 };
-use crate::ui::{card, column, error_text, row, row_text, scroll_page, section};
-use bachuc_icons::{IconName, icon};
-use bachuc_theme::metrics::{
-    CONTROL_XS, FONT_SM, ICON_SM, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_2, SPACE_3,
+use crate::ui::{
+    card, column, error_text, page_title, row, row_text, scroll_page, section, select_trigger,
 };
+use bachuc_icons::{IconName, icon};
+use bachuc_theme::metrics::{FONT_SM, ICON_MD, SPACE_0_5, SPACE_1};
 use bachuc_theme::{ThemeChoice, tokens, ui_font_size};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::theme::Theme;
-use gpui_kit::component::{Sizable as _, h_flex};
-use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::component::{Side, Sizable as _, h_flex};
 use gpui_kit::*;
 use std::path::PathBuf;
+
+/// The built-in themes in `THEME_OPTIONS` order.
+const THEMES: [ThemeChoice; 3] = [
+    ThemeChoice::Light,
+    ThemeChoice::ClaudeDark,
+    ThemeChoice::System,
+];
+
+/// `ThemeLeading`: sun, moon, or monitor.
+fn theme_icon(theme: ThemeChoice) -> IconName {
+    match theme {
+        ThemeChoice::Light => IconName::Sun,
+        ThemeChoice::ClaudeDark => IconName::Moon,
+        ThemeChoice::System => IconName::Monitor,
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Size {
@@ -116,46 +132,34 @@ impl AppearancePane {
         }
     }
 
-    fn theme_button(
-        &self,
-        theme: ThemeChoice,
-        icon_name: IconName,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
-        let colors = tokens(cx);
-        let selected = self.current.theme == theme;
-        let label = theme_label(theme);
-        div()
-            .id(("theme", theme as usize))
-            .role(Role::RadioButton)
-            .aria_label(label)
-            .aria_selected(selected)
-            .h(px(CONTROL_XS))
-            .px(px(SPACE_3))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(SPACE_2))
-            .rounded(px(RADIUS_MD))
-            .cursor_pointer()
-            .text_size(ui_font_size(bachuc_theme::metrics::FONT_BASE, cx))
-            .when(selected, |this| {
-                this.bg(colors.surface3)
-                    .border_1()
-                    .border_color(colors.border_accent)
-                    .text_color(colors.foreground)
-            })
-            .when(!selected, |this| {
-                this.text_color(colors.foreground_muted)
-                    .hover(|style| style.bg(colors.surface2))
-            })
-            .child(
-                icon(icon_name)
-                    .with_size(px(ICON_SM))
-                    .text_color(colors.foreground_muted),
+    /// `ThemeRow`: a dropdown with the current theme; the menu checks the picked one.
+    fn theme_dropdown(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let current = self.current.theme;
+        let label = theme_label(current);
+        let weak = cx.weak_entity();
+        select_trigger(
+            "theme-trigger",
+            theme_icon(current),
+            label,
+            format!("Theme: {label}"),
+            cx,
+        )
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+            THEMES.into_iter().fold(
+                menu.min_w(px(200.)).check_side(Side::Right),
+                |menu, theme| {
+                    let weak = weak.clone();
+                    menu.item(
+                        PopupMenuItem::new(theme_label(theme))
+                            .icon(icon(theme_icon(theme)).with_size(px(ICON_MD)))
+                            .checked(theme == current)
+                            .on_click(move |_, _, cx| {
+                                weak.update(cx, |this, cx| this.set_theme(theme, cx)).ok();
+                            }),
+                    )
+                },
             )
-            .child(label)
-            .on_click(cx.listener(move |this, _, _, cx| this.set_theme(theme, cx)))
+        })
     }
 
     fn size_row(
@@ -192,28 +196,15 @@ impl AppearancePane {
 
 impl Render for AppearancePane {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let themes = [
-            (ThemeChoice::Light, IconName::Sun),
-            (ThemeChoice::ClaudeDark, IconName::Moon),
-            (ThemeChoice::System, IconName::Monitor),
-        ];
-        let buttons: Vec<Stateful<Div>> = themes
-            .into_iter()
-            .map(|(theme, name)| self.theme_button(theme, name, cx))
-            .collect();
         let body = column()
+            .child(page_title("Appearance", cx))
             .child(section(
                 "Theme",
                 None,
                 card(cx).child(
-                    row(true, cx).child(row_text("Theme", None, cx)).child(
-                        h_flex()
-                            .id("theme-options")
-                            .role(Role::RadioGroup)
-                            .aria_label("Theme")
-                            .gap(px(SPACE_1))
-                            .children(buttons),
-                    ),
+                    row(true, cx)
+                        .child(row_text("Theme", None, cx))
+                        .child(self.theme_dropdown(cx)),
                 ),
                 cx,
             ))

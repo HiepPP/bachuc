@@ -2,8 +2,8 @@
 
 use crate::hosts::validate_host;
 use crate::ui::{
-    callout, card, column, error_text, field_label, icon_button, note, row, row_text, scroll_page,
-    section, tag,
+    callout, card, column, error_text, field_label, icon_button, note, page_title, row, row_text,
+    scroll_page, section, tag,
 };
 use bachuc_client::{Client, HostConfig, load_hosts, save_hosts};
 use bachuc_icons::{IconName, icon};
@@ -379,7 +379,7 @@ impl Render for HostsPane {
             .on_click(cx.listener(|this, _, window, cx| this.open_form(None, window, cx)))
             .into_any_element();
 
-        let mut body = column();
+        let mut body = column().child(page_title("Hosts", cx));
         if removed_current {
             body = body.child(
                 div().mb(px(SPACE_4)).child(
