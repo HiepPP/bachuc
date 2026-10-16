@@ -8,8 +8,8 @@ use crate::chord::display_combos;
 use crate::search::{Layout, Row, SearchIndex, step};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_SM, ICON_MD, RADIUS_LG, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_2, SPACE_3,
-    SPACE_4, SPACE_6,
+    BORDER_WIDTH_1, FONT_BASE, FONT_SM, ICON_MD, RADIUS_LG, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_2,
+    SPACE_3, SPACE_4, SPACE_6,
 };
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
 use gpui_kit::component::h_flex;
@@ -25,7 +25,7 @@ const PANEL_HEIGHT: f32 = 560.;
 const PANEL_MAX_WIDTH: f32 = 0.92;
 const PANEL_MAX_HEIGHT: f32 = 0.8;
 /// The Electron input has no line height, so the browser uses `normal`: about 1.2 times the font
-/// size. With FONT_BASE this makes the 50 px header of the reference.
+/// size, 17 px at FONT_BASE.
 const INPUT_LINE_HEIGHT: f32 = 1.2;
 /// How far the list draws beyond the visible rows.
 const OVERDRAW: f32 = 400.;
@@ -317,6 +317,21 @@ impl CommandCenter {
 }
 
 /// A section row: content sits at the bottom of a fixed height, as in Electron.
+/// One line of search text. GPUI rounds a line height to whole pixels, as the browser does.
+fn input_line_height(font_size: f32) -> f32 {
+    (font_size * INPUT_LINE_HEIGHT).round()
+}
+
+/// The search input: one line with SPACE_1 above and below, as `styles.input`.
+fn input_height(font_size: f32) -> f32 {
+    input_line_height(font_size) + SPACE_1 * 2.
+}
+
+/// The header: SPACE_3 above and below the input and a bottom border, as `styles.header`.
+fn header_height(font_size: f32) -> f32 {
+    SPACE_3 * 2. + input_height(font_size) + BORDER_WIDTH_1
+}
+
 fn v_section(height: f32) -> Div {
     div()
         .w_full()
@@ -330,7 +345,7 @@ fn v_section(height: f32) -> Div {
 impl Render for CommandCenter {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = tokens(cx);
-        let input_line = ui_font_size(FONT_BASE, cx) * INPUT_LINE_HEIGHT;
+        let input_font = ui_font_size(FONT_BASE, cx).as_f32();
         let body = if self.layout.rows.is_empty() {
             div()
                 .id("command-center-empty")
@@ -398,6 +413,7 @@ impl Render for CommandCenter {
                     .child(
                         div()
                             .flex_shrink_0()
+                            .h(px(header_height(input_font)))
                             .px(px(SPACE_4))
                             .py(px(SPACE_3))
                             .border_b_1()
@@ -413,8 +429,11 @@ impl Render for CommandCenter {
                                     // line of FONT_BASE, no side inset.
                                     .px_0()
                                     .py(px(SPACE_1))
-                                    .h(input_line + px(SPACE_1 * 2.))
-                                    .line_height(input_line)
+                                    // `Input::h` sets only a multi-line height and shadows
+                                    // `Styled::h`; without this the frame keeps the Medium
+                                    // `h_8` (2 rem, 28 px) and the header is 53 px.
+                                    .map(|input| Styled::h(input, px(input_height(input_font))))
+                                    .line_height(px(input_line_height(input_font)))
                                     .text_size(ui_font_size(FONT_BASE, cx))
                                     .accessibility_id("command-center-input")
                                     .aria_label("Search commands"),
@@ -422,5 +441,18 @@ impl Render for CommandCenter {
                     )
                     .child(body),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FONT_BASE, header_height, input_height, input_line_height};
+
+    #[test]
+    fn header_matches_the_electron_50_px_header() {
+        // Electron: 12 + (4 + 17 + 4) + 12 + 1 border, measured at y 48 to y 98.
+        assert_eq!(input_line_height(FONT_BASE), 17.);
+        assert_eq!(input_height(FONT_BASE), 25.);
+        assert_eq!(header_height(FONT_BASE), 50.);
     }
 }
