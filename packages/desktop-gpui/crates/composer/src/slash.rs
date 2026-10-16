@@ -47,13 +47,18 @@ pub fn client_items() -> Vec<SlashItem> {
     ]
 }
 
-/// The daemon commands first, then the client commands. A client command hides a daemon command
-/// of the same name, as Electron resolves the client command first.
+/// The client commands first, then the daemon commands, as `mergeSlashCommandSources` does. A
+/// client command name or alias hides a daemon command of that name.
 pub fn menu_items(daemon: &[SlashCommand]) -> Vec<SlashItem> {
-    let client = client_items();
-    let mut items: Vec<SlashItem> = daemon
+    let mut items = client_items();
+    let claimed = |name: &str| {
+        items
+            .iter()
+            .any(|item| item.name == name || item.aliases.iter().any(|alias| alias == name))
+    };
+    let daemon: Vec<SlashItem> = daemon
         .iter()
-        .filter(|command| !client.iter().any(|item| item.name == command.name))
+        .filter(|command| !claimed(&command.name))
         .map(|command| SlashItem {
             name: command.name.clone(),
             description: command.description.clone(),
@@ -61,7 +66,7 @@ pub fn menu_items(daemon: &[SlashCommand]) -> Vec<SlashItem> {
             client: None,
         })
         .collect();
-    items.extend(client);
+    items.extend(daemon);
     items
 }
 
@@ -127,6 +132,17 @@ pub fn resolve_client_command(text: &str, attachments: usize) -> Option<ClientCo
         .and_then(|item| item.client)
 }
 
+/// The step an arrow key makes through the matches, best first. The menu draws the best match
+/// at the bottom, next to the input (`orderAutocompleteOptions` "above-input"), so Up moves to
+/// the next worse match.
+pub fn arrow_delta(key: &str) -> Option<isize> {
+    match key {
+        "up" => Some(1),
+        "down" => Some(-1),
+        _ => None,
+    }
+}
+
 /// The key a menu step moves to: `delta` rows from `active`, wrapping at both ends.
 pub fn step(active: usize, len: usize, delta: isize) -> usize {
     if len == 0 {
@@ -164,17 +180,17 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_query_lists_everything_daemon_commands_first() {
+    fn an_empty_query_lists_everything_client_commands_first() {
         let items = menu_items(&daemon(&["review", "init"]));
         let all = filter_items(&items, "");
-        assert_eq!(names(&all), ["review", "init", "exit", "clear"]);
+        assert_eq!(names(&all), ["exit", "clear", "review", "init"]);
     }
 
     #[test]
-    fn a_client_command_hides_a_daemon_command_of_the_same_name() {
-        let items = menu_items(&daemon(&["clear", "review"]));
+    fn a_client_command_hides_a_daemon_command_of_its_name_or_alias() {
+        let items = menu_items(&daemon(&["clear", "review", "q"]));
         let all = filter_items(&items, "");
-        assert_eq!(names(&all), ["review", "exit", "clear"]);
+        assert_eq!(names(&all), ["exit", "clear", "review"]);
         assert!(
             items
                 .iter()
@@ -201,8 +217,8 @@ mod tests {
     #[test]
     fn picking_a_daemon_command_leaves_room_for_arguments() {
         let items = menu_items(&daemon(&["review"]));
-        assert_eq!(insert_text(&items[0]), "/review ");
-        assert_eq!(insert_text(&items[1]), "/exit");
+        assert_eq!(insert_text(&items[0]), "/exit");
+        assert_eq!(insert_text(&items[2]), "/review ");
     }
 
     #[test]
@@ -224,6 +240,14 @@ mod tests {
         assert_eq!(resolve_client_command("/review", 0), None);
         assert_eq!(resolve_client_command("/", 0), None);
         assert_eq!(resolve_client_command("exit", 0), None);
+    }
+
+    #[test]
+    fn up_moves_away_from_the_best_match_at_the_bottom() {
+        // Matches best first: 0 is the bottom row, drawn next to the input.
+        assert_eq!(step(0, 3, arrow_delta("up").unwrap()), 1);
+        assert_eq!(step(0, 3, arrow_delta("down").unwrap()), 2);
+        assert_eq!(arrow_delta("tab"), None);
     }
 
     #[test]

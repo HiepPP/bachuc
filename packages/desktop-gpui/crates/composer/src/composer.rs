@@ -6,8 +6,8 @@ use crate::actions::{
 };
 use crate::attachments::{Attachment, can_send, mime_for_path};
 use crate::slash::{
-    ClientCommand, SlashItem, filter_items, insert_text, menu_items, resolve_client_command,
-    slash_query, step,
+    ClientCommand, SlashItem, arrow_delta, filter_items, insert_text, menu_items,
+    resolve_client_command, slash_query, step,
 };
 use bachuc_client::{
     AgentControls, Client, ClientEvent, QueuedPrompt, SlashCommand, ThinkingControls,
@@ -17,7 +17,7 @@ use bachuc_theme::metrics::{
     FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, RADIUS_2XL, RADIUS_LG, RADIUS_MD, SPACE_1,
     SPACE_1_5, SPACE_2, SPACE_3,
 };
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
 use gpui_kit::component::input::{InputEvent, Position, Textarea, TextareaState};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::theme::Theme;
@@ -26,11 +26,22 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// Size of the round toolbar buttons (attach, send, stop) and of the pills.
 const CONTROL: f32 = 28.;
-/// Electron draws the stop button with `palette.red[600]`, which the theme crate does not carry.
+/// Electron draws the stop button with `palette.red[600]` in every theme. The theme crate carries
+/// that value only as the light terminal red (`ansi[1]`), which is a different role.
 const STOP_RED: u32 = 0xdc2626;
+/// `composer.placeholders.desktop` in `packages/app/src/i18n/resources/en.ts`.
+const PLACEHOLDER: &str = "Message the agent, tag @files, or use /commands and /skills";
+/// The model pill icon size: the toolbar glyph size.
+const GLYPH: f32 = 14.;
+/// The slash list height cap: the `Autocomplete` default `maxHeight`.
+const SLASH_MAX_HEIGHT: f32 = 220.;
+/// Electron's `ClaudeIcon`, a filled logo. `bachuc_icons` carries only lucide stroke icons, so
+/// the composer draws it as an SVG image with the fill color written in.
+const CLAUDE_LOGO: &str = include_str!("../assets/claude.svg");
 
 /// What a `Composer` tells its owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,11 +59,17 @@ struct Watched {
     thinking: Option<ThinkingControls>,
     queued: Vec<QueuedPrompt>,
     supports_queue: bool,
+    provider: Option<String>,
 }
 
 impl Watched {
     fn read(client: &Client, agent_id: &str) -> Self {
         Self {
+            provider: client
+                .agents()
+                .iter()
+                .find(|agent| agent.id == agent_id)
+                .map(|agent| agent.provider.clone()),
             controls: client.agent_controls(agent_id),
             thinking: client.agent_thinking(agent_id),
             queued: client.queued_prompts(agent_id),
@@ -88,6 +105,9 @@ pub struct Composer {
     slash_active: usize,
     /// Escape closed the menu for the text being typed.
     slash_dismissed: bool,
+    slash_scroll: ScrollHandle,
+    /// The provider logo drawn in the last fill color; rebuilt when the theme changes it.
+    logo: Option<(Hsla, Arc<Image>)>,
     /// The row limit the input was last given, from the window height.
     max_rows: usize,
     _subscriptions: Vec<Subscription>,
@@ -106,7 +126,7 @@ impl Composer {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .auto_grow(1, max_rows)
-                .placeholder("Message")
+                .placeholder(PLACEHOLDER)
                 .submit_on_enter(true)
         });
         let watched = Watched::read(client.read(cx), &agent_id);
@@ -164,6 +184,8 @@ impl Composer {
             commands_state: CommandsState::NotLoaded,
             slash_active: 0,
             slash_dismissed: false,
+            slash_scroll: ScrollHandle::new(),
+            logo: None,
             max_rows,
             _subscriptions: subscriptions,
         }
@@ -195,7 +217,9 @@ impl Composer {
                 self.commands_state = CommandsState::NotLoaded;
             }
         }
+        // The best match sits at the bottom, next to the input, as Electron pins the list there.
         self.slash_active = 0;
+        self.slash_scroll.scroll_to_bottom();
         cx.notify();
     }
 
@@ -251,9 +275,15 @@ impl Composer {
             return false;
         }
         let active = self.slash_active.min(matches.len() - 1);
+        if let Some(delta) = arrow_delta(key) {
+            self.slash_active = step(active, matches.len(), delta);
+            // Rows draw worst first, so the match at `slash_active` is row `len - 1 - active`.
+            self.slash_scroll
+                .scroll_to_item(matches.len() - 1 - self.slash_active);
+            cx.notify();
+            return true;
+        }
         match key {
-            "down" => self.slash_active = step(active, matches.len(), 1),
-            "up" => self.slash_active = step(active, matches.len(), -1),
             "tab" => self.pick(&matches[active], window, cx),
             "escape" => self.slash_dismissed = true,
             _ => return false,
@@ -417,8 +447,27 @@ impl Composer {
         took
     }
 
+    /// The model pill icon: the provider logo, or `Bot` as Electron's `getProviderIcon` falls
+    /// back to. Only the Claude logo is carried here.
+    fn model_glyph(&mut self, color: Hsla) -> Glyph {
+        if self.watched.provider.as_deref() != Some("claude") {
+            return Glyph::Icon(IconName::Bot);
+        }
+        match &self.logo {
+            Some((drawn, image)) if *drawn == color => Glyph::Image(image.clone()),
+            _ => {
+                let image = Arc::new(Image::from_bytes(
+                    ImageFormat::Svg,
+                    filled_svg(CLAUDE_LOGO, color).into_bytes(),
+                ));
+                self.logo = Some((color, image.clone()));
+                Glyph::Image(image)
+            }
+        }
+    }
+
     /// The pills, in the Electron order: model, thinking, mode.
-    fn pills(&self) -> Vec<AnyElement> {
+    fn pills(&self, model_glyph: Glyph) -> Vec<AnyElement> {
         let controls = self.watched.controls.clone().unwrap_or(AgentControls {
             modes: Vec::new(),
             current_mode: None,
@@ -432,7 +481,7 @@ impl Composer {
         pills.push(choice_pill(
             "composer-model",
             "Model",
-            IconName::Bot,
+            model_glyph,
             controls.models,
             controls.current_model,
             "Model",
@@ -444,7 +493,7 @@ impl Composer {
             pills.push(choice_pill(
                 "composer-thinking",
                 "Thinking",
-                IconName::Brain,
+                Glyph::Icon(IconName::Brain),
                 thinking.options,
                 thinking.current,
                 "Thinking",
@@ -452,18 +501,38 @@ impl Composer {
             ));
         }
 
-        let (client, agent_id) = (self.client.clone(), self.agent_id.clone());
-        pills.push(choice_pill(
-            "composer-mode",
-            "Mode",
-            IconName::ShieldCheck,
-            controls.modes,
-            controls.current_mode,
-            "Mode",
-            move |id, cx| client.update(cx, |c, cx| c.set_mode(&agent_id, id, cx)),
-        ));
+        // `AgentModeControl` renders nothing while the agent reports no modes (a closed agent).
+        if !controls.modes.is_empty() {
+            let (client, agent_id) = (self.client.clone(), self.agent_id.clone());
+            pills.push(choice_pill(
+                "composer-mode",
+                "Mode",
+                Glyph::Icon(IconName::ShieldCheck),
+                controls.modes,
+                controls.current_mode,
+                "Mode",
+                move |id, cx| client.update(cx, |c, cx| c.set_mode(&agent_id, id, cx)),
+            ));
+        }
         pills
     }
+}
+
+/// The SVG with its `{FILL}` and `{OPACITY}` placeholders set to `color`.
+fn filled_svg(template: &str, color: Hsla) -> String {
+    let rgba = Rgba::from(color);
+    let channel = |value: f32| (value.clamp(0., 1.) * 255.).round() as u8;
+    template
+        .replace(
+            "{FILL}",
+            &format!(
+                "#{:02x}{:02x}{:02x}",
+                channel(rgba.r),
+                channel(rgba.g),
+                channel(rgba.b)
+            ),
+        )
+        .replace("{OPACITY}", &format!("{:.3}", rgba.a.clamp(0., 1.)))
 }
 
 /// The text to send, or `None` when there is nothing to send: blank text and no image.
@@ -517,12 +586,19 @@ fn round_button(
         .child(icon(glyph).text_color(foreground))
 }
 
+/// The icon of a pill: a lucide icon tinted by the pill, or an image drawn in its own color.
+#[derive(Clone)]
+enum Glyph {
+    Icon(IconName),
+    Image(Arc<Image>),
+}
+
 /// The trigger of a pill: an icon and the current value, 28 px high and fully round.
 #[derive(IntoElement)]
 struct PillTrigger {
     id: ElementId,
     kind: &'static str,
-    glyph: IconName,
+    glyph: Glyph,
     label: String,
     disabled: bool,
     open: bool,
@@ -561,11 +637,13 @@ impl RenderOnce for PillTrigger {
             .when(!disabled, |pill| {
                 pill.cursor_pointer().hover(|pill| pill.bg(t.surface2))
             })
-            .child(
-                icon(self.glyph)
-                    .with_size(px(14.))
-                    .text_color(t.foreground_muted),
-            )
+            .child(match self.glyph {
+                Glyph::Icon(name) => icon(name)
+                    .with_size(px(GLYPH))
+                    .text_color(t.foreground_muted)
+                    .into_any_element(),
+                Glyph::Image(image) => img(image).flex_none().size(px(GLYPH)).into_any_element(),
+            })
             .child(div().truncate().max_w(px(160.)).child(self.label))
     }
 }
@@ -576,7 +654,7 @@ type PickFn = Rc<dyn Fn(&str, &mut App)>;
 fn choice_pill(
     id: &'static str,
     kind: &'static str,
-    glyph: IconName,
+    glyph: Glyph,
     choices: Vec<(String, String)>,
     current: Option<String>,
     fallback: &str,
@@ -659,16 +737,19 @@ impl Composer {
         let size = ui_font_size(FONT_BASE, cx);
         let small = ui_font_size(FONT_SM, cx);
         let active = self.slash_active.min(matches.len() - 1);
-        let rows = matches.iter().enumerate().map(|(ix, item)| {
+        // `matches` is best first. Electron draws it reversed, so the best match sits at the
+        // bottom next to the input, and selects it.
+        let rows = matches.iter().enumerate().rev().map(|(ix, item)| {
             let picked = item.clone();
             h_flex()
                 .id(("composer-slash-item", ix))
                 .role(Role::MenuItem)
                 .aria_label(format!("/{}, {}", item.name, item.description))
                 .aria_selected(ix == active)
+                .min_h(px(36.))
                 .px(px(SPACE_3))
-                .py(px(SPACE_1_5))
-                .gap(px(SPACE_3))
+                .py(px(SPACE_2))
+                .gap(px(SPACE_2))
                 .items_center()
                 .cursor_pointer()
                 .text_size(size)
@@ -694,28 +775,62 @@ impl Composer {
                         .child(item.description.clone()),
                 )
         });
+        // The `detailCard` of `Autocomplete`: the selected command in full, in its own box.
+        let selected = &matches[active];
+        let detail = (!selected.description.is_empty()).then(|| {
+            v_flex()
+                .gap(px(SPACE_1))
+                .px(px(SPACE_3))
+                .py(px(SPACE_3))
+                .bg(t.surface1)
+                .border_1()
+                .border_color(t.border_accent)
+                .rounded(px(RADIUS_LG))
+                .shadow(vec![shadow(ShadowSize::Md, cx)])
+                .occlude()
+                .child(
+                    div()
+                        .text_size(size)
+                        .text_color(t.foreground)
+                        .child(format!("/{}", selected.name)),
+                )
+                .child(
+                    div()
+                        .text_size(small)
+                        .text_color(t.foreground_muted)
+                        .child(selected.description.clone()),
+                )
+        });
         // Above the surface, as an overlay: it takes no height from the layout.
         Some(
-            div()
+            v_flex()
                 .absolute()
                 .bottom_full()
                 .left_0()
                 .right_0()
                 .pb(px(SPACE_1))
+                .gap(px(SPACE_1))
+                .children(detail)
                 .child(
-                    v_flex()
-                        .id("composer-slash-menu")
-                        .role(Role::Menu)
-                        .aria_label("Slash commands")
-                        .occlude()
-                        .max_h(px(280.))
-                        .overflow_y_scroll()
-                        .py(px(SPACE_1))
-                        .bg(t.popover)
+                    div()
+                        .bg(t.surface1)
                         .border_1()
-                        .border_color(t.border)
+                        .border_color(t.border_accent)
                         .rounded(px(RADIUS_LG))
-                        .children(rows),
+                        .shadow(vec![shadow(ShadowSize::Md, cx)])
+                        .overflow_hidden()
+                        .occlude()
+                        .child(
+                            v_flex()
+                                .id("composer-slash-menu")
+                                .role(Role::Menu)
+                                .aria_label("Slash commands")
+                                .track_scroll(&self.slash_scroll)
+                                .max_h(px(SLASH_MAX_HEIGHT))
+                                .overflow_y_scroll()
+                                .py(px(SPACE_1))
+                                .children(rows),
+                        ),
                 ),
         )
     }
@@ -736,6 +851,7 @@ impl Render for Composer {
         let primary = primary_action(sendable, running);
         let content_size = ui_font_size(FONT_CONTENT, cx);
         let matches = self.slash_matches(cx);
+        let model_glyph = self.model_glyph(t.foreground_muted);
         let weak = cx.weak_entity();
 
         let queue = (!self.watched.queued.is_empty()).then(|| {
@@ -932,7 +1048,7 @@ impl Render for Composer {
                                             }),
                                         ),
                                     )
-                                    .children(self.pills()),
+                                    .children(self.pills(model_glyph)),
                             )
                             .children(primary_button),
                     ),
@@ -943,7 +1059,23 @@ impl Render for Composer {
 #[cfg(test)]
 mod tests {
     // Named imports: `use super::*` would bring in GPUI's `test` macro over `#[test]`.
-    use super::{outgoing_text, pill_label};
+    use super::{CLAUDE_LOGO, filled_svg, outgoing_text, pill_label};
+    use gpui_kit::{Hsla, Rgba};
+
+    #[test]
+    fn the_logo_takes_the_fill_color() {
+        let color: Hsla = Rgba {
+            r: 1.,
+            g: 0.5,
+            b: 0.,
+            a: 0.5,
+        }
+        .into();
+        let svg = filled_svg(CLAUDE_LOGO, color);
+        assert!(svg.contains(r##"fill="#ff8000""##), "{svg}");
+        assert!(svg.contains(r#"fill-opacity="0.500""#), "{svg}");
+        assert!(!svg.contains('{'));
+    }
 
     #[test]
     fn empty_text_with_no_image_sends_nothing() {
