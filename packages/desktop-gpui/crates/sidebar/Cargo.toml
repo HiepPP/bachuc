@@ -11,3 +11,10 @@ bachuc-icons = { path = "../icons" }
 bachuc-theme = { path = "../theme" }
 gpui-kit.workspace = true
 log = "0.4"
+
+# The fake daemon of the client tests, included by tests/fake_daemon.rs.
+[dev-dependencies]
+futures = "0.3"
+serde_json = "1"
+tungstenite = "0.24"
+uuid = { version = "1", features = ["v4"] }

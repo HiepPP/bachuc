@@ -5,7 +5,10 @@
 //! `components/sidebar-workspace-list.tsx`, `git/worktree-archive-warning.ts`, and
 //! `styles/identity-colors.ts` under `packages/app/src`.
 
-use bachuc_client::{AgentSummary, ChangedFile, ProjectNode, WorkspaceNode};
+use bachuc_client::{
+    AgentSummary, AttentionReason, ChangedFile, Client, ClientCore, DiffStat, ProjectNode,
+    WorkspaceNode,
+};
 use bachuc_theme::metrics::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -51,8 +54,112 @@ impl StatusBucket {
     }
 }
 
-/// `deriveAgentStateBucket`. The client does not expose `requiresAttention` or the attention
-/// reason yet, so the sidebar passes `false` and `None`; the other inputs are exact.
+/// What the tree reads from the client besides the project and agent lists. `Client` and
+/// `ClientCore` answer the same way, so a test can read a fake daemon without GPUI.
+pub trait TreeSource {
+    fn agent_attention(&self, agent_id: &str) -> Option<(bool, Option<AttentionReason>)>;
+    fn project_view_key(&self, project_id: &str) -> Option<String>;
+    fn workspace_diff_stat(&self, workspace_id: &str) -> Option<DiffStat>;
+    fn workspace_pinned_at(&self, workspace_id: &str) -> Option<String>;
+}
+
+impl TreeSource for Client {
+    fn agent_attention(&self, agent_id: &str) -> Option<(bool, Option<AttentionReason>)> {
+        Client::agent_attention(self, agent_id)
+    }
+
+    fn project_view_key(&self, project_id: &str) -> Option<String> {
+        Client::project_view_key(self, project_id)
+    }
+
+    fn workspace_diff_stat(&self, workspace_id: &str) -> Option<DiffStat> {
+        Client::workspace_diff_stat(self, workspace_id)
+    }
+
+    fn workspace_pinned_at(&self, workspace_id: &str) -> Option<String> {
+        Client::workspace_pinned_at(self, workspace_id)
+    }
+}
+
+impl TreeSource for ClientCore {
+    fn agent_attention(&self, agent_id: &str) -> Option<(bool, Option<AttentionReason>)> {
+        ClientCore::agent_attention(self, agent_id)
+    }
+
+    fn project_view_key(&self, project_id: &str) -> Option<String> {
+        ClientCore::project_view_key(self, project_id)
+    }
+
+    fn workspace_diff_stat(&self, workspace_id: &str) -> Option<DiffStat> {
+        ClientCore::workspace_diff_stat(self, workspace_id)
+    }
+
+    fn workspace_pinned_at(&self, workspace_id: &str) -> Option<String> {
+        ClientCore::workspace_pinned_at(self, workspace_id)
+    }
+}
+
+/// The client fields the rows need, read once per refresh. An id without an entry has none.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Facts {
+    /// Agent id to (requires attention, reason).
+    pub attention: HashMap<String, (bool, Option<AttentionReason>)>,
+    /// Project id to the key its letter color hashes (`projectKey`).
+    pub project_keys: HashMap<String, String>,
+    /// Workspace id to the (added, deleted) counts of its base-ref diff.
+    pub diff_stats: HashMap<String, (u32, u32)>,
+    /// Workspace id to the ISO time it was pinned.
+    pub pinned_at: HashMap<String, String>,
+}
+
+impl Facts {
+    pub fn read(
+        source: &impl TreeSource,
+        projects: &[ProjectNode],
+        agents: &[AgentSummary],
+    ) -> Facts {
+        let mut facts = Facts::default();
+        for agent in agents {
+            if let Some(attention) = source.agent_attention(&agent.id) {
+                facts.attention.insert(agent.id.clone(), attention);
+            }
+        }
+        for project in projects {
+            if let Some(key) = source.project_view_key(&project.id) {
+                facts.project_keys.insert(project.id.clone(), key);
+            }
+            for node in &project.workspaces {
+                if let Some(stat) = source.workspace_diff_stat(&node.id) {
+                    facts
+                        .diff_stats
+                        .insert(node.id.clone(), (stat.additions, stat.deletions));
+                }
+                if let Some(at) = source.workspace_pinned_at(&node.id) {
+                    facts.pinned_at.insert(node.id.clone(), at);
+                }
+            }
+        }
+        facts
+    }
+
+    /// The key a project's letter color hashes: the view key, else the project id.
+    fn color_key(&self, project_id: &str) -> String {
+        self.project_keys
+            .get(project_id)
+            .cloned()
+            .unwrap_or_else(|| project_id.to_string())
+    }
+}
+
+fn reason_name(reason: AttentionReason) -> &'static str {
+    match reason {
+        AttentionReason::Finished => "finished",
+        AttentionReason::Error => "error",
+        AttentionReason::Permission => "permission",
+    }
+}
+
+/// `deriveAgentStateBucket`.
 pub fn bucket_for_agent(
     status: &str,
     pending_permissions: usize,
@@ -81,12 +188,28 @@ pub fn most_urgent(buckets: impl IntoIterator<Item = StatusBucket>) -> StatusBuc
         .unwrap_or(StatusBucket::Done)
 }
 
-fn workspace_bucket(node: &WorkspaceNode, agents: &HashMap<&str, &AgentSummary>) -> StatusBucket {
+fn workspace_bucket(
+    node: &WorkspaceNode,
+    agents: &HashMap<&str, &AgentSummary>,
+    facts: &Facts,
+) -> StatusBucket {
     most_urgent(
         node.agent_ids
             .iter()
             .filter_map(|id| agents.get(id.as_str()))
-            .map(|agent| bucket_for_agent(&agent.status, agent.pending_permissions, false, None)),
+            .map(|agent| {
+                let (requires_attention, reason) = facts
+                    .attention
+                    .get(&agent.id)
+                    .copied()
+                    .unwrap_or((false, None));
+                bucket_for_agent(
+                    &agent.status,
+                    agent.pending_permissions,
+                    requires_attention,
+                    reason.map(reason_name),
+                )
+            }),
     )
 }
 
@@ -106,6 +229,8 @@ pub struct ProjectRow {
     /// The most urgent bucket of the project's workspaces. The view shows it only while the
     /// project is collapsed, because open rows show their own.
     pub bucket: StatusBucket,
+    /// The key the letter color hashes.
+    pub color_key: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -116,8 +241,13 @@ pub struct WorkspaceRow {
     pub branch: Option<String>,
     pub pinned: bool,
     pub bucket: StatusBucket,
+    /// The (added, deleted) counts at the right of the row. `None` shows nothing; `(0, 0)` shows
+    /// `+0 -0`, as Electron does.
+    pub diff: Option<(u32, u32)>,
     pub project_id: String,
     pub project_name: String,
+    /// The key the project letter color hashes, for the pinned rows that lead with it.
+    pub color_key: String,
     pub group: Group,
     /// The last row of a section, which keeps extra space under it.
     pub block_end: bool,
@@ -184,6 +314,7 @@ fn workspace_row(
     node: &WorkspaceNode,
     group: Group,
     agents: &HashMap<&str, &AgentSummary>,
+    facts: &Facts,
 ) -> WorkspaceRow {
     WorkspaceRow {
         id: node.id.clone(),
@@ -191,9 +322,11 @@ fn workspace_row(
         cwd: node.cwd.clone(),
         branch: node.branch.clone(),
         pinned: node.pinned,
-        bucket: workspace_bucket(node, agents),
+        bucket: workspace_bucket(node, agents, facts),
+        diff: facts.diff_stats.get(&node.id).copied(),
         project_id: project.id.clone(),
         project_name: project.name.clone(),
+        color_key: facts.color_key(&project.id),
         group,
         block_end: false,
     }
@@ -297,10 +430,13 @@ fn sorted(projects: &[ProjectNode]) -> Vec<ProjectNode> {
 }
 
 /// The rows of the tree, top to bottom: the pinned section (when any workspace is pinned), then
-/// "Workspaces" with each project and its unpinned workspaces, in the Electron sort order.
+/// "Workspaces" with each project and its unpinned workspaces, in the Electron sort order. The
+/// pinned rows go by `pinnedAt`, newest first, and keep the tree order when the times are equal
+/// or missing.
 pub fn build_rows(
     projects: &[ProjectNode],
     agents: &[AgentSummary],
+    facts: &Facts,
     state: &ViewState,
 ) -> Vec<Row> {
     if projects.is_empty() {
@@ -310,9 +446,7 @@ pub fn build_rows(
     let by_id: HashMap<&str, &AgentSummary> = agents.iter().map(|a| (a.id.as_str(), a)).collect();
     let mut rows = Vec::new();
 
-    // Electron orders pinned rows by `pinnedAt`, newest first; the client does not expose it,
-    // so they keep the tree order.
-    let pinned: Vec<WorkspaceRow> = projects
+    let mut pinned: Vec<WorkspaceRow> = projects
         .iter()
         .flat_map(|project| {
             let by_id = &by_id;
@@ -320,9 +454,18 @@ pub fn build_rows(
                 .workspaces
                 .iter()
                 .filter(|node| node.pinned)
-                .map(move |node| workspace_row(project, node, Group::Pinned, by_id))
+                .map(move |node| workspace_row(project, node, Group::Pinned, by_id, facts))
         })
         .collect();
+    // `sortPinnedChats`: a missing time compares as "", and the sort is stable.
+    let pinned_at = |row: &WorkspaceRow| {
+        facts
+            .pinned_at
+            .get(&row.id)
+            .map(String::as_str)
+            .unwrap_or_default()
+    };
+    pinned.sort_by(|left, right| pinned_at(right).cmp(pinned_at(left)));
     if !pinned.is_empty() {
         rows.push(Row::PinnedHeader {
             collapsed: state.pinned_collapsed,
@@ -339,7 +482,15 @@ pub fn build_rows(
             .workspaces
             .iter()
             .filter(|node| !node.pinned)
-            .map(|node| workspace_row(project, node, Group::Project(project.id.clone()), &by_id))
+            .map(|node| {
+                workspace_row(
+                    project,
+                    node,
+                    Group::Project(project.id.clone()),
+                    &by_id,
+                    facts,
+                )
+            })
             .collect();
         let collapsed = state.collapsed_projects.contains(&project.id);
         rows.push(Row::Project(ProjectRow {
@@ -351,8 +502,9 @@ pub fn build_rows(
                 project
                     .workspaces
                     .iter()
-                    .map(|node| workspace_bucket(node, &by_id)),
+                    .map(|node| workspace_bucket(node, &by_id, facts)),
             ),
+            color_key: facts.color_key(&project.id),
         }));
         if !collapsed && !items.is_empty() {
             push_section(&mut rows, Group::Project(project.id.clone()), items, state);
@@ -403,6 +555,21 @@ pub fn archive_prompt(workspace_name: &str, files: &[ChangedFile]) -> Option<Arc
     }
     let added: u32 = files.iter().map(|file| file.added).sum();
     let removed: u32 = files.iter().map(|file| file.removed).sum();
+    Some(archive_confirm(workspace_name, added, removed))
+}
+
+/// The same confirm from the workspace `diffStat`, which needs no request: Electron treats a
+/// workspace as risky when the daemon gives no dirty flag and the stat has a changed line.
+/// `None` and `0/0` archive at once.
+pub fn archive_prompt_for_stat(
+    workspace_name: &str,
+    stat: Option<(u32, u32)>,
+) -> Option<ArchivePrompt> {
+    let (added, removed) = stat.filter(|(added, removed)| added + removed > 0)?;
+    Some(archive_confirm(workspace_name, added, removed))
+}
+
+fn archive_confirm(workspace_name: &str, added: u32, removed: u32) -> ArchivePrompt {
     let mut parts = Vec::new();
     if added > 0 {
         parts.push(lines(added, "added line", "added lines"));
@@ -415,19 +582,10 @@ pub fn archive_prompt(workspace_name: &str, files: &[ChangedFile]) -> Option<Arc
     } else {
         format!("Uncommitted changes ({})", parts.join(", "))
     };
-    Some(ArchivePrompt {
+    ArchivePrompt {
         title: format!("Archive \"{workspace_name}\"?"),
         message,
-    })
-}
-
-/// The `+added -removed` counts at the right of a workspace row. Electron reads the workspace
-/// `diffStat`, which the client does not expose, so the sidebar sums the uncommitted changed
-/// files of the checkout. A clean checkout gives `None` and the row shows nothing.
-pub fn diff_stat(files: &[ChangedFile]) -> Option<(u32, u32)> {
-    let added: u32 = files.iter().map(|file| file.added).sum();
-    let removed: u32 = files.iter().map(|file| file.removed).sum();
-    (added + removed > 0).then_some((added, removed))
+    }
 }
 
 /// `formatDiffCount`: `Intl.NumberFormat("en-US", { notation: "compact",
@@ -461,7 +619,8 @@ pub const IDENTITY_COLORS: [u32; 10] = [
 ];
 
 /// `deriveIdentityColorName`: a hash of the key (31 times the hash plus each UTF-16 unit, kept
-/// in 32 bits) picks one of the ten colors.
+/// in 32 bits) picks one of the ten colors. The key is the project view key, see
+/// [`Facts::project_keys`].
 pub fn identity_color(key: &str) -> u32 {
     let mut hash: u32 = 0;
     for character in key.chars() {

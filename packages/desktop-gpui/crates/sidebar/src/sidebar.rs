@@ -6,9 +6,9 @@
 //! that keeps every row's height redraws without a new measure.
 
 use crate::model::{
-    Group, ProjectRow, Row, RowShape, StatusBucket, ViewState, WorkspaceRow, archive_prompt,
-    build_rows, changed_range, clamp_width, diff_stat, format_diff_count, identity_color,
-    project_initial, workspace_label,
+    Facts, Group, ProjectRow, Row, RowShape, StatusBucket, ViewState, WorkspaceRow,
+    archive_prompt_for_stat, build_rows, changed_range, clamp_width, format_diff_count,
+    identity_color, project_initial, workspace_label,
 };
 use crate::ring::{FRAME as RING_FRAME, Knockout, RunningRing};
 use bachuc_client::{Client, ClientEvent, DirectoryEvent};
@@ -142,9 +142,6 @@ pub struct Sidebar {
     width: f32,
     rings: HashMap<String, Entity<RunningRing>>,
     archiving: HashSet<String>,
-    /// The diff counts of each shown checkout by cwd. A key without a value is a clean checkout,
-    /// a failed read, or a read in flight.
-    diffs: HashMap<String, Option<(u32, u32)>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -159,10 +156,7 @@ impl Sidebar {
             }),
             cx.subscribe(&client, |this, _, event: &DirectoryEvent, cx| match event {
                 DirectoryEvent::ProjectsChanged => this.refresh(cx),
-                // Only the explorer watches a checkout; its changes reach the sidebar too.
-                DirectoryEvent::CheckoutChanged { cwd } if this.diffs.contains_key(cwd) => {
-                    this.fetch_diff(cwd.clone(), cx)
-                }
+                // The daemon pushes the diff counts with each workspace update.
                 DirectoryEvent::CheckoutChanged { .. } => {}
             }),
             // set_theme and set_font_scale write the gpui-kit theme global.
@@ -178,7 +172,6 @@ impl Sidebar {
             width: SIDEBAR_WIDTH,
             rings: HashMap::new(),
             archiving: HashSet::new(),
-            diffs: HashMap::new(),
             _subscriptions: subscriptions,
         };
         sidebar.refresh(cx);
@@ -204,7 +197,8 @@ impl Sidebar {
             // Nothing to say before the first answer.
             Vec::new()
         } else {
-            build_rows(client.projects(), client.agents(), &self.state)
+            let facts = Facts::read(client, client.projects(), client.agents());
+            build_rows(client.projects(), client.agents(), &facts, &self.state)
         };
         if rows == self.rows {
             return;
@@ -228,61 +222,9 @@ impl Sidebar {
         }
         let live: HashSet<String> = rows.iter().filter_map(ring_key).collect();
         self.rings.retain(|key, _| live.contains(key));
-        // Read a checkout when it first shows, and again when a turn in it ends.
-        let was_running: HashSet<&str> = self
-            .rows
-            .iter()
-            .filter_map(|row| match row {
-                Row::Workspace(w) if w.bucket == StatusBucket::Running => Some(w.id.as_str()),
-                _ => None,
-            })
-            .collect();
-        let mut shown = HashSet::new();
-        let mut stale = HashSet::new();
-        for row in &rows {
-            if let Row::Workspace(w) = row {
-                shown.insert(w.cwd.clone());
-                let ended =
-                    was_running.contains(w.id.as_str()) && w.bucket != StatusBucket::Running;
-                if ended || !self.diffs.contains_key(&w.cwd) {
-                    stale.insert(w.cwd.clone());
-                }
-            }
-        }
-        self.diffs.retain(|cwd, _| shown.contains(cwd));
-        for cwd in stale {
-            self.fetch_diff(cwd, cx);
-        }
         self.shapes = shapes;
         self.rows = rows;
         cx.notify();
-    }
-
-    fn fetch_diff(&mut self, cwd: String, cx: &mut Context<Self>) {
-        self.diffs.entry(cwd.clone()).or_insert(None);
-        let status = self
-            .client
-            .update(cx, |client, cx| client.checkout_status(&cwd, cx));
-        cx.spawn(async move |this, cx| {
-            let stat = match status.await {
-                Ok(status) => diff_stat(&status.files),
-                Err(error) => {
-                    log::debug!("checkout status of {cwd} failed: {error}");
-                    None
-                }
-            };
-            this.update(cx, |this, cx| {
-                // A row that went away meanwhile keeps no entry.
-                if let Some(slot) = this.diffs.get_mut(&cwd)
-                    && *slot != stat
-                {
-                    *slot = stat;
-                    cx.notify();
-                }
-            })
-            .ok();
-        })
-        .detach();
     }
 
     fn toggle_project(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -363,55 +305,39 @@ impl Sidebar {
         window.push_notification("Path copied", cx);
     }
 
-    /// Asks for a confirm only when the checkout lists changed files; a clean workspace goes at
-    /// once. A failed status read also goes at once, as Electron does with no risk data.
-    fn archive(
-        &mut self,
-        id: String,
-        name: String,
-        cwd: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// Asks for a confirm only when the workspace diff stat has a changed line; a clean workspace
+    /// goes at once. The stat comes with the workspace, so the menu sends no request.
+    fn archive(&mut self, id: String, name: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.archiving.contains(&id) {
             return;
         }
-        let status = self
+        let stat = self
             .client
-            .update(cx, |client, cx| client.checkout_status(&cwd, cx));
-        cx.spawn_in(window, async move |this, cx| {
-            let files = match status.await {
-                Ok(status) => status.files,
-                Err(error) => {
-                    log::warn!("checkout status of {cwd} failed: {error}");
-                    Vec::new()
-                }
-            };
-            this.update_in(cx, |this, window, cx| match archive_prompt(&name, &files) {
-                None => this.start_archive(id, cx),
-                Some(prompt) => {
-                    let weak = cx.weak_entity();
-                    window.open_alert_dialog(cx, move |dialog, _, _| {
-                        let weak = weak.clone();
-                        let id = id.clone();
-                        dialog
-                            .title(prompt.title.clone())
-                            .description(prompt.message.clone())
-                            .confirm()
-                            .ok_text("Archive")
-                            .ok_variant(ButtonVariant::Danger)
-                            .cancel_text("Cancel")
-                            .on_ok(move |_, _, cx| {
-                                let id = id.clone();
-                                weak.update(cx, |this, cx| this.start_archive(id, cx)).ok();
-                                true
-                            })
-                    });
-                }
-            })
-            .ok();
-        })
-        .detach();
+            .read(cx)
+            .workspace_diff_stat(&id)
+            .map(|stat| (stat.additions, stat.deletions));
+        match archive_prompt_for_stat(&name, stat) {
+            None => self.start_archive(id, cx),
+            Some(prompt) => {
+                let weak = cx.weak_entity();
+                window.open_alert_dialog(cx, move |dialog, _, _| {
+                    let weak = weak.clone();
+                    let id = id.clone();
+                    dialog
+                        .title(prompt.title.clone())
+                        .description(prompt.message.clone())
+                        .confirm()
+                        .ok_text("Archive")
+                        .ok_variant(ButtonVariant::Danger)
+                        .cancel_text("Cancel")
+                        .on_ok(move |_, _, cx| {
+                            let id = id.clone();
+                            weak.update(cx, |this, cx| this.start_archive(id, cx)).ok();
+                            true
+                        })
+                });
+            }
+        }
     }
 
     fn start_archive(&mut self, id: String, cx: &mut Context<Self>) {
@@ -549,7 +475,7 @@ impl Sidebar {
                 div()
                     .group_hover(group.clone(), |style| style.invisible())
                     .child(project_icon(
-                        &project.id,
+                        &project.color_key,
                         &project.name,
                         badge,
                         ring,
@@ -662,7 +588,7 @@ impl Sidebar {
                 .items_center()
                 .justify_center()
                 .child(project_icon(
-                    &row.project_id,
+                    &row.color_key,
                     &row.project_name,
                     badge,
                     ring,
@@ -692,28 +618,24 @@ impl Sidebar {
             .group_hover(group.clone(), |style| style.text_color(t.foreground))
             .child(row.name.clone());
         // `DiffStat` in the trailing slot: 4 px apart, small type, the status colors.
-        let diff = self
-            .diffs
-            .get(&row.cwd)
-            .copied()
-            .flatten()
-            .map(|(added, removed)| {
-                h_flex()
-                    .flex_shrink_0()
-                    .h(px(LINE_HEIGHT))
-                    .gap(px(SPACE_1))
-                    .text_size(ui_font_size(FONT_SM, cx))
-                    .child(
-                        div()
-                            .text_color(t.status_success)
-                            .child(format!("+{}", format_diff_count(added))),
-                    )
-                    .child(
-                        div()
-                            .text_color(t.status_danger)
-                            .child(format!("-{}", format_diff_count(removed))),
-                    )
-            });
+        // A `0/0` stat shows `+0 -0`, as Electron does; no stat shows nothing.
+        let diff = row.diff.map(|(added, removed)| {
+            h_flex()
+                .flex_shrink_0()
+                .h(px(LINE_HEIGHT))
+                .gap(px(SPACE_1))
+                .text_size(ui_font_size(FONT_SM, cx))
+                .child(
+                    div()
+                        .text_color(t.status_success)
+                        .child(format!("+{}", format_diff_count(added))),
+                )
+                .child(
+                    div()
+                        .text_color(t.status_danger)
+                        .child(format!("-{}", format_diff_count(removed))),
+                )
+        });
         let click = div()
             .id(("workspace", ix))
             .role(Role::Button)
@@ -1110,9 +1032,8 @@ fn project_icon(
     t: &Tokens,
     _cx: &mut Context<Sidebar>,
 ) -> AnyElement {
-    // Electron hashes the project view key: the daemon `projectKey`, or `[serverId, projectId]`
-    // without one. The client exposes neither yet, so `key` is the project id and the color can
-    // differ from Electron's.
+    // `key` is the project view key: the daemon `projectKey`, or `[serverId, projectId]`
+    // without one. The project id stands in only when the client cannot give a key.
     let color: Rgba = rgb(identity_color(key));
     // `projectIconRadius`: a quarter of the box.
     let radius = (ICON_MD * 0.25).round();
@@ -1223,13 +1144,13 @@ fn workspace_menu(menu: PopupMenu, weak: &WeakEntity<Sidebar>, row: &WorkspaceRo
         row.id.clone(),
         move |this, id, _, cx| this.pin(&id, !pinned, cx),
     ));
-    let (name, cwd) = (row.name.clone(), row.cwd.clone());
+    let name = row.name.clone();
     menu.item(menu_item(
         "Archive",
         IconName::Archive,
         weak.clone(),
         row.id.clone(),
-        move |this, id, window, cx| this.archive(id, name.clone(), cwd.clone(), window, cx),
+        move |this, id, window, cx| this.archive(id, name.clone(), window, cx),
     ))
 }
 

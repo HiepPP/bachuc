@@ -682,8 +682,12 @@ dependencies = [
  "bachuc-client",
  "bachuc-icons",
  "bachuc-theme",
+ "futures",
  "gpui-kit",
  "log",
+ "serde_json",
+ "tungstenite",
+ "uuid",
 ]
 
 [[package]]

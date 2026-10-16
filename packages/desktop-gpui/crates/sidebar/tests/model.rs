@@ -1,5 +1,11 @@
-use bachuc_client::{AgentSummary, ChangedFile, ProjectNode, WorkspaceNode};
+use bachuc_client::{AgentSummary, AttentionReason, ChangedFile, ProjectNode, WorkspaceNode};
+use bachuc_sidebar::model::build_rows as build_rows_with;
 use bachuc_sidebar::model::*;
+
+/// The rows with no client fields: no attention, no key, no diff stat, no pin time.
+fn build_rows(projects: &[ProjectNode], agents: &[AgentSummary], state: &ViewState) -> Vec<Row> {
+    build_rows_with(projects, agents, &Facts::default(), state)
+}
 
 fn agent(id: &str, status: &str, pending: usize) -> AgentSummary {
     AgentSummary {
@@ -124,15 +130,7 @@ fn names_compare_without_case_and_with_numbers_by_value() {
 }
 
 #[test]
-fn diff_counts_sum_the_files_and_print_compact() {
-    assert_eq!(diff_stat(&[]), None);
-    assert_eq!(
-        diff_stat(&[file(0, 0)]),
-        None,
-        "a clean checkout shows nothing"
-    );
-    assert_eq!(diff_stat(&[file(50, 30), file(5, 5)]), Some((55, 35)));
-    assert_eq!(diff_stat(&[file(742, 0)]), Some((742, 0)));
+fn diff_counts_print_compact() {
     assert_eq!(format_diff_count(0), "0");
     assert_eq!(format_diff_count(999), "999");
     assert_eq!(format_diff_count(1000), "1k");
@@ -366,6 +364,195 @@ fn archive_asks_only_when_the_checkout_has_changed_files() {
     assert_eq!(prompt.message, "Uncommitted changes");
     let prompt = archive_prompt("main", &[file(1, 0)]).expect("risky");
     assert_eq!(prompt.message, "Uncommitted changes (1 added line)");
+}
+
+#[test]
+fn archive_from_the_diff_stat_asks_only_for_a_changed_line() {
+    assert_eq!(archive_prompt_for_stat("main", None), None, "no stat");
+    assert_eq!(
+        archive_prompt_for_stat("main", Some((0, 0))),
+        None,
+        "a 0/0 stat archives at once"
+    );
+    let prompt = archive_prompt_for_stat("main", Some((4, 1))).expect("risky");
+    assert_eq!(prompt.title, "Archive \"main\"?");
+    assert_eq!(
+        prompt.message,
+        "Uncommitted changes (4 added lines, 1 deleted line)"
+    );
+    let prompt = archive_prompt_for_stat("main", Some((0, 2))).expect("risky");
+    assert_eq!(prompt.message, "Uncommitted changes (2 deleted lines)");
+}
+
+/// The bucket of a workspace with one agent that has this status and attention data.
+fn attention_bucket(requires: bool, reason: Option<AttentionReason>, status: &str) -> StatusBucket {
+    let projects = [project("a", vec![workspace("a1", false, &["x"])])];
+    let mut facts = Facts::default();
+    facts.attention.insert("x".into(), (requires, reason));
+    let rows = build_rows_with(
+        &projects,
+        &[agent("x", status, 0)],
+        &facts,
+        &ViewState::default(),
+    );
+    let Some(Row::Workspace(row)) = rows.iter().find(|row| matches!(row, Row::Workspace(_))) else {
+        panic!("workspace row")
+    };
+    row.bucket
+}
+
+#[test]
+fn an_agent_that_needs_attention_shows_the_attention_status() {
+    use StatusBucket::*;
+    use bachuc_client::AttentionReason::*;
+    assert_eq!(attention_bucket(true, Some(Finished), "idle"), Attention);
+    assert_eq!(attention_bucket(true, None, "idle"), Attention);
+    assert_eq!(attention_bucket(false, None, "idle"), Done);
+    assert_eq!(attention_bucket(true, Some(Error), "idle"), Failed);
+    assert_eq!(attention_bucket(true, Some(Permission), "idle"), NeedsInput);
+    assert_eq!(
+        attention_bucket(true, Some(Finished), "running"),
+        Running,
+        "running outranks attention"
+    );
+
+    // An agent the client has no attention data for stays done.
+    let projects = [project("a", vec![workspace("a1", false, &["x"])])];
+    let rows = build_rows(&projects, &[agent("x", "idle", 0)], &ViewState::default());
+    assert!(matches!(&rows[2], Row::Workspace(w) if w.bucket == Done));
+
+    // A collapsed project takes the urgency of the workspace behind it.
+    let mut facts = Facts::default();
+    facts
+        .attention
+        .insert("x".into(), (true, Some(AttentionReason::Finished)));
+    let mut state = ViewState::default();
+    state.collapsed_projects.insert("a".into());
+    let rows = build_rows_with(&projects, &[agent("x", "idle", 0)], &facts, &state);
+    assert!(matches!(&rows[1], Row::Project(p) if p.bucket == Attention));
+}
+
+#[test]
+fn the_letter_color_hashes_the_project_key_and_falls_back_to_the_id() {
+    let projects = [
+        project("p1", vec![workspace("w1", true, &[])]),
+        project("p2", vec![workspace("w2", true, &[])]),
+    ];
+    let key = "remote:github.com/hieppp/claude-setting";
+    let mut facts = Facts::default();
+    facts.project_keys.insert("p1".into(), key.into());
+    let rows = build_rows_with(&projects, &[], &facts, &ViewState::default());
+    let keys: Vec<(&str, &str)> = rows
+        .iter()
+        .filter_map(|row| match row {
+            Row::Project(p) => Some((p.id.as_str(), p.color_key.as_str())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(keys, [("p1", key), ("p2", "p2")]);
+    let pinned: Vec<(&str, &str)> = rows
+        .iter()
+        .filter_map(|row| match row {
+            Row::Workspace(w) if w.group == Group::Pinned => {
+                Some((w.id.as_str(), w.color_key.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        pinned,
+        [("w1", key), ("w2", "p2")],
+        "pinned rows lead with it"
+    );
+    assert_eq!(
+        identity_color(key),
+        0xa4673a,
+        "the .claude project is orange"
+    );
+    assert_ne!(identity_color(key), identity_color("p1"));
+}
+
+#[test]
+fn a_row_shows_the_diff_stat_the_workspace_carries() {
+    let projects = [project(
+        "a",
+        vec![
+            workspace("none", false, &[]),
+            workspace("zero", false, &[]),
+            workspace("some", false, &[]),
+        ],
+    )];
+    let mut facts = Facts::default();
+    facts.diff_stats.insert("zero".into(), (0, 0));
+    facts.diff_stats.insert("some".into(), (12, 3));
+    let rows = build_rows_with(&projects, &[], &facts, &ViewState::default());
+    let diffs: Vec<(&str, Option<(u32, u32)>)> = rows
+        .iter()
+        .filter_map(|row| match row {
+            Row::Workspace(w) => Some((w.id.as_str(), w.diff)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        diffs,
+        [
+            ("none", None),
+            ("some", Some((12, 3))),
+            ("zero", Some((0, 0)))
+        ],
+        "no stat has no count; 0/0 keeps its row, which shows +0 -0"
+    );
+}
+
+#[test]
+fn pinned_rows_go_by_pinned_at_newest_first() {
+    let projects = [
+        project(
+            "a",
+            vec![
+                workspace("old", true, &[]),
+                workspace("new", true, &[]),
+                workspace("tie1", true, &[]),
+                workspace("tie2", true, &[]),
+                workspace("none", true, &[]),
+            ],
+        ),
+        project("b", vec![workspace("b-new", true, &[])]),
+    ];
+    let mut facts = Facts::default();
+    for (id, at) in [
+        ("old", "2026-10-01T00:00:00.000Z"),
+        ("new", "2026-10-09T00:00:00.000Z"),
+        ("tie1", "2026-10-05T00:00:00.000Z"),
+        ("tie2", "2026-10-05T00:00:00.000Z"),
+        ("b-new", "2026-10-12T00:00:00.000Z"),
+    ] {
+        facts.pinned_at.insert(id.into(), at.into());
+    }
+    let rows = build_rows_with(&projects, &[], &facts, &ViewState::default());
+    let pinned: Vec<String> = ids(&rows)
+        .into_iter()
+        .skip(1)
+        .take_while(|id| id != "title")
+        .collect();
+    // Tree order is name order: new, none, old, tie1, tie2. Equal times keep it; a missing
+    // time goes last.
+    assert_eq!(
+        pinned,
+        ["w:b-new", "w:new", "w:tie1", "w:tie2", "w:old", "w:none"]
+    );
+
+    // Without any time the rows keep the tree order.
+    let rows = build_rows(&projects, &[], &ViewState::default());
+    let pinned: Vec<String> = ids(&rows)
+        .into_iter()
+        .skip(1)
+        .take_while(|id| id != "title")
+        .collect();
+    assert_eq!(
+        pinned,
+        ["w:new", "w:none", "w:old", "w:tie1", "w:tie2", "w:b-new"]
+    );
 }
 
 #[test]
