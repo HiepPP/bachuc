@@ -12,6 +12,8 @@ pub struct SlashItem {
     pub aliases: Vec<String>,
     /// The client runs it; it never reaches the agent.
     pub client: Option<ClientCommand>,
+    /// A plugin runs it with its arguments; it never reaches the agent.
+    pub plugin: bool,
 }
 
 /// What a client command does when sent.
@@ -30,6 +32,7 @@ pub fn client_items() -> Vec<SlashItem> {
         description: description.to_string(),
         aliases: aliases.iter().map(|alias| alias.to_string()).collect(),
         client: Some(command),
+        plugin: false,
     };
     vec![
         item(
@@ -49,25 +52,69 @@ pub fn client_items() -> Vec<SlashItem> {
 
 /// The client commands first, then the daemon commands, as `mergeSlashCommandSources` does. A
 /// client command name or alias hides a daemon command of that name.
+#[cfg(test)]
 pub fn menu_items(daemon: &[SlashCommand]) -> Vec<SlashItem> {
+    merge_items(daemon, &[])
+}
+
+/// `mergeSlashCommandSources`: the built-in commands, then the plugin commands whose name no
+/// built-in name or alias claims, then the daemon commands no earlier entry claims. `plugins`
+/// are `(name, description)` in registration order.
+pub fn merge_items(daemon: &[SlashCommand], plugins: &[(String, String)]) -> Vec<SlashItem> {
     let mut items = client_items();
-    let claimed = |name: &str| {
+    let claimed = |items: &[SlashItem], name: &str| {
         items
             .iter()
             .any(|item| item.name == name || item.aliases.iter().any(|alias| alias == name))
     };
+    for (name, description) in plugins {
+        if claimed(&items, name) {
+            log::warn!("plugin slash command /{name} is hidden by a built-in command");
+            continue;
+        }
+        items.push(SlashItem {
+            name: name.clone(),
+            description: description.clone(),
+            aliases: Vec::new(),
+            client: None,
+            plugin: true,
+        });
+    }
     let daemon: Vec<SlashItem> = daemon
         .iter()
-        .filter(|command| !claimed(&command.name))
+        .filter(|command| !claimed(&items, &command.name))
         .map(|command| SlashItem {
             name: command.name.clone(),
             description: command.description.clone(),
             aliases: Vec::new(),
             client: None,
+            plugin: false,
         })
         .collect();
     items.extend(daemon);
     items
+}
+
+/// `resolvePluginClientSlashCommand`: with no attachment, `/name args` whose name is one of
+/// `names` gives that name and the trimmed arguments.
+pub fn resolve_plugin_command<'a>(
+    text: &str,
+    attachments: usize,
+    names: &[&'a str],
+) -> Option<(&'a str, String)> {
+    if attachments > 0 {
+        return None;
+    }
+    let rest = text.trim().strip_prefix('/')?;
+    let (name, args) = match rest.find(char::is_whitespace) {
+        Some(at) => (&rest[..at], rest[at..].trim()),
+        None => (rest, ""),
+    };
+    if name.is_empty() {
+        return None;
+    }
+    let name = names.iter().find(|candidate| **candidate == name)?;
+    Some((name, args.to_string()))
 }
 
 /// The text after the leading `/` while the user is still typing the command name. `None` when
@@ -240,6 +287,39 @@ mod tests {
         assert_eq!(resolve_client_command("/review", 0), None);
         assert_eq!(resolve_client_command("/", 0), None);
         assert_eq!(resolve_client_command("exit", 0), None);
+    }
+
+    #[test]
+    fn plugin_commands_sit_between_built_ins_and_daemon_commands() {
+        let plugins = vec![
+            ("clear".to_string(), "plugin clear".to_string()),
+            ("route".to_string(), "Route the turn".to_string()),
+        ];
+        let items = merge_items(&daemon(&["review", "route"]), &plugins);
+        let all = filter_items(&items, "");
+        // The plugin `/clear` hides behind the built-in; the daemon `/route` behind the plugin.
+        assert_eq!(names(&all), ["exit", "clear", "route", "review"]);
+        let route = items.iter().find(|item| item.name == "route").unwrap();
+        assert!(route.plugin && route.client.is_none());
+        assert_eq!(insert_text(route), "/route ");
+        let clear = items.iter().find(|item| item.name == "clear").unwrap();
+        assert!(clear.client.is_some() && !clear.plugin);
+    }
+
+    #[test]
+    fn a_plugin_command_takes_its_trimmed_arguments_without_attachments() {
+        let names = ["route"];
+        assert_eq!(
+            resolve_plugin_command("/route fast  ", 0, &names),
+            Some(("route", "fast".to_string()))
+        );
+        assert_eq!(
+            resolve_plugin_command(" /route", 0, &names),
+            Some(("route", String::new()))
+        );
+        assert_eq!(resolve_plugin_command("/route fast", 1, &names), None);
+        assert_eq!(resolve_plugin_command("/other fast", 0, &names), None);
+        assert_eq!(resolve_plugin_command("route fast", 0, &names), None);
     }
 
     #[test]

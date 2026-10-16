@@ -582,11 +582,16 @@ dependencies = [
 name = "bachuc-composer"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bachuc-client",
  "bachuc-command",
  "bachuc-icons",
+ "bachuc-plugin-host",
+ "bachuc-sidebar",
  "bachuc-theme",
  "base64 0.22.1",
+ "chrono",
+ "futures",
  "gpui-kit",
  "log",
  "serde_json",
