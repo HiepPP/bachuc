@@ -1,6 +1,6 @@
 # Autorun
 
-Started: 2026-10-15. The user reviews `feat/bachuc-gpui` and merges it to `main`.
+Started: 2026-10-16. The user reviews `feat/bachuc-gpui` and merges it to `main`.
 
 ## Config
 
@@ -10,6 +10,8 @@ branch_prefix: feat/
 forbidden_paths: .env* */.env* .dev/* */.dev.vars
 max_line: 100
 header_pattern: ^(feat|fix|docs|refactor|test|chore|perf)(\([a-z0-9-]+\))?: .+
+max_builders: 6
+build_dir_env: CARGO_TARGET_DIR
 ```
 
 ## Repo Rules
@@ -19,13 +21,14 @@ header_pattern: ^(feat|fix|docs|refactor|test|chore|perf)(\([a-z0-9-]+\))?: .+
 - Never send prompts to or create agents on release (6767) in a check. Live checks use port 6768 only.
 - Run one test file at a time with `npx vitest run <file> --bail=1`. Never run a full suite.
 - Run GitNexus `impact` before you edit an existing TypeScript symbol. Run `detect_changes` before each commit, per the root `CLAUDE.md`.
-- The gate has no `formatter` line. Format changed JS, TS, JSON, and markdown files with `npm run format:files -- <files>` before you stage; the lefthook pre-commit hook checks staged files. Format Rust with `packages/desktop-gpui/cargo.sh fmt`.
-- Use only `packages/desktop-gpui/cargo.sh` for cargo, so the rustup toolchain runs. Keep one shared `target` folder.
+- The gate has no `formatter` line. Format changed JS, TS, JSON, and markdown files with `npm run format:files -- <file> <file>`, one argument per file, before you stage; the lefthook pre-commit hook checks staged files. Format Rust with `packages/desktop-gpui/cargo.sh fmt`.
+- Use only `packages/desktop-gpui/cargo.sh` for cargo, so the rustup toolchain runs. A per-builder build folder goes under `packages/desktop-gpui/target/groups/<groupId>` through `CARGO_TARGET_DIR`, and only when the disk rule in the watchtower skill allows it (free disk was 14 GB and `target` was 22 GB on 2026-10-16, so builders share `target` until the owner frees disk).
 - Builders run Claude with `bypassPermissions`, because nobody answers a permission. They still obey every rule in this file.
 - Builders carry the label `watchtower.task=<first TASK ID of the group>` (Q-037).
-- Builders archive or kill every mock agent and terminal they create on live.
+- Builders run no screen check. They return each app screenshot, `cua_repl` step, AX tree read, and `measure.sh` read as `DEFERRED (UI checker)`.
+- Builders and the UI checker archive or kill every mock agent and terminal they create on live, except the run-start fixture.
 - Never push and never open a PR.
-- Skip: none. TASK-142 has one manual VoiceOver check; the builder records it as `UNVERIFIED (unattended)`.
+- Skip: none. TASK-156 has one manual VoiceOver check; record it as `UNVERIFIED (unattended)`.
 
 ## Verify Extras
 
@@ -37,6 +40,8 @@ header_pattern: ^(feat|fix|docs|refactor|test|chore|perf)(\([a-z0-9-]+\))?: .+
 
 - Start: none. The run uses the live daemon only when it is already running.
 - Stop: none.
+- Run-start fixtures: at run start, the lead starts one mock agent on live titled `gpui-age`: `npm run cli -- run --provider mock --model thirty-minute-stream --title gpui-age --cwd /tmp/gpui-bench -d -q "start bench"`. A CPU read that needs a turn age of about 15 minutes uses it when its age is 12 to 25 minutes. Otherwise the UI checker starts a fresh mock at the start of its run, does every other check while the mock ages, and takes the 15-minute reads last. The mock ends after 30 minutes. The lead stops and archives every `gpui-age` agent at Finish.
+- UI timeouts: pass `timeout_ms` to every `cua_repl` call and wrap each step in `Promise.race` with a 60-second limit. A screen lock folder `/tmp/gpui-ui-lock` older than 15 minutes is stale: break it with `find /tmp/gpui-ui-lock -maxdepth 0 -mmin +15 -exec rmdir {} \;` before waiting.
 - Destructive database steps: never.
 
 ## Known Failures

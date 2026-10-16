@@ -2,28 +2,29 @@
 
 ## Current Active Plan
 
-- Title: GPUI desktop client to replace the Electron UI
-- Slug: 20261015-gpui-desktop-client
-- Status: DONE
+- Title: GPUI client daily-use parity with the Electron UI
+- Slug: 20261016-gpui-electron-parity
+- Status: ACTIVE
 - Updated: 2026-10-16
 
 ## Tracker
 
-One row per TASK. Group ties together items that ship as one transaction. Waves: 1 = A; 2 = B, C; 3 = D, E, F; 4 = G; 5 = H, I; 6 = J.
+One row per TASK. Group ties together items that ship as one transaction. Waves: 1 = A, B; 2 = C, D, E, F, G, H, J; 3 = I; 4 = K; 5 = L.
 
-| Order | TASK                                                        | Group | Status | Spec                                                                                                       | Deps                                   | Context                                        | Notes                                                                                                                 |
-| ----- | ----------------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| 1     | TASK-134 Move the prototype into the desktop-gpui workspace | A     | DONE   | [watchtower/tasks/TASK-134-desktop-gpui-workspace.md](watchtower/tasks/TASK-134-desktop-gpui-workspace.md) | -                                      | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Workspace, theme crate, build scripts. Commit f4feab6db.                                                              |
-| 2     | TASK-135 Generate Rust protocol types from zod              | A     | DONE   | [watchtower/tasks/TASK-135-protocol-codegen.md](watchtower/tasks/TASK-135-protocol-codegen.md)             | TASK-134                               | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Follows ADR-0035. Commit f4feab6db.                                                                                   |
-| 3     | TASK-136 Client core: connection, requests, and sync        | B     | DONE   | [watchtower/tasks/TASK-136-client-core.md](watchtower/tasks/TASK-136-client-core.md)                       | TASK-135                               | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | One host at a time. Commit 3283bf219.                                                                                 |
-| 4     | TASK-137 Diagram renderer with one hidden WebView           | C     | DONE   | [watchtower/tasks/TASK-137-diagram-renderer.md](watchtower/tasks/TASK-137-diagram-renderer.md)             | TASK-134                               | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Follows ADR-0037; prove the hidden snapshot first. Commit f975b8352; scroll CPU check changed (Q-058).                |
-| 5     | TASK-138 Timeline view with the turn step list              | D     | DONE   | [watchtower/tasks/TASK-138-timeline.md](watchtower/tasks/TASK-138-timeline.md)                             | TASK-136, TASK-137                     | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Follows the turn design ADRs. Commit a1c844922.                                                                       |
-| 6     | TASK-139 Composer with mode and model controls              | E     | DONE   | [watchtower/tasks/TASK-139-composer.md](watchtower/tasks/TASK-139-composer.md)                             | TASK-136                               | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Pill wheel: Q-055. Commit 129125b14.                                                                                  |
-| 7     | TASK-140 Terminal with resize, scrollback, and selection    | F     | DONE   | [watchtower/tasks/TASK-140-terminal.md](watchtower/tasks/TASK-140-terminal.md)                             | TASK-136                               | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | alacritty_terminal. Commit 4ef7549d1.                                                                                 |
-| 8     | TASK-141 App shell with host switcher, sidebar, and panes   | G     | DONE   | [watchtower/tasks/TASK-141-app-shell.md](watchtower/tasks/TASK-141-app-shell.md)                           | TASK-137, TASK-138, TASK-139, TASK-140 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Joins all parts into one app. Commit fbce39e7c. implement: manual checks pending; CPU over 10% on long turns (Q-065). |
-| 9     | TASK-142 Accessibility audit with VoiceOver and the AX tree | H     | DONE   | [watchtower/tasks/TASK-142-accessibility-audit.md](watchtower/tasks/TASK-142-accessibility-audit.md)       | TASK-141                               | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | VoiceOver pass needs a human. Commit 261f9ea44. implement: manual checks pending.                                     |
-| 10    | TASK-143 Design the plugin UI host for the GPUI client      | I     | DONE   | [watchtower/tasks/TASK-143-plugin-ui-host-design.md](watchtower/tasks/TASK-143-plugin-ui-host-design.md)   | TASK-141                               | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Writes a proposed ADR only. Commit 1661ed495; ADR-0038 proposed.                                                      |
-| 11    | TASK-144 Cut timeline and shell render cost on long turns   | J     | DONE   | [watchtower/tasks/TASK-144-long-turn-render-cost.md](watchtower/tasks/TASK-144-long-turn-render-cost.md)   | TASK-141                               | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Q-065 answer: 10% at 2 and 15 minutes. Commit 8ce19e425; 7.5% and 8.9%.                                               |
+| Order | TASK                                                          | Group | Status | Spec                                                                                                                   | Deps                                                                                     | Context                                        | Notes                              |
+| ----- | ------------------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------- |
+| 1     | TASK-145 Design system tokens and lucide icons                | A     | TODO   | [watchtower/tasks/TASK-145-design-system-and-icons.md](watchtower/tasks/TASK-145-design-system-and-icons.md)           | -                                                                                        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Follows ADR-0043.                  |
+| 2     | TASK-146 Client RPCs for parity and a typed server_info       | B     | TODO   | [watchtower/tasks/TASK-146-client-rpcs.md](watchtower/tasks/TASK-146-client-rpcs.md)                                   | -                                                                                        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Add-only API; closes Q-057.        |
+| 3     | TASK-147 Sidebar with the project and workspace tree          | C     | TODO   | [watchtower/tasks/TASK-147-sidebar-tree.md](watchtower/tasks/TASK-147-sidebar-tree.md)                                 | TASK-145, TASK-146                                                                       | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | New crate `bachuc-sidebar`.        |
+| 4     | TASK-148 Workspace shell with the Electron tab bar and splits | D     | TODO   | [watchtower/tasks/TASK-148-tabs-and-splits.md](watchtower/tasks/TASK-148-tabs-and-splits.md)                           | TASK-145                                                                                 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | New crate `bachuc-workspace`.      |
+| 5     | TASK-149 Agent pane parity                                    | E     | TODO   | [watchtower/tasks/TASK-149-agent-pane-parity.md](watchtower/tasks/TASK-149-agent-pane-parity.md)                       | TASK-145, TASK-146                                                                       | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Keeps ADR-0039 incremental sync.   |
+| 6     | TASK-150 Composer parity                                      | F     | TODO   | [watchtower/tasks/TASK-150-composer-parity.md](watchtower/tasks/TASK-150-composer-parity.md)                           | TASK-145, TASK-146                                                                       | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Slash commands, steer, thinking.   |
+| 7     | TASK-151 Explorer with files, a file viewer, and git changes  | G     | TODO   | [watchtower/tasks/TASK-151-explorer-files-and-diff.md](watchtower/tasks/TASK-151-explorer-files-and-diff.md)           | TASK-145, TASK-146                                                                       | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | New crate `bachuc-explorer`.       |
+| 8     | TASK-152 Command center and keyboard shortcuts                | H     | TODO   | [watchtower/tasks/TASK-152-command-center-and-shortcuts.md](watchtower/tasks/TASK-152-command-center-and-shortcuts.md) | TASK-145                                                                                 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | New crate `bachuc-command`.        |
+| 9     | TASK-153 Hosts and settings                                   | I     | TODO   | [watchtower/tasks/TASK-153-hosts-and-settings.md](watchtower/tasks/TASK-153-hosts-and-settings.md)                     | TASK-145, TASK-146, TASK-152                                                             | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | New crate `bachuc-settings`.       |
+| 10    | TASK-154 Terminal colors and font from the tokens             | J     | TODO   | [watchtower/tasks/TASK-154-terminal-colors-and-font.md](watchtower/tasks/TASK-154-terminal-colors-and-font.md)         | TASK-145                                                                                 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Colors and font only.              |
+| 11    | TASK-155 App integration and Electron window chrome           | K     | TODO   | [watchtower/tasks/TASK-155-app-integration.md](watchtower/tasks/TASK-155-app-integration.md)                           | TASK-146, TASK-147, TASK-148, TASK-149, TASK-150, TASK-151, TASK-152, TASK-153, TASK-154 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Only TASK that edits `crates/app`. |
+| 12    | TASK-156 Side-by-side parity audit                            | L     | TODO   | [watchtower/tasks/TASK-156-parity-audit.md](watchtower/tasks/TASK-156-parity-audit.md)                                 | TASK-155                                                                                 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | VoiceOver pass needs a human.      |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
@@ -32,30 +33,21 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 - `packages/desktop-gpui/cargo.sh test --workspace` -> all crates pass
 - `packages/desktop-gpui/cargo.sh build --release -p bachuc-app` -> exit 0
-- Agent check on live with one mock stream: open the bundled `Bachuc GPUI.app`, open the agent, send a prompt, open a terminal tab -> the stream, the reply, and the terminal work in one window
-- `measure.sh 60` on the bundled app with one stream tab and one terminal tab -> CPU at most 10.0 and footprint sum at most 250, WebKit helpers included
+- [packages/desktop-gpui/docs/parity-audit.md](packages/desktop-gpui/docs/parity-audit.md) -> every in-scope surface has a row in both themes, and no high-rank mismatch is left open without a follow-up item
+- `measure.sh 60` on the app bundle with one mock stream tab and one terminal tab, at about 2 and about 15 minutes -> CPU at most 10.0 and footprint sum at most 250, WebKit helpers included
 - `git diff --stat main -- packages/protocol packages/server packages/app packages/desktop` -> empty; the plan does not touch the existing packages
 
 ## Review Focus
 
-- The daemon restarts while a stream tab is open -> the client reconnects, refetches, and shows no duplicate rows; owner TASK-136
-- An agent with a timeline longer than one page -> scrolling to the top loads older items without a jump; owner TASK-138
-- A running turn that grows past 60 steps -> CPU stays at or below 10% and does not grow with the step count; owner TASK-144
-- The selected host is down at app start -> the app shows a disconnected state and retries; owner TASK-141
-- A terminal pane resized while output streams -> the emulator and the daemon PTY agree on the size; owner TASK-140
+- A shortcut override with an empty chord -> it loads as unassigned and nothing crashes or binds; owner TASK-152
+- A workspace with more than 10,000 files -> the explorer lists only expanded folders and stays responsive; owner TASK-151
+- A theme switch with an agent pane and a terminal open -> every region recolors at once; owner TASK-155
+- A 900 px wide window with the sidebar and explorer open -> nothing overlaps and tabs shrink; owner TASK-155
+- A workspace folder that is not a git repo, an image file, and a `too_large` diff -> the explorer shows the Electron non-git state, the image, and the placeholder; owner TASK-151
 
 ## Handoff
 
-- Implement runs of 2026-10-15 to 2026-10-16 built all 11 TASKs on `feat/bachuc-gpui`. Nothing was pushed.
-- Plan Verify on 2026-10-16, after TASK-144:
-  - `cargo.sh test --workspace` -> 132 passed, 0 failed, 3 ignored live tests. PASS.
-  - `cargo.sh build --release -p bachuc-app` -> exit 0. PASS.
-  - Agent check on live in one window -> covered by the TASK-141 and TASK-144 checks (mock stream tab, terminal tab, composer). No separate lead run: UNVERIFIED (unattended).
-  - `measure.sh 60` on the app -> 7.5% CPU and 213 MB at a 2-minute turn, 8.9% and 227 MB at a 15-minute turn (TASK-144 outcome). PASS.
-  - `git diff --stat main -- packages/protocol packages/server packages/app packages/desktop` -> empty. PASS.
-- Owner answers on 2026-10-16: Q-065 cut the timeline cost and keep 10% (done in TASK-144); Q-057 export the `server_info` schema in the next GPUI plan; [ADR-0038](watchtower/decisions/ADR-0038-native-data-kinds-and-webview-panes-over-all-webview-or-rewrite.md) accepted.
-- Still open: the six accessibility gaps in [packages/desktop-gpui/docs/a11y-audit.md](packages/desktop-gpui/docs/a11y-audit.md), the VoiceOver pass, and Q-067 to Q-069.
-- Next action: review `feat/bachuc-gpui`, then run `/watchtower archive`.
+- Next action: run `/watchtower implement` on branch `feat/bachuc-gpui`. Wave 1 is groups A (TASK-145) and B (TASK-146).
 
 ## Archive
 
@@ -71,5 +63,6 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 - [watchtower/archive/20261013-turn-step-list-follow-ups](watchtower/archive/20261013-turn-step-list-follow-ups)
 - [watchtower/archive/20261014-native-glm-provider](watchtower/archive/20261014-native-glm-provider)
 - [watchtower/archive/20261014-watchtower-plan-tree](watchtower/archive/20261014-watchtower-plan-tree)
+- [watchtower/archive/20261015-gpui-desktop-client](watchtower/archive/20261015-gpui-desktop-client)
 - [watchtower/archive/20261015-instant-thread-open](watchtower/archive/20261015-instant-thread-open)
 - [watchtower/archive/20261015-sqlite-ram-cpu-cuts](watchtower/archive/20261015-sqlite-ram-cpu-cuts)

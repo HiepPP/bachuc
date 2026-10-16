@@ -57,6 +57,11 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid hand-written Rust protocol structs while the zod schemas can export JSON Schema for code generation. Reason: [ADR-0035](watchtower/decisions/ADR-0035-generated-protocol-types-over-hand-written-rust-types.md).
 - Avoid a live WebView inside each timeline row, and SVG export of diagrams, while `gpui-wry` views do not clip inside GPUI scroll lists and GPUI's usvg drops `foreignObject` labels and KaTeX HTML. Reason: [ADR-0037](watchtower/decisions/ADR-0037-hidden-webview-png-snapshots-over-svg-and-inline-webviews.md).
 - Avoid a WebView for every plugin surface, one declarative UI contract for all plugin UI, and a Rust rewrite of every plugin, while 10 of 14 contribution kinds are data items, each WebView costs 55 to 83 MB, and plugins need hot reload. Reason: [ADR-0038](watchtower/decisions/ADR-0038-native-data-kinds-and-webview-panes-over-all-webview-or-rewrite.md).
+- Avoid a higher GPUI CPU budget, a slower timeline redraw while a turn streams, and folding or capping old steps, while incremental sync keeps a 15-minute turn under 10%. Reason: [ADR-0039](watchtower/decisions/ADR-0039-incremental-timeline-sync-over-throttle-or-budget.md).
+- Avoid a merged "All machines" view, `wss`, the relay, and built-in SSH in the GPUI client while the owner reaches hosts through a tunnel and needs one host on screen. Reason: [ADR-0040](watchtower/decisions/ADR-0040-one-host-plain-ws-over-merged-hosts-and-relay.md).
+- Avoid daemon start, stop, updates, CLI install, and deep links in the GPUI client while Electron and the CLI own them. Reason: [ADR-0041](watchtower/decisions/ADR-0041-gpui-client-connects-only-over-daemon-management.md).
+- Avoid terminal restore mode `"full-snapshot"` (`0x05` ANSI bytes) in the GPUI client while the daemon sends the `0x04` JSON grid without a restore mode. Reason: [ADR-0042](watchtower/decisions/ADR-0042-json-grid-terminal-restore-over-ansi-snapshot.md).
+- Avoid gpui-kit default themes and the gpui-kit `IconName` set in the GPUI client, and porting every dark theme variant now, while the owner wants the exact Electron look in `light` and `claude` dark. Reason: [ADR-0043](watchtower/decisions/ADR-0043-electron-tokens-and-lucide-icons-over-gpui-kit-defaults.md).
 
 ## Learnings
 

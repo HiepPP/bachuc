@@ -2,30 +2,35 @@
 
 ## Shared Context
 
-- Goal of the plan: turn the GPUI prototype into a desktop client that can replace the Electron UI for the daily flows. Plugins are ported in a later plan.
-- Branch: `feat/bachuc-gpui`. Never push from a builder.
-- Crate home: [packages/desktop-gpui](packages/desktop-gpui), a Cargo workspace with `members = ["crates/*"]`. Each TASK owns its own crate folder under `crates/`. Do not edit the workspace `Cargo.toml` after TASK-134.
-- [packages/desktop-gpui/Cargo.lock](packages/desktop-gpui/Cargo.lock) is generated. Any builder's cargo run may update it, and it does not tie groups together. Builders in one wave share the workspace and one `target` folder; cargo serializes their builds with its own lock. The lead commits the lock file with the last group of a wave.
-- Each crate declares its own dependencies. Pin `gpui-kit = "=0.7.3"` and `gpui-wry = "=0.7.3"` in every crate that uses them, because gpui-kit pins the `gpui-pre =0.3.9` snapshot. A crate may add macOS bindings such as `objc2-app-kit` or `objc2-web-kit` when its TASK says so.
-- Build with the rustup toolchain, not Homebrew `rustc` 1.79. TASK-134 adds the wrapper `packages/desktop-gpui/cargo.sh <cargo args>`. It sets `PATH="$HOME/.cargo/bin:$PATH"` and `RUSTUP_TOOLCHAIN=1.97.1`.
-- TASK-134 adds `packages/desktop-gpui/bundle.sh <bin|example> <target> <app-name> <bundle-id>`. It builds the release binary or example and wraps it in `packages/desktop-gpui/target/bundles/<app-name>.app`. UI checks run from such a bundle, because `cua_repl` cannot attach to a bare binary.
-- The machine has no Xcode Metal compiler. gpui-kit enables `runtime_shaders`, so do not add a feature that needs `xcrun metal`.
-- Free disk was 22 GB on 2026-10-15. One `target` folder is about 1.6 GB. Do not create extra target folders per crate.
-- Test against the live daemon only: `ws://127.0.0.1:6768/ws`. Never send prompts or create agents on release (6767) in a check, and never restart either daemon.
-- Make a test agent with `npm run cli -- run --provider mock --model thirty-minute-stream --cwd /tmp/gpui-bench -d -q "start bench"`. The mock emits a chunk every 50 ms; the clients counted about 10 timeline events per second on 2026-10-15. Stop and archive it after the check with `npm run cli -- stop <id>` and `npm run cli -- archive <id>`, and kill the terminals the check created with `npm run cli -- terminal kill <id>`.
-- `hello` needs `clientId`, `clientType`, and `protocolVersion`. The daemon closes the socket if a session message arrives before it answers `hello` with `status` `server_info`. Queue outgoing session messages until then.
-- Terminal data uses binary frames `[opcode, slot, payload]`: `0x01` output bytes, `0x02` input bytes, `0x03` resize (JSON `{rows, cols, intent}`), `0x04` snapshot (a JSON cell grid, not bytes), `0x05` restore. Source: [packages/protocol/src/binary-frames/terminal.ts](packages/protocol/src/binary-frames/terminal.ts).
-- Performance limit for UI TASKs: at most 10% CPU of one core and at most 250 MB phys_footprint, WebKit helpers included, while showing the mock stream in the foreground for 60 seconds. Measure with [packages/desktop-gpui/measure.sh](packages/desktop-gpui/measure.sh); match WebKit helper pids to the app by start time. Baseline on 2026-10-15: 6.5% CPU and about 197 MB.
-- Accessibility: every UI TASK gives its buttons, list rows, messages, and inputs a role and a label with the gpui-pre 0.3.9 element API (`role` and `aria_label` on `div`, built on accesskit). Agents then check UI through the accessibility tree with `cua_repl` `getAXState`, not only by screenshots.
+- Goal: make the Bachuc GPUI client in [packages/desktop-gpui](packages/desktop-gpui) look and work like the Electron app for daily use. Exact look, per [ADR-0043](watchtower/decisions/ADR-0043-electron-tokens-and-lucide-icons-over-gpui-kit-defaults.md).
+- Branch: `feat/bachuc-gpui`. Builders never commit, push, or switch branches.
+- The previous plan built the client: [watchtower/archive/20261015-gpui-desktop-client](watchtower/archive/20261015-gpui-desktop-client). Read its [LEARN.md](watchtower/archive/20261015-gpui-desktop-client/LEARN.md) and the outcome Lessons of the crate you change.
+- Cargo: run only `packages/desktop-gpui/cargo.sh`. The workspace has `members = ["crates/*"]`, so a new crate needs no workspace edit. Pin `gpui-kit = "=0.7.3"` in every crate that uses it. `Cargo.lock` is generated and does not tie groups together; the lead commits it with the last group of a wave.
+- gpui-kit components live in `gpui-component` 0.7.3 under `~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gpui-component-0.7.3/src`, reached as `gpui_kit::component::*`. Useful ones: `tab`, `resizable`, `dock`, `tree`, `list`, `table`, `command`, `popover`, `menu`, `dialog`, `select`, `switch`, `tooltip`, `kbd`, `diff`, `highlighter`, `title_bar`.
+- Do not enable the gpui-kit `test-support` feature or the tree-sitter `css`, `html`, `toml`, `yaml` features: they break `cocoa` resolution. Test views through plain functions.
+- Hold a strong `Entity<Client>` in each view. A `cx.subscribe` holds its emitter weakly.
+- Every new view uses `bachuc_theme` tokens and metrics and `bachuc_icons` icons, never literal colors, sizes, or glyphs.
+- Every button, row, tab, input, and menu item gets a role and a label (gpui-pre `role` and `aria_label`). Keep labeled chrome views uncached: a cached view drops out of the AX tree.
+- Performance limit: the app stays at or below 10% CPU of one core and 250 MB phys_footprint, WebKit helpers included, with one mock stream tab and one terminal tab in front for 60 seconds, at a turn age of about 2 and about 15 minutes ([ADR-0039](watchtower/decisions/ADR-0039-incremental-timeline-sync-over-throttle-or-budget.md)). Keep per-frame work in proportion to the change.
+- Functional checks use the live daemon `ws://127.0.0.1:6768/ws`. Never send prompts to, create on, or archive on release (6767). Never restart a daemon.
+- Mock agent: `npm run cli -- run --provider mock --model thirty-minute-stream --cwd /tmp/gpui-bench -d -q "start bench"`. Stop and archive it after the check, and kill the terminals the check made. For a CPU read at a turn age of about 15 minutes, use the run-start `gpui-age` agent from `## Environment` in [watchtower/AUTORUN.md](watchtower/AUTORUN.md) when its age fits; never stop it. `create_terminal` needs a daemon workspace folder: `/tmp/gpui-bench` works, `/tmp` does not.
+- Parity reference (planner call): open the in-place Electron build `packages/desktop/release/mac-arm64/Bachuc.app` (built 2026-10-15 14:19, after the last app source change at 11:34). It uses home `~/.paseo-dev` and listen `127.0.0.1:6770` (`packages/desktop/src/main.ts` lines 116-117 and 136; `~/.paseo-dev/config.json` holds `127.0.0.1:6770`) only when the launching shell has no `PASEO_HOME` or `PASEO_ELECTRON_USER_DATA_DIR`. An agent shell inherits `PASEO_HOME=~/.bachuc`, so launch it with `env -u PASEO_HOME -u PASEO_ELECTRON_USER_DATA_DIR open packages/desktop/release/mac-arm64/Bachuc.app`, then confirm with `lsof -iTCP:6770 -sTCP:LISTEN` that its daemon listens. If no daemon listens on 6770, add live `ws://127.0.0.1:6768/ws` as a host in the reference app and compare on live. Never let the reference app connect to 6767. For a side-by-side check, point the GPUI bundle at `ws://127.0.0.1:6770/ws` through a temporary `hosts.json` entry, open the same agent or workspace in both apps at the same window size, and take `cua_repl` screenshots of both. Use only mock agents on 6770. Restore `hosts.json` and quit the reference app after the check.
+- Each UI TASK writes a parity list in its outcome: one row per element with layout, spacing, color, icon, and state, and match or mismatch.
+- Screen checks: builders run none; they return each app screenshot, `cua_repl` step, AX tree read, and `measure.sh` read as `DEFERRED (UI checker)`. One UI checker agent runs them, one at a time, per the watchtower skill.
+- UI automation: only the `cua_repl` MCP `js` tool. Pass `timeout_ms` to every call and wrap each step in `Promise.race` with a 60-second limit. GPUI draws only while its window is in front: keep it in front with an `open <bundle>` loop, read `getAXState` twice, and check a screenshot for a cut window (Q-069) before each CPU read.
+- Screen lock: take `until mkdir /tmp/gpui-ui-lock 2>/dev/null; do find /tmp/gpui-ui-lock -maxdepth 0 -mmin +15 -exec rmdir {} \; ; sleep 20; done` before any `cua_repl` session or `measure.sh` read. A lock older than 15 minutes is stale and breaks. Release with `rmdir /tmp/gpui-ui-lock`, hold it at most 15 minutes, and quit the bundle first.
+- Bundle a crate example with `packages/desktop-gpui/bundle.sh example <example> <AppName> <bundle id>`; measure with `packages/desktop-gpui/measure.sh 60 app="pids:<pid>" wk="pids:<WebKit pids>"`.
+- Format markdown and JS with `npm run format:files -- <file> <file>`, one argument per file. Treat "Expected at least one target file" as a failed check.
 
 ## Decisions
 
-- One host at a time, with a host switcher. No merged "All machines" view in this plan.
-- Hosts are plain `ws://` URLs. A remote host such as macmini is reached through a tunnel the owner opens, for example `ssh -L 6769:127.0.0.1:6767 macmini`, then added as `ws://127.0.0.1:6769/ws`. No `wss`, relay, or built-in SSH in this plan.
-- The GPUI client only connects to a daemon. Electron and the CLI keep starting and stopping daemons, updates, CLI install, and `paseo://` deep links. The GPUI client does show notifications and the dock badge.
-- The timeline follows the existing turn design: [ADR-0018](watchtower/decisions/ADR-0018-all-trailing-messages-over-last-message-as-answer.md), [ADR-0019](watchtower/decisions/ADR-0019-always-open-step-list-over-folding-group.md), [ADR-0020](watchtower/decisions/ADR-0020-scheme-label-colors-over-palette-tokens-for-turn-steps.md), [ADR-0021](watchtower/decisions/ADR-0021-note-opens-its-step-over-tools-before-the-note.md), and [ADR-0022](watchtower/decisions/ADR-0022-scheme-label-tones-in-the-theme-over-color-scheme-branches.md).
-- Rust and GPUI client: [ADR-0034](watchtower/decisions/ADR-0034-rust-gpui-client-over-swift-and-electron.md). Generated protocol types: [ADR-0035](watchtower/decisions/ADR-0035-generated-protocol-types-over-hand-written-rust-types.md). Diagrams as PNG snapshots of one hidden WebView: [ADR-0037](watchtower/decisions/ADR-0037-hidden-webview-png-snapshots-over-svg-and-inline-webviews.md).
-- Plugin UI is out of scope, except the design TASK-143.
+- Scope: daily-use parity (owner, 2026-10-16). Out of scope: plugin surfaces ([ADR-0038](watchtower/decisions/ADR-0038-native-data-kinds-and-webview-panes-over-all-webview-or-rewrite.md) is a later plan), the Electron browser pane, daemon management ([ADR-0041](watchtower/decisions/ADR-0041-gpui-client-connects-only-over-daemon-management.md)), schedules, session import, dictation, provider usage, the PR panel, rewind and fork, the status-grouped sidebar list, sidebar display options, drag-to-split, the new workspace screen, the open project flow, the skills picker, and the send-behavior setting.
+- The sidebar follows Electron exactly: project > workspace rows, no agent rows; agents open as tabs of their workspace (planner call from the Builder Check, 2026-10-16).
+- Themes: `light` and `claude` dark, with a system switch ([ADR-0043](watchtower/decisions/ADR-0043-electron-tokens-and-lucide-icons-over-gpui-kit-defaults.md)).
+- Splits: split right and split down from a menu and shortcuts, with resizable dividers. No drag-to-split drop zones.
+- Settings: hosts, appearance, keyboard shortcuts, providers, and project settings.
+- Proof: side-by-side screenshots with a parity list per surface.
+- New views go into new crates so builders run in parallel. Only TASK-155 edits `crates/app`.
 
 ## Open Decisions
 
@@ -33,8 +38,6 @@
 
 ## References
 
-- [docs/timeline-sync.md](docs/timeline-sync.md) (timeline cursors, epochs, gaps)
-- [docs/protocol-compatibility.md](docs/protocol-compatibility.md) (optional fields, capability gating)
-- [docs/rpc-namespacing.md](docs/rpc-namespacing.md) (request and response names)
-- [packages/client/src/daemon-client.ts](packages/client/src/daemon-client.ts) (reference client in TypeScript)
-- [packages/protocol/src/client-capabilities.ts](packages/protocol/src/client-capabilities.ts) (hello capability names)
+- Electron surfaces: [packages/app/src/components/left-sidebar.tsx](packages/app/src/components/left-sidebar.tsx), [packages/app/src/screens/workspace/workspace-screen.tsx](packages/app/src/screens/workspace/workspace-screen.tsx), [packages/app/src/panels/agent-panel.tsx](packages/app/src/panels/agent-panel.tsx), [packages/app/src/composer/index.tsx](packages/app/src/composer/index.tsx), [packages/app/src/command-center/command-center.tsx](packages/app/src/command-center/command-center.tsx)
+- Design: [docs/design.md](docs/design.md), [packages/app/src/styles/theme.ts](packages/app/src/styles/theme.ts), [packages/app/src/constants/layout.ts](packages/app/src/constants/layout.ts), [packages/app/src/components/ui/control-geometry.ts](packages/app/src/components/ui/control-geometry.ts)
+- Protocol: [packages/protocol/src/messages.ts](packages/protocol/src/messages.ts), [docs/protocol-compatibility.md](docs/protocol-compatibility.md), [docs/rpc-namespacing.md](docs/rpc-namespacing.md)
