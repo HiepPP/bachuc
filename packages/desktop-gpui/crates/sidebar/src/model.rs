@@ -7,6 +7,7 @@
 
 use bachuc_client::{AgentSummary, ChangedFile, ProjectNode, WorkspaceNode};
 use bachuc_theme::metrics::{SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
@@ -222,8 +223,81 @@ fn push_section(rows: &mut Vec<Row>, group: Group, items: Vec<WorkspaceRow>, sta
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CharClass {
+    Space,
+    Punctuation,
+    Digit,
+    Letter,
+}
+
+fn char_class(c: char) -> CharClass {
+    if c.is_whitespace() {
+        CharClass::Space
+    } else if c.is_numeric() {
+        CharClass::Digit
+    } else if c.is_alphabetic() {
+        CharClass::Letter
+    } else {
+        CharClass::Punctuation
+    }
+}
+
+/// `localeCompare(right, undefined, { numeric: true, sensitivity: "base" })` for the names the
+/// sidebar sorts: case is ignored, digit runs compare by value, and the ICU root order puts
+/// spaces, then punctuation, then digits before letters. Accents are not folded.
+pub fn natural_compare(left: &str, right: &str) -> Ordering {
+    let mut a = left.chars().peekable();
+    let mut b = right.chars().peekable();
+    loop {
+        let (Some(&x), Some(&y)) = (a.peek(), b.peek()) else {
+            return a.peek().is_some().cmp(&b.peek().is_some());
+        };
+        if x.is_ascii_digit() && y.is_ascii_digit() {
+            let take = |chars: &mut std::iter::Peekable<std::str::Chars>| {
+                let mut run = String::new();
+                while let Some(c) = chars.next_if(char::is_ascii_digit) {
+                    run.push(c);
+                }
+                run
+            };
+            let (x, y) = (take(&mut a), take(&mut b));
+            let (x, y) = (x.trim_start_matches('0'), y.trim_start_matches('0'));
+            let order = x.len().cmp(&y.len()).then_with(|| x.cmp(y));
+            if order != Ordering::Equal {
+                return order;
+            }
+            continue;
+        }
+        let order = char_class(x)
+            .cmp(&char_class(y))
+            .then_with(|| x.to_lowercase().cmp(y.to_lowercase()));
+        if order != Ordering::Equal {
+            return order;
+        }
+        a.next();
+        b.next();
+    }
+}
+
+/// `buildWorkspaceStructureProjects` order: projects by name, workspaces by name, each with the
+/// id as the tie-break. A user drag order (`applyStoredOrdering`) is not ported.
+fn sorted(projects: &[ProjectNode]) -> Vec<ProjectNode> {
+    let mut projects = projects.to_vec();
+    projects.sort_by(|left, right| {
+        natural_compare(&left.name, &right.name).then_with(|| left.id.cmp(&right.id))
+    });
+    for project in &mut projects {
+        project.workspaces.sort_by(|left, right| {
+            natural_compare(&left.name, &right.name)
+                .then_with(|| left.id.to_lowercase().cmp(&right.id.to_lowercase()))
+        });
+    }
+    projects
+}
+
 /// The rows of the tree, top to bottom: the pinned section (when any workspace is pinned), then
-/// "Workspaces" with each project and its unpinned workspaces. Workspaces keep the daemon order.
+/// "Workspaces" with each project and its unpinned workspaces, in the Electron sort order.
 pub fn build_rows(
     projects: &[ProjectNode],
     agents: &[AgentSummary],
@@ -232,9 +306,12 @@ pub fn build_rows(
     if projects.is_empty() {
         return vec![Row::Empty];
     }
+    let projects = sorted(projects);
     let by_id: HashMap<&str, &AgentSummary> = agents.iter().map(|a| (a.id.as_str(), a)).collect();
     let mut rows = Vec::new();
 
+    // Electron orders pinned rows by `pinnedAt`, newest first; the client does not expose it,
+    // so they keep the tree order.
     let pinned: Vec<WorkspaceRow> = projects
         .iter()
         .flat_map(|project| {
@@ -257,7 +334,7 @@ pub fn build_rows(
     }
 
     rows.push(Row::SectionTitle);
-    for project in projects {
+    for project in &projects {
         let items: Vec<WorkspaceRow> = project
             .workspaces
             .iter()
@@ -342,6 +419,33 @@ pub fn archive_prompt(workspace_name: &str, files: &[ChangedFile]) -> Option<Arc
         title: format!("Archive \"{workspace_name}\"?"),
         message,
     })
+}
+
+/// The `+added -removed` counts at the right of a workspace row. Electron reads the workspace
+/// `diffStat`, which the client does not expose, so the sidebar sums the uncommitted changed
+/// files of the checkout. A clean checkout gives `None` and the row shows nothing.
+pub fn diff_stat(files: &[ChangedFile]) -> Option<(u32, u32)> {
+    let added: u32 = files.iter().map(|file| file.added).sum();
+    let removed: u32 = files.iter().map(|file| file.removed).sum();
+    (added + removed > 0).then_some((added, removed))
+}
+
+/// `formatDiffCount`: `Intl.NumberFormat("en-US", { notation: "compact",
+/// maximumFractionDigits: 1 })` in lower case, so 1234 is "1.2k".
+pub fn format_diff_count(value: u32) -> String {
+    let mut text = value.to_string();
+    // 999,950 rounds to 1000k, which Intl writes in the next unit as 1m.
+    let mut carried = false;
+    for (size, suffix) in [(1e3, "k"), (1e6, "m"), (1e9, "b")] {
+        let value = f64::from(value);
+        if value < size && !carried {
+            break;
+        }
+        let scaled = (value / size * 10.).round() / 10.;
+        carried = scaled >= 1000.;
+        text = format!("{scaled}{suffix}");
+    }
+    text
 }
 
 /// The sidebar width a drag asks for, kept between the Electron limits.

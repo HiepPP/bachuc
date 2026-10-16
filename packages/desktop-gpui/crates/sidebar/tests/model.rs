@@ -62,7 +62,88 @@ fn no_projects_gives_the_empty_state() {
 }
 
 #[test]
-fn the_tree_lists_projects_and_workspaces_in_daemon_order() {
+fn projects_and_workspaces_sort_by_name_like_electron() {
+    let named = |id: &str, name: &str| WorkspaceNode {
+        name: name.into(),
+        ..workspace(id, false, &[])
+    };
+    let projects = [
+        ProjectNode {
+            name: "wp-test".into(),
+            ..project("w", vec![])
+        },
+        ProjectNode {
+            name: ".claude".into(),
+            ..project(
+                "c",
+                vec![
+                    named("c1", "Research Jump Desktop"),
+                    named("c2", "Re-enable Hammerspoon"),
+                    named("c3", "Check chase-goal"),
+                    named("c4", "/caveman ultra"),
+                    named("c5", "Check Claude CLI"),
+                ],
+            )
+        },
+        ProjectNode {
+            name: "calendar-ref".into(),
+            ..project("r", vec![])
+        },
+        ProjectNode {
+            name: "App".into(),
+            ..project("a", vec![])
+        },
+    ];
+    let rows = build_rows(&projects, &[], &ViewState::default());
+    assert_eq!(
+        ids(&rows),
+        [
+            "title", "p:c", "w:c4", "w:c3", "w:c5", "w:c2", "w:c1", "p:a", "p:r", "p:w"
+        ],
+        "the reference shows .claude, App, calendar-ref, ... and /caveman first"
+    );
+}
+
+#[test]
+fn names_compare_without_case_and_with_numbers_by_value() {
+    use std::cmp::Ordering::*;
+    assert_eq!(natural_compare("app", "App"), Equal);
+    assert_eq!(natural_compare("task-2", "task-10"), Less);
+    assert_eq!(natural_compare(".claude", "App"), Less);
+    assert_eq!(
+        natural_compare("a b", "a-b"),
+        Less,
+        "a space sorts before punctuation"
+    );
+    assert_eq!(
+        natural_compare("a_b", "a1"),
+        Less,
+        "punctuation sorts before digits"
+    );
+    assert_eq!(natural_compare("abc", "ab"), Greater);
+}
+
+#[test]
+fn diff_counts_sum_the_files_and_print_compact() {
+    assert_eq!(diff_stat(&[]), None);
+    assert_eq!(
+        diff_stat(&[file(0, 0)]),
+        None,
+        "a clean checkout shows nothing"
+    );
+    assert_eq!(diff_stat(&[file(50, 30), file(5, 5)]), Some((55, 35)));
+    assert_eq!(diff_stat(&[file(742, 0)]), Some((742, 0)));
+    assert_eq!(format_diff_count(0), "0");
+    assert_eq!(format_diff_count(999), "999");
+    assert_eq!(format_diff_count(1000), "1k");
+    assert_eq!(format_diff_count(1234), "1.2k");
+    assert_eq!(format_diff_count(15_300), "15.3k");
+    assert_eq!(format_diff_count(999_950), "1m");
+    assert_eq!(format_diff_count(2_500_000), "2.5m");
+}
+
+#[test]
+fn the_tree_lists_projects_and_workspaces_in_name_order() {
     let projects = [
         project(
             "a",
@@ -100,7 +181,7 @@ fn a_collapsed_project_hides_its_workspaces_and_shows_the_urgent_status() {
 }
 
 #[test]
-fn pinned_workspaces_move_to_a_section_in_daemon_order() {
+fn pinned_workspaces_move_to_a_section_in_tree_order() {
     let projects = [
         project(
             "a",
@@ -112,7 +193,7 @@ fn pinned_workspaces_move_to_a_section_in_daemon_order() {
     assert_eq!(
         ids(&rows),
         ["pinned", "w:a1", "w:b1", "title", "p:a", "w:a2", "p:b"],
-        "pinned first in daemon order; the projects keep only their unpinned workspaces"
+        "pinned first in tree order; the projects keep only their unpinned workspaces"
     );
     let Row::Workspace(last_pinned) = &rows[2] else {
         panic!("workspace row")
@@ -208,14 +289,23 @@ fn a_workspace_takes_the_most_urgent_bucket_of_its_agents() {
         agent("p", "running", 1),
     ];
     let rows = build_rows(&projects, &agents, &ViewState::default());
-    let buckets: Vec<StatusBucket> = rows
+    let buckets: Vec<(&str, StatusBucket)> = rows
         .iter()
         .filter_map(|row| match row {
-            Row::Workspace(w) => Some(w.bucket),
+            Row::Workspace(w) => Some((w.id.as_str(), w.bucket)),
             _ => None,
         })
         .collect();
-    assert_eq!(buckets, [Done, Running, NeedsInput, Done, Done]);
+    assert_eq!(
+        buckets,
+        [
+            ("asks", NeedsInput),
+            ("busy", Running),
+            ("empty", Done),
+            ("gone", Done),
+            ("idle", Done)
+        ]
+    );
 }
 
 #[test]
@@ -291,6 +381,11 @@ fn project_icons_pick_a_color_and_an_initial_like_electron() {
     assert_eq!(identity_color("a"), 0xb06260);
     // "ab" is 97 * 31 + 98 = 3105, and 3105 % 10 is 5: "indigo".
     assert_eq!(identity_color("ab"), 0x6a70b8);
+    // The reference daemon's `.claude` projectKey hashes to "orange", as Electron draws it.
+    assert_eq!(
+        identity_color("remote:github.com/hieppp/claude-setting"),
+        0xa4673a
+    );
     assert_eq!(project_initial("bachuc"), "B");
     assert_eq!(project_initial("org/paseo"), "P");
     assert_eq!(project_initial("  "), "");
