@@ -15,6 +15,11 @@ gpui-kit = { version = "=0.7.3", features = [
     "tree-sitter-typescript",
 ] }
 
+# A vendored gpui-base 0.7.3 with one a11y fix; see vendor/gpui-base/BACHUC-PATCH.md
+# and ADR-0044. Re-apply the patch on each gpui-kit upgrade.
+[patch.crates-io]
+gpui-base = { path = "vendor/gpui-base" }
+
 [profile.dev]
 debug = "line-tables-only"
 
