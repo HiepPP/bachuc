@@ -843,3 +843,52 @@ pub enum GitStatusEvent {
     /// The scripts of a workspace changed (`script_status_update` or a workspace update).
     ScriptsChanged { workspace_id: String },
 }
+
+/// One agent row of the agent history, archived agents included.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HistoryEntry {
+    pub agent_id: String,
+    pub title: String,
+    pub provider: String,
+    pub workspace_id: Option<String>,
+    pub workspace_name: Option<String>,
+    pub project_name: String,
+    pub branch: Option<String>,
+    pub cwd: String,
+    pub archived: bool,
+    /// The snapshot `updatedAt`, as the app's history list reads it.
+    pub last_activity_at: Option<String>,
+    pub pending_permissions: usize,
+}
+
+/// One page of `fetch_agent_history_request`, newest first.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HistoryPage {
+    pub entries: Vec<HistoryEntry>,
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+    /// An older daemon cut a search short instead of giving a cursor.
+    pub search_truncated: bool,
+}
+
+/// A timeline position, as `AgentTimelineCursorSchema`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForkCursor {
+    pub epoch: String,
+    pub seq: u64,
+}
+
+/// Where a fork ends; both `None` forks the whole chat.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ForkBoundary {
+    pub cursor: Option<ForkCursor>,
+    pub message_id: Option<String>,
+}
+
+/// The chat history of a fork. Send `attachment` unchanged with the new agent's prompt.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForkContext {
+    pub attachment: serde_json::Value,
+    pub title: Option<String>,
+    pub item_count: u32,
+}

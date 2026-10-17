@@ -33,6 +33,7 @@ pub use model::{
     ChangedFile, CheckoutStatus, DirectoryEvent, FileContent, FileEntry, FileKind, ProjectNode,
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
 };
+pub use model::{ForkBoundary, ForkContext, ForkCursor, HistoryEntry, HistoryPage};
 pub use model::{
     GitAction, GitActionReply, GitStatus, GitStatusEvent, MergeMethod, PrCheck, PrMergeCapability,
     PrStatus, PrStatusReply, PrTimelineItem, StashEntry, WorkspaceScript,
@@ -905,6 +906,62 @@ impl Client {
         cx: &mut Context<Client>,
     ) -> Task<anyhow::Result<()>> {
         let receiver = self.core.refresh_agent(agent_id);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Unarchives the agent; the daemon also restores its workspace.
+    pub fn unarchive_agent(
+        &mut self,
+        agent_id: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.unarchive_agent(agent_id);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// An archived agent this client has seen; archived agents are never in `agents`.
+    pub fn archived_agent(&self, agent_id: &str) -> Option<&AgentSummary> {
+        self.core.archived_agent(agent_id)
+    }
+
+    pub fn is_archived(&self, agent_id: &str) -> bool {
+        self.core.is_archived(agent_id)
+    }
+
+    pub fn history_search_supported(&self) -> bool {
+        self.core.history_search_supported()
+    }
+
+    /// One page of the agent history, archived agents included.
+    pub fn fetch_agent_history(
+        &mut self,
+        search: Option<&str>,
+        cursor: Option<&str>,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<HistoryPage>> {
+        let receiver = self.core.fetch_agent_history(search, cursor);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn fork_supported(&self) -> bool {
+        self.core.fork_supported()
+    }
+
+    pub fn fork_cursor_supported(&self) -> bool {
+        self.core.fork_cursor_supported()
+    }
+
+    /// The chat history to fork. A host without `agentForkContextCursor` gets no cursor.
+    pub fn fork_context(
+        &mut self,
+        agent_id: &str,
+        boundary: ForkBoundary,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<ForkContext>> {
+        let receiver = self.core.fork_context(agent_id, boundary);
         self.publish(cx);
         reply_task(receiver, cx)
     }

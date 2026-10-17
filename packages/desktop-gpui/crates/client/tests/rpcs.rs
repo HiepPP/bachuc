@@ -6,9 +6,10 @@ mod common;
 use bachuc_client::{
     AgentFeature, AgentFeatureKind, AgentFeatureOption, AttentionReason, ChangedFile,
     ChangedFileDetails, CheckoutDetails, CheckoutStatus, CommitFile, CommitList, CommitSummary,
-    DiffStat, DirectoryEvent, FileDiff, FileDiffStatus, FileKind, GitAction, GitActionReply,
-    GitStatus, GitStatusEvent, MergeMethod, PrCheck, PrMergeCapability, PrStatus, PrTimelineItem,
-    ProjectNode, QueuedPrompt, StashEntry, TurnBehavior, WorkspaceNode, WorkspaceScript,
+    DiffStat, DirectoryEvent, FileDiff, FileDiffStatus, FileKind, ForkBoundary, ForkCursor,
+    GitAction, GitActionReply, GitStatus, GitStatusEvent, HistoryEntry, HistoryPage, MergeMethod,
+    PrCheck, PrMergeCapability, PrStatus, PrTimelineItem, ProjectNode, QueuedPrompt, StashEntry,
+    TurnBehavior, WorkspaceNode, WorkspaceScript,
 };
 use bachuc_protocol::generated::ServerInfoPermissionsItem;
 use common::{FakeServer, Harness, agent_snapshot, session};
@@ -1907,4 +1908,250 @@ fn status_updates_are_subscribed_and_emit_git_status_events() {
         ),
         ("running", Some("healthy"), Some("t9"))
     );
+}
+
+fn with_features(server: &FakeServer, features: &[&str]) {
+    server.with(|s| {
+        for feature in features {
+            s.features.insert((*feature).into(), json!(true));
+        }
+    });
+}
+
+fn history_row(id: &str, archived_at: Value) -> Value {
+    let mut agent = agent_snapshot(id, "idle");
+    agent["archivedAt"] = archived_at;
+    agent["updatedAt"] = json!("2026-10-17T00:00:00.000Z");
+    json!({"agent": agent, "project": {"projectKey": "p1", "projectName": "Project p1",
+        "workspaceName": "ws one", "checkout": {"cwd": "/tmp/fake", "isGit": true,
+        "currentBranch": "main", "remoteUrl": null, "isPaseoOwnedWorktree": false}}})
+}
+
+#[test]
+fn agent_history_sends_the_search_page_and_sort_and_parses_the_page() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["agentHistorySearch"]);
+    server.reply(
+        "fetch_agent_history_request",
+        "fetch_agent_history_response",
+        json!({"entries": [history_row("a1", Value::Null),
+                           history_row("old", json!("2026-10-01T00:00:00.000Z"))],
+               "pageInfo": {"nextCursor": "c2", "prevCursor": null, "hasMore": true},
+               "searchTruncated": true}),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.core.history_search_supported());
+    let reply = harness.core.fetch_agent_history(Some("bug"), Some("c1"));
+    let page = harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("fetch_agent_history_request")[0];
+    assert_eq!(request["search"], json!("bug"));
+    assert_eq!(
+        request["sort"],
+        json!([{"key": "updated_at", "direction": "desc"}])
+    );
+    assert_eq!(request["page"], json!({"limit": 200, "cursor": "c1"}));
+    assert!(request.get("filter").is_none());
+
+    let entry = |id: &str, archived: bool| HistoryEntry {
+        agent_id: id.into(),
+        title: format!("agent {id}"),
+        provider: "mock".into(),
+        workspace_id: Some("ws1".into()),
+        workspace_name: Some("ws one".into()),
+        project_name: "Project p1".into(),
+        branch: Some("main".into()),
+        cwd: "/tmp/fake".into(),
+        archived,
+        last_activity_at: Some("2026-10-17T00:00:00.000Z".into()),
+        pending_permissions: 0,
+    };
+    assert_eq!(
+        page,
+        HistoryPage {
+            entries: vec![entry("a1", false), entry("old", true)],
+            next_cursor: Some("c2".into()),
+            has_more: true,
+            search_truncated: true,
+        }
+    );
+    // The archived row fills the archived map; the live directory keeps only a1.
+    assert!(harness.core.is_archived("old"));
+    assert!(!harness.core.is_archived("a1"));
+    let ids: Vec<&str> = harness
+        .core
+        .agents()
+        .iter()
+        .map(|a| a.id.as_str())
+        .collect();
+    assert_eq!(ids, ["a1"]);
+}
+
+#[test]
+fn agent_history_sends_no_search_when_empty_or_unsupported() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "fetch_agent_history_request",
+        "fetch_agent_history_response",
+        json!({"entries": [], "pageInfo": page_info()}),
+    );
+    let mut harness = connect(&server);
+    assert!(!harness.core.history_search_supported());
+    let reply = harness.core.fetch_agent_history(Some("bug"), None);
+    let page = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(page, HistoryPage::default());
+    let request = &server.requests_of("fetch_agent_history_request")[0];
+    assert!(request.get("search").is_none());
+    assert_eq!(request["page"], json!({"limit": 200}));
+
+    with_features(&server, &["agentHistorySearch"]);
+    let mut harness = connect(&server);
+    let reply = harness.core.fetch_agent_history(Some(""), None);
+    harness.wait(reply, WAIT).unwrap();
+    let request = server
+        .requests_of("fetch_agent_history_request")
+        .pop()
+        .unwrap();
+    assert!(request.get("search").is_none());
+}
+
+#[test]
+fn archived_upserts_move_to_the_archived_map_and_back() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.add_agent("a2", "idle");
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.agents().len() == 2));
+    let live_a2 = harness.core.agents()[1].clone();
+
+    let mut archived = agent_snapshot("a1", "idle");
+    archived["archivedAt"] = json!("2026-10-17T00:00:00.000Z");
+    server.broadcast(json!({"type": "agent_update",
+                            "payload": {"kind": "upsert", "agent": archived}}));
+    assert!(harness.pump_until(WAIT, |h| h.core.is_archived("a1")));
+    let ids: Vec<&str> = harness
+        .core
+        .agents()
+        .iter()
+        .map(|a| a.id.as_str())
+        .collect();
+    assert_eq!(ids, ["a2"]);
+    assert_eq!(harness.core.agents()[0], live_a2);
+    assert_eq!(
+        harness.core.archived_agent("a1").map(|a| a.title.as_str()),
+        Some("agent a1")
+    );
+
+    server.broadcast(json!({"type": "agent_update",
+                            "payload": {"kind": "upsert", "agent": agent_snapshot("a1", "idle")}}));
+    assert!(harness.pump_until(WAIT, |h| !h.core.is_archived("a1")));
+    assert!(harness.core.archived_agent("a1").is_none());
+    assert!(harness.core.agents().iter().any(|a| a.id == "a1"));
+}
+
+#[test]
+fn unarchive_sends_a_refresh() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "refresh_agent_request",
+        "status",
+        json!({"status": "agent_refreshed", "agentId": "old", "timelineSize": 0}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.unarchive_agent("old");
+    harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        server.requests_of("refresh_agent_request")[0]["agentId"],
+        json!("old")
+    );
+}
+
+fn fork_reply(attachment: Value, error: Value) -> Value {
+    json!({"agentId": "a1", "attachment": attachment, "itemCount": 4,
+           "boundaryMessageId": null, "error": error})
+}
+
+#[test]
+fn fork_context_keeps_the_raw_attachment_and_gates_the_cursor() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["agentForkContext"]);
+    let attachment = json!({"type": "text", "mimeType": "text/plain",
+                            "contextKind": "chat_history", "title": "Chat", "text": "hi"});
+    server.reply(
+        "agent.fork_context.request",
+        "agent.fork_context.response",
+        fork_reply(attachment.clone(), Value::Null),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.core.fork_supported());
+    assert!(!harness.core.fork_cursor_supported());
+    let boundary = ForkBoundary {
+        cursor: Some(ForkCursor {
+            epoch: "e1".into(),
+            seq: 5,
+        }),
+        message_id: Some("m1".into()),
+    };
+    let reply = harness.core.fork_context("a1", boundary.clone());
+    let context = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(context.attachment, attachment);
+    assert_eq!(context.title.as_deref(), Some("Chat"));
+    assert_eq!(context.item_count, 4);
+    let request = &server.requests_of("agent.fork_context.request")[0];
+    assert_eq!(request["agentId"], json!("a1"));
+    assert_eq!(request["boundaryMessageId"], json!("m1"));
+    assert!(request.get("boundaryCursor").is_none());
+
+    server.reply(
+        "agent.fork_context.request",
+        "agent.fork_context.response",
+        fork_reply(Value::Null, json!("Agent not found")),
+    );
+    let failed = harness.core.fork_context("a1", ForkBoundary::default());
+    assert_eq!(
+        harness.wait(failed, WAIT).unwrap_err().to_string(),
+        "Agent not found"
+    );
+    server.reply(
+        "agent.fork_context.request",
+        "agent.fork_context.response",
+        fork_reply(Value::Null, Value::Null),
+    );
+    let empty = harness.core.fork_context("a1", ForkBoundary::default());
+    assert_eq!(
+        harness.wait(empty, WAIT).unwrap_err().to_string(),
+        "Nothing to fork"
+    );
+
+    with_features(&server, &["agentForkContextCursor"]);
+    server.reply(
+        "agent.fork_context.request",
+        "agent.fork_context.response",
+        fork_reply(attachment, Value::Null),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.fork_context("a1", boundary);
+    harness.wait(reply, WAIT).unwrap();
+    let request = server
+        .requests_of("agent.fork_context.request")
+        .pop()
+        .unwrap();
+    assert_eq!(request["boundaryCursor"], json!({"epoch": "e1", "seq": 5}));
+}
+
+#[test]
+fn fork_context_without_the_feature_fails_without_a_request() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    assert!(!harness.core.fork_supported());
+    let reply = harness.core.fork_context("a1", ForkBoundary::default());
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Update the host to use this."
+    );
+    assert!(server.requests_of("agent.fork_context.request").is_empty());
 }

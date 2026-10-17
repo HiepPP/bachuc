@@ -16,6 +16,7 @@ use crate::model::{
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode, WorkspaceSummary,
     provider_label,
 };
+use crate::model::{ForkBoundary, ForkContext, HistoryEntry, HistoryPage};
 use crate::model::{
     GitAction, GitActionReply, GitStatus, GitStatusEvent, PrStatus, PrStatusReply, PrTimelineItem,
     StashEntry, WorkspaceScript,
@@ -127,6 +128,8 @@ enum Pending {
     /// A checkout answer with only `success` and `error`.
     CheckoutDone(Reply<()>),
     StartScript(Reply<String>),
+    History(Reply<HistoryPage>),
+    ForkContext(Reply<ForkContext>),
 }
 
 impl Pending {
@@ -177,6 +180,8 @@ impl Pending {
             Pending::StashList(reply) => send(reply, error),
             Pending::CheckoutDone(reply) => send(reply, error),
             Pending::StartScript(reply) => send(reply, error),
+            Pending::History(reply) => send(reply, error),
+            Pending::ForkContext(reply) => send(reply, error),
             _ => {}
         }
     }
@@ -308,6 +313,8 @@ pub struct ClientCore {
     pending: HashMap<String, Pending>,
     agents: Vec<AgentSummary>,
     extras: HashMap<String, AgentExtra>,
+    /// Archived agents seen in `agent_update` or the history; never in `agents`.
+    archived: HashMap<String, AgentSummary>,
     workspaces: Vec<WorkspaceSummary>,
     providers: Vec<ProviderSummary>,
     viewed: Vec<String>,
@@ -360,6 +367,7 @@ impl ClientCore {
             pending: HashMap::new(),
             agents: Vec::new(),
             extras: HashMap::new(),
+            archived: HashMap::new(),
             workspaces: Vec::new(),
             providers: Vec::new(),
             viewed: Vec::new(),
@@ -1185,6 +1193,84 @@ impl ClientCore {
             json!({"type": "refresh_agent_request", "agentId": agent_id}),
             Pending::Refresh,
         )
+    }
+
+    /// The daemon unarchives the agent and restores its workspace on a refresh.
+    pub fn unarchive_agent(&mut self, agent_id: &str) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.refresh_agent(agent_id)
+    }
+
+    pub fn archived_agent(&self, agent_id: &str) -> Option<&AgentSummary> {
+        self.archived.get(agent_id)
+    }
+
+    pub fn is_archived(&self, agent_id: &str) -> bool {
+        self.archived.contains_key(agent_id)
+    }
+
+    fn server_feature(&self, name: &str) -> bool {
+        self.server_info
+            .as_ref()
+            .is_some_and(|info| info["features"][name] == true)
+    }
+
+    /// Whether the host searches the history (`features.agentHistorySearch`).
+    pub fn history_search_supported(&self) -> bool {
+        self.server_feature("agentHistorySearch")
+    }
+
+    /// One history page, newest first. The search is left out when empty or unsupported.
+    pub fn fetch_agent_history(
+        &mut self,
+        search: Option<&str>,
+        cursor: Option<&str>,
+    ) -> oneshot::Receiver<anyhow::Result<HistoryPage>> {
+        let mut page = json!({"limit": 200});
+        if let Some(cursor) = cursor {
+            page["cursor"] = json!(cursor);
+        }
+        let mut message = json!({"type": "fetch_agent_history_request",
+                                 "sort": [{"key": "updated_at", "direction": "desc"}],
+                                 "page": page});
+        if let Some(search) = search.filter(|search| !search.is_empty())
+            && self.history_search_supported()
+        {
+            message["search"] = json!(search);
+        }
+        self.request_reply(message, Pending::History)
+    }
+
+    /// Whether the host builds fork contexts (`features.agentForkContext`).
+    pub fn fork_supported(&self) -> bool {
+        self.server_feature("agentForkContext")
+    }
+
+    /// Whether the host takes a fork boundary cursor (`features.agentForkContextCursor`).
+    pub fn fork_cursor_supported(&self) -> bool {
+        self.server_feature("agentForkContextCursor")
+    }
+
+    /// The chat history up to `boundary`, as an attachment for a new agent.
+    pub fn fork_context(
+        &mut self,
+        agent_id: &str,
+        boundary: ForkBoundary,
+    ) -> oneshot::Receiver<anyhow::Result<ForkContext>> {
+        if !self.fork_supported() {
+            let (reply, receiver) = oneshot::channel();
+            let _ = reply.send(Err(anyhow!("Update the host to use this.")));
+            return receiver;
+        }
+        let mut message = json!({"type": "agent.fork_context.request", "agentId": agent_id});
+        if let Some(cursor) = boundary.cursor
+            && self.fork_cursor_supported()
+        {
+            message["boundaryCursor"] = json!({"epoch": cursor.epoch, "seq": cursor.seq});
+        }
+        if let Some(message_id) = boundary.message_id {
+            message["boundaryMessageId"] = json!(message_id);
+        }
+        self.request_reply(message, Pending::ForkContext)
     }
 
     /// The provider-native session id: `runtimeInfo.sessionId`, else `persistence.sessionId`.
@@ -2731,6 +2817,23 @@ impl ClientCore {
                     Err(anyhow!("terminal rename failed"))
                 }
             }),
+            Pending::History(sender) => {
+                if error.is_none() {
+                    self.archive_history_rows(payload);
+                }
+                reply(sender, error, || Ok(history_page(payload)))
+            }
+            Pending::ForkContext(sender) => reply(sender, error, || {
+                let attachment = &payload["attachment"];
+                if attachment.is_null() {
+                    return Err(anyhow!("Nothing to fork"));
+                }
+                Ok(ForkContext {
+                    attachment: attachment.clone(),
+                    title: attachment["title"].as_str().map(str::to_string),
+                    item_count: payload["itemCount"].as_u64().unwrap_or_default() as u32,
+                })
+            }),
             pending => self.git_response(pending, kind, payload, error),
         }
     }
@@ -2875,8 +2978,12 @@ impl ClientCore {
         };
         if !agent["archivedAt"].is_null() {
             self.remove_agent(id);
+            self.archived
+                .insert(id.to_string(), agent_summary(id, agent));
+            self.directory_changed = true;
             return;
         }
+        self.archived.remove(id);
         // The daemon can send an older snapshot after a newer one, for example `idle` after
         // `running` at agent start. ISO timestamps compare as strings.
         let updated_at = agent["updatedAt"].as_str().map(str::to_string);
@@ -2894,23 +3001,7 @@ impl ClientCore {
             .as_array()
             .cloned()
             .unwrap_or_default();
-        let summary = AgentSummary {
-            id: id.to_string(),
-            title: agent["title"]
-                .as_str()
-                .filter(|title| !title.is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| id.chars().take(8).collect()),
-            status: agent["status"].as_str().unwrap_or("unknown").to_string(),
-            cwd: agent["cwd"].as_str().unwrap_or_default().to_string(),
-            workspace_id: agent["workspaceId"].as_str().map(str::to_string),
-            provider: agent["provider"].as_str().unwrap_or_default().to_string(),
-            model: agent["model"]
-                .as_str()
-                .or_else(|| runtime["model"].as_str())
-                .map(str::to_string),
-            pending_permissions: permissions.len(),
-        };
+        let summary = agent_summary(id, agent);
         let modes = agent["availableModes"]
             .as_array()
             .into_iter()
@@ -2967,6 +3058,22 @@ impl ClientCore {
         extra.queue_held = agent["queue"]["held"] == true;
         self.set_permissions(id, permissions);
         self.directory_changed = true;
+    }
+
+    /// Archived history rows fill the archived map; a live agent stays where it is.
+    fn archive_history_rows(&mut self, payload: &Value) {
+        for entry in payload["entries"].as_array().into_iter().flatten() {
+            let agent = &entry["agent"];
+            let Some(id) = agent["id"].as_str() else {
+                continue;
+            };
+            if agent["archivedAt"].is_null() || self.agents.iter().any(|a| a.id == id) {
+                continue;
+            }
+            self.archived
+                .insert(id.to_string(), agent_summary(id, agent));
+            self.directory_changed = true;
+        }
     }
 
     fn remove_agent(&mut self, id: &str) {
@@ -3266,6 +3373,68 @@ fn project_info(descriptor: &Value) -> Option<ProjectInfo> {
             .to_string(),
         key: descriptor["projectKey"].as_str().map(str::to_string),
     })
+}
+
+fn agent_title(id: &str, agent: &Value) -> String {
+    agent["title"]
+        .as_str()
+        .filter(|title| !title.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| id.chars().take(8).collect())
+}
+
+fn agent_summary(id: &str, agent: &Value) -> AgentSummary {
+    AgentSummary {
+        id: id.to_string(),
+        title: agent_title(id, agent),
+        status: agent["status"].as_str().unwrap_or("unknown").to_string(),
+        cwd: agent["cwd"].as_str().unwrap_or_default().to_string(),
+        workspace_id: agent["workspaceId"].as_str().map(str::to_string),
+        provider: agent["provider"].as_str().unwrap_or_default().to_string(),
+        model: agent["model"]
+            .as_str()
+            .or_else(|| agent["runtimeInfo"]["model"].as_str())
+            .map(str::to_string),
+        pending_permissions: agent["pendingPermissions"].as_array().map_or(0, Vec::len),
+    }
+}
+
+/// A `fetch_agent_history_response` payload as a page.
+fn history_page(payload: &Value) -> HistoryPage {
+    let text = |value: &Value| value.as_str().map(str::to_string);
+    let entries = payload["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let agent = &entry["agent"];
+            let id = agent["id"].as_str()?;
+            let project = &entry["project"];
+            Some(HistoryEntry {
+                agent_id: id.to_string(),
+                title: agent_title(id, agent),
+                provider: agent["provider"].as_str().unwrap_or_default().to_string(),
+                workspace_id: text(&agent["workspaceId"]),
+                workspace_name: text(&project["workspaceName"]),
+                project_name: project["projectName"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                branch: text(&project["checkout"]["currentBranch"]),
+                cwd: agent["cwd"].as_str().unwrap_or_default().to_string(),
+                archived: !agent["archivedAt"].is_null(),
+                last_activity_at: text(&agent["updatedAt"]),
+                pending_permissions: agent["pendingPermissions"].as_array().map_or(0, Vec::len),
+            })
+        })
+        .collect();
+    let page_info = &payload["pageInfo"];
+    HistoryPage {
+        entries,
+        next_cursor: text(&page_info["nextCursor"]),
+        has_more: page_info["hasMore"] == true,
+        search_truncated: payload["searchTruncated"] == true,
+    }
 }
 
 /// The snapshot `features`, decoded one by one through the generated union, so a feature type
