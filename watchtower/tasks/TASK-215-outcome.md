@@ -52,3 +52,7 @@ Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from 
 - Cmd-click a URL and a file path: UNVERIFIED (unattended): needs pointer.
 - Anti-goal, 200,000-line flood timing: UNVERIFIED. Not run; it needs the baseline bundle at `59a040442`.
 - Observation: the first terminal row (the prompt line) draws half under the tab bar edge in the same shot.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

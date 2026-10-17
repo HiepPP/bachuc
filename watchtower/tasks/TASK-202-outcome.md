@@ -64,3 +64,7 @@ Run 2026-10-18 by the UI checker (run 3). Bundle `Bachuc GPUI Check` built from 
 - Toast after a git action: PASS (see Commit).
 - Anti-goal, workspace click to first tab paint under 200 ms: UNVERIFIED. No paint timestamps; a background window paints only when forced.
 - Observation, not in this TASK: after the commit on a repo with no remote, the git split button disappears from the header (`/tmp/r3-20-changes-empty.png`); it comes back as "Update from main" on `feature-x`.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

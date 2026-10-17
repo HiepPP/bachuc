@@ -56,3 +56,7 @@ Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from 
 - Files scope (Cmd+P), its rows, and Enter: PASS, see TASK-203. The command center opened in the Files scope (`button Files`, field "Search files", rows a.txt and paseo.json); "main" left one row "src/main.rs". Evidence: `/tmp/r4-203-03-cmdp.png`, `/tmp/r4-203-04-cmdp-main.png`.
 - Shortcuts dialog: PASS, see TASK-203. It lists "Show keyboard shortcuts" with key `?` and the note "Available when focus is not in a text field or terminal." under General. Evidence: `/tmp/r4-203-06-qmark-outside.png`.
 - Anti-goal, Cmd+K to first row under 50 ms from log timestamps: UNVERIFIED. The app logs no key or paint timestamps.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

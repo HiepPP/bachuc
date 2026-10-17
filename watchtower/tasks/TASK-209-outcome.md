@@ -97,3 +97,7 @@ Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from 
 - Remove by AX: PASS. On the same card: the card left the Board ("11 finished" -> "10 finished"), the Board stayed open, no tab opened. Evidence: `/tmp/r4-209-06-after-remove.png`. Board size was reset to 100%.
 - Observation: the card "t198r2 running" (not created in this run) shows its pencil and a full-opacity star with no hover; its label is still "Star", so it is not starred. Cause not checked.
 - Pencil whole on hover: UNVERIFIED (unattended): needs pointer.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

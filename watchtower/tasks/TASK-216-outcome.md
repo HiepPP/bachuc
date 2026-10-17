@@ -43,3 +43,7 @@ Run 2026-10-18 by the UI checker (run 3). Bundle `Bachuc GPUI Check` built from 
 - Nav rows in order: PASS. AX order and screen order are "New workspace", "History", "Search", "Board", "Plugins" (`/tmp/r3-01-start.png`). History opens the History tab (TASK-200).
 - Hover "+" on a project: UNVERIFIED (unattended): needs pointer. The "+" is not drawn without hover. The AX tree has one "Create a new workspace for <project>" button per project row, before "Project actions".
 - Anti-goal, 3 existing rows keep their height: PASS. Text band pitch on the same 3420 x 2024 screenshot size, before (`/tmp/t198r2-10-sidebar-workspace.png`, build without `93fc8d183`) and after (`/tmp/r3-01-start.png`): nav rows 60 px in both, project rows 80 px in both (for example 750 -> 830 and 1490 -> 1570 in both), workspace rows 80 px in both. Script `/tmp/r3-bands.py`.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

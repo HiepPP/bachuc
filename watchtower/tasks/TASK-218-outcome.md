@@ -45,3 +45,7 @@ DONE
 
 - Run 3 (2026-10-18, recorded in the TASK-200 outcome): History opens with Today, Yesterday, and This week groups and Archived pills: PASS (`/tmp/r3-02-history.png`).
 - Search narrows the rows: UNVERIFIED (unattended): not run by the UI checker. Owner hand test, Q-133.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

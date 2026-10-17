@@ -59,3 +59,7 @@ Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from 
 - Explorer "Open to the side" and "Add to chat": UNVERIFIED (unattended): needs pointer. The file menu has no AX or keyboard path on macOS (see TASK-213 UI Checks Run 4).
 - Anti-goal, Cmd+K, Cmd+T, Cmd+W: PASS. Cmd+K opened the command center (`/tmp/r4-203-08-cmdk.png`). Cmd+T added a "New tab" tab (`/tmp/r4-203-15-cmdt.png`). Cmd+W closed the active tab each time (two New workspace tabs, then the new tab).
 - Cmd-click a file path in a terminal: UNVERIFIED (unattended): needs pointer.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

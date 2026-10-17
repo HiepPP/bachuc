@@ -47,3 +47,7 @@ Run 2026-10-18 by the UI checker (run 3). Bundle `Bachuc GPUI Check` built from 
 - A completed turn footer shows the fork button: PASS. The footer of a completed turn has "Copy turn" and "Fork chat from here" (a split glyph) before "Worked for 9s" (`/tmp/r3-03-archived-open.png`).
 - Its menu shows both items: PASS. The press opened AX `menu Fork chat from here` with "Fork in a new tab" and "Fork in a new workspace" (`/tmp/r3-04-fork-menu.png`). No item was pressed. Escape did not close the menu; a second press on the trigger closed it (`/tmp/r3-05-fork-closed.png`).
 - Anti-goal, CPU under 10% during the mock stream: UNVERIFIED (unattended): background frame. With "t208 cpu stream" (five-minute stream) open, `ps` gave 1.7% and 1.2% for PID 31420, but the background window does not paint, so the paint cost is not in this reading (`/tmp/r3-33-cpu-stream.png`).
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

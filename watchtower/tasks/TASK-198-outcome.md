@@ -146,3 +146,7 @@ Run 2026-10-18 by the UI checker. Bundle `Bachuc GPUI Check` built from HEAD `da
 - Sidebar workspace press with the Board open ("t207-ws"): PASS. Board closed, workspace t207-ws shows with its tab and timeline. Evidence: `/tmp/t198r2-10-sidebar-workspace.png`.
 - Anti-goal, click to first timeline paint under 300 ms: UNVERIFIED. The app logs no click or paint timestamps, and a background window paints only when forced. Press plus AX read took 807-848 ms, which includes cua round trips.
 - Cleanup: PID 80366 quit and exited.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

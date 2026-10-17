@@ -101,3 +101,7 @@ Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from 
 
 - Archive an agent, then AX-press its Board card -> its tab opens with the archived callout: PASS (recheck after `aaada0a61`). "r4 board card" (`f7857f7`) was archived by CLI while its card showed on the Board. One AX press on "Open conversation r4 board card" opened the tab "r4 board card" in its workspace (header "feature-x", t202-repo) with the timeline and "This agent is archived" + "Unarchive" in place of the composer. Evidence: `/tmp/r4-200-02-archived-card-open.png`.
 - Note: the opened archived tab shows the tail, not the latest prompt, as the fix round 1 Lessons predict.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

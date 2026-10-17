@@ -54,3 +54,7 @@ Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from 
 - New file, Rename, Duplicate, Delete with confirm, Discard changes with confirm, tree updates: UNVERIFIED (unattended): needs pointer. The menu opens only from a right mouse-down.
 - Revert a changed file in the scratch repo: UNVERIFIED (unattended): needs pointer. `/tmp/t202-repo` keeps its change (` M a.txt`).
 - Anti-goal, scroll CPU over a 2,000-entry tree: UNVERIFIED (unattended): needs pointer (scroll).
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

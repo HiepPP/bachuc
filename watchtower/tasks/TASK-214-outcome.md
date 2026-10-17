@@ -46,3 +46,7 @@ Run 2026-10-18 by the UI checker (run 3). Bundle `Bachuc GPUI Check` built from 
 - File drop: UNVERIFIED (unattended): needs pointer.
 - Anti-goal, 10 fast characters after `@`: PASS. `@srcmainrsx` typed in 92 ms (18:30:16.837Z to .929Z) gave 1 `directory_suggestions_request` in the metric window 18:30:08Z to 18:30:38Z.
 - The draft was cleared after the checks.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

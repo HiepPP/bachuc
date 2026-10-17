@@ -49,3 +49,7 @@ Run 2026-10-18 by the UI checker (run 3). Bundle `Bachuc GPUI Check` built from 
 
 - A repo with a PR shows the header, checks, and activity: UNVERIFIED (unattended): no PR. No live workspace the checker may read has a PR: `calendar-ref` on `main` has none (`gh pr view`), and `HiepPP/bachuc` has no open PR. The scratch repo has no remote, so the PR tab did not auto-open.
 - Anti-goal, no PR status request over 60 idle seconds: PASS. With the check app idle on the scratch workspace, the 4 metric windows from 18:27:38Z to 18:29:38Z (120 s) show no `checkout_pr_status_request`. The window before (branch switches) had 4, as the git status change asks for it.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.

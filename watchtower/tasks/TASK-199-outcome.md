@@ -69,3 +69,7 @@ Blocked: not reproduced by the UI checker (Q-127). No code changed, so group S g
 - UI checker run 2: "With Board open, press a sidebar workspace -> the workspace shows": PASS (`/tmp/t198r2-10-sidebar-workspace.png`, recorded in the TASK-198 outcome).
 - Owner hand test on a new build (Q-133): with the Board open, click a sidebar workspace; and without the Board, click tab chips in a workspace.
 - No code changed for this TASK.
+
+## Owner Hand Test
+
+- 2026-10-18: Hiep ran the Q-133 checks of this TASK by hand on the "Bachuc GPUI Test" bundle built from `fc70abf5a`, on live: PASS.
