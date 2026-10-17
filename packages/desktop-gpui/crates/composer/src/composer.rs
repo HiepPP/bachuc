@@ -24,6 +24,10 @@ use crate::draft::{
     draft_config, min_input_height, model_groups, model_key, split_model_key,
 };
 use crate::input::{CONTROL, MessageInput, round_button};
+use crate::mention::{
+    DEBOUNCE_MS, FileMention, LIMIT, MentionMenu, apply_mention, find_active_file_mention,
+    insert_mentions, mention_path,
+};
 use crate::plugin_slots::{
     HostAction, PopoverViews, ShowPanel, draft_pill_row, host_action, needs_intercept,
     picker_sources, pill_slots, pill_states, plugin_pill, run_chain, stop_button, toggle_chip,
@@ -71,7 +75,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -299,6 +303,11 @@ pub struct Composer {
     /// Escape closed the menu for the text being typed.
     slash_dismissed: bool,
     slash_scroll: ScrollHandle,
+    /// The `@` file menu.
+    mention: MentionMenu,
+    mention_scroll: ScrollHandle,
+    /// The debounced suggestion request; a newer keystroke drops it.
+    mention_fetch: Option<Task<()>>,
     /// The feature requests that wait for the daemon.
     requests: FeatureRequests,
     /// The row limit the input was last given, from the window height.
@@ -445,7 +454,9 @@ impl Composer {
                 }
                 let key = event.keystroke.key.clone();
                 let handled = weak
-                    .update(cx, |this, cx| this.slash_key(&key, window, cx))
+                    .update(cx, |this, cx| {
+                        this.mention_key(&key, window, cx) || this.slash_key(&key, window, cx)
+                    })
                     .unwrap_or(false);
                 if handled {
                     cx.stop_propagation();
@@ -473,6 +484,9 @@ impl Composer {
             slash_active: 0,
             slash_dismissed: false,
             slash_scroll: ScrollHandle::new(),
+            mention: MentionMenu::default(),
+            mention_scroll: ScrollHandle::new(),
+            mention_fetch: None,
             requests: FeatureRequests::default(),
             max_rows,
             focus_hint: focus_hint(&load_shortcuts()),
@@ -832,6 +846,7 @@ impl Composer {
     }
 
     fn text_changed(&mut self, cx: &mut Context<Self>) {
+        self.request_mentions(cx);
         let value = self.value(cx);
         if slash_query(&value).is_some() {
             self.load_commands(cx);
@@ -899,7 +914,8 @@ impl Composer {
 
     /// The menu rows for the text in the input; empty when the menu is closed.
     fn slash_matches(&self, cx: &App) -> Vec<SlashItem> {
-        if self.slash_dismissed {
+        // A file mention at the caret wins, as `resolveAutocompleteMode` picks "file" first.
+        if self.slash_dismissed || self.mention_open(cx) {
             return Vec::new();
         }
         let value = self.value(cx);
@@ -960,6 +976,7 @@ impl Composer {
             input.set_value(text, window, cx);
             input.set_cursor_position(position, window, cx);
         });
+        self.request_mentions(cx);
     }
 
     /// Puts the command in the input and puts the caret after it.
@@ -969,10 +986,215 @@ impl Composer {
         cx.notify();
     }
 
+    /// The folder file mentions resolve in: the draft's, or the agent's.
+    fn mention_cwd(&self, cx: &App) -> Option<String> {
+        match &self.draft {
+            Some(draft) => draft.cwd().map(String::from),
+            None => self
+                .client
+                .read(cx)
+                .agents()
+                .iter()
+                .find(|agent| agent.id == self.agent_id)
+                .map(|agent| agent.cwd.trim().to_string()),
+        }
+    }
+
+    /// The `@query` that ends at the caret.
+    fn active_mention(&self, cx: &App) -> Option<FileMention> {
+        let input = self.input.read(cx);
+        find_active_file_mention(&input.value(), input.cursor())
+    }
+
+    fn mention_open(&self, cx: &App) -> bool {
+        let mention = self.active_mention(cx);
+        self.mention
+            .open(self.mention_cwd(cx).as_deref(), mention.as_ref())
+    }
+
+    /// Asks for the files that match the mention at the caret once typing pauses. A newer
+    /// keystroke drops the waiting request, so a burst of keys sends one request.
+    fn request_mentions(&mut self, cx: &mut Context<Self>) {
+        let mention = self.active_mention(cx);
+        let cwd = self.mention_cwd(cx);
+        let Some(request) = self.mention.update(cwd.as_deref(), mention.as_ref()) else {
+            if mention.is_none() {
+                self.mention_fetch = None;
+            }
+            return;
+        };
+        self.mention_scroll.scroll_to_bottom();
+        self.mention_fetch = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(DEBOUNCE_MS))
+                .await;
+            let Ok(task) = this.update(cx, |this, cx| {
+                this.client.update(cx, |client, cx| {
+                    client.directory_suggestions(
+                        &request.cwd,
+                        &request.query,
+                        true,
+                        true,
+                        LIMIT,
+                        cx,
+                    )
+                })
+            }) else {
+                return;
+            };
+            let answer = task.await.map_err(|error| error.to_string());
+            let _ = this.update(cx, |this, cx| {
+                if this.mention.accept(request.generation, answer) {
+                    this.mention_scroll.scroll_to_bottom();
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    /// Up, Down, Tab, and Escape while the `@` menu is open. Returns whether it took the key.
+    fn mention_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.input.read(cx).focus_handle(cx).is_focused(window) {
+            return false;
+        }
+        let Some(mention) = self.active_mention(cx) else {
+            return false;
+        };
+        if !self
+            .mention
+            .open(self.mention_cwd(cx).as_deref(), Some(&mention))
+        {
+            return false;
+        }
+        let len = self.mention.items.len();
+        if let Some(delta) = arrow_delta(key) {
+            if len == 0 {
+                return false;
+            }
+            self.mention.active = step(self.mention.active.min(len - 1), len, delta);
+            // Rows draw worst first, as the slash menu does.
+            self.mention_scroll
+                .scroll_to_item(len - 1 - self.mention.active);
+            cx.notify();
+            return true;
+        }
+        match key {
+            "tab" => return self.pick_mention(self.mention.active, window, cx),
+            "escape" => self.mention.dismiss(&mention),
+            _ => return false,
+        }
+        cx.notify();
+        true
+    }
+
+    /// Replaces the `@query` with the quoted path of row `index`. Returns whether it picked.
+    fn pick_mention(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(mention) = self.active_mention(cx) else {
+            return false;
+        };
+        if !self
+            .mention
+            .open(self.mention_cwd(cx).as_deref(), Some(&mention))
+        {
+            return false;
+        }
+        let Some(item) = self
+            .mention
+            .items
+            .get(index.min(self.mention.items.len().saturating_sub(1)))
+        else {
+            return false;
+        };
+        let (text, caret) = apply_mention(&self.value(cx), &mention, &item.path);
+        self.set_text_at(text, caret, window, cx);
+        true
+    }
+
+    /// Puts `text` in the input with the caret at byte `caret`. `set_value` emits no change
+    /// event, so the mention menu reads the new text here.
+    fn set_text_at(
+        &mut self,
+        text: String,
+        caret: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.input.update(cx, |input, cx| {
+            input.set_value(text, window, cx);
+            input.set_selected_range(caret..caret, cx);
+            input.focus(window, cx);
+        });
+        self.request_mentions(cx);
+        cx.notify();
+    }
+
+    /// Puts `path` in at the caret as a quoted mention. A path inside the folder becomes
+    /// relative to it.
+    pub fn insert_path_mention(
+        &mut self,
+        path: &str,
+        window: &mut Window,
+        cx: &mut Context<Composer>,
+    ) {
+        let cwd = self.mention_cwd(cx);
+        let path = mention_path(Path::new(path), cwd.as_deref());
+        self.insert_mentions_at_caret(&[path], window, cx);
+    }
+
+    fn insert_mentions_at_caret(
+        &mut self,
+        paths: &[String],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let cursor = self.input.read(cx).cursor();
+        let (text, caret) = insert_mentions(&self.value(cx), cursor, paths);
+        self.set_text_at(text, caret, window, cx);
+    }
+
+    /// Files dropped from Finder: images attach, as a pasted file does; any other file or
+    /// folder goes in at the caret as a quoted path. A drop while the composer submits is
+    /// ignored.
+    fn drop_paths(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
+        if self.processing || self.locked() {
+            return;
+        }
+        let (images, others): (Vec<PathBuf>, Vec<PathBuf>) = paths
+            .iter()
+            .cloned()
+            .partition(|path| mime_for_path(path).is_some());
+        if !others.is_empty() {
+            let cwd = self.mention_cwd(cx);
+            let mentions: Vec<String> = others
+                .iter()
+                .map(|path| mention_path(path, cwd.as_deref()))
+                .collect();
+            self.insert_mentions_at_caret(&mentions, window, cx);
+        }
+        self.focus(window, cx);
+        if images.is_empty() {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let loaded = cx
+                .background_executor()
+                .spawn(async move { load_images(images) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.attachments.extend(loaded);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Enter picks a menu row, or sends. Cmd+Enter (`secondary`) queues during a run. The
     /// textarea inserts the new line itself for Shift+Enter, and still reports it here.
     fn enter(&mut self, secondary: bool, shift: bool, window: &mut Window, cx: &mut Context<Self>) {
         if shift {
+            return;
+        }
+        if self.pick_mention(self.mention.active, window, cx) {
             return;
         }
         let matches = self.slash_matches(cx);
@@ -1162,6 +1384,7 @@ impl Composer {
     fn clear_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.request_mentions(cx);
         self.slash_dismissed = false;
         self.slash_active = 0;
         cx.notify();
@@ -1819,6 +2042,31 @@ fn spinner(cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// Where an autocomplete menu sits: above the card, as an overlay that takes no layout height.
+/// The gap is the `AutocompletePopover` `OFFSET_FROM_ANCHOR`.
+fn popup_anchor() -> Div {
+    v_flex()
+        .absolute()
+        .bottom_full()
+        .left_0()
+        .right_0()
+        .pb(px(SPACE_3))
+        .gap(px(SPACE_1))
+}
+
+/// The bordered box of an autocomplete menu.
+fn popup_box(cx: &App) -> Div {
+    let t = tokens(cx);
+    div()
+        .bg(t.surface1)
+        .border_1()
+        .border_color(t.border_accent)
+        .rounded(px(RADIUS_LG))
+        .shadow(vec![shadow(ShadowSize::Md, cx)])
+        .overflow_hidden()
+        .occlude()
+}
+
 impl Composer {
     fn slash_menu(
         &self,
@@ -1898,38 +2146,103 @@ impl Composer {
                         .child(selected.description.clone()),
                 )
         });
-        // Above the card, as an overlay: it takes no height from the layout. The gap is the
-        // `AutocompletePopover` `OFFSET_FROM_ANCHOR`.
         Some(
-            v_flex()
-                .absolute()
-                .bottom_full()
-                .left_0()
-                .right_0()
-                .pb(px(SPACE_3))
-                .gap(px(SPACE_1))
-                .children(detail)
+            popup_anchor().children(detail).child(
+                popup_box(cx).child(
+                    v_flex()
+                        .id("composer-slash-menu")
+                        .role(Role::Menu)
+                        .aria_label("Slash commands")
+                        .track_scroll(&self.slash_scroll)
+                        .max_h(px(SLASH_MAX_HEIGHT))
+                        .overflow_y_scroll()
+                        .py(px(SPACE_1))
+                        .children(rows),
+                ),
+            ),
+        )
+    }
+
+    /// The `@` file menu, in the slash menu's frame: a folder or file glyph and the path per
+    /// row, best match at the bottom, or the search status while it has no rows.
+    fn mention_menu(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        if !self.mention_open(cx) {
+            return None;
+        }
+        let t = tokens(cx);
+        let size = ui_font_size(FONT_BASE, cx);
+        let items = &self.mention.items;
+        let active = self.mention.active.min(items.len().saturating_sub(1));
+        let rows = items.iter().enumerate().rev().map(|(ix, item)| {
+            let glyph = if item.is_directory {
+                IconName::Folder
+            } else {
+                IconName::File
+            };
+            let pick = cx.listener(move |this, _, window, cx| {
+                this.pick_mention(ix, window, cx);
+            });
+            let weak = cx.weak_entity();
+            h_flex()
+                .id(("composer-mention-item", ix))
+                .role(Role::Button)
+                .aria_label(item.path.clone())
+                .aria_selected(ix == active)
+                .min_h(px(36.))
+                .px(px(SPACE_3))
+                .py(px(SPACE_2))
+                .gap(px(SPACE_2))
+                .items_center()
+                .cursor_pointer()
+                .text_size(size)
+                .line_height(relative(1.2))
+                .when(ix == active, |row| row.bg(t.surface2))
+                .hover(|row| row.bg(t.surface2))
+                .on_click(pick)
+                .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                    weak.update(cx, |this, cx| {
+                        this.pick_mention(ix, window, cx);
+                    })
+                    .ok();
+                })
+                .child(
+                    icon(glyph)
+                        .with_size(px(ICON_SM))
+                        .text_color(t.foreground_muted),
+                )
                 .child(
                     div()
-                        .bg(t.surface1)
-                        .border_1()
-                        .border_color(t.border_accent)
-                        .rounded(px(RADIUS_LG))
-                        .shadow(vec![shadow(ShadowSize::Md, cx)])
-                        .overflow_hidden()
-                        .occlude()
-                        .child(
-                            v_flex()
-                                .id("composer-slash-menu")
-                                .role(Role::Menu)
-                                .aria_label("Slash commands")
-                                .track_scroll(&self.slash_scroll)
-                                .max_h(px(SLASH_MAX_HEIGHT))
-                                .overflow_y_scroll()
-                                .py(px(SPACE_1))
-                                .children(rows),
-                        ),
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(t.foreground)
+                        .child(item.path.clone()),
+                )
+        });
+        let status = self.mention.status().map(|status| {
+            div()
+                .px(px(SPACE_3))
+                .py(px(SPACE_2))
+                .text_size(ui_font_size(FONT_SM, cx))
+                .line_height(relative(1.2))
+                .text_color(t.foreground_muted)
+                .child(status)
+        });
+        Some(
+            popup_anchor().child(
+                popup_box(cx).child(
+                    v_flex()
+                        .id("composer-mention-menu")
+                        .role(Role::Menu)
+                        .aria_label("Files")
+                        .track_scroll(&self.mention_scroll)
+                        .max_h(px(SLASH_MAX_HEIGHT))
+                        .overflow_y_scroll()
+                        .py(px(SPACE_1))
+                        .children(rows)
+                        .children(status),
                 ),
+            ),
         )
     }
 
@@ -2442,6 +2755,7 @@ impl Render for Composer {
             .trailing(trailing)
             .primary(self.primary_button(&index, window, cx));
         let picker = self.picker_list(cx);
+        let mention_menu = self.mention_menu(cx);
 
         // `inputAreaContainer`: 16 px at the sides and bottom, the content centered at 820 px.
         div()
@@ -2452,6 +2766,9 @@ impl Render for Composer {
             .px(px(SPACE_4))
             .pb(px(SPACE_4))
             .when(self.locked(), |area| area.opacity(LOCKED_OPACITY))
+            .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.drop_paths(paths.paths(), window, cx)
+            }))
             .child(
                 v_flex()
                     .w_full()
@@ -2464,6 +2781,7 @@ impl Render for Composer {
                             .relative()
                             .w_full()
                             .children(self.slash_menu(&matches, cx))
+                            .children(mention_menu)
                             .children(picker)
                             .children(draft_row)
                             .child(card),

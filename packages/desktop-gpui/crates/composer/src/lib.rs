@@ -14,6 +14,7 @@ mod diff_stat_pill;
 mod dock;
 mod draft;
 mod input;
+mod mention;
 mod pill_styles;
 mod plugin_slots;
 mod queue;
