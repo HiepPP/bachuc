@@ -165,9 +165,16 @@ pub fn code_font_size(base: f32, cx: &App) -> Pixels {
             .map_or(1., |state| state.code_scale))
 }
 
-/// The monospace family: SF Mono when it is installed, else Menlo.
+/// The monospace family: SF Mono when it is installed, else Menlo. Views call this on every
+/// draw, and `all_font_names` builds a CoreText collection of every family each time, so the
+/// pick is made once per process.
 pub fn mono_font_family(cx: &App) -> &'static str {
-    let installed = cx.text_system().all_font_names();
+    static MONO: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    MONO.get_or_init(|| pick_mono_family(&cx.text_system().all_font_names()))
+}
+
+/// The first SF Mono name in `installed`, else Menlo.
+fn pick_mono_family(installed: &[String]) -> &'static str {
     ["SFMono-Regular", "SF Mono"]
         .into_iter()
         .find(|name| installed.iter().any(|font| font == name))
@@ -554,6 +561,18 @@ pub fn turn_label_colors(label: TurnLabel, scheme: Scheme) -> TurnLabelColors {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mono_family_prefers_sf_mono_and_falls_back_to_menlo() {
+        let names = |list: &[&str]| list.iter().map(|name| name.to_string()).collect::<Vec<_>>();
+        assert_eq!(pick_mono_family(&names(&["Menlo", "SF Mono"])), "SF Mono");
+        assert_eq!(
+            pick_mono_family(&names(&["SFMono-Regular", "SF Mono"])),
+            "SFMono-Regular"
+        );
+        assert_eq!(pick_mono_family(&names(&["Menlo", "Helvetica"])), "Menlo");
+        assert_eq!(pick_mono_family(&[]), "Menlo");
+    }
 
     /// rgb values that `turnLabelColors` in `packages/app/src/styles/turn-label-colors.ts`
     /// returned on 2026-10-15: (scheme, label, segment, text, border).
