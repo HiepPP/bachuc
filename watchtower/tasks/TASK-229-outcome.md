@@ -46,6 +46,15 @@ Run 2026-10-18 by the UI checker (run B). Bundle `Bachuc GPUI Check` built from 
 - AX focus is not readable for this check: the AX "focused UI element" stayed the window on every press (background window).
 - Anti-goal, scroll CPU with 30 cards at most 1 point over the TASK-209 reading: UNVERIFIED (unattended): needs pointer. The Board has no keyboard or AX scroll path, live has only 10 finished cards, and TASK-209 has no earlier reading. Idle reading with the Board open: 0.0% (`top -l 6 -s 1`, load 5.8).
 
+### Run C
+
+Run 2026-10-18 by the UI checker (run C), after fix round 1. Bundle `Bachuc GPUI Check` built from HEAD `e220a915d`, PID 13872, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The Board opened by AX press; keys went to PID 13872 only; frames were window screenshots, and every Tab press drew a new frame. Disposable mock agents in scratch repo `/tmp/rc-229`: "rc seen card" (`aad84208`, attention cleared with the client library `clearAgentAttention`), its subagent "rc sub row" (`c694bb99`, label `paseo.parent-agent-id`), and "rc other card" (`0b563feb`, unseen). The darkest title pixel is the minimum luminance in the title box (`/tmp/rc-229-scripts/dark2.py`). After the run, PID 13872 exited, and the 3 agents and 3 scratch workspaces were archived. Hiep's test app was not running at any time.
+
+- Tab moves a focus ring through the card parts in order; Shift+Tab goes back: FAIL. The order is correct: "rc other card" open target, repo, pencil, star, Remove (no TASK chip: no linked task), then "rc seen card" open, repo, pencil, star, Remove all, the "1 subagent" toggle row, and "rc sub row" open, star, Remove. Six Shift+Tab presses walked the same stops back. The indicator is wrong on every part with a non-inset ring: the top-level open target fills the whole card with solid accent green, and the repo chip, pencil, star, Remove, and Remove all show a solid green box, not a 2 px ring. On the open target the fill hides the status line and Remove. Parts with an inset ring (the cluster root's open target, the toggle row, the subagent open target) draw a correct ring. Cause (static read): `ring(_, false)` is a spread `BoxShadow` (`card.rs:155-163`), and GPUI paints the shadow quad under the element, so a transparent part shows the full quad. This is new to users, because fix round 1 made these parts reachable by Tab. Evidence: `/tmp/rc-229-02-tab1-crop.png`, `/tmp/rc-229-03-grid.png`, `/tmp/rc-229-04-zoom.png`, `/tmp/rc-229-09-grid.png`.
+- Tab onto a part of a seen card -> the whole card shows at full opacity; Tab away -> it dims again: PASS. Darkest title pixel of "rc seen card": 132 at rest and with focus on the other card (Tab 1-5), 18-21 with focus on its open, repo, pencil, star, and Remove all (Tab 6-10), 132 again when focus moved to the toggle row (Tab 11) and to the subagent row (Tab 12-14). Unseen "rc other card" stayed 18-21. Shift+Tab back onto Remove all and the star: 18 again. The subagent row is its own card: 132 at rest, 21 while focus is on its open, star, or Remove. Frames 4-9 had the stale notice below, so their boxes were moved down 54 px. Evidence: `/tmp/rc-229-01-board.png`, `/tmp/rc-229-03-tab6.png`, `/tmp/rc-229-06-tab11.png`, `/tmp/rc-229-06-tab12.png`.
+- A subagent row: Tab onto its star -> its actions show: FAIL. Tab 13 and 14 (star, Remove) kept focus in the row (title 21), but the star and Remove stayed invisible, with no ring, in Tab and in Shift+Tab frames. Cause (static read): the actions container shows on `in_focus` (`card.rs:964-968`), and in `gpui-pre` 0.3.9 `in_focus` tests `focus_handle.within_focused` (`elements/div.rs:3417-3421`), which is true when the container is inside the focused element (`window.rs:521-526`), not when the focused star is inside the container. Electron's `actionFocused` needs `contains_focused`. Evidence: `/tmp/rc-229-08-subactions.png` (the first frame shows the star and X; the Tab 12-14 and Shift+Tab 2 frames do not), `/tmp/rc-229-07-subrow.png`.
+- Not a TASK-229 result: from Tab 4 on, the Board showed "live, Stale" and "Updates are delayed. Showing a snapshot older than 10 seconds." with Retry, which pushed the list down 54 px; it was gone by Tab 10. Evidence: `/tmp/rc-229-11-notice.png`.
+
 ## Fix round 1
 
 Status: DONE (code). The screen checks are DEFERRED (UI checker).
@@ -85,3 +94,48 @@ The card parts were `.focusable()` but no tab stops. In `gpui-pre` 0.3.9 `Intera
 
 - In `gpui-pre`, `.focusable()` alone is not reachable by Tab. Add `.tab_stop(true)`, or `.tab_index(n)`, which also sets it.
 - A `Visibility::Hidden` element registers no tab stop. Hide a focusable control with opacity, and show it with `in_focus` on a focusable container.
+
+## Fix round 2
+
+Status: DONE (code). The screen checks are DEFERRED (UI checker).
+
+### Cause
+
+- Focus indicator: `ring(_, false)` is a spread `BoxShadow`. GPUI paints the whole shadow quad under the element, so a transparent part showed a solid accent box, and the open target filled the card.
+- Subagent actions: `in_focus` tests `within_focused`, which is true when the container is inside the focused element. The focused star is inside the container, so the actions stayed at opacity 0.
+
+### Changed
+
+- `packages/desktop-gpui/plugins/board/src/card.rs` only:
+  - New `Parts`: one keyed focus handle per focusable card part (open, repo, pencil, star, TASK chip, Remove), created with `use_keyed_state` under `board-part-<agent id>` and tracked on the part with `track_focus`. The render knows which part has focus (`Parts.focused`) and whether the last input was the keyboard.
+  - New `part()` replaces `button()` for the card parts: no shadow ring. `button()` and `ring()` stay for the toggle row (inset, draws correctly), `runs.rs`, and `page.rs`.
+  - New `focus_ring()`: an absolutely positioned 2 px border with no fill, added as a child only while the part has keyboard focus. It is absolute, so the layout never shifts. The open target's ring is the card root's last child, inset, so the card clip keeps it and it draws over the attention border.
+  - The star and pencil keep `focus_visible` for their opacity only.
+  - The subagent actions container lost its `id` and `focusable`; it shows at opacity 1 when `subagent_actions_shown(pinned, focused)` is true. Only opacity changes, never `display`.
+- New pure `ring_box(radius, inset) -> (outset, radius)`: Electron's 2 px outline at offset 1 (outer edge 3 px out), or inset at offset -2 where a parent clips (`focus.ts`). New pure `subagent_actions_shown(pinned, focused)`: Electron's `actionFocused` (`page.tsx:386-394`), any focus on the star or Remove, a click too.
+
+### Deviation
+
+- The top-level open target draws its ring inside the card, not 2 px outside as Electron does. The card root clips its overflow, and the Runs list items have no side padding, so an outer ring would be cut off.
+
+### Verified
+
+- GitNexus impact (index 91 commits stale; callers confirmed with `rg`): `run_card`, `star_button`, `subagent_body` LOW. `diffs_button`, `remove_button`, `card_body`, `task_chip` have only `card.rs` callers (`task_chip` in `timeline.rs` is a different method).
+- `CARGO_BUILD_JOBS=4 ./cargo.sh clippy -p bachuc-plugin-board --all-targets` -> no board warnings. Log: `/tmp/task229-fix2-clippy.txt`.
+- `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-plugin-board` -> pass, 97 + 1 tests, with the new `the_focus_ring_sits_1_px_outside_the_part_or_inside_a_clipping_surface` and `focus_on_the_star_or_remove_shows_a_subagent_rows_actions`. Log: `/tmp/task229-fix2-test.txt`.
+- `./cargo.sh fmt --check -p bachuc-plugin-board` -> exit 0.
+- `./cargo.sh metadata --format-version 1 > /dev/null` -> exit 0.
+- UI check on live: Tab through a card's parts -> each shows a 2 px ring with no fill; the open target keeps the status line and Remove visible; nothing shifts -> DEFERRED (UI checker).
+- UI check on live: Tab onto a subagent row's star and Remove -> the actions show with the inset ring -> DEFERRED (UI checker).
+- UI check on live: the Tab order and the keyboard un-dim still pass as in Run C -> DEFERRED (UI checker).
+- Anti-goal, scroll CPU: per card and frame the change adds 6 keyed-state lookups, 6 `is_focused` checks, and one key string -> DEFERRED (UI checker).
+
+### Lessons
+
+- In `gpui-pre`, a spread `BoxShadow` is a filled quad under the element, not a ring. Draw a ring on a transparent element as an absolute child with a border and no fill.
+- With `track_focus`, the element's `.tab_stop(true)` is ignored; set it on the handle, `cx.focus_handle().tab_stop(true)` (`div.rs:2251-2269`).
+- `in_focus` means "inside the focused element". For "holds the focused element", check a handle at render.
+
+### Open
+
+- `button()` in `runs.rs` (Retry) and `page.rs` (size control) and the view tabs (`page.rs:188`) still use the spread-shadow ring. They are not tab stops, so Tab does not reach them now; they are outside this TASK's files.
