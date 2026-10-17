@@ -39,3 +39,12 @@ DONE
 ## Lessons
 
 - An empty root renders no list, so a root-level name row needs the list arm to match the empty states while a draft is open.
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker (run B). Bundle `Bachuc GPUI Check` built from HEAD `800604233`, PID 46300, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). Frames were forced with the AX "zoom the window" action; keys went to the check app only. Scratch repo `/tmp/t202-repo` was the live workspace "rb check" (`wks_86e1ae1af8379049`), with a scratch folder `rb-big` of 2,000 files. After the run, PID 46300 exited, the workspace was archived, the scratch files were deleted, and the repo stayed as before (`feature-x`, ` M a.txt`).
+
+- Toolbar New file, pressed by AX, shows the inline name row at the root: PASS. The row "File name" with a focused text field drew above `.dev`. Typing `rb-new.txt` and Enter added `rb-new.txt` to the tree (and on disk), and opened it in a tab. Evidence: `/tmp/rb-225-01-new-file-row.jpg`, `/tmp/rb-225-02-new-file.png`.
+- Toolbar New folder, the same way: PASS. The row "Folder name" drew at the root; `rb-newdir` and Enter added the folder to the tree, sorted with the folders. Evidence: `/tmp/rb-225-03-new-folder-row.png`, `/tmp/rb-225-04-new-folder.png`.
+- Right-click menus (changed file Duplicate, changed folder items): UNVERIFIED (unattended): needs pointer.
+- Anti-goal, `top` CPU while scrolling a 2,000-entry tree: UNVERIFIED (unattended): needs pointer. The Files list is virtual (only about 22 rows in the AX tree), has no keyboard navigation, and exposes no AX scroll action, so only the wheel scrolls it. TASK-213 has no earlier reading. Idle reading with `rb-big` open: 0.0-0.2% (`top -l 6 -s 1`, load 4.4). Evidence: `/tmp/rb-225-05-rb-big-open.png`.
