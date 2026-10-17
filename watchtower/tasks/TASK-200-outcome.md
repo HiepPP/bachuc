@@ -94,3 +94,10 @@ The fix fetches the unknown agent instead of subscribing with `includeArchived`.
 
 - An agent update subscription without `includeArchived` gets `remove` on an archive. A client test must send what the daemon sends to that filter, not an archived upsert.
 - An archived agent opened from a stale Board card shows the tail, not the latest prompt. The tab exists only after the fetch, so the `LatestPrompt` reveal in the same event finds no tab.
+
+## UI Checks Run 4
+
+Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from HEAD `60fd3a593`, PID 88032, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The checker forced each frame with the AX "zoom the window" action and sent keys with cua `pressKey`/`typeText` to the check app only. Scratch repo `/tmp/t202-repo` with disposable agents "r4 board card", "r4 remove card", "r4 fork src" (mock ten-second-stream), "r4 fork ok" (Haiku 5.5, one-word reply), and the fork child "Continue." (`af3218a`). After the run, PID 88032 exited, all five agents and the five t202-repo workspaces were archived, and the repo stayed as before (`feature-x`, ` M a.txt`).
+
+- Archive an agent, then AX-press its Board card -> its tab opens with the archived callout: PASS (recheck after `aaada0a61`). "r4 board card" (`f7857f7`) was archived by CLI while its card showed on the Board. One AX press on "Open conversation r4 board card" opened the tab "r4 board card" in its workspace (header "feature-x", t202-repo) with the timeline and "This agent is archived" + "Unarchive" in place of the composer. Evidence: `/tmp/r4-200-02-archived-card-open.png`.
+- Note: the opened archived tab shows the tail, not the latest prompt, as the fix round 1 Lessons predict.

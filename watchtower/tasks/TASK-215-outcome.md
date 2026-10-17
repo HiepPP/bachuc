@@ -42,3 +42,13 @@ DONE. The screen checks and the flood timing are deferred to the UI checker.
 - Link detection reads one row. A path that wraps onto the next row is cut, unlike Electron, which joins wrapped rows.
 - The terminal crate does not depend on `bachuc-icons`. The bar draws the Lucide SVGs by asset path (`lucide/arrow-up.svg`), which the app's asset source serves.
 - Electron keeps the last query when the bar closes and searches it again on reopen. This bar starts empty.
+
+## UI Checks Run 4
+
+Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from HEAD `60fd3a593`, PID 88032, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The checker forced each frame with the AX "zoom the window" action and sent keys with cua `pressKey`/`typeText` to the check app only. Scratch repo `/tmp/t202-repo` with disposable agents "r4 board card", "r4 remove card", "r4 fork src" (mock ten-second-stream), "r4 fork ok" (Haiku 5.5, one-word reply), and the fork child "Continue." (`af3218a`). After the run, PID 88032 exited, all five agents and the five t202-repo workspaces were archived, and the repo stayed as before (`feature-x`, ` M a.txt`).
+
+- Run `echo hello https://example.com a.txt:1`, Cmd+F, type hello -> match count and highlight: PASS. Cmd+Shift+T opened "Terminal t202-repo"; the line ran. Cmd+F opened the Find bar (`Find in pane`, Previous, Next, Close). "hello" gave "1 of 2": the command line and the output both contain hello, so 2 is right. The current match is drawn blue and the other tan. Evidence: `/tmp/r4-215-04-find-hello.png`.
+- Escape closes the Find bar: PASS. The AX tree has no `Find` container after Escape. Evidence: `/tmp/r4-215-05-find-closed.png`.
+- Cmd-click a URL and a file path: UNVERIFIED (unattended): needs pointer.
+- Anti-goal, 200,000-line flood timing: UNVERIFIED. Not run; it needs the baseline bundle at `59a040442`.
+- Observation: the first terminal row (the prompt line) draws half under the tab bar edge in the same shot.

@@ -40,3 +40,8 @@ DONE
 - The time-ago labels and date groups are computed when the list changes, not on each draw. They do not age while the screen stays open.
 - `chrono::DateTime<Tz>::format` needs `Tz::Offset: Display`. For a generic `Tz: TimeZone`, format the result of `naive_local()` instead.
 - Clippy flags `vec![a..b]` (`single_range_in_vec_init`). Use `std::iter::once(a..b).collect()`.
+
+## UI Checks
+
+- Run 3 (2026-10-18, recorded in the TASK-200 outcome): History opens with Today, Yesterday, and This week groups and Archived pills: PASS (`/tmp/r3-02-history.png`).
+- Search narrows the rows: UNVERIFIED (unattended): not run by the UI checker. Owner hand test, Q-133.

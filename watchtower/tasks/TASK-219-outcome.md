@@ -42,3 +42,9 @@ DONE
 - `set_draft_seed` reads the provider list the composer already holds. A seed given before the client has its provider list is ignored. Providers arrive with the connection, so a fork from a connected agent has them.
 - The seed sets `mode_id` to none at once. The seeded mode shows only after `provider_modes` answers, and only when the draft has a `cwd`.
 - For TASK-201: call `add_raw_attachment(title, fork_context.attachment, cx)` with the chat history label (Electron uses `attachment.title`, or "Text attachment"). The composer sends the JSON as given, so `contextKind: "chat_history"` stays in it.
+
+## UI Checks Run 4
+
+Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from HEAD `60fd3a593`, PID 88032, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The checker forced each frame with the AX "zoom the window" action and sent keys with cua `pressKey`/`typeText` to the check app only. Scratch repo `/tmp/t202-repo` with disposable agents "r4 board card", "r4 remove card", "r4 fork src" (mock ten-second-stream), "r4 fork ok" (Haiku 5.5, one-word reply), and the fork child "Continue." (`af3218a`). After the run, PID 88032 exited, all five agents and the five t202-repo workspaces were archived, and the repo stayed as before (`feature-x`, ` M a.txt`).
+
+- A seeded draft shows the source provider and model in its pills, and the chip shows: PASS, covered by the TASK-201 fork check. Both fork targets showed Haiku 5.5 (Claude logo), Medium, Always Ask, and the "Chat history" attachment chip. Evidence: `/tmp/r4-201-08-fork-new-tab.png`, `/tmp/r4-201-11-fork-new-ws.png`.

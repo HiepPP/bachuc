@@ -86,3 +86,14 @@ DONE (code). This status replaces the first-build status above. The screen check
 
 - Never put a negative main-axis margin on a child of a GPUI flex container that is sized by its content (`flex_none` or basis auto). Taffy 0.13 then measures the container as 0 wide. Use `relative()` with `left`/`right`, or put the margin on a child of a row whose width is definite.
 - A GPUI control that an AX press must reach needs an explicit `AccessibleAction::Click` listener. The fallback is a mouse click at the node's centre, so it fails when the centre is clipped or covered.
+
+## UI Checks Run 4
+
+Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from HEAD `60fd3a593`, PID 88032, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The checker forced each frame with the AX "zoom the window" action and sent keys with cua `pressKey`/`typeText` to the check app only. Scratch repo `/tmp/t202-repo` with disposable agents "r4 board card", "r4 remove card", "r4 fork src" (mock ten-second-stream), "r4 fork ok" (Haiku 5.5, one-word reply), and the fork child "Continue." (`af3218a`). After the run, PID 88032 exited, all five agents and the five t202-repo workspaces were archived, and the repo stayed as before (`feature-x`, ` M a.txt`).
+
+- Star inside each card at 0.35 opacity, 100% Board size: PASS (recheck after `ca0ac2d90`). The star draws inside the card's top right on every card. Darkest star pixel 191-192 on a 249-251 background; a full-opacity star (t198r2 card) is 110. With antialiasing, (251-191)/(251-110) = 0.43, which fits 0.35 on thin strokes. Evidence: `/tmp/r4-209-01-board-100.png`.
+- Same at 160%: PASS. Star darkest 191 vs full 105; the card border is at x 3371 and the star at x 3295-3350 (device px), so it is inside the card. Evidence: `/tmp/r4-209-03-board-160.png`.
+- AX press on the star toggles it and keeps the Board open with no tab: PASS. On "r4 remove card" the label went from "Star" to "Unstar", the star drew filled, the Board stayed open, and no agent tab opened. Evidence: `/tmp/r4-209-04-after-star.png`, crop `/tmp/r4-209-05-after-star-crop.png`.
+- Remove by AX: PASS. On the same card: the card left the Board ("11 finished" -> "10 finished"), the Board stayed open, no tab opened. Evidence: `/tmp/r4-209-06-after-remove.png`. Board size was reset to 100%.
+- Observation: the card "t198r2 running" (not created in this run) shows its pencil and a full-opacity star with no hover; its label is still "Star", so it is not starred. Cause not checked.
+- Pencil whole on hover: UNVERIFIED (unattended): needs pointer.

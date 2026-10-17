@@ -43,3 +43,19 @@ DONE. Every UI check and the owner hand test are DEFERRED.
 - `Workspace::split` emits `PaneEvent::NewTab`, and the shell handles that event later. To fill the new group with a given tab, set a pending value that the `NewTab` arm reads, as `side_file` does.
 - Safe default: "Add to chat" with no agent tab active, for example on a draft tab, does nothing. Electron hides the item when no chat has focus. The GPUI menu (TASK-213) always shows it.
 - Safe default: "Open to the side" on a file that is already open shows the open tab and makes no split.
+
+## UI Checks Run 4
+
+Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from HEAD `60fd3a593`, PID 88032, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The checker forced each frame with the AX "zoom the window" action and sent keys with cua `pressKey`/`typeText` to the check app only. Scratch repo `/tmp/t202-repo` with disposable agents "r4 board card", "r4 remove card", "r4 fork src" (mock ten-second-stream), "r4 fork ok" (Haiku 5.5, one-word reply), and the fork child "Continue." (`af3218a`). After the run, PID 88032 exited, all five agents and the five t202-repo workspaces were archived, and the repo stayed as before (`feature-x`, ` M a.txt`).
+
+- Cmd+P with a query and Enter opens the file: PASS. "main" + Return closed the command center and opened the tab "main.rs" with "Contents of src/main.rs". Evidence: `/tmp/r4-203-05-cmdp-opened.png`.
+- Cmd+N opens New workspace: PASS. A "New workspace" tab opened with the heading "New workspace" (project picker on ".claude"). Evidence: `/tmp/r4-203-13-cmdn.png`.
+- Cmd+Shift+P pins the workspace: PASS. A "Pinned" group with "t202-repo, feature-x" appeared at the top of the sidebar (`/tmp/r4-203-17-after-pin.png`). A second Cmd+Shift+P removed it (`/tmp/r4-203-18-after-unpin.png`).
+- `?` with focus outside text opens the shortcuts dialog, Escape closes it: PASS. Focus on the main.rs file view; `?` opened `dialog Shortcuts` with an empty search field; Escape closed it. Evidence: `/tmp/r4-203-06-qmark-outside.png`, `/tmp/r4-203-07-qmark-escape.png`.
+- `?` in the composer: PASS. Value became "?", no dialog (`/tmp/r4-203-10-composer-qmark.png`). Cleared after.
+- `?` in a terminal: PASS. The prompt shows `?`, no dialog (`/tmp/r4-203-02-terminal-qmark-crop.png`). Cleared with Ctrl+U.
+- `?` in the command center field: PASS. Value "?", the dialog stays "Command center" (`/tmp/r4-203-09-cc-qmark.png`).
+- `?` in a settings field: PASS. Interface font size became "14?", no dialog (`/tmp/r4-203-12-settings-qmark.png`). Restored to 14.
+- Explorer "Open to the side" and "Add to chat": UNVERIFIED (unattended): needs pointer. The file menu has no AX or keyboard path on macOS (see TASK-213 UI Checks Run 4).
+- Anti-goal, Cmd+K, Cmd+T, Cmd+W: PASS. Cmd+K opened the command center (`/tmp/r4-203-08-cmdk.png`). Cmd+T added a "New tab" tab (`/tmp/r4-203-15-cmdt.png`). Cmd+W closed the active tab each time (two New workspace tabs, then the new tab).
+- Cmd-click a file path in a terminal: UNVERIFIED (unattended): needs pointer.

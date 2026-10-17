@@ -332,3 +332,21 @@ This file holds long-term intent. It keeps task planning aligned across sessions
   - Run a Builder Check of every spec against the code before building; it found missing Deps, wrong line refs, and items no producer gave, which the lead fixed in the specs.
 - Source: TASK-168 to TASK-195 specs and outcomes; owner review, 2026-10-17.
 - Use next time: for a new plugin, write its server part in `hiep-plugins/plugins/<id>`, then add a GPUI client crate in `packages/desktop-gpui/plugins/<id>` that uses only `bachuc_plugin_host` kinds and calls the server through RPC. If it needs a contribution kind the host lacks, add the kind to `bachuc-plugin-host` first, and draw it in the owning host view. Avoid in plugin and view code: reading a `ListState` inside a row callback, system queries such as `all_font_names` in a render path, and small `HashMap`s on per-frame paths; give every pressable element an explicit `AccessibleAction::Click` handler.
+
+### 2026-10-18 - Implement 20261017-gpui-daily-gaps-and-fixes
+
+- Learned: a GPUI flex child with a negative main-axis margin inside a content-sized container (flex_none or basis auto) makes taffy 0.13 measure the container at 0 width, so its children draw outside the parent and get clipped.
+- Source: TASK-209 fix round, `packages/desktop-gpui/plugins/board/src/card.rs` (`actions_offset`).
+- Use next time: move content with `relative()` and `left`/`right`, never with a negative margin.
+- Learned: an agent-update subscription without `includeArchived` gets `remove`, not an archived upsert, when an agent is archived. A client test must send what the daemon sends for that filter.
+- Source: TASK-200 fix round; `packages/server/src/server/agent-updates-service.ts`, `Client::fetch_agent`.
+- Use next time: fetch an unknown agent before deciding it does not exist.
+- Learned: an AX press runs only an explicit `AccessibleAction::Click` listener reliably; the fallback click lands at the node centre and misses a clipped or covered node. `accesskit_macos` 0.26.3 maps no show-menu action, so a right-click-only menu cannot be opened by a UI checker.
+- Source: UI checker runs 2 and 4; TASK-198, TASK-209, TASK-213 outcomes.
+- Use next time: give every control and context menu a keyboard or AX Click path when a background UI check must reach it.
+- Learned: `BACHUC_NO_ACTIVATE=1` keeps the GPUI app in the background for UI checks (`open -n -g --env BACHUC_NO_ACTIVATE=1 <bundle>`), and the AX "zoom the window" action forces a frame of a background window.
+- Source: `packages/desktop-gpui/crates/app/src/main.rs` (`activates_on_launch`); UI checker runs 2 to 4.
+- Use next time: build the check app under its own bundle name so it never replaces the owner's running GPUI app.
+- Learned: GPUI calls event subscribers in subscription order, so a shell handler runs before views made later and must use `cx.defer_in` to read their state for the same event.
+- Source: TASK-198 fix round 1, `crates/app/src/shell.rs`.
+- Use next time: defer any shell read of a child view's state that the same event updates.

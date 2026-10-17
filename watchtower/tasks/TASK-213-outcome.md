@@ -45,3 +45,12 @@ DONE
 - The menu is opened at the pointer from the right mouse-down. The AX `ShowContextMenu` action opens it at `window.mouse_position()`, so a UI checker can open it without the pointer.
 - A dismiss of an old `PopupMenu` can arrive after a new one opens, so the dismiss handler checks that the entity is still the open menu.
 - PopupMenu's dismiss does not take focus back when the item's handler focused something else, so a menu item can focus the inline field directly.
+
+## UI Checks Run 4
+
+Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from HEAD `60fd3a593`, PID 88032, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The checker forced each frame with the AX "zoom the window" action and sent keys with cua `pressKey`/`typeText` to the check app only. Scratch repo `/tmp/t202-repo` with disposable agents "r4 board card", "r4 remove card", "r4 fork src" (mock ten-second-stream), "r4 fork ok" (Haiku 5.5, one-word reply), and the fork child "Continue." (`af3218a`). After the run, PID 88032 exited, all five agents and the five t202-repo workspaces were archived, and the repo stayed as before (`feature-x`, ` M a.txt`).
+
+- Open the file menu without the pointer: FAIL. The rows of the Files tree expose only the AX action "Pick" (`row (selectable) a.txt, Secondary Actions: Pick`). "AXShowMenu", "ShowMenu", and "Show menu" are rejected as "not a valid secondary action". The cause: `accesskit_macos` 0.26.3 (the version in `Cargo.lock`) has no `accessibilityPerformShowMenu` method; it maps only press, pick, increment, decrement, and value actions, so the `AccessibleAction::ShowContextMenu` handler at `crates/explorer/src/explorer.rs:1515` can never run on macOS. The explorer has no keyboard path to the menu either.
+- New file, Rename, Duplicate, Delete with confirm, Discard changes with confirm, tree updates: UNVERIFIED (unattended): needs pointer. The menu opens only from a right mouse-down.
+- Revert a changed file in the scratch repo: UNVERIFIED (unattended): needs pointer. `/tmp/t202-repo` keeps its change (` M a.txt`).
+- Anti-goal, scroll CPU over a 2,000-entry tree: UNVERIFIED (unattended): needs pointer (scroll).

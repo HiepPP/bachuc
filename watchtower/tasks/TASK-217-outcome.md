@@ -48,3 +48,11 @@ DONE
 - TASK-203: subscribe with `cx.subscribe(&center, |shell, _, event: &CommandFileEvent, cx| ...)`. Answer `FileQuery` with `Client::directory_suggestions(cwd, query, include_files: true, include_directories: false, limit: 100)`. `set_file_results` takes no query, so drop answers to older queries in the app.
 - The section of a shortcut now lives in `bachuc_command::shortcut_section`. A new row needs only its `DEFAULTS` entry. Settings `Section` is the same type.
 - `on_a11y_action` takes `FnMut(Option<&ActionData>, &mut Window, &mut App)`, not a `cx.listener`. Capture `cx.weak_entity()` and write the closure inline at the call site, or type inference fails ("FnMut is not general enough").
+
+## UI Checks Run 4
+
+Run 2026-10-18 by the UI checker (run 4). Bundle `Bachuc GPUI Check` built from HEAD `60fd3a593`, PID 88032, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The checker forced each frame with the AX "zoom the window" action and sent keys with cua `pressKey`/`typeText` to the check app only. Scratch repo `/tmp/t202-repo` with disposable agents "r4 board card", "r4 remove card", "r4 fork src" (mock ten-second-stream), "r4 fork ok" (Haiku 5.5, one-word reply), and the fork child "Continue." (`af3218a`). After the run, PID 88032 exited, all five agents and the five t202-repo workspaces were archived, and the repo stayed as before (`feature-x`, ` M a.txt`).
+
+- Files scope (Cmd+P), its rows, and Enter: PASS, see TASK-203. The command center opened in the Files scope (`button Files`, field "Search files", rows a.txt and paseo.json); "main" left one row "src/main.rs". Evidence: `/tmp/r4-203-03-cmdp.png`, `/tmp/r4-203-04-cmdp-main.png`.
+- Shortcuts dialog: PASS, see TASK-203. It lists "Show keyboard shortcuts" with key `?` and the note "Available when focus is not in a text field or terminal." under General. Evidence: `/tmp/r4-203-06-qmark-outside.png`.
+- Anti-goal, Cmd+K to first row under 50 ms from log timestamps: UNVERIFIED. The app logs no key or paint timestamps.
