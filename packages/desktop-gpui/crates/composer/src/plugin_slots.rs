@@ -12,7 +12,7 @@ use bachuc_plugin_host::{
     Contributed, ContributionIndex, InterceptOutcome, PillBehavior, PillPlacement, PillState,
     PluginHostEvent, PluginSlashCommand, StopButton, host,
 };
-use bachuc_theme::metrics::{FONT_SM, ICON_SM, RADIUS_2XL, SPACE_1, SPACE_2, SPACE_3};
+use bachuc_theme::metrics::{FONT_SM, ICON_SM, RADIUS_2XL, SPACE_1, SPACE_2, SPACE_3, SPACE_4};
 use bachuc_theme::{tokens, ui_font_size};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::tooltip::Tooltip;
@@ -334,12 +334,20 @@ pub fn plugin_pill(
     match state.behavior.clone() {
         PillBehavior::Action { on_press, .. } => {
             let plugin_id = pill.plugin_id;
+            let press: Rc<dyn Fn(&mut Window, &mut App)> =
+                Rc::new(move |window, cx| match effect {
+                    PressEffect::ShowPanel(panel) => show_panel(plugin_id, panel, cx),
+                    _ => on_press(target.clone(), window, cx),
+                });
+            let ax_press = press.clone();
             pill_body(id, &state, slot, false, cx)
                 .when(!disabled, |pill| {
-                    pill.on_click(move |_, window, cx| match effect {
-                        PressEffect::ShowPanel(panel) => show_panel(plugin_id, panel, cx),
-                        _ => on_press(target.clone(), window, cx),
-                    })
+                    // An AX press runs the handler itself. GPUI's default replays a mouse click
+                    // at the node centre, which the 2026-10-17 UI check saw do nothing.
+                    pill.on_click(move |_, window, cx| press(window, cx))
+                        .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                            ax_press(window, cx)
+                        })
                 })
                 .into_any_element()
         }
@@ -524,6 +532,10 @@ impl Render for CornerPills {
     }
 }
 
+/// `draftPills`: `paddingHorizontal` 16 and `paddingBottom` 8.
+const DRAFT_PILLS_PADDING_X: f32 = SPACE_4;
+const DRAFT_PILLS_PADDING_BOTTOM: f32 = SPACE_2;
+
 /// The draft's track pills: a row above the card (`draftPills`).
 pub fn draft_pill_row(pills: Vec<AnyElement>) -> Option<AnyElement> {
     if pills.is_empty() {
@@ -535,7 +547,8 @@ pub fn draft_pill_row(pills: Vec<AnyElement>) -> Option<AnyElement> {
             .role(Role::Group)
             .aria_label("Plugin pills")
             .gap(px(SPACE_1))
-            .pb(px(SPACE_2))
+            .px(px(DRAFT_PILLS_PADDING_X))
+            .pb(px(DRAFT_PILLS_PADDING_BOTTOM))
             .children(pills)
             .into_any_element(),
     )
@@ -545,10 +558,11 @@ pub fn draft_pill_row(pills: Vec<AnyElement>) -> Option<AnyElement> {
 mod tests {
     // Named imports: `use super::*` would bring in GPUI's `test` macro over `#[test]`.
     use super::{
-        HostAction, PressEffect, command_visible, host_action, needs_intercept, option_checked,
-        picker_sources, pill_slots, press_effect, run_chain, stop_button, toggle_chip, upsert_chip,
-        visible_commands,
+        DRAFT_PILLS_PADDING_BOTTOM, DRAFT_PILLS_PADDING_X, HostAction, PressEffect,
+        command_visible, host_action, needs_intercept, option_checked, picker_sources, pill_slots,
+        press_effect, run_chain, stop_button, toggle_chip, upsert_chip, visible_commands,
     };
+    use crate::pill_styles::DOCKED_PILL_HEIGHT;
     use bachuc_icons::IconName;
     use bachuc_plugin_host::{
         AttachmentItem, AttachmentPicker, AttachmentSource, CommandContext, ComposerAttachment,
@@ -621,6 +635,13 @@ mod tests {
         assert_eq!(ids(&draft.track), ["d", "e"]);
         assert_eq!(ids(&draft.toolbar), ["b"]);
         assert!(draft.corner.is_empty());
+    }
+
+    #[test]
+    fn the_draft_pill_row_is_32_px_tall() {
+        // `draftPills`: a 24 px docked pill, `paddingBottom` 8, and 16 px in from the column.
+        assert_eq!(DOCKED_PILL_HEIGHT + DRAFT_PILLS_PADDING_BOTTOM, 32.);
+        assert_eq!(DRAFT_PILLS_PADDING_X, 16.);
     }
 
     #[test]

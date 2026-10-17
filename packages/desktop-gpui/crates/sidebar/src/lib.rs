@@ -7,6 +7,7 @@
 //! sections, and the Add project button request their work through [`SidebarPluginEvent`], a
 //! second event type.
 
+mod metrics;
 pub mod model;
 pub mod plugin;
 mod ring;

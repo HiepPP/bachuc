@@ -36,6 +36,9 @@ const BADGE_MAX_WIDTH: f32 = 240.;
 const BADGE_DISABLED_OPACITY: f32 = 0.6;
 /// The `errorText` line height.
 const ERROR_LINE_HEIGHT: f32 = 20.;
+/// `composerTitle` sets no line height, so Electron draws the 20 px title at about 1.2;
+/// GPUI's default 1.618 put the chip row 8 px lower.
+const TITLE_LINE_HEIGHT: f32 = 24.;
 /// The width of a picker list.
 const PICKER_WIDTH: f32 = 280.;
 const PICKER_MAX_HEIGHT: f32 = 320.;
@@ -1175,6 +1178,7 @@ impl Render for NewWorkspaceScreen {
                 .role(Role::Heading)
                 .aria_label("New workspace")
                 .text_size(ui_font_size(FONT_2XL, cx))
+                .line_height(px(TITLE_LINE_HEIGHT))
                 .font_weight(FontWeight(WEIGHT_NORMAL))
                 .text_color(t.foreground)
                 .child("New workspace"),
@@ -1221,10 +1225,10 @@ impl Render for NewWorkspaceScreen {
 mod tests {
     // Not `super::*`: the gpui glob brings a `test` macro that shadows the std one.
     use super::{
-        BaseItem, CHOOSE_PROJECT, CREATE_WORKTREE_FAILED, Form, Isolation, NewWorkspacePreset,
-        SELECT_MODEL, SubmitGuard, Visibility, base_items, base_rows, branch_name_from_ref,
-        build_request, default_base_ref, default_project, project_options, visibility,
-        worktree_slug,
+        BADGE_HEIGHT, BaseItem, CHOOSE_PROJECT, CREATE_WORKTREE_FAILED, Form, Isolation,
+        NewWorkspacePreset, SELECT_MODEL, SPACE_8, SubmitGuard, TITLE_LINE_HEIGHT, Visibility,
+        base_items, base_rows, branch_name_from_ref, build_request, default_base_ref,
+        default_project, project_options, visibility, worktree_slug,
     };
     use bachuc_client::{
         BranchSuggestion, BranchValidation, DraftConfig, ProjectNode, WorkspaceNode,
@@ -1270,6 +1274,12 @@ mod tests {
             environment: [("PLUGIN".to_string(), "1".to_string())].into(),
             ..DraftSubmission::default()
         }
+    }
+
+    #[test]
+    fn the_chip_row_centre_sits_70_px_below_the_title_top() {
+        // Electron: a 24 px title line, `marginBottom` 32, and half of the 28 px chip.
+        assert_eq!(TITLE_LINE_HEIGHT + SPACE_8 + BADGE_HEIGHT / 2., 70.);
     }
 
     #[test]

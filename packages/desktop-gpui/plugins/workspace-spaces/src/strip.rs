@@ -221,3 +221,19 @@ impl Render for Strip {
             .into_any_element()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // Named imports: `use super::*` would bring in GPUI's `test` macro over `#[test]`.
+    use super::{STRIP_PADDING_X, STRIP_PADDING_Y, TAB_PADDING, TAB_SIZE};
+
+    #[test]
+    fn tabs_are_26_px_in_a_39_px_strip() {
+        // `spaces-strip.tsx`: tab `minWidth` and `height` 26 with the 1 px border inside,
+        // padding 7, and a strip of a 1 px top border, padding 6, and one tab row.
+        assert_eq!(TAB_SIZE, 26.);
+        assert_eq!(TAB_PADDING, 7.);
+        assert_eq!(STRIP_PADDING_X, 10.);
+        assert_eq!(1. + 2. * STRIP_PADDING_Y + TAB_SIZE, 39.);
+    }
+}

@@ -5,6 +5,7 @@
 //! redraws nothing in the view. The list rebuilds only when the tree changes, and a status change
 //! that keeps every row's height redraws without a new measure.
 
+use crate::metrics::{ADD_PROJECT_MIN, LABEL_LINE, NAV_ROW_MIN};
 use crate::model::{
     Facts, Group, ProjectRow, Row, RowShape, StatusBucket, ViewState, WorkspaceRow,
     archive_prompt_for_checkout, changed_range, clamp_width, format_diff_count, identity_color,
@@ -38,6 +39,7 @@ use gpui_kit::*;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// How far the list draws beyond the visible rows.
@@ -94,6 +96,26 @@ pub enum SidebarPluginEvent {
 }
 
 impl EventEmitter<SidebarPluginEvent> for Sidebar {}
+
+/// A click and an AX press run the same handler. GPUI's default AX press replays a mouse click
+/// at the node centre, which the 2026-10-17 UI check saw do nothing on the sidebar rows.
+trait OnPress: StatefulInteractiveElement + Sized {
+    fn on_press(
+        self,
+        cx: &Context<Sidebar>,
+        handler: impl Fn(&mut Sidebar, &mut Window, &mut Context<Sidebar>) + 'static,
+    ) -> Self {
+        let handler = Rc::new(handler);
+        let click = handler.clone();
+        let view = cx.weak_entity();
+        self.on_click(cx.listener(move |this, _, window, cx| click(this, window, cx)))
+            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                view.update(cx, |this, cx| handler(this, window, cx)).ok();
+            })
+    }
+}
+
+impl<E: StatefulInteractiveElement> OnPress for E {}
 
 /// A plugin section view, built once per contribution.
 struct SectionView {
@@ -781,7 +803,7 @@ impl Sidebar {
             .text_size(ui_font_size(FONT_SM, cx))
             .text_color(muted)
             .cursor_pointer()
-            .on_click(cx.listener(|this, _, _, cx| this.toggle_pinned(cx)))
+            .on_press(cx, |this, _, cx| this.toggle_pinned(cx))
             .child("Pinned")
             .child(
                 div()
@@ -865,7 +887,7 @@ impl Sidebar {
             .cursor_pointer()
             .hover(|style| style.bg(t.surface_sidebar_hover))
             .active(|style| style.bg(t.surface2))
-            .on_click(cx.listener(move |this, _, _, cx| this.toggle_project(&toggle_id, cx)))
+            .on_press(cx, move |this, _, cx| this.toggle_project(&toggle_id, cx))
             .child(leading)
             .child(
                 div()
@@ -1013,7 +1035,7 @@ impl Sidebar {
             })
             .active(|style| style.bg(t.surface2))
             .when(!archiving, |this| {
-                this.on_click(cx.listener(move |this, _, _, cx| this.open_workspace(&click_id, cx)))
+                this.on_press(cx, move |this, _, cx| this.open_workspace(&click_id, cx))
             })
             .child(leading)
             .child(title)
@@ -1114,7 +1136,7 @@ impl Sidebar {
             .text_color(t.foreground_muted)
             .hover(|style| style.bg(t.surface_sidebar_hover).text_color(t.foreground))
             .active(|style| style.bg(t.surface2).text_color(t.foreground))
-            .on_click(cx.listener(move |this, _, _, cx| this.toggle_group(group.clone(), cx)))
+            .on_press(cx, move |this, _, cx| this.toggle_group(group.clone(), cx))
             .child(
                 div()
                     .w(px(ICON_MD))
@@ -1149,7 +1171,7 @@ impl Sidebar {
                         .id("sidebar-search")
                         .role(Role::Button)
                         .aria_label("Search")
-                        .min_h(px(28.))
+                        .min_h(px(NAV_ROW_MIN))
                         .px(px(SPACE_2))
                         .py(px(SPACE_1))
                         .rounded(px(RADIUS_LG))
@@ -1159,11 +1181,10 @@ impl Sidebar {
                         .gap(px(SPACE_2))
                         .cursor_pointer()
                         .text_size(ui_font_size(FONT_BASE, cx))
+                        .line_height(px(LABEL_LINE))
                         .text_color(t.foreground_muted)
                         .hover(|style| style.bg(t.surface_sidebar_hover).text_color(t.foreground))
-                        .on_click(
-                            cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::OpenCommandCenter)),
-                        )
+                        .on_press(cx, |_, _, cx| cx.emit(SidebarEvent::OpenCommandCenter))
                         .child(icon(IconName::Search).with_size(px(ICON_SM)))
                         .child("Search"),
                 ),
@@ -1212,7 +1233,7 @@ impl Sidebar {
                     .when(row.disabled, |this| {
                         this.aria_description("Disabled: no workspace is open")
                     })
-                    .min_h(px(28.))
+                    .min_h(px(NAV_ROW_MIN))
                     .px(px(SPACE_2))
                     .py(px(SPACE_1))
                     .rounded(px(RADIUS_LG))
@@ -1221,6 +1242,7 @@ impl Sidebar {
                     .items_center()
                     .gap(px(SPACE_2))
                     .text_size(ui_font_size(FONT_BASE, cx))
+                    .line_height(px(LABEL_LINE))
                     .text_color(if row.active {
                         foreground
                     } else {
@@ -1231,9 +1253,9 @@ impl Sidebar {
                     .when(enabled, |this| {
                         this.cursor_pointer()
                             .hover(move |style| style.bg(hover).text_color(foreground))
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                            .on_press(cx, move |this, window, cx| {
                                 this.press_nav(plugin_id, id, window, cx)
-                            }))
+                            })
                     })
                     .child(icon(row.icon).with_size(px(ICON_SM)))
                     .child(div().min_w_0().truncate().child(row.label)),
@@ -1260,7 +1282,7 @@ impl Sidebar {
             .role(Role::Button)
             .aria_label("Add project")
             .min_w_0()
-            .min_h(px(32.))
+            .min_h(px(ADD_PROJECT_MIN))
             .flex_1()
             .px(px(SPACE_2))
             .py(px(SPACE_1_5))
@@ -1270,12 +1292,13 @@ impl Sidebar {
             .items_center()
             .gap(px(SPACE_2))
             .text_size(ui_font_size(FONT_BASE, cx))
+            .line_height(px(LABEL_LINE))
             .text_color(t.foreground_muted)
             .when(self.adding, |this| this.opacity(0.5))
             .when(!self.adding, |this| {
                 this.cursor_pointer()
                     .hover(move |style| style.bg(hover).text_color(foreground))
-                    .on_click(cx.listener(|this, _, window, cx| this.add_project(window, cx)))
+                    .on_press(cx, |this, window, cx| this.add_project(window, cx))
             })
             .child(icon(IconName::FolderPlus).with_size(px(ICON_SM)))
             .child(div().min_w_0().truncate().child("Add project"))
@@ -1306,7 +1329,7 @@ impl Sidebar {
                     .cursor_pointer()
                     .text_color(t.foreground_muted)
                     .hover(|style| style.text_color(t.foreground))
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(SidebarEvent::OpenSettings)))
+                    .on_press(cx, |_, _, cx| cx.emit(SidebarEvent::OpenSettings))
                     .child(icon(IconName::Settings).with_size(px(ICON_MD))),
             )
     }
