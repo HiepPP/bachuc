@@ -8,7 +8,7 @@
 use crate::code::{code_font, code_text, gutter_width};
 use crate::diff::{LineKind, NoDiff, no_diff_reason, parse};
 use crate::diff_doc::{DiffDoc, DiffRow, FileBody, Latest};
-use crate::diff_prefs::{DiffPrefs, FocusTracker, clamp_offset, uniform_row_height};
+use crate::diff_prefs::{DiffPrefs, FocusTracker, clamp_offset, code_widths, uniform_row_height};
 use crate::syntax::{Run, ThemeSyntax, highlight, language_for};
 use crate::ui::{
     centered_text, change_icon, chevron, diff_mode_menu, diff_stat, read_prefs, update_prefs,
@@ -81,6 +81,9 @@ pub struct DiffView {
     offsets: Vec<f32>,
     /// The advance width of one code character, measured at the last render.
     advance: f32,
+    /// The list's width at the last frame, read in `render`. A row callback runs while the list
+    /// holds its state borrowed, so it must not read the `ListState` itself.
+    pane_width: f32,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -173,6 +176,7 @@ impl DiffView {
             wrap,
             offsets: Vec::new(),
             advance: 0.,
+            pane_width: 0.,
             _subscriptions: subscriptions,
         };
         view.reload(cx);
@@ -325,10 +329,13 @@ impl DiffView {
 
     /// The width of a file's code with its paddings, and the width the pane leaves for code.
     fn code_widths(&self, file: usize) -> (f32, f32) {
-        let content =
-            CODE_LEFT_PADDING + self.doc.longest_columns(file) as f32 * self.advance + SPACE_3;
-        let pane: f32 = self.list.viewport_bounds().size.width.into();
-        (content, pane - self.gutter)
+        code_widths(
+            self.doc.longest_columns(file),
+            self.advance,
+            CODE_LEFT_PADDING + SPACE_3,
+            self.pane_width,
+            self.gutter,
+        )
     }
 
     /// A horizontal trackpad or shift-wheel delta over a file's lines moves only that file.
@@ -872,6 +879,7 @@ impl Render for DiffView {
             .text_system()
             .em_advance(font_id, code_size)
             .map_or(0., f32::from);
+        self.pane_width = self.list.viewport_bounds().size.width.into();
         let root = div()
             .id("diff-view")
             .role(Role::Pane)

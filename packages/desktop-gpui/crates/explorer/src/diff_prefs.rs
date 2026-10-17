@@ -245,6 +245,19 @@ pub fn clamp_offset(offset: f32, delta: f32, content_width: f32, code_width: f32
     (offset + delta).clamp(0., max)
 }
 
+/// The width of a file's code (`columns` characters of `advance` pixels plus `paddings`), and the
+/// width a list of `pane` pixels leaves for code beside the gutter. The caller passes the pane
+/// width it read outside the list, because a row callback must not read the `ListState`.
+pub fn code_widths(
+    columns: usize,
+    advance: f32,
+    paddings: f32,
+    pane: f32,
+    gutter: f32,
+) -> (f32, f32) {
+    (paddings + columns as f32 * advance, pane - gutter)
+}
+
 /// The fixed row height of the diff list: one height while lines scroll sideways, none while
 /// they wrap and each row has its own height.
 pub fn uniform_row_height(wrap_lines: bool, line_height: f32) -> Option<f32> {

@@ -13,8 +13,8 @@ use bachuc_explorer::commits::{
 use bachuc_explorer::diff::NoDiff;
 use bachuc_explorer::diff_doc::{DiffDoc, DiffRow, FileBody, Latest};
 use bachuc_explorer::diff_prefs::{
-    DiffPrefs, FocusTracker, ModeOverride, clamp_offset, committed_description, compare_for,
-    resolve_mode, uniform_row_height,
+    DiffPrefs, FocusTracker, ModeOverride, clamp_offset, code_widths, committed_description,
+    compare_for, resolve_mode, uniform_row_height,
 };
 use bachuc_explorer::syntax::{ThemeSyntax, highlight};
 use bachuc_explorer::tree::{FileTree, ROOT, SortBy};
@@ -575,6 +575,18 @@ fn sideways_offsets_clamp_to_the_code_that_does_not_fit() {
     // A file with no long line never moves.
     assert_eq!(clamp_offset(0., 300., 500., 600.), 0.);
     assert_eq!(clamp_offset(0., -300., 500., 600.), 0.);
+}
+
+#[test]
+fn code_widths_take_the_pane_width_as_a_value() {
+    // 1,000 columns of 7.5 px plus 20 px of paddings, in a 640 px pane with a 40 px gutter. The
+    // pane width is a plain value, so a row callback never reads the borrowed list state.
+    assert_eq!(code_widths(1000, 7.5, 20., 640., 40.), (7520., 600.));
+    // Before the first frame the pane is 0 px wide, and the offset stays at 0.
+    let (content, code) = code_widths(1000, 7.5, 20., 0., 40.);
+    assert_eq!(clamp_offset(0., 0., content, code), 0.);
+    // A wider pane leaves more room for the same code.
+    assert_eq!(code_widths(1000, 7.5, 20., 900., 40.).1, 860.);
 }
 
 #[test]
