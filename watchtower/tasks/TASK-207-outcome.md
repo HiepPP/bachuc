@@ -37,3 +37,13 @@ DONE (code), partly. The `~` path rule is done. The quote style and the step lab
 - The vendored text view styles a blockquote only through the shared `muted_foreground` and `border` colors. An Electron-like quote needs a `TextViewStyle::with_blockquote(StyleRefinement)` field in `vendor/gpui-base`, which is an ADR-0044 patch decision for the lead.
 - gpui-pre 0.3.9 has no letter spacing, so any Electron `letterSpacing` stays unmatched until GPUI adds it.
 - Empty cwd: the `~` rule applies, because no path is inside an empty cwd.
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker. GPUI: bundle `Bachuc GPUI Check` (PID 80366) on live, thread "t207 prose check" (Haiku 5.5, `f324881`): an Edit of `/Users/hiep/.t207-check/x.md` with cwd `/tmp/t207-ws`, then 3 prose paragraphs, a quote, and a paragraph. Electron: reference build (PID 9726, daemon 6770), the same prompt as agent `bccb9e3`. Both windows zoomed to 1710 pt wide (3420 device px), content column 940 pt in both. Measures are in device px at 2x.
+
+- Prose line pitch: FAIL. GPUI 48 px (24 pt); Electron 42 px (21 pt). Glyph band height is the same in both (28 px), so the font size matches and only the line box differs. Electron source: `lineHeight: Math.round(fontSize.content * 1.4)` = 21 (`packages/app/src/styles/markdown-styles.ts:37`); GPUI `BODY_LINE_HEIGHT` 1.618 gives 24. Script `/tmp/bands.py`; evidence `/tmp/t198r2-03-finished-open.png`, `/tmp/t207-ref-02-zoomed.png`.
+- Paragraph gap (space added between paragraphs over the line pitch): PASS, borderline. GPUI 47 px (23.5 pt); Electron about 49 px (24.5 pt), read from a line that is partly cut at the top of the view, so +-1 px.
+- Quote: differs, as expected (Q-117). GPUI: 2 pt left border, no background. Electron: 4 pt left border, background `#FAFAFA`, padded box. Evidence: `/tmp/t207-ref-quote-crop.png`; the GPUI quote sits under the composer (`/tmp/t207-gpui-quote-crop.png`), and the view could not be scrolled without the pointer.
+- Edit row of a file under home outside the cwd: PASS. The row shows `~/.t207-check/x.md`. Evidence: `/tmp/t198r2-03-finished-open.png`. Note: the turn header summary on the same turn shows `.t207-check/x.md` without `~/`; that text comes from another code path.
+- Cleanup: both apps quit. The scratch file `~/.t207-check/x.md` (made by the checker) stays.

@@ -135,3 +135,14 @@ DONE. The lead widened this TASK (Q-120) to the timeline and workspace crates. T
 ### Lessons
 
 - For an AX press on a workspace tab, the handler must focus the group itself. The group's `capture_any_mouse_down` runs only for a mouse event.
+
+## UI Checks Run 2
+
+Run 2026-10-18 by the UI checker. Bundle `Bachuc GPUI Check` built from HEAD `da7231026` (includes `8819e6d89` and `7c066ec26`) plus uncommitted group C client files. PID 80366, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1`, connected only to live `127.0.0.1:6768` (`lsof`). The app stayed in the background for the whole run (`lsappinfo front` kept the owner's release app in front). A background GPUI window does not draw, so the checker forced each frame with the window's AX "zoom the window" action (a resize, no activation) and read the AX tree after a no-op F15 key. Disposable agents on live: "t198r2 running" (`558d897`, stopped after the run), "t199 tab A/B/C", "t209 ...", "t207 prose check", and "Reply with the single word ok" (`f23565a`).
+
+- Running card click: PASS. Board closed, tab "t198r2 running" active, the timeline list starts at "User message: start bench" with the turn below it, no toast in the AX tree. A read 5 s later during the stream still started at the prompt, so tail follow did not pull the view down. Evidence: `/tmp/t198r2-02-running-open.png`.
+- Finished card click ("t207 prose check", other workspace): PASS. Board closed, the prompt bubble is at the top of the view, no toast. Evidence: `/tmp/t198r2-03-finished-open.png`.
+- Star: FAIL. The star is not drawn anywhere inside the card at 100% and 160% Board size; a pixel scan of the repo row's right end finds no glyph (`/tmp/t198r2-06-star-crop.png`, `/tmp/t198r2-08-star-click-pos.png`). It should show at 0.35 opacity (`card.rs:442-445`), so it is still laid out outside the card's clip. Its exact position cannot be read: cua gives no AX frames. A press by element index and a true AX "Press" both left the Board open with no tab, but the star did not toggle (the label stays "Star t199 tab A"), so neither press reached it. The Board `button()` helper (`plugins/board/src/card.rs:146-159`) has no `AccessibleAction::Click` handler, so AX presses on star, pencil, and Remove do nothing.
+- Sidebar workspace press with the Board open ("t207-ws"): PASS. Board closed, workspace t207-ws shows with its tab and timeline. Evidence: `/tmp/t198r2-10-sidebar-workspace.png`.
+- Anti-goal, click to first timeline paint under 300 ms: UNVERIFIED. The app logs no click or paint timestamps, and a background window paints only when forced. Press plus AX read took 807-848 ms, which includes cua round trips.
+- Cleanup: PID 80366 quit and exited.

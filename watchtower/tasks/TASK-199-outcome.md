@@ -47,3 +47,17 @@ Each suspect of the Brief, checked by reading:
 ## Update from TASK-198 fix round 2
 
 - The workspace tab chip now has an `AccessibleAction::Click` handler (`packages/desktop-gpui/crates/workspace/src/workspace.rs:994`). It focuses the group and activates the tab, as a left mouse-down does. The UI checker can now press a tab by AX to reproduce the empty pane. Not yet run: DEFERRED (UI checker).
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker, same bundle and setup as TASK-198 UI Checks Run 2 (PID 80366, live 6768, background, frames forced by the AX zoom action). Workspace `t199-ws` held 5 agent tabs: "t198r2 running" (mock, streaming), "t209 ..." , "t199 tab A", "t199 tab B", "t199 tab C" (mock, finished).
+
+- AX press on each tab (true AX "Press", the new chip handler): PASS. Each pressed tab became active (`Value: on`) and showed its timeline with rows and the composer: tab A, B, C, t209, and the running tab. Evidence: `/tmp/t199-tab-t199_tab_A.png`, `-t199_tab_B.png`, `-t199_tab_C.png`, `-t209.png`, `-t198r2_running.png`, combined `/tmp/t199-tabs-BC-r.png`. No pane showed "Loading agent", "Loading timeline...", or blank. Note: an AX read taken before a frame lists an empty `list Timeline`; that is a stale AX tree, not an empty pane.
+- Split pane, agent tab in the new pane: PASS. Command center (Cmd+K) "Split pane right" made a second group with "New tab". "Focus pane right" and Shift+Cmd+A opened an agent draft there; a short prompt made the disposable agent `f23565a`. Pressing pane 2 "New tab", the pane 2 agent tab, pane 1 tab A, and the pane 2 agent tab again showed a timeline every time. Evidence: `/tmp/t199-split-01.png`, `/tmp/t199-split-11-p2_New_tab.png` to `/tmp/t199-split-14-p2_agent_again.png`.
+- Same agent open from the Board while its tab is open: PASS for the open. Board -> "t199 tab C" reused the existing tab in pane 1 (no second tab) and showed its timeline from the prompt. Evidence: `/tmp/t199-dup-01-board-open-C.png`, `/tmp/t199-dup-02-reopen-C.png`.
+- Two live views of one agent, close one: UNVERIFIED (unattended): needs pointer. Board and command center both reuse the open tab, so no UI path without the pointer made a second view. The tab "Close" button has no AX press action, and Cmd+W did nothing in the background window, so no tab could be closed.
+- Result: no step in this run made an empty pane.
+
+## Lead Status
+
+Blocked: not reproduced by the UI checker (Q-127). No code changed, so group S goes on with TASK-200 (the dependency is file order only).
