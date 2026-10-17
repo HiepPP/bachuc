@@ -289,15 +289,23 @@ pub(crate) fn part_opacity(part: CardPart, seen: bool, active: bool) -> f32 {
     }
 }
 
-/// Applies `part_opacity`; hovering the card is the active state.
+/// `active = hovered || ... || focus?.keyboard` (`page.tsx:563-565`): a hover, or focus on one of
+/// the card's parts that came from the keyboard.
+pub(crate) fn card_active(hovered: bool, focused: bool, keyboard: bool) -> bool {
+    hovered || (focused && keyboard)
+}
+
+/// Applies `part_opacity`. The card's keyboard focus is active at rest, and a hover
+/// (`group_hover`) is always active; only opacity changes, never `display`.
 fn dim<E: Styled + InteractiveElement>(
     el: E,
     part: CardPart,
     seen: bool,
+    focused: bool,
     group: &SharedString,
 ) -> E {
     let (rest, active) = (
-        part_opacity(part, seen, false),
+        part_opacity(part, seen, focused),
         part_opacity(part, seen, true),
     );
     let el = if rest < 1. { el.opacity(rest) } else { el };
@@ -322,6 +330,8 @@ pub(crate) struct Card<'r> {
     pub remove_count: usize,
     /// Remove shows: the host is online and nothing in the subtree runs.
     pub can_remove: bool,
+    /// Keyboard focus is on one of the card's parts; `run_card` sets it.
+    pub focused: bool,
 }
 
 pub(crate) fn run_card(p: &Paint, c: Card, window: &mut Window, cx: &mut App) -> AnyElement {
@@ -330,6 +340,25 @@ pub(crate) fn run_card(p: &Paint, c: Card, window: &mut Window, cx: &mut App) ->
     let ui = p.cards.get(&run.id).cloned().unwrap_or_default();
     let running = run.running();
     let group: SharedString = format!("board-card-{}", run.id).into();
+    // One handle per rendered card, tracked on the card root, so focus on any part is inside
+    // it. It is no tab stop, and GPUI drops it when the card leaves the list.
+    let focus = window
+        .use_keyed_state(
+            SharedString::from(format!("board-focus-{}", run.agent_id)),
+            cx,
+            |_, cx| cx.focus_handle(),
+        )
+        .read(cx)
+        .clone();
+    let keyboard = window.last_input_was_keyboard();
+    let c = Card {
+        focused: card_active(
+            false,
+            keyboard && focus.contains_focused(window, cx),
+            keyboard,
+        ),
+        ..c
+    };
 
     let star = star_button(p, &c, &ui, &group);
     let remove = (c.can_remove && !running).then(|| remove_button(p, &c, &ui, &group));
@@ -383,6 +412,7 @@ pub(crate) fn run_card(p: &Paint, c: Card, window: &mut Window, cx: &mut App) ->
     div()
         .id(SharedString::from(format!("board-card-{}", run.id)))
         .group(group.clone())
+        .track_focus(&focus)
         .role(Role::Group)
         .aria_label(card_label(run, c.seen, c.subagent))
         .relative()
@@ -480,7 +510,7 @@ fn star_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEle
         )
     })
     .child(glyph);
-    dim(star, CardPart::Star, c.seen, group).into_any_element()
+    dim(star, CardPart::Star, c.seen, c.focused, group).into_any_element()
 }
 
 fn diffs_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyElement {
@@ -539,7 +569,7 @@ fn diffs_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEl
             t.foreground_muted
         }),
     );
-    dim(diffs, CardPart::Diffs, c.seen, group).into_any_element()
+    dim(diffs, CardPart::Diffs, c.seen, c.focused, group).into_any_element()
 }
 
 fn remove_button(p: &Paint, c: &Card, ui: &CardUi, card: &SharedString) -> AnyElement {
@@ -564,7 +594,7 @@ fn remove_button(p: &Paint, c: &Card, ui: &CardUi, card: &SharedString) -> AnyEl
             },
         )
     });
-    let base = dim(base, CardPart::Remove, c.seen, card);
+    let base = dim(base, CardPart::Remove, c.seen, c.focused, card);
     if c.subagent {
         base.p(p.s(5.))
             .child(
@@ -751,6 +781,7 @@ fn card_body(
             div().flex_shrink(1.).min_w_0().child(repo),
             CardPart::Repo,
             c.seen,
+            c.focused,
             group,
         ))
         .child(
@@ -836,6 +867,7 @@ fn card_body(
         ),
         CardPart::Main,
         c.seen,
+        c.focused,
         group,
     );
 
@@ -855,6 +887,7 @@ fn card_body(
                 .child(model_tags(p, run, false)),
             CardPart::Tags,
             c.seen,
+            c.focused,
             group,
         ))
         .children(remove);
@@ -943,6 +976,7 @@ fn subagent_body(
                     ),
                     CardPart::Elbow,
                     c.seen,
+                    c.focused,
                     group,
                 ))
                 .child(dim(
@@ -951,6 +985,7 @@ fn subagent_body(
                         .child(agent_avatar(&run.agent_id, p.s(24.))),
                     CardPart::Main,
                     c.seen,
+                    c.focused,
                     group,
                 ))
                 .child(dim(
@@ -983,6 +1018,7 @@ fn subagent_body(
                         ),
                     CardPart::Main,
                     c.seen,
+                    c.focused,
                     group,
                 ))
                 .child(actions),
@@ -1003,6 +1039,7 @@ fn subagent_body(
                         .child(model_tags(p, run, true)),
                     CardPart::Tags,
                     c.seen,
+                    c.focused,
                     group,
                 )),
         )
@@ -1127,6 +1164,7 @@ pub(crate) fn column_card(
                 inherited_project: false,
                 remove_count: 1,
                 can_remove,
+                focused: false,
             },
             window,
             cx,
@@ -1156,6 +1194,7 @@ pub(crate) fn column_card(
                 inherited_project: false,
                 remove_count: tree.count,
                 can_remove,
+                focused: false,
             },
             window,
             cx,
@@ -1239,6 +1278,7 @@ fn nested_cluster(
         inherited_project: tree.run.project_key == parent.project_key,
         remove_count: tree.count,
         can_remove: p.online && !tree.running,
+        focused: false,
     };
     if tree.children.is_empty() {
         return run_card(p, card, window, cx);
@@ -1298,7 +1338,7 @@ fn nested_cluster(
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob import brings a `test` attribute of its own.
-    use super::{CardPart, actions_offset, part_opacity, pulse_opacity};
+    use super::{CardPart, actions_offset, card_active, part_opacity, pulse_opacity};
 
     #[test]
     fn a_pulse_fades_to_0_35_and_back_in_one_loop() {
@@ -1343,5 +1383,25 @@ mod tests {
             }
             assert!((part_opacity(CardPart::Elbow, seen, active) - 0.6).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn card_active_on_hover_or_keyboard_focus_but_not_mouse_focus() {
+        assert!(!card_active(false, false, false));
+        assert!(!card_active(false, false, true));
+        assert!(card_active(true, false, false));
+        assert!(card_active(true, true, false));
+        // A click focuses a part too, but only keyboard focus un-dims (`focus?.keyboard`).
+        assert!(!card_active(false, true, false));
+        assert!(card_active(false, true, true));
+        // The seen card's dimmed parts show at full opacity while focus is from the keyboard.
+        let active = card_active(false, true, true);
+        for part in [CardPart::Repo, CardPart::Main, CardPart::Tags] {
+            assert_eq!(part_opacity(part, true, active), 1., "{part:?}");
+        }
+        assert_eq!(
+            part_opacity(CardPart::Main, true, card_active(false, true, false)),
+            0.5
+        );
     }
 }
