@@ -3,8 +3,10 @@
 //! loaded only when the list opens and kept for 15 s. A switch that fails on uncommitted
 //! changes offers "Stash & Switch"; a switch that lands on a branch with a Paseo stash offers
 //! to restore it. Electron shows both confirms in an app dialog; here they draw inline under the
-//! label, because the GPUI client has no app dialog.
+//! label, because the GPUI client has no app dialog. A failed step and a restored stash emit
+//! `ExplorerNoticeEvent`, which the app shows as Electron's toast.
 
+use crate::explorer::ExplorerNoticeEvent;
 use bachuc_client::{Client, StashEntry};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
@@ -107,6 +109,30 @@ pub(crate) fn offers_stash(error: &str) -> bool {
     error.to_lowercase().contains("uncommitted")
 }
 
+/// `branchSwitcher.stashRestored`, the success toast of a restore.
+const STASH_RESTORED: &str = "Stashed changes restored";
+
+/// An error toast of the switcher.
+fn failure(message: String) -> ExplorerNoticeEvent {
+    ExplorerNoticeEvent { ok: false, message }
+}
+
+/// What a failed switch emits: nothing when it offers "Stash & Switch", else an error notice.
+pub(crate) fn switch_failure_notice(error: &str) -> Option<ExplorerNoticeEvent> {
+    (!offers_stash(error)).then(|| failure(error.to_string()))
+}
+
+/// What a restore emits: Electron's success note, or the error.
+pub(crate) fn restore_notice(result: Result<(), String>) -> ExplorerNoticeEvent {
+    match result {
+        Ok(()) => ExplorerNoticeEvent {
+            ok: true,
+            message: STASH_RESTORED.to_string(),
+        },
+        Err(message) => failure(message),
+    }
+}
+
 /// The Paseo stash to offer for restore after a switch to `branch`: the first one listed.
 pub(crate) fn restore_index(entries: &[StashEntry], branch: &str) -> Option<u32> {
     entries
@@ -131,8 +157,6 @@ enum Confirm {
     Stash { target: String },
     /// The new branch has the Paseo stash `index`.
     Restore { index: u32 },
-    /// A failed step; Electron shows it as an error toast.
-    Notice(String),
 }
 
 enum ListLoad {
@@ -163,6 +187,7 @@ pub(crate) struct BranchSwitcher {
 }
 
 impl EventEmitter<BranchSwitched> for BranchSwitcher {}
+impl EventEmitter<ExplorerNoticeEvent> for BranchSwitcher {}
 
 impl BranchSwitcher {
     pub(crate) fn new(client: Entity<Client>, cwd: String) -> BranchSwitcher {
@@ -336,14 +361,10 @@ impl BranchSwitcher {
                         cx.emit(BranchSwitched);
                         this.offer_restore(name, cx);
                     }
-                    Err(error) => {
-                        let message = format!("{error:#}");
-                        this.confirm = Some(if offers_stash(&message) {
-                            Confirm::Stash { target: name }
-                        } else {
-                            Confirm::Notice(message)
-                        });
-                    }
+                    Err(error) => match switch_failure_notice(&format!("{error:#}")) {
+                        Some(notice) => cx.emit(notice),
+                        None => this.confirm = Some(Confirm::Stash { target: name }),
+                    },
                 }
                 cx.notify();
             })
@@ -369,7 +390,7 @@ impl BranchSwitcher {
                 this.update(cx, |this, cx| {
                     if this.generation == generation {
                         this.busy = false;
-                        this.confirm = Some(Confirm::Notice(message));
+                        cx.emit(failure(message));
                         cx.notify();
                     }
                 })
@@ -444,9 +465,7 @@ impl BranchSwitcher {
                     return;
                 }
                 this.busy = false;
-                if let Err(error) = result {
-                    this.confirm = Some(Confirm::Notice(format!("{error:#}")));
-                }
+                cx.emit(restore_notice(result.map_err(|error| format!("{error:#}"))));
                 cx.emit(BranchSwitched);
                 cx.notify();
             })
@@ -459,7 +478,7 @@ impl BranchSwitcher {
         match self.confirm.take() {
             Some(Confirm::Stash { target }) => self.stash_and_switch(target, cx),
             Some(Confirm::Restore { index }) => self.restore(index, cx),
-            Some(Confirm::Notice(_)) | None => cx.notify(),
+            None => cx.notify(),
         }
     }
 
@@ -631,7 +650,7 @@ impl BranchSwitcher {
                 "Uncommitted changes",
                 "You have uncommitted changes. Stash them before switching branches?".to_string(),
                 "Stash & Switch",
-                Some("Cancel"),
+                "Cancel",
             ),
             Confirm::Restore { .. } => (
                 "Restore stashed changes?",
@@ -639,9 +658,8 @@ impl BranchSwitcher {
                  restore them?"
                     .to_string(),
                 "Restore",
-                Some("Later"),
+                "Later",
             ),
-            Confirm::Notice(message) => ("Failed to switch branch", message.clone(), "OK", None),
         };
         let title_size = ui_font_size(FONT_BASE, cx);
         let small = ui_font_size(FONT_SM, cx);
@@ -678,11 +696,13 @@ impl BranchSwitcher {
                     h_flex()
                         .justify_end()
                         .gap(px(SPACE_2))
-                        .children(no.map(|label| {
-                            dialog_button("branch-switcher-no", label, false, cx, |this, cx| {
-                                this.confirm_no(cx)
-                            })
-                        }))
+                        .child(dialog_button(
+                            "branch-switcher-no",
+                            no,
+                            false,
+                            cx,
+                            |this, cx| this.confirm_no(cx),
+                        ))
                         .child(dialog_button(
                             "branch-switcher-yes",
                             yes,
@@ -777,8 +797,10 @@ impl Render for BranchSwitcher {
 #[cfg(test)]
 mod tests {
     use super::{
-        BRANCH_CACHE, cache_fresh, offers_stash, rank_branches, restore_index, should_switch,
+        BRANCH_CACHE, cache_fresh, offers_stash, rank_branches, restore_index, restore_notice,
+        should_switch, switch_failure_notice,
     };
+    use crate::explorer::ExplorerNoticeEvent;
     use bachuc_client::StashEntry;
     use std::time::{Duration, Instant};
 
@@ -803,6 +825,32 @@ mod tests {
         assert!(offers_stash("UNCOMMITTED changes in the worktree"));
         assert!(!offers_stash("Branch not found: feat/x"));
         assert!(!offers_stash(""));
+    }
+
+    #[test]
+    fn branch_switch_error_and_restore_success_map_to_notices() {
+        assert_eq!(
+            switch_failure_notice("Branch not found: feat/x"),
+            Some(ExplorerNoticeEvent {
+                ok: false,
+                message: "Branch not found: feat/x".to_string(),
+            })
+        );
+        assert_eq!(switch_failure_notice("you have uncommitted changes"), None);
+        assert_eq!(
+            restore_notice(Ok(())),
+            ExplorerNoticeEvent {
+                ok: true,
+                message: "Stashed changes restored".to_string(),
+            }
+        );
+        assert_eq!(
+            restore_notice(Err("conflict in a.txt".to_string())),
+            ExplorerNoticeEvent {
+                ok: false,
+                message: "conflict in a.txt".to_string(),
+            }
+        );
     }
 
     #[test]

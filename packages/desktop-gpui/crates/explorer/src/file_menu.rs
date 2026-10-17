@@ -22,11 +22,15 @@ pub struct GitState {
     pub uncommitted: bool,
 }
 
-/// The host features the file operations need (`fsEntryOps`, `fsEntryDuplicate`).
+/// What the menu may offer: the host features the file operations need (`fsEntryOps`,
+/// `fsEntryDuplicate`, `checkoutDiscardChanges`), and whether a chat tab can take a file.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct EntryFeatures {
     pub entry_ops: bool,
     pub duplicate: bool,
+    pub discard: bool,
+    /// A focused chat tab can take the file. Electron hides Add to chat without one.
+    pub chat_target: bool,
 }
 
 /// One menu item, by what it does.
@@ -110,7 +114,8 @@ pub enum FileMenuEntry {
 
 /// The menu of a row in the Electron order. `git` is `None` for a Files row and set for a changed
 /// file of the Changes tree. Create, Rename, and Delete need `entry_ops`; Duplicate needs
-/// `duplicate`. Open to the side and Add to chat need a file that exists.
+/// `duplicate`; Discard changes needs `discard`. Open to the side and Add to chat need a file
+/// that exists, and Add to chat needs `chat_target`.
 pub fn menu_entries(
     kind: EntryKind,
     git: Option<GitState>,
@@ -124,7 +129,7 @@ pub fn menu_entries(
             (file, FileAction::OpenToSide),
             (true, FileAction::CopyPath),
             (true, FileAction::CopyRelativePath),
-            (file, FileAction::AddToChat),
+            (file && features.chat_target, FileAction::AddToChat),
             (features.entry_ops, FileAction::Rename),
             (features.duplicate, FileAction::Duplicate),
             (features.entry_ops, FileAction::Delete),
@@ -135,8 +140,11 @@ pub fn menu_entries(
                 (exists, FileAction::OpenToSide),
                 (true, FileAction::CopyPath),
                 (true, FileAction::CopyRelativePath),
-                (exists, FileAction::AddToChat),
-                (file && git.uncommitted, FileAction::Revert),
+                (exists && features.chat_target, FileAction::AddToChat),
+                (
+                    file && git.uncommitted && features.discard,
+                    FileAction::Revert,
+                ),
             ]
         }
     };
@@ -279,6 +287,8 @@ mod tests {
     const ALL: EntryFeatures = EntryFeatures {
         entry_ops: true,
         duplicate: true,
+        discard: true,
+        chat_target: true,
     };
 
     fn render(entries: &[FileMenuEntry]) -> Vec<&'static str> {
@@ -339,20 +349,14 @@ mod tests {
         let none = menu_entries(EntryKind::File, None, EntryFeatures::default());
         assert_eq!(
             render(&none),
-            vec![
-                "Open to the side",
-                "---",
-                "Copy path",
-                "Copy relative path",
-                "Add to chat",
-            ]
+            vec!["Open to the side", "---", "Copy path", "Copy relative path"]
         );
         let no_duplicate = menu_entries(
             EntryKind::File,
             None,
             EntryFeatures {
-                entry_ops: true,
                 duplicate: false,
+                ..ALL
             },
         );
         assert!(!no_duplicate.contains(&FileMenuEntry::Item(FileAction::Duplicate)));
@@ -362,7 +366,7 @@ mod tests {
             None,
             EntryFeatures {
                 entry_ops: false,
-                duplicate: true,
+                ..ALL
             },
         );
         assert_eq!(
@@ -414,6 +418,53 @@ mod tests {
             render(&menu_entries(EntryKind::File, Some(committed), ALL)),
             vec!["Copy path", "Copy relative path"]
         );
+    }
+
+    #[test]
+    fn file_menu_hides_discard_on_a_host_without_the_feature() {
+        let git = GitState {
+            untracked: false,
+            deleted: false,
+            uncommitted: true,
+        };
+        let old_host = EntryFeatures {
+            discard: false,
+            ..ALL
+        };
+        let entries = menu_entries(EntryKind::File, Some(git), old_host);
+        assert!(!entries.contains(&FileMenuEntry::Item(FileAction::Revert)));
+        assert_eq!(
+            render(&entries),
+            vec![
+                "Open to the side",
+                "---",
+                "Copy path",
+                "Copy relative path",
+                "Add to chat",
+            ]
+        );
+    }
+
+    #[test]
+    fn file_menu_hides_add_to_chat_without_a_chat_target() {
+        let no_chat = EntryFeatures {
+            chat_target: false,
+            ..ALL
+        };
+        let files = menu_entries(EntryKind::File, None, no_chat);
+        assert!(!files.contains(&FileMenuEntry::Item(FileAction::AddToChat)));
+        assert_eq!(
+            render(&files)[4..8],
+            ["---", "Copy path", "Copy relative path", "---"]
+        );
+        let git = GitState {
+            untracked: false,
+            deleted: false,
+            uncommitted: true,
+        };
+        let changes = menu_entries(EntryKind::File, Some(git), no_chat);
+        assert!(!changes.contains(&FileMenuEntry::Item(FileAction::AddToChat)));
+        assert!(changes.contains(&FileMenuEntry::Item(FileAction::Revert)));
     }
 
     #[test]

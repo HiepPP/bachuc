@@ -5,7 +5,8 @@
 //! click on a changed file emits `ExplorerDiffEvent::OpenAllDiffs`, a click on a file of a
 //! commit emits `ExplorerDiffEvent::OpenCommitDiff`, and the app opens the viewer pane. A right
 //! click opens the file menu (`file_menu`); its Open to the side and Add to chat items emit
-//! `ExplorerFileEvent`, and the Explorer runs the rest itself.
+//! `ExplorerFileEvent`, and the Explorer runs the rest itself. A failed file or branch operation
+//! and a restored stash emit `ExplorerNoticeEvent` for the app toast.
 
 use crate::branch_switcher::{BranchSwitched, BranchSwitcher};
 use crate::changes::{ChangeRow, CheckoutView};
@@ -96,6 +97,13 @@ pub enum ExplorerDiffEvent {
 pub enum ExplorerFileEvent {
     OpenToSide { cwd: String, path: String },
     AddToChat { cwd: String, path: String },
+}
+
+/// A note for the app toast, as Electron's `toast.error` (`ok` false) and `toast.show`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExplorerNoticeEvent {
+    pub ok: bool,
+    pub message: String,
 }
 
 impl ExplorerDiffEvent {
@@ -209,8 +217,8 @@ pub struct Explorer {
     branch_switcher: Entity<BranchSwitcher>,
     file_menu: Option<OpenFileMenu>,
     inline_edit: Option<InlineEdit>,
-    /// The last failed file operation. The client has no toast host, so it shows inline.
-    action_error: Option<String>,
+    /// A chat tab can take a file, so the file menu offers Add to chat. The app sets it.
+    chat_target: bool,
     watching: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -218,6 +226,7 @@ pub struct Explorer {
 impl EventEmitter<ExplorerEvent> for Explorer {}
 impl EventEmitter<ExplorerDiffEvent> for Explorer {}
 impl EventEmitter<ExplorerFileEvent> for Explorer {}
+impl EventEmitter<ExplorerNoticeEvent> for Explorer {}
 
 impl Explorer {
     pub fn new(
@@ -236,6 +245,10 @@ impl Explorer {
                         this.request_commits(cx);
                     }
                 },
+            ),
+            cx.subscribe(
+                &branch_switcher,
+                |_: &mut Explorer, _, notice: &ExplorerNoticeEvent, cx| cx.emit(notice.clone()),
             ),
             cx.subscribe(
                 &client,
@@ -300,7 +313,7 @@ impl Explorer {
             branch_switcher,
             file_menu: None,
             inline_edit: None,
-            action_error: None,
+            chat_target: false,
             watching: false,
             _subscriptions: subscriptions,
         };
@@ -329,7 +342,6 @@ impl Explorer {
         self.open_commits.clear();
         self.file_menu = None;
         self.inline_edit = None;
-        self.action_error = None;
         self.load_directory(crate::tree::ROOT, cx);
         if self.tab == ExplorerTab::Changes && self.visible {
             self.start_watching(cx);
@@ -339,6 +351,15 @@ impl Explorer {
             }
         }
         cx.notify();
+    }
+
+    /// The app calls this when the focused tab changes: Add to chat shows only while a chat tab
+    /// can take the file.
+    pub fn set_chat_target(&mut self, available: bool, cx: &mut Context<Explorer>) {
+        if self.chat_target != available {
+            self.chat_target = available;
+            cx.notify();
+        }
     }
 
     pub fn tab(&self) -> ExplorerTab {
@@ -721,6 +742,9 @@ impl Explorer {
         EntryFeatures {
             entry_ops: client.fs_entry_ops_supported(),
             duplicate: client.fs_entry_duplicate_supported(),
+            // COMPAT(checkoutDiscardChanges): added in v0.3.0, remove gate after 2027-02-08.
+            discard: client.discard_changes_supported(),
+            chat_target: self.chat_target,
         }
     }
 
@@ -849,7 +873,6 @@ impl Explorer {
         window: &mut Window,
         cx: &mut Context<Explorer>,
     ) {
-        self.action_error = None;
         let cwd = self.cwd.clone();
         let path = target.path().to_string();
         match (action, target) {
@@ -1071,8 +1094,10 @@ impl Explorer {
                 }
                 if let Err(error) = result {
                     log::warn!("file operation in {parent}: {error:#}");
-                    this.action_error = Some(format!("{error:#}"));
-                    cx.notify();
+                    cx.emit(ExplorerNoticeEvent {
+                        ok: false,
+                        message: format!("{error:#}"),
+                    });
                     return;
                 }
                 this.load_directory(&parent, cx);
@@ -1126,7 +1151,10 @@ impl Explorer {
                 match result {
                     Err(error) => {
                         log::warn!("discard_changes: {error:#}");
-                        this.action_error = Some(format!("{error:#}"));
+                        cx.emit(ExplorerNoticeEvent {
+                            ok: false,
+                            message: format!("{error:#}"),
+                        });
                     }
                     Ok(()) => {
                         this.request_status(cx);
@@ -1152,41 +1180,6 @@ impl Explorer {
         };
         let (slot, depth) = draft_slot(&self.rows, parent);
         Some((slot, depth, *kind, edit.input.clone()))
-    }
-
-    /// The failed file operation, under the tab rail. A press clears it.
-    fn render_action_error(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let message = self.action_error.clone()?;
-        let colors = tokens(cx);
-        let dismiss = cx.weak_entity();
-        Some(
-            div()
-                .id("explorer-action-error")
-                .role(Role::Button)
-                .aria_label(format!("Dismiss: {message}"))
-                .flex_shrink_0()
-                .px(px(SPACE_3))
-                .py(px(SPACE_2))
-                .border_b_1()
-                .border_color(colors.border)
-                .cursor_pointer()
-                .text_size(ui_font_size(FONT_SM, cx))
-                .text_color(colors.destructive)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.action_error = None;
-                    cx.notify();
-                }))
-                .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
-                    dismiss
-                        .update(cx, |this, cx| {
-                            this.action_error = None;
-                            cx.notify();
-                        })
-                        .ok();
-                })
-                .child(message)
-                .into_any_element(),
-        )
     }
 
     // ----- render -----
@@ -2077,7 +2070,6 @@ impl Render for Explorer {
             ExplorerTab::Files => self.render_files(cx),
             ExplorerTab::Changes => self.render_changes(cx),
         };
-        let error = self.render_action_error(cx);
         let menu = self.file_menu.as_ref().map(|open| {
             deferred(
                 anchored()
@@ -2097,7 +2089,6 @@ impl Render for Explorer {
             .bg(colors.surface_sidebar)
             .text_color(colors.foreground)
             .child(self.render_tab_rail(cx))
-            .children(error)
             .child(body)
             .children(menu)
     }

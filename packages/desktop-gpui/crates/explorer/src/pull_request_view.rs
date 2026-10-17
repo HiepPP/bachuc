@@ -52,6 +52,14 @@ pub enum PullRequestEvent {
     OpenUrl { url: String },
 }
 
+/// A note for the app toast, apart from `PullRequestEvent` because the app matches that enum
+/// exhaustively. A failed Refresh sends one with `ok` false, as Electron's `toast.error`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PullRequestNoticeEvent {
+    pub ok: bool,
+    pub message: String,
+}
+
 // ---- rules ----
 
 /// `PrState` of `data.ts`.
@@ -353,7 +361,6 @@ pub struct PullRequestView {
     generation: u64,
     refetch_gate: RefreshGate,
     refreshing: bool,
-    refresh_error: Option<String>,
     checks_open: bool,
     activity_open: bool,
     collapsed_groups: Vec<CheckKind>,
@@ -365,6 +372,7 @@ pub struct PullRequestView {
 }
 
 impl EventEmitter<PullRequestEvent> for PullRequestView {}
+impl EventEmitter<PullRequestNoticeEvent> for PullRequestView {}
 
 impl PullRequestView {
     pub fn new(
@@ -402,7 +410,6 @@ impl PullRequestView {
             generation: 0,
             refetch_gate: RefreshGate::default(),
             refreshing: false,
-            refresh_error: None,
             checks_open: true,
             activity_open: true,
             collapsed_groups: Vec::new(),
@@ -551,14 +558,17 @@ impl PullRequestView {
             let result = task.await;
             this.update(cx, |this, cx| {
                 this.refreshing = false;
-                this.refresh_error = result.err().map(|error| {
+                if let Err(error) = result {
                     let message = format!("{error:#}");
-                    if message.is_empty() {
-                        "Failed to refresh git state.".to_string()
-                    } else {
-                        message
-                    }
-                });
+                    cx.emit(PullRequestNoticeEvent {
+                        ok: false,
+                        message: if message.is_empty() {
+                            "Failed to refresh git state.".to_string()
+                        } else {
+                            message
+                        },
+                    });
+                }
                 this.fetch(cx);
                 cx.notify();
             })
@@ -1499,11 +1509,6 @@ impl Render for PullRequestView {
         let Some(status) = status else {
             return root.child(self.render_empty(cx));
         };
-        let refresh_error = self.refresh_error.clone().map(|message| {
-            self.text(FONT_SM, colors.status_danger, cx)
-                .px(px(SPACE_3))
-                .child(message)
-        });
         root.child(
             div()
                 .id("pr-view-scroll")
@@ -1511,7 +1516,6 @@ impl Render for PullRequestView {
                 .min_h_0()
                 .overflow_y_scroll()
                 .child(self.render_toolbar(&status.url, cx))
-                .children(refresh_error)
                 .child(self.render_header(&status, cx))
                 .child(self.render_checks(&status, cx))
                 .child(div().h(px(1.)).bg(colors.border))
@@ -1580,6 +1584,8 @@ mod tests {
             status: status.into(),
             url: None,
             workflow: None,
+            duration: None,
+            traits: Vec::new(),
         }
     }
 
