@@ -1,17 +1,20 @@
-//! The toast host: short success and error notes stacked at the bottom right, after Electron's
-//! `toast-host.tsx` look (surface, border, 16 px radius, medium shadow). Each note leaves after
-//! `TOAST_DURATION`, the time Electron gives an error toast.
+//! The toast host: one short success or error note at the top center, below the header, after
+//! Electron's `toast-host.tsx` (surface, border, 16 px radius, medium shadow). Each note carries
+//! its own duration from `toast_duration`.
 
 use bachuc_icons::{IconName, icon};
-use bachuc_theme::metrics::{FONT_BASE, RADIUS_2XL, SPACE_2, SPACE_3, SPACE_4};
+use bachuc_theme::metrics::{FONT_BASE, HEADER_HEIGHT, RADIUS_2XL, SPACE_2, SPACE_3, SPACE_4};
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::*;
 use std::time::Duration;
 
-pub const TOAST_DURATION: Duration = Duration::from_millis(3200);
-/// More notes than this drop the oldest, so a burst never covers the window.
-pub const MAX_TOASTS: usize = 3;
+/// Electron's `DEFAULT_DURATION_MS`, for a success note.
+const SUCCESS_DURATION: Duration = Duration::from_millis(2200);
+/// Electron's `toast.error` duration.
+const ERROR_DURATION: Duration = Duration::from_millis(3200);
+/// Electron's host holds one toast; a new note replaces the shown one.
+pub const MAX_TOASTS: usize = 1;
 const TOAST_MAX_WIDTH: f32 = 480.;
 const TOAST_ICON: f32 = 18.;
 
@@ -20,6 +23,12 @@ pub struct Toast {
     pub id: u64,
     pub ok: bool,
     pub message: String,
+    pub duration: Duration,
+}
+
+/// How long a note shows, as Electron's `toast.show` (2.2 s) and `toast.error` (3.2 s).
+pub fn toast_duration(ok: bool) -> Duration {
+    if ok { SUCCESS_DURATION } else { ERROR_DURATION }
 }
 
 #[derive(Default)]
@@ -29,8 +38,8 @@ pub struct ToastStack {
 }
 
 impl ToastStack {
-    /// Adds a note and returns its id. A blank message shows nothing.
-    pub fn push(&mut self, ok: bool, message: String) -> Option<u64> {
+    /// Adds a note and returns it. A blank message shows nothing.
+    pub fn push(&mut self, ok: bool, message: String) -> Option<&Toast> {
         let message = message.trim().to_string();
         if message.is_empty() {
             return None;
@@ -40,11 +49,12 @@ impl ToastStack {
             id: self.next,
             ok,
             message,
+            duration: toast_duration(ok),
         });
         if self.items.len() > MAX_TOASTS {
             self.items.remove(0);
         }
-        Some(self.next)
+        self.items.last()
     }
 
     /// Removes a note; false when it already left.
@@ -104,11 +114,18 @@ pub fn render_toasts(stack: &ToastStack, cx: &App) -> Option<AnyElement> {
         v_flex()
             .id("toasts")
             .absolute()
-            .bottom(px(SPACE_4))
+            .top(px(HEADER_HEIGHT + SPACE_2))
+            .left(px(SPACE_4))
             .right(px(SPACE_4))
-            .items_end()
-            .gap(px(SPACE_2))
-            .children(notes)
+            .items_center()
+            .child(
+                v_flex()
+                    .w(relative(0.92))
+                    .max_w(px(TOAST_MAX_WIDTH))
+                    .items_center()
+                    .gap(px(SPACE_2))
+                    .children(notes),
+            )
             .into_any_element(),
     )
 }
@@ -116,25 +133,37 @@ pub fn render_toasts(stack: &ToastStack, cx: &App) -> Option<AnyElement> {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob brings a `test` macro that shadows the std one.
-    use super::{MAX_TOASTS, ToastStack};
+    use super::{MAX_TOASTS, ToastStack, toast_duration};
+    use std::time::Duration;
 
     #[test]
-    fn toasts_stack_drop_the_oldest_and_leave_by_id() {
+    fn a_new_toast_replaces_the_shown_one_and_leaves_by_id() {
         let mut stack = ToastStack::default();
-        assert_eq!(stack.push(true, "  ".into()), None);
-        let first = stack.push(true, "Committed".into()).expect("shown");
-        let second = stack.push(false, " Failed to push ".into()).expect("shown");
-        assert_eq!(stack.items()[1].message, "Failed to push");
-        assert!(!stack.items()[1].ok);
-        for n in 0..MAX_TOASTS {
-            stack.push(true, format!("note {n}"));
-        }
+        assert!(stack.push(true, "  ".into()).is_none());
+        let first = stack.push(true, "Committed".into()).expect("shown").id;
+        let second = stack
+            .push(false, " Failed to push ".into())
+            .expect("shown")
+            .clone();
+        assert_eq!(second.message, "Failed to push");
+        assert!(!second.ok);
         assert_eq!(stack.items().len(), MAX_TOASTS);
-        assert!(stack.items().iter().all(|toast| toast.id != first));
-        assert!(!stack.dismiss(second));
-        let last = stack.items()[MAX_TOASTS - 1].id;
-        assert!(stack.dismiss(last));
-        assert!(!stack.dismiss(last));
-        assert_eq!(stack.items().len(), MAX_TOASTS - 1);
+        assert!(!stack.dismiss(first));
+        assert!(stack.dismiss(second.id));
+        assert!(!stack.dismiss(second.id));
+        assert!(stack.items().is_empty());
+    }
+
+    #[test]
+    fn a_success_toast_lasts_2_2_s_and_an_error_toast_3_2_s() {
+        assert_eq!(toast_duration(true), Duration::from_millis(2200));
+        assert_eq!(toast_duration(false), Duration::from_millis(3200));
+        let mut stack = ToastStack::default();
+        let ok = stack
+            .push(true, "Committed".into())
+            .expect("shown")
+            .duration;
+        let error = stack.push(false, "Failed".into()).expect("shown").duration;
+        assert_eq!((ok, error), (toast_duration(true), toast_duration(false)));
     }
 }

@@ -26,7 +26,7 @@ use crate::state::{
     notification_for, pull_request_key, save_ship_default, step_index, step_workspace,
     workspace_agents, workspace_order,
 };
-use crate::toast::{TOAST_DURATION, ToastStack, render_toasts};
+use crate::toast::{ToastStack, render_toasts};
 use crate::workspace_draft::{self, WorkspaceDraftPane};
 use bachuc_client::{
     AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, Client, ClientEvent,
@@ -1627,13 +1627,17 @@ impl Shell {
 
     // ----- toasts, git actions, and the Pull request tab -----
 
-    /// Shows a success or error note at the bottom right for `TOAST_DURATION`.
+    /// Shows a success or error note at the top center for its own duration (`toast_duration`).
     pub(crate) fn show_toast(&mut self, ok: bool, message: String, cx: &mut Context<Self>) {
-        let Some(id) = self.toasts.push(ok, message) else {
+        let Some((id, duration)) = self
+            .toasts
+            .push(ok, message)
+            .map(|toast| (toast.id, toast.duration))
+        else {
             return;
         };
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(TOAST_DURATION).await;
+            cx.background_executor().timer(duration).await;
             let _ = this.update(cx, |shell, cx| {
                 if shell.toasts.dismiss(id) {
                     cx.notify();
