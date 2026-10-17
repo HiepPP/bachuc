@@ -49,3 +49,49 @@ Run 2026-10-18 by the UI checker. Bundle `Bachuc GPUI Check` built from HEAD `72
 - Sidebar workspace click with the Board open: UNVERIFIED (unattended): background frame. After the press on "turn-step-check", 3 reads over about 20 s showed the same frame and the same "6m 40s" duration while Zen was in front (`/tmp/t198-10-sidebar-workspace.png`, `/tmp/t198-11-sidebar-workspace-retry.png`). Code read: `SidebarEvent::OpenWorkspace` calls `open_workspace`, which calls `close_page_surface` (`shell.rs:664`).
 - Anti-goal, click to first timeline paint under 300 ms: UNVERIFIED. The app logs no click or paint timestamps, and `open -g` drops its stderr. The AX press plus the next snapshot took 782 ms, 825 ms, and 1525 ms; these include cua round trips, so they are not a paint time.
 - Cleanup: PID 82578 quit and exited. The owner's app (PID 37065) and live stayed up.
+
+## Fix round 1
+
+### Status
+
+BLOCKED. This status replaces the first-build status above. The shell part of the latest-prompt reveal is fixed, and the background launch (lead request) is done. The reveal still cannot show on screen without a change in the timeline crate, which is outside this TASK's Files. The UI checks are DEFERRED (UI checker).
+
+### Cause
+
+The UI checker saw the toast "That message isn't loaded in this chat" and the tail view on every card. Two causes, found by reading:
+
+1. Shell, fixed. The shell subscribes to the client before each `TimelineView`, and GPUI calls subscribers in subscription order (`gpui-pre-0.3.9/src/subscription.rs:20`, a `BTreeMap` by id). On the agent's first `TimelineChanged`, `on_client_event` called `reveal_passage` before the view synced that change. The new view was already `loaded` from the `sync` in `TimelineView::new` (`crates/timeline/src/lib.rs:412`, which sets `loaded = true` at client version 0), with no rows. So `reveal_now` found no row and `reveal_plan` returned `NotLoaded`. The message id was correct: both sides use `message_key`.
+2. Timeline crate, the blocker. `reveal_now` (`crates/timeline/src/plugin_view.rs:121`) scrolls with `ListState::scroll_to_reveal_item`, which keeps tail follow on (`gpui-pre-0.3.9/src/elements/list.rs:677-702` does not touch `follow_state`). A new `TimelineView` follows the tail (`crates/timeline/src/lib.rs:304`), and the next layout moves the list back to the end (`list.rs:1043-1049`). `scroll_to_reveal_item` also puts a lower row at the bottom of the view, not at the top. The fix is one line in `reveal_now`: `self.list.scroll_to(ListOffset { item_ix: row, offset_in_item: px(0.) })`. `scroll_to` stops the tail follow (`list.rs:668-670`) and puts the prompt row at the top. The same gap affects every `RevealTimelinePassage` on a list that follows the tail.
+
+### Changed
+
+- `packages/desktop-gpui/crates/app/src/shell.rs`
+  - `on_client_event`: a waiting latest-prompt reveal now runs through `cx.defer_in`. The deferred reveal runs after every subscriber of that `TimelineChanged`, so the view has synced the same version.
+  - `latest_prompt_reveal`: a state with no entries returns `Wait`, not `Tail`. A permission change can raise the version before the first page arrives, and before this change, that ended the wait with no reveal.
+- `packages/desktop-gpui/crates/app/src/main.rs` (lead request): `BACHUC_NO_ACTIVATE=1` skips `cx.activate(true)` and opens the main window with `focus: false`. With `focus: false`, GPUI calls `orderFront_` instead of `makeKeyAndOrderFront_` (`gpui-pre-macos-0.3.9/src/window.rs:1291-1295`). The pure function `activates_on_launch` holds the env rule. The normal launch is unchanged. The other `cx.activate(true)` call (`shell.rs:344`) runs only when the user clicks a system notification. GPUI also activates the app on a file drop (`gpui-pre-0.3.9/src/window.rs:5686`). Both need a user action.
+
+### Contract
+
+- `Shell::open_agent` keeps its signature (for TASK-200).
+- Background launch: `BACHUC_NO_ACTIVATE=1` in the app's environment keeps the app in the background. Any other value or no value activates the app, as before. `open` does not pass the shell environment to the app, so the UI checker sets the variable with `open -g --env BACHUC_NO_ACTIVATE=1 "<bundle>"`.
+
+### Verified
+
+- `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-app`: pass, 62 tests. This includes the extended `the_latest_prompt_is_the_last_user_message` (failed first with `Tail` for a version-1 state with no entries, then passed) and the new `only_bachuc_no_activate_1_keeps_the_app_in_the_background`.
+- `CARGO_BUILD_JOBS=4 ./cargo.sh build -p bachuc-app`: exit 0. It has 1 warning that was already there (`next_theme` is not used, `state.rs:272`).
+- `./cargo.sh fmt --check -p bachuc-app`: exit 0.
+- `./cargo.sh metadata --format-version 1 > /dev/null`: exit 0.
+- UI check, the latest prompt shows at the top after a card click: BLOCKED. It needs the timeline crate fix above.
+- UI check, the toast does not show on a card click: DEFERRED (UI checker).
+- UI check, `BACHUC_NO_ACTIVATE=1` launch stays in the background through card clicks: DEFERRED (UI checker).
+- Anti-goal, under 300 ms: DEFERRED (UI checker). The fix adds one deferred call per open.
+
+### Lessons
+
+- A shell handler of a `ClientEvent` runs before the handler of each view made later. Code in the shell that reads a view's state for the same event must use `cx.defer_in`.
+- `TimelineView` is `loaded` from its first `sync` at client version 0, before any page arrives. So `reveal_passage` right after a view is created reports `NotLoaded` instead of waiting.
+- `ListState::scroll_to_reveal_item` does not stop tail follow. On a timeline that follows the tail, a reveal must use `scroll_to`.
+
+### Questions
+
+- May the lead add `packages/desktop-gpui/crates/timeline/src/plugin_view.rs` to this TASK (or a follow-up TASK) for the one-line `scroll_to` change in `reveal_now`? Without it, no reveal shows on a timeline that follows the tail.
