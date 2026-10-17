@@ -5,8 +5,9 @@
 //! palette view: the app passes `CommandItem`s and runs the id of `CommandEvent::Run`. The view
 //! adds the active plugins' items itself and runs them; the app ignores a `plugin:` id.
 //! `gpui_keystrokes` turns a chord into the strings that `KeyBinding::new` takes. In its Files
-//! scope the palette asks the app for files through `CommandFileEvent`. `ShortcutsDialog` lists
-//! the table in its help sections.
+//! scope, and for a typed query in the full list, the palette asks the app for files through
+//! `CommandFileEvent`; the app answers with `FileResult`s. `ShortcutsDialog` lists the table in
+//! its help sections.
 
 mod center;
 mod chord;
@@ -15,7 +16,7 @@ pub mod search;
 mod shortcuts;
 mod shortcuts_dialog;
 
-pub use center::{CommandCenter, CommandEvent, CommandFileEvent, CommandItem};
+pub use center::{CommandCenter, CommandEvent, CommandFileEvent, CommandItem, FileResult};
 pub use chord::{display_combos, gpui_keystrokes, is_valid_chord};
 pub use shortcuts::{
     Shortcut, ShortcutSection, data_dir, default_shortcuts, load_shortcuts, load_shortcuts_from,
