@@ -16,7 +16,7 @@ max_builders: 2
 ## Repo Rules
 
 - Never restart or stop the release daemon on port 6767. Never run `scripts/paseo-release.sh` or `npm run build:desktop`.
-- Do not start, stop, or restart the live daemon or the live Electron app (owner answer, 2026-10-12). Live was down at run start, so each live check is `UNVERIFIED (unattended)`.
+- Do not start, stop, or restart the live daemon or the live Electron app (owner answer, 2026-10-12). One exception (owner, Q-109, 2026-10-17): the lead starts live with `npm run dev` for the UI checker of TASK-168 to TASK-197 and stops it at Finish. Builders never touch live.
 - Builders run code tests only: unit tests, crate tests, and fake-daemon tests. A builder opens no app window and returns each `UI check:` line as `DEFERRED (UI checker)`.
 - TASK-157 to TASK-167 had no UI checker (owner, 2026-10-16). For TASK-168 to TASK-195 one UI checker runs the `UI check:` lines (owner, 2026-10-16): it opens the GPUI bundle and the Electron reference with `open -g`, never brings an app to the front, never moves the pointer, and takes window screenshots only. A stale or blank frame (Q-069) is `UNVERIFIED (unattended): background frame`. A line that needs the pointer or the front is `UNVERIFIED (unattended): needs pointer` or `needs foreground`.
 - The UI checker quits every app it opens, and never runs `measure.sh`.
