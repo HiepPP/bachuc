@@ -12,7 +12,7 @@ pub enum EntryKind {
     Directory,
 }
 
-/// The git state of a changed file of the Changes tree.
+/// The git state of a changed file or folder row of the Changes tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GitState {
     /// A new file: discard deletes it.
@@ -20,6 +20,8 @@ pub struct GitState {
     pub deleted: bool,
     /// The tree lists uncommitted changes, which discard can revert. The Committed mode cannot.
     pub uncommitted: bool,
+    /// A folder row shows its children, so it offers Collapse folder.
+    pub expanded: bool,
 }
 
 /// What the menu may offer: the host features the file operations need (`fsEntryOps`,
@@ -38,9 +40,11 @@ pub struct EntryFeatures {
 pub enum FileAction {
     NewFile,
     NewFolder,
+    CollapseFolder,
     OpenToSide,
     CopyPath,
     CopyRelativePath,
+    Reveal,
     AddToChat,
     Rename,
     Duplicate,
@@ -62,10 +66,11 @@ impl FileAction {
     fn group(self) -> Group {
         match self {
             FileAction::NewFile | FileAction::NewFolder => Group::Create,
-            FileAction::OpenToSide => Group::Open,
-            FileAction::CopyPath | FileAction::CopyRelativePath | FileAction::AddToChat => {
-                Group::Reference
-            }
+            FileAction::CollapseFolder | FileAction::OpenToSide => Group::Open,
+            FileAction::CopyPath
+            | FileAction::CopyRelativePath
+            | FileAction::Reveal
+            | FileAction::AddToChat => Group::Reference,
             FileAction::Rename | FileAction::Duplicate => Group::Manage,
             FileAction::Revert | FileAction::Delete => Group::Destructive,
         }
@@ -76,9 +81,12 @@ impl FileAction {
         match self {
             FileAction::NewFile => "New file",
             FileAction::NewFolder => "New folder",
+            FileAction::CollapseFolder => "Collapse folder",
             FileAction::OpenToSide => "Open to the side",
             FileAction::CopyPath => "Copy path",
             FileAction::CopyRelativePath => "Copy relative path",
+            // `revealIn` with the desktop file manager; the GPUI app runs on macOS only.
+            FileAction::Reveal => "Reveal in Finder",
             FileAction::AddToChat => "Add to chat",
             FileAction::Rename => "Rename",
             FileAction::Duplicate => "Duplicate",
@@ -91,8 +99,10 @@ impl FileAction {
         match self {
             FileAction::NewFile => IconName::FilePlus,
             FileAction::NewFolder => IconName::FolderPlus,
+            FileAction::CollapseFolder => IconName::FolderMinus,
             FileAction::OpenToSide => IconName::ArrowRightToLine,
             FileAction::CopyPath | FileAction::CopyRelativePath => IconName::Copy,
+            FileAction::Reveal => IconName::FolderOpen,
             FileAction::AddToChat => IconName::MessageSquarePlus,
             FileAction::Rename => IconName::Pencil,
             FileAction::Duplicate => IconName::CopyPlus,
@@ -113,9 +123,11 @@ pub enum FileMenuEntry {
 }
 
 /// The menu of a row in the Electron order. `git` is `None` for a Files row and set for a changed
-/// file of the Changes tree. Create, Rename, and Delete need `entry_ops`; Duplicate needs
-/// `duplicate`; Discard changes needs `discard`. Open to the side and Add to chat need a file
-/// that exists, and Add to chat needs `chat_target`.
+/// file or folder of the Changes tree. Create, Rename, and Delete need `entry_ops`; Duplicate
+/// needs `duplicate` and a file that exists; Discard changes needs `discard`. Open to the side
+/// and Add to chat need a file that exists, and Add to chat needs `chat_target`. A Changes folder
+/// row gets `DiffFolderRow`'s items: Collapse folder while it is open, then Copy path, Copy
+/// relative path, Reveal, Duplicate, and Discard changes.
 pub fn menu_entries(
     kind: EntryKind,
     git: Option<GitState>,
@@ -134,17 +146,23 @@ pub fn menu_entries(
             (features.duplicate, FileAction::Duplicate),
             (features.entry_ops, FileAction::Delete),
         ],
+        Some(git) if !file => vec![
+            (git.expanded, FileAction::CollapseFolder),
+            (true, FileAction::CopyPath),
+            (true, FileAction::CopyRelativePath),
+            (true, FileAction::Reveal),
+            (features.duplicate, FileAction::Duplicate),
+            (git.uncommitted && features.discard, FileAction::Revert),
+        ],
         Some(git) => {
-            let exists = file && !git.deleted;
+            let exists = !git.deleted;
             vec![
                 (exists, FileAction::OpenToSide),
                 (true, FileAction::CopyPath),
                 (true, FileAction::CopyRelativePath),
                 (exists && features.chat_target, FileAction::AddToChat),
-                (
-                    file && git.uncommitted && features.discard,
-                    FileAction::Revert,
-                ),
+                (exists && features.duplicate, FileAction::Duplicate),
+                (git.uncommitted && features.discard, FileAction::Revert),
             ]
         }
     };
@@ -381,6 +399,7 @@ mod tests {
             untracked: false,
             deleted: false,
             uncommitted: true,
+            expanded: false,
         };
         let entries = menu_entries(EntryKind::File, Some(git), ALL);
         assert_eq!(
@@ -391,6 +410,8 @@ mod tests {
                 "Copy path",
                 "Copy relative path",
                 "Add to chat",
+                "---",
+                "Duplicate",
                 "---",
                 "Discard changes",
             ]
@@ -405,6 +426,7 @@ mod tests {
             untracked: false,
             deleted: true,
             uncommitted: true,
+            expanded: false,
         };
         assert_eq!(
             render(&menu_entries(EntryKind::File, Some(deleted), ALL)),
@@ -421,11 +443,90 @@ mod tests {
     }
 
     #[test]
+    fn file_menu_of_a_changed_file_offers_duplicate_unless_deleted() {
+        let git = GitState {
+            untracked: true,
+            deleted: false,
+            uncommitted: false,
+            expanded: false,
+        };
+        let committed = menu_entries(EntryKind::File, Some(git), ALL);
+        assert_eq!(
+            render(&committed)[render(&committed).len() - 2..],
+            ["---", "Duplicate"]
+        );
+        let no_duplicate = EntryFeatures {
+            duplicate: false,
+            ..ALL
+        };
+        assert!(
+            !menu_entries(EntryKind::File, Some(git), no_duplicate)
+                .contains(&FileMenuEntry::Item(FileAction::Duplicate))
+        );
+        let deleted = GitState {
+            deleted: true,
+            ..git
+        };
+        assert!(
+            !menu_entries(EntryKind::File, Some(deleted), ALL)
+                .contains(&FileMenuEntry::Item(FileAction::Duplicate))
+        );
+    }
+
+    #[test]
+    fn file_menu_of_a_changed_folder_has_the_diff_folder_row_items() {
+        let open = GitState {
+            untracked: false,
+            deleted: false,
+            uncommitted: true,
+            expanded: true,
+        };
+        assert_eq!(
+            render(&menu_entries(EntryKind::Directory, Some(open), ALL)),
+            vec![
+                "Collapse folder",
+                "---",
+                "Copy path",
+                "Copy relative path",
+                "Reveal in Finder",
+                "---",
+                "Duplicate",
+                "---",
+                "Discard changes",
+            ]
+        );
+        let collapsed_committed = GitState {
+            uncommitted: false,
+            expanded: false,
+            ..open
+        };
+        assert_eq!(
+            render(&menu_entries(
+                EntryKind::Directory,
+                Some(collapsed_committed),
+                EntryFeatures::default()
+            )),
+            vec!["Copy path", "Copy relative path", "Reveal in Finder"]
+        );
+        let old_host = EntryFeatures {
+            discard: false,
+            duplicate: false,
+            ..ALL
+        };
+        let entries = menu_entries(EntryKind::Directory, Some(open), old_host);
+        assert!(!entries.contains(&FileMenuEntry::Item(FileAction::Revert)));
+        assert!(!entries.contains(&FileMenuEntry::Item(FileAction::Duplicate)));
+        assert!(!entries.contains(&FileMenuEntry::Item(FileAction::NewFile)));
+        assert!(!entries.contains(&FileMenuEntry::Item(FileAction::NewFolder)));
+    }
+
+    #[test]
     fn file_menu_hides_discard_on_a_host_without_the_feature() {
         let git = GitState {
             untracked: false,
             deleted: false,
             uncommitted: true,
+            expanded: false,
         };
         let old_host = EntryFeatures {
             discard: false,
@@ -441,6 +542,8 @@ mod tests {
                 "Copy path",
                 "Copy relative path",
                 "Add to chat",
+                "---",
+                "Duplicate",
             ]
         );
     }
@@ -461,6 +564,7 @@ mod tests {
             untracked: false,
             deleted: false,
             uncommitted: true,
+            expanded: false,
         };
         let changes = menu_entries(EntryKind::File, Some(git), no_chat);
         assert!(!changes.contains(&FileMenuEntry::Item(FileAction::AddToChat)));

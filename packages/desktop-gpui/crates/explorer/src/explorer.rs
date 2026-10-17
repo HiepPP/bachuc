@@ -64,6 +64,8 @@ const COMMIT_ROW_HEIGHT: f32 = 28.;
 const COMMITS_MAX_HEIGHT: f32 = 240.;
 /// The file menu width (`ContextMenuContent` min width).
 const FILE_MENU_WIDTH: f32 = 200.;
+/// `workspace.fileExplorer.errors.revealFailed`.
+const REVEAL_FAILED: &str = "Failed to reveal entry";
 
 /// What the Explorer tells its owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,12 +139,18 @@ enum MenuTarget {
         old_path: Option<String>,
         git: GitState,
     },
+    ChangeFolder {
+        path: String,
+        git: GitState,
+    },
 }
 
 impl MenuTarget {
     fn path(&self) -> &str {
         match self {
-            MenuTarget::Entry { path, .. } | MenuTarget::Change { path, .. } => path,
+            MenuTarget::Entry { path, .. }
+            | MenuTarget::Change { path, .. }
+            | MenuTarget::ChangeFolder { path, .. } => path,
         }
     }
 }
@@ -168,9 +176,20 @@ struct InlineEdit {
 
 /// What a file operation changes after it succeeds, besides the parent listing.
 enum AfterEntryOp {
-    Created { path: String, open: bool },
-    Renamed { from: String, to: String },
-    Deleted { path: String },
+    Created {
+        path: String,
+        open: bool,
+    },
+    Renamed {
+        from: String,
+        to: String,
+    },
+    Deleted {
+        path: String,
+    },
+    /// A Changes row changed: list the parent only when the Files tree shows it, and ask for
+    /// the status again.
+    Status,
     Nothing,
 }
 
@@ -772,7 +791,7 @@ impl Explorer {
         self.open_file_menu(target, position, window, cx);
     }
 
-    /// Selects the changed file of Changes row `index` and opens its menu at `position`.
+    /// Selects Changes row `index`, a changed file or folder, and opens its menu at `position`.
     fn open_change_menu(
         &mut self,
         index: usize,
@@ -780,24 +799,38 @@ impl Explorer {
         window: &mut Window,
         cx: &mut Context<Explorer>,
     ) {
-        let (Some(ChangeRow::File { index: file, .. }), ChangesState::Ready(view)) =
-            (self.change_rows.get(index), &self.changes)
+        let (Some(row), ChangesState::Ready(view)) = (self.change_rows.get(index), &self.changes)
         else {
             return;
         };
-        let Some(file) = view.files.get(*file) else {
-            return;
-        };
-        let target = MenuTarget::Change {
-            path: file.path.clone(),
-            old_path: file.old_path.clone(),
-            git: GitState {
-                untracked: file.is_new,
-                deleted: file.is_deleted,
-                uncommitted: self.tree_compare.is_none(),
+        let uncommitted = self.tree_compare.is_none();
+        let target = match row {
+            ChangeRow::Folder { dir_path, .. } => MenuTarget::ChangeFolder {
+                path: dir_path.clone(),
+                git: GitState {
+                    untracked: false,
+                    deleted: false,
+                    uncommitted,
+                    expanded: !self.collapsed.contains(dir_path),
+                },
             },
+            ChangeRow::File { index: file, .. } => {
+                let Some(file) = view.files.get(*file) else {
+                    return;
+                };
+                MenuTarget::Change {
+                    path: file.path.clone(),
+                    old_path: file.old_path.clone(),
+                    git: GitState {
+                        untracked: file.is_new,
+                        deleted: file.is_deleted,
+                        uncommitted,
+                        expanded: false,
+                    },
+                }
+            }
         };
-        self.selected_change = Some(file.path.clone());
+        self.selected_change = Some(target.path().to_string());
         self.open_file_menu(target, position, window, cx);
     }
 
@@ -812,6 +845,7 @@ impl Explorer {
         let (kind, git) = match &target {
             MenuTarget::Entry { kind, .. } => (*kind, None),
             MenuTarget::Change { git, .. } => (EntryKind::File, Some(*git)),
+            MenuTarget::ChangeFolder { git, .. } => (EntryKind::Directory, Some(*git)),
         };
         let entries = menu_entries(kind, git, self.entry_features(cx));
         if entries.is_empty() {
@@ -884,6 +918,10 @@ impl Explorer {
                 let parent = create_parent(kind, &path).to_string();
                 self.start_create(parent, NewEntryKind::Directory, window, cx);
             }
+            (FileAction::CollapseFolder, MenuTarget::ChangeFolder { path, .. }) => {
+                self.collapse_change_folder(&path);
+            }
+            (FileAction::Reveal, _) => self.reveal(absolute_path(&cwd, &path), cx),
             (FileAction::OpenToSide, _) => cx.emit(ExplorerFileEvent::OpenToSide { cwd, path }),
             (FileAction::AddToChat, _) => cx.emit(ExplorerFileEvent::AddToChat { cwd, path }),
             (FileAction::CopyPath, _) => {
@@ -895,12 +933,18 @@ impl Explorer {
             (FileAction::Rename, MenuTarget::Entry { path, name, .. }) => {
                 self.start_rename(path, name, window, cx);
             }
-            (FileAction::Duplicate, MenuTarget::Entry { path, .. }) => {
+            (FileAction::Duplicate, target) => {
+                let after = match target {
+                    MenuTarget::Entry { .. } => AfterEntryOp::Nothing,
+                    MenuTarget::Change { .. } | MenuTarget::ChangeFolder { .. } => {
+                        AfterEntryOp::Status
+                    }
+                };
                 let task = self
                     .client
                     .update(cx, |client, cx| client.duplicate_entry(&cwd, &path, cx));
                 let parent = parent_path(&path).to_string();
-                self.finish_entry_op(task, parent, AfterEntryOp::Nothing, cx);
+                self.finish_entry_op(task, parent, after, cx);
             }
             (FileAction::Delete, MenuTarget::Entry { path, name, kind }) => {
                 let explorer = cx.entity().downgrade();
@@ -931,10 +975,60 @@ impl Explorer {
                     },
                 );
             }
+            // `DiffFolderRow` discards the folder path with the tracked confirm.
+            (FileAction::Revert, MenuTarget::ChangeFolder { path, .. }) => {
+                let explorer = cx.entity().downgrade();
+                open_confirm(revert_confirm(&path, false), window, cx, move |cx| {
+                    let paths = vec![path.clone()];
+                    explorer.update(cx, |this, cx| this.discard(paths, cx)).ok();
+                });
+            }
             // The menu offers these only on the row kind above.
             _ => {}
         }
         cx.notify();
+    }
+
+    /// Collapses Changes folder `dir` and every folder under it, as `handleCollapseFolder` of
+    /// `changed-files-tree.tsx` does.
+    fn collapse_change_folder(&mut self, dir: &str) {
+        let ChangesState::Ready(view) = &self.changes else {
+            return;
+        };
+        let prefix = format!("{dir}/");
+        let folders: Vec<String> = view
+            .tree
+            .folder_paths()
+            .into_iter()
+            .filter(|path| path == dir || path.starts_with(&prefix))
+            .collect();
+        self.collapsed.extend(folders);
+        self.rebuild_change_rows();
+    }
+
+    /// Shows `target` selected in Finder with the macOS `open -R` command.
+    fn reveal(&mut self, target: String, cx: &mut Context<Explorer>) {
+        cx.spawn(async move |this, cx| {
+            let revealed = cx
+                .background_executor()
+                .spawn(async move {
+                    std::process::Command::new("open")
+                        .args(["-R", &target])
+                        .status()
+                        .is_ok_and(|status| status.success())
+                })
+                .await;
+            if !revealed {
+                this.update(cx, |_, cx| {
+                    cx.emit(ExplorerNoticeEvent {
+                        ok: false,
+                        message: REVEAL_FAILED.to_string(),
+                    })
+                })
+                .ok();
+            }
+        })
+        .detach();
     }
 
     /// Opens a New file or New folder row first under `parent`, opening `parent` first.
@@ -1100,7 +1194,9 @@ impl Explorer {
                     });
                     return;
                 }
-                this.load_directory(&parent, cx);
+                if !matches!(after, AfterEntryOp::Status) || !this.tree.needs_load(&parent) {
+                    this.load_directory(&parent, cx);
+                }
                 match after {
                     AfterEntryOp::Created { path, open } => {
                         this.selected_file = Some(path.clone());
@@ -1121,6 +1217,7 @@ impl Explorer {
                             this.selected_file = None;
                         }
                     }
+                    AfterEntryOp::Status => this.request_status(cx),
                     AfterEntryOp::Nothing => {}
                 }
                 cx.notify();
@@ -1258,13 +1355,13 @@ impl Explorer {
                     .into_any_element()
             }
             RootState::Failed(message) => self.render_files_failed(message, cx),
-            RootState::Empty => v_flex()
+            RootState::Empty if self.draft().is_none() => v_flex()
                 .flex_1()
                 .min_h_0()
                 .child(self.render_files_toolbar(cx))
                 .child(centered_text("explorer-files-empty", "No files", false, cx))
                 .into_any_element(),
-            RootState::Ready if self.rows.is_empty() => v_flex()
+            RootState::Ready if self.rows.is_empty() && self.draft().is_none() => v_flex()
                 .flex_1()
                 .min_h_0()
                 .child(self.render_files_toolbar(cx))
@@ -1279,7 +1376,8 @@ impl Explorer {
                     cx,
                 ))
                 .into_any_element(),
-            RootState::Ready => v_flex()
+            // A New file row at the root of an empty folder shows in the list too.
+            RootState::Empty | RootState::Ready => v_flex()
                 .flex_1()
                 .min_h_0()
                 .child(self.render_files_toolbar(cx))
@@ -1334,10 +1432,35 @@ impl Explorer {
             )
     }
 
-    /// The Files toolbar (`files-pane-header`): the sort trigger, then the hidden files toggle
-    /// and refresh. The Modified sort needs a modified time that `FileEntry` does not have.
+    /// A toolbar button that opens a New file or New folder row at the root, on a click and on
+    /// an accessibility press.
+    fn new_entry_button(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        glyph: IconName,
+        kind: NewEntryKind,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let weak = cx.weak_entity();
+        self.toolbar_button(id, label, glyph, cx)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.start_create(crate::tree::ROOT.to_string(), kind, window, cx)
+            }))
+            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                weak.update(cx, |this, cx| {
+                    this.start_create(crate::tree::ROOT.to_string(), kind, window, cx)
+                })
+                .ok();
+            })
+    }
+
+    /// The Files toolbar (`files-pane-header`): the sort trigger, then New file and New folder
+    /// when the host has entry ops, the hidden files toggle, and refresh. The Modified sort needs
+    /// a modified time that `FileEntry` does not have.
     fn render_files_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let colors = tokens(cx);
+        let entry_ops = self.client.read(cx).fs_entry_ops_supported();
         let sort_label = self.sort.label();
         let (hidden_label, hidden_icon) = if self.show_hidden {
             ("Hide hidden files", IconName::Eye)
@@ -1383,6 +1506,22 @@ impl Explorer {
             .child(
                 h_flex()
                     .gap(px(SPACE_1))
+                    .when(entry_ops, |this| {
+                        this.child(self.new_entry_button(
+                            "files-new-file",
+                            "New file",
+                            IconName::FilePlus,
+                            NewEntryKind::File,
+                            cx,
+                        ))
+                        .child(self.new_entry_button(
+                            "files-new-folder",
+                            "New folder",
+                            IconName::FolderPlus,
+                            NewEntryKind::Directory,
+                            cx,
+                        ))
+                    })
                     .child(
                         self.toolbar_button("files-hidden-toggle", hidden_label, hidden_icon, cx)
                             .aria_selected(!self.show_hidden)
@@ -1939,6 +2078,7 @@ impl Explorer {
                         let selected = self.selected_change.as_deref() == Some(dir_path.as_str());
                         let collapsed = self.collapsed.contains(dir_path);
                         let group = SharedString::from(format!("explorer-change-row-{index}"));
+                        let menu_view = cx.weak_entity();
                         base.id(("explorer-change-row", index))
                             .group(group.clone())
                             .role(Role::TreeItem)
@@ -1950,6 +2090,23 @@ impl Explorer {
                             .hover(|style| style.bg(colors.surface_sidebar_hover))
                             .on_click(
                                 cx.listener(move |this, _, _, cx| this.click_change_row(index, cx)),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                    this.open_change_menu(index, event.position, window, cx)
+                                }),
+                            )
+                            .on_a11y_action(
+                                AccessibleAction::ShowContextMenu,
+                                move |_, window, cx| {
+                                    let position = window.mouse_position();
+                                    menu_view
+                                        .update(cx, |this, cx| {
+                                            this.open_change_menu(index, position, window, cx)
+                                        })
+                                        .ok();
+                                },
                             )
                             .child(
                                 h_flex()
