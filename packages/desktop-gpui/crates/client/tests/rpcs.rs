@@ -6,8 +6,9 @@ mod common;
 use bachuc_client::{
     AgentFeature, AgentFeatureKind, AgentFeatureOption, AttentionReason, ChangedFile,
     ChangedFileDetails, CheckoutDetails, CheckoutStatus, CommitFile, CommitList, CommitSummary,
-    DiffStat, DirectoryEvent, FileDiff, FileDiffStatus, FileKind, ProjectNode, QueuedPrompt,
-    TurnBehavior, WorkspaceNode,
+    DiffStat, DirectoryEvent, FileDiff, FileDiffStatus, FileKind, GitAction, GitActionReply,
+    GitStatus, GitStatusEvent, MergeMethod, PrCheck, PrMergeCapability, PrStatus, PrTimelineItem,
+    ProjectNode, QueuedPrompt, StashEntry, TurnBehavior, WorkspaceNode, WorkspaceScript,
 };
 use bachuc_protocol::generated::ServerInfoPermissionsItem;
 use common::{FakeServer, Harness, agent_snapshot, session};
@@ -1195,4 +1196,715 @@ fn commit_file_diff_renders_a_file_or_gives_none_for_null() {
 
     let reply = harness.core.commit_file_diff("/repo", "abc123", "logo.png");
     assert_eq!(harness.wait(reply, WAIT).unwrap(), None);
+}
+
+// ---- git, PR, stash, and script calls (TASK-204) ----
+
+/// A fake daemon whose checkout requests succeed; `reply_kinds` maps request to response.
+fn checkout_server(reply_kinds: &[(&str, &str)]) -> FakeServer {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    for (request, response) in reply_kinds {
+        server.reply(
+            request,
+            response,
+            json!({"cwd": "/repo", "success": true, "error": null}),
+        );
+    }
+    server
+}
+
+fn checkout_failure(message: &str) -> Value {
+    json!({"cwd": "/repo", "success": false, "error": {"code": "UNKNOWN", "message": message}})
+}
+
+#[test]
+fn git_action_sends_each_request_with_its_fields() {
+    let cases = [
+        (
+            GitAction::Commit,
+            "checkout_commit_request",
+            "checkout_commit_response",
+        ),
+        (
+            GitAction::Pull,
+            "checkout_pull_request",
+            "checkout_pull_response",
+        ),
+        (
+            GitAction::Push,
+            "checkout_push_request",
+            "checkout_push_response",
+        ),
+        (
+            GitAction::MergePr(MergeMethod::Squash),
+            "checkout_pr_merge_request",
+            "checkout_pr_merge_response",
+        ),
+        (
+            GitAction::MergeBranch,
+            "checkout_merge_request",
+            "checkout_merge_response",
+        ),
+        (
+            GitAction::MergeFromBase,
+            "checkout_merge_from_base_request",
+            "checkout_merge_from_base_response",
+        ),
+        (
+            GitAction::Refresh,
+            "checkout.refresh.request",
+            "checkout.refresh.response",
+        ),
+    ];
+    let kinds: Vec<(&str, &str)> = cases.iter().map(|(_, req, res)| (*req, *res)).collect();
+    let server = checkout_server(&kinds);
+    let mut harness = connect(&server);
+    for (action, request, _) in cases {
+        let reply = harness.core.git_action("/repo", action);
+        assert_eq!(
+            harness.wait(reply, WAIT).unwrap(),
+            GitActionReply::default(),
+            "{request}"
+        );
+    }
+    let field = |kind: &str, key: &str| server.requests_of(kind)[0][key].clone();
+    assert_eq!(field("checkout_commit_request", "addAll"), json!(true));
+    assert_eq!(field("checkout_commit_request", "message"), Value::Null);
+    assert_eq!(
+        field("checkout_pr_merge_request", "mergeMethod"),
+        json!("squash")
+    );
+    assert_eq!(field("checkout_merge_request", "strategy"), json!("merge"));
+    assert_eq!(
+        field("checkout_merge_request", "requireCleanTarget"),
+        json!(true)
+    );
+    assert_eq!(
+        field("checkout_merge_from_base_request", "requireCleanTarget"),
+        json!(true)
+    );
+    for (_, request, _) in cases {
+        assert_eq!(field(request, "cwd"), json!("/repo"), "{request}");
+    }
+}
+
+#[test]
+fn git_action_fails_with_the_daemon_message() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "checkout_push_request",
+        "checkout_push_response",
+        checkout_failure("rejected: non-fast-forward"),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.git_action("/repo", GitAction::Push);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "rejected: non-fast-forward"
+    );
+}
+
+#[test]
+fn pull_and_push_pushes_only_after_the_pull_succeeds() {
+    let server = checkout_server(&[
+        ("checkout_pull_request", "checkout_pull_response"),
+        ("checkout_push_request", "checkout_push_response"),
+    ]);
+    let mut harness = connect(&server);
+    let reply = harness.core.git_action("/repo", GitAction::PullAndPush);
+    harness.wait(reply, WAIT).unwrap();
+    let order: Vec<Value> = server
+        .messages()
+        .into_iter()
+        .map(|m| m["type"].clone())
+        .filter(|kind| kind == "checkout_pull_request" || kind == "checkout_push_request")
+        .collect();
+    assert_eq!(
+        order,
+        [
+            json!("checkout_pull_request"),
+            json!("checkout_push_request")
+        ]
+    );
+
+    server.reply(
+        "checkout_pull_request",
+        "checkout_pull_response",
+        checkout_failure("merge conflict"),
+    );
+    let reply = harness.core.git_action("/repo", GitAction::PullAndPush);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "merge conflict"
+    );
+    harness.pump_for(Duration::from_millis(100));
+    assert_eq!(
+        server.requests_of("checkout_push_request").len(),
+        1,
+        "no second push"
+    );
+}
+
+#[test]
+fn create_pr_sends_no_title_and_returns_the_url_and_number() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "checkout_pr_create_request",
+        "checkout_pr_create_response",
+        json!({"cwd": "/repo", "url": "https://github.com/o/r/pull/7", "number": 7,
+               "error": null}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.git_action("/repo", GitAction::CreatePr);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        GitActionReply {
+            url: Some("https://github.com/o/r/pull/7".into()),
+            number: Some(7),
+        }
+    );
+    let request = &server.requests_of("checkout_pr_create_request")[0];
+    assert!(request.get("title").is_none() && request.get("body").is_none());
+}
+
+#[test]
+fn auto_merge_uses_the_forge_request_and_the_github_one_only_without_it() {
+    let reply_kinds = [
+        (
+            "checkout.forge.set_auto_merge.request",
+            "checkout.forge.set_auto_merge.response",
+        ),
+        (
+            "checkout.github.set_auto_merge.request",
+            "checkout.github.set_auto_merge.response",
+        ),
+    ];
+    let enable = GitAction::SetAutoMerge {
+        enabled: true,
+        method: Some(MergeMethod::Rebase),
+    };
+    let disable = GitAction::SetAutoMerge {
+        enabled: false,
+        method: None,
+    };
+
+    let server = checkout_server(&reply_kinds);
+    server.with(|s| {
+        s.features
+            .insert("checkoutForgeSetAutoMerge".into(), json!(true));
+        s.features
+            .insert("checkoutGithubSetAutoMerge".into(), json!(true));
+    });
+    let mut harness = connect(&server);
+    let reply = harness.core.git_action("/repo", enable);
+    harness.wait(reply, WAIT).unwrap();
+    let reply = harness.core.git_action("/repo", disable);
+    harness.wait(reply, WAIT).unwrap();
+    let sent = server.requests_of("checkout.forge.set_auto_merge.request");
+    assert_eq!(
+        (sent[0]["enabled"].clone(), sent[0]["mergeMethod"].clone()),
+        (json!(true), json!("rebase"))
+    );
+    assert_eq!(sent[1]["enabled"], json!(false));
+    assert!(sent[1].get("mergeMethod").is_none());
+    assert!(
+        server
+            .requests_of("checkout.github.set_auto_merge.request")
+            .is_empty()
+    );
+
+    let legacy = checkout_server(&reply_kinds);
+    legacy.with(|s| {
+        s.features
+            .insert("checkoutGithubSetAutoMerge".into(), json!(true));
+    });
+    let mut harness = connect(&legacy);
+    let reply = harness.core.git_action("/repo", enable);
+    harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        legacy
+            .requests_of("checkout.github.set_auto_merge.request")
+            .len(),
+        1
+    );
+
+    let old = checkout_server(&reply_kinds);
+    let mut harness = connect(&old);
+    let reply = harness.core.git_action("/repo", enable);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Update the host to use auto-merge actions."
+    );
+}
+
+#[test]
+fn git_status_of_a_folder_outside_git_is_not_git() {
+    let server = git_server();
+    let mut harness = connect(&server);
+    let reply = harness.core.git_status("/plain");
+    assert_eq!(harness.wait(reply, WAIT).unwrap(), GitStatus::default());
+
+    server.reply(
+        "checkout_status_request",
+        "checkout_status_response",
+        json!({"cwd": "/gone", "isGit": false, "isPaseoOwnedWorktree": false, "hasRemote": false,
+               "error": {"code": "NOT_GIT_REPO", "message": "not a git repository"}}),
+    );
+    let reply = harness.core.git_status("/gone");
+    assert!(
+        !harness.wait(reply, WAIT).unwrap().is_git,
+        "NOT_GIT_REPO is no error"
+    );
+}
+
+#[test]
+fn git_status_maps_a_null_ahead_behind_to_zero() {
+    let server = git_server();
+    let mut harness = connect(&server);
+    let reply = harness.core.git_status("/repo");
+    let status = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        status,
+        GitStatus {
+            is_git: true,
+            branch: Some("main".into()),
+            is_dirty: true,
+            ..GitStatus::default()
+        }
+    );
+    assert_eq!(
+        server.requests_of("checkout_status_request")[0]["cwd"],
+        json!("/repo")
+    );
+}
+
+#[test]
+fn git_status_reads_counts_remote_and_upstream() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "checkout_status_request",
+        "checkout_status_response",
+        json!({"cwd": "/wt", "isGit": true, "isPaseoOwnedWorktree": true, "repoRoot": "/wt",
+               "mainRepoRoot": "/repo", "currentBranch": "feat/x", "isDirty": false,
+               "baseRef": "main", "aheadBehind": {"ahead": 3, "behind": 1},
+               "aheadOfOrigin": 2, "behindOfOrigin": 0, "hasRemote": true,
+               "remoteUrl": "git@github.com:o/r.git", "error": null}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.git_status("/wt");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        GitStatus {
+            is_git: true,
+            branch: Some("feat/x".into()),
+            is_dirty: false,
+            base_ref: Some("main".into()),
+            ahead: 3,
+            behind: 1,
+            ahead_of_origin: 2,
+            behind_of_origin: 0,
+            has_remote: true,
+            remote_url: Some("git@github.com:o/r.git".into()),
+            is_paseo_owned_worktree: true,
+            has_upstream: true,
+        }
+    );
+
+    server.reply(
+        "checkout_status_request",
+        "checkout_status_response",
+        checkout_failure("git failed"),
+    );
+    let reply = harness.core.git_status("/wt");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "git failed"
+    );
+}
+
+fn pr_status_payload() -> Value {
+    json!({"cwd": "/repo", "githubFeaturesEnabled": true, "forge": "github", "error": null,
+        "status": {"url": "https://github.com/o/r/pull/9", "title": "Add git", "state": "open",
+            "baseRefName": "main", "headRefName": "feat/git", "isMerged": false,
+            "isDraft": true, "mergeable": "MERGEABLE", "reviewDecision": "APPROVED",
+            "repoOwner": "o", "repoName": "r",
+            "checks": [
+                {"name": "build", "status": "success", "url": "https://ci/1",
+                 "workflow": "CI"},
+                {"name": "lint", "status": "pending", "url": null}
+            ],
+            "github": {"mergeStateStatus": "BLOCKED",
+                "autoMergeRequest": {"mergeMethod": "SQUASH", "enabledAt": null,
+                                     "enabledBy": null},
+                "viewerCanEnableAutoMerge": true, "viewerCanDisableAutoMerge": true,
+                "repository": {"autoMergeAllowed": true, "mergeCommitAllowed": false,
+                    "squashMergeAllowed": true, "rebaseMergeAllowed": true}}}})
+}
+
+#[test]
+fn pr_status_parses_the_pr_checks_and_merge_capability() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "checkout_pr_status_request",
+        "checkout_pr_status_response",
+        pr_status_payload(),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.pr_status("/repo");
+    let answer = harness.wait(reply, WAIT).unwrap();
+    assert!(answer.github_features_enabled);
+    assert_eq!(
+        answer.status,
+        Some(PrStatus {
+            number: None,
+            url: "https://github.com/o/r/pull/9".into(),
+            title: "Add git".into(),
+            state: "open".into(),
+            is_merged: false,
+            is_draft: true,
+            mergeable: Some("MERGEABLE".into()),
+            checks: vec![
+                PrCheck {
+                    name: "build".into(),
+                    status: "success".into(),
+                    url: Some("https://ci/1".into()),
+                    workflow: Some("CI".into()),
+                },
+                PrCheck {
+                    name: "lint".into(),
+                    status: "pending".into(),
+                    url: None,
+                    workflow: None,
+                },
+            ],
+            review_decision: Some("APPROVED".into()),
+            repo_owner: "o".into(),
+            repo_name: "r".into(),
+            merge: PrMergeCapability {
+                auto_merge_enabled: true,
+                auto_merge_method: Some(MergeMethod::Squash),
+                can_enable_auto_merge: true,
+                can_disable_auto_merge: true,
+                allowed_methods: vec![MergeMethod::Squash, MergeMethod::Rebase],
+                merge_state_status: Some("BLOCKED".into()),
+            },
+        })
+    );
+    assert_eq!(
+        server.requests_of("checkout_pr_status_request")[0]["cwd"],
+        json!("/repo")
+    );
+}
+
+#[test]
+fn pr_status_without_a_pr_or_github_facts() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut payload = pr_status_payload();
+    payload["status"]["number"] = json!(9);
+    payload["status"]["github"] = Value::Null;
+    payload["status"]["mergeable"] = Value::Null;
+    server.reply(
+        "checkout_pr_status_request",
+        "checkout_pr_status_response",
+        payload,
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.pr_status("/repo");
+    let status = harness.wait(reply, WAIT).unwrap().status.expect("a PR");
+    assert_eq!(status.number, Some(9));
+    assert_eq!(status.mergeable, None);
+    assert_eq!(status.merge, PrMergeCapability::default());
+
+    server.reply(
+        "checkout_pr_status_request",
+        "checkout_pr_status_response",
+        json!({"cwd": "/repo", "status": null, "githubFeaturesEnabled": false, "error": null}),
+    );
+    let reply = harness.core.pr_status("/repo");
+    let answer = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        (answer.status, answer.github_features_enabled),
+        (None, false)
+    );
+}
+
+#[test]
+fn pr_timeline_sends_the_pr_and_parses_reviews_and_comments() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "pull_request_timeline_request",
+        "pull_request_timeline_response",
+        json!({"cwd": "/repo", "prNumber": 9, "truncated": false, "error": null, "items": [
+            {"id": "r1", "kind": "review", "author": "ann", "body": "LGTM",
+             "createdAt": 1760000000000_i64, "url": "https://github.com/o/r/pull/9#r1",
+             "reviewState": "approved"},
+            {"id": "c1", "kind": "comment", "author": "bob", "body": "nit",
+             "createdAt": 1760000001000_i64, "url": "",
+             "location": {"path": "src/a.rs", "line": 12}},
+            {"id": "x1", "kind": "event", "body": "?"}
+        ]}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.pr_timeline("/repo", 9, "o", "r");
+    let items = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        items,
+        [
+            PrTimelineItem::Review {
+                author: "ann".into(),
+                body: "LGTM".into(),
+                created_at_ms: 1_760_000_000_000,
+                url: Some("https://github.com/o/r/pull/9#r1".into()),
+                state: "approved".into(),
+            },
+            PrTimelineItem::Comment {
+                author: "bob".into(),
+                body: "nit".into(),
+                created_at_ms: 1_760_000_001_000,
+                url: None,
+                path: Some("src/a.rs".into()),
+                line: Some(12),
+            },
+            PrTimelineItem::Comment {
+                author: "unknown".into(),
+                body: "?".into(),
+                created_at_ms: 0,
+                url: None,
+                path: None,
+                line: None,
+            },
+        ]
+    );
+    let request = &server.requests_of("pull_request_timeline_request")[0];
+    // The generated schema types `prNumber` as f64, so it goes out as `9.0`.
+    assert_eq!(
+        (
+            &request["cwd"],
+            request["prNumber"].as_f64(),
+            &request["repoOwner"],
+            &request["repoName"]
+        ),
+        (&json!("/repo"), Some(9.0), &json!("o"), &json!("r"))
+    );
+
+    server.reply(
+        "pull_request_timeline_request",
+        "pull_request_timeline_response",
+        json!({"items": [], "error": {"kind": "forbidden", "message": "no access"}}),
+    );
+    let reply = harness.core.pr_timeline("/repo", 9, "o", "r");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "no access"
+    );
+}
+
+#[test]
+fn switch_branch_sends_the_branch_and_reports_errors() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "checkout_switch_branch_request",
+        "checkout_switch_branch_response",
+        json!({"cwd": "/repo", "success": true, "branch": "dev", "error": null}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.switch_branch("/repo", "dev");
+    harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("checkout_switch_branch_request")[0];
+    assert_eq!(
+        (&request["cwd"], &request["branch"]),
+        (&json!("/repo"), &json!("dev"))
+    );
+
+    let mut failure = checkout_failure("local changes would be overwritten");
+    failure["branch"] = json!("dev");
+    server.reply(
+        "checkout_switch_branch_request",
+        "checkout_switch_branch_response",
+        failure,
+    );
+    let reply = harness.core.switch_branch("/repo", "dev");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "local changes would be overwritten"
+    );
+}
+
+#[test]
+fn stash_save_pop_and_list_send_their_fields() {
+    let server = checkout_server(&[
+        ("stash_save_request", "stash_save_response"),
+        ("stash_pop_request", "stash_pop_response"),
+    ]);
+    server.reply(
+        "stash_list_request",
+        "stash_list_response",
+        json!({"cwd": "/repo", "error": null, "entries": [
+            {"index": 0, "message": "paseo: main", "branch": "main", "isPaseo": true},
+            {"index": 1, "message": "WIP", "branch": null, "isPaseo": false}
+        ]}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.stash_save("/repo", Some("main"));
+    harness.wait(reply, WAIT).unwrap();
+    let reply = harness.core.stash_save("/repo", None);
+    harness.wait(reply, WAIT).unwrap();
+    let reply = harness.core.stash_pop("/repo", 1);
+    harness.wait(reply, WAIT).unwrap();
+    let reply = harness.core.stash_list("/repo", false);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        [
+            StashEntry {
+                index: 0,
+                message: "paseo: main".into(),
+                branch: Some("main".into()),
+                is_paseo: true,
+            },
+            StashEntry {
+                index: 1,
+                message: "WIP".into(),
+                branch: None,
+                is_paseo: false,
+            },
+        ]
+    );
+    let saves = server.requests_of("stash_save_request");
+    assert_eq!(saves[0]["branch"], json!("main"));
+    assert!(saves[1].get("branch").is_none());
+    assert_eq!(
+        server.requests_of("stash_pop_request")[0]["stashIndex"],
+        json!(1)
+    );
+    assert_eq!(
+        server.requests_of("stash_list_request")[0]["paseoOnly"],
+        json!(false)
+    );
+
+    server.reply(
+        "stash_pop_request",
+        "stash_pop_response",
+        checkout_failure("conflict"),
+    );
+    let reply = harness.core.stash_pop("/repo", 0);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "conflict"
+    );
+}
+
+#[test]
+fn start_workspace_script_returns_the_terminal_id() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.on("start_workspace_script_request", |request| {
+        let ok = request["scriptName"] == "web";
+        vec![session(
+            "start_workspace_script_response",
+            json!({"requestId": request["requestId"], "workspaceId": request["workspaceId"],
+                   "scriptName": request["scriptName"],
+                   "terminalId": if ok { json!("t1") } else { Value::Null },
+                   "error": if ok { Value::Null } else { json!("unknown script") }}),
+        )]
+    });
+    let mut harness = connect(&server);
+    let reply = harness.core.start_workspace_script("w1", "web");
+    assert_eq!(harness.wait(reply, WAIT).unwrap(), "t1");
+    let request = &server.requests_of("start_workspace_script_request")[0];
+    assert_eq!(
+        (&request["workspaceId"], &request["scriptName"]),
+        (&json!("w1"), &json!("web"))
+    );
+    let reply = harness.core.start_workspace_script("w1", "nope");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "unknown script"
+    );
+}
+
+#[test]
+fn status_updates_are_subscribed_and_emit_git_status_events() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut described = workspace("w1", "p1", Some("main"), Value::Null);
+    described["scripts"] = json!([{"scriptName": "web", "type": "service", "hostname": "web",
+        "port": 3000, "lifecycle": "stopped", "health": null}]);
+    server.reply(
+        "fetch_workspaces_request",
+        "fetch_workspaces_response",
+        json!({"subscriptionId": "sub-w", "entries": [described], "pageInfo": page_info()}),
+    );
+    let mut harness = connect(&server);
+    let events = sent(
+        &server,
+        &mut harness,
+        "session.events.set_subscription.request",
+    )["events"]
+        .clone();
+    let events = events.as_array().unwrap();
+    assert!(events.contains(&json!("checkout_status_update")));
+    assert!(events.contains(&json!("script_status_update")));
+
+    let mut seen = Vec::new();
+    assert!(harness.pump_until(WAIT, |h| {
+        seen.extend(h.core.take_git_status_events());
+        !h.core.workspace_scripts("w1").is_empty()
+    }));
+    assert_eq!(
+        harness.core.workspace_scripts("w1"),
+        [WorkspaceScript {
+            name: "web".into(),
+            kind: "service".into(),
+            lifecycle: "stopped".into(),
+            health: None,
+            terminal_id: None,
+            exit_code: None,
+        }]
+    );
+    assert!(seen.contains(&GitStatusEvent::ScriptsChanged {
+        workspace_id: "w1".into()
+    }));
+
+    seen.clear();
+    server.broadcast(json!({"type": "checkout_status_update", "payload": {
+        "cwd": "/repo", "isGit": true, "isPaseoOwnedWorktree": false, "repoRoot": "/repo",
+        "currentBranch": "main", "isDirty": false, "baseRef": null, "aheadBehind": null,
+        "aheadOfOrigin": null, "behindOfOrigin": null, "hasRemote": false, "remoteUrl": null,
+        "error": null, "requestId": "daemon-1"}}));
+    server.broadcast(json!({"type": "script_status_update", "payload": {
+        "workspaceId": "w1", "scripts": [{"scriptName": "web", "type": "service",
+        "hostname": "web", "port": 3000, "lifecycle": "running", "health": "healthy",
+        "exitCode": null, "terminalId": "t9"}]}}));
+    assert!(harness.pump_until(WAIT, |h| {
+        seen.extend(h.core.take_git_status_events());
+        seen.len() >= 2
+    }));
+    assert_eq!(
+        seen,
+        [
+            GitStatusEvent::Changed {
+                cwd: "/repo".into()
+            },
+            GitStatusEvent::ScriptsChanged {
+                workspace_id: "w1".into()
+            },
+        ]
+    );
+    let script = &harness.core.workspace_scripts("w1")[0];
+    assert_eq!(
+        (
+            script.lifecycle.as_str(),
+            script.health.as_deref(),
+            script.terminal_id.as_deref()
+        ),
+        ("running", Some("healthy"), Some("t9"))
+    );
 }

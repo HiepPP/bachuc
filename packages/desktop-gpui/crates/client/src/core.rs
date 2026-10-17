@@ -16,6 +16,10 @@ use crate::model::{
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode, WorkspaceSummary,
     provider_label,
 };
+use crate::model::{
+    GitAction, GitActionReply, GitStatus, GitStatusEvent, PrStatus, PrStatusReply, PrTimelineItem,
+    StashEntry, WorkspaceScript,
+};
 use crate::plugins::{self, PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite};
 use crate::terminal::{self, TerminalFrame, TerminalHandle};
 use crate::timeline::{FetchPlan, LiveRow, TimelineState, TimelineSync};
@@ -110,6 +114,19 @@ enum Pending {
     AddProject(Reply<AddedProject>),
     Refresh(Reply<()>),
     RenameTerminal(Reply<()>),
+    GitAction(Reply<GitActionReply>),
+    /// The pull of a pull and push; the push follows when it succeeds.
+    PullThenPush {
+        cwd: String,
+        reply: Reply<GitActionReply>,
+    },
+    GitStatus(Reply<GitStatus>),
+    PrStatus(Reply<PrStatusReply>),
+    PrTimeline(Reply<Vec<PrTimelineItem>>),
+    StashList(Reply<Vec<StashEntry>>),
+    /// A checkout answer with only `success` and `error`.
+    CheckoutDone(Reply<()>),
+    StartScript(Reply<String>),
 }
 
 impl Pending {
@@ -153,6 +170,13 @@ impl Pending {
             Pending::AddProject(reply) => send(reply, error),
             Pending::Refresh(reply) => send(reply, error),
             Pending::RenameTerminal(reply) => send(reply, error),
+            Pending::GitAction(reply) | Pending::PullThenPush { reply, .. } => send(reply, error),
+            Pending::GitStatus(reply) => send(reply, error),
+            Pending::PrStatus(reply) => send(reply, error),
+            Pending::PrTimeline(reply) => send(reply, error),
+            Pending::StashList(reply) => send(reply, error),
+            Pending::CheckoutDone(reply) => send(reply, error),
+            Pending::StartScript(reply) => send(reply, error),
             _ => {}
         }
     }
@@ -263,13 +287,15 @@ struct TerminalStream {
 
 /// Session events this client subscribes to; with `explicit_event_subscriptions` the daemon
 /// sends them only on request.
-const SESSION_EVENTS: [&str; 6] = [
+const SESSION_EVENTS: [&str; 8] = [
     "agent_permission_request",
     "agent_permission_resolved",
     "project.update",
     "status.plugin_catalog_changed",
     "status.plugin_settings_changed",
     "agent.provider_subagents.update",
+    "checkout_status_update",
+    "script_status_update",
 ];
 
 /// Client state for one host.
@@ -314,6 +340,9 @@ pub struct ClientCore {
     tasks: HashMap<String, TasksCache>,
     /// Provider-owned subagents by parent agent id.
     provider_subagents: HashMap<String, Vec<ProviderSubagent>>,
+    git_status_events: Vec<GitStatusEvent>,
+    /// By workspace id, from the workspace `scripts` and `script_status_update`.
+    workspace_scripts: HashMap<String, Vec<WorkspaceScript>>,
 }
 
 impl ClientCore {
@@ -357,7 +386,14 @@ impl ClientCore {
             plugin_events: Vec::new(),
             tasks: HashMap::new(),
             provider_subagents: HashMap::new(),
+            git_status_events: Vec::new(),
+            workspace_scripts: HashMap::new(),
         }
+    }
+
+    /// Git and script status events since the last call.
+    pub fn take_git_status_events(&mut self) -> Vec<GitStatusEvent> {
+        std::mem::take(&mut self.git_status_events)
     }
 
     /// Plugin events since the last call.
@@ -1746,6 +1782,168 @@ impl ClientCore {
         );
     }
 
+    // ---- git, PR, stash, and script calls (TASK-204) ----
+
+    /// Runs a git or PR action as the app's `actions-store.ts` does: a commit adds every
+    /// change, and a pull and push pushes only after the pull succeeds.
+    pub fn git_action(
+        &mut self,
+        cwd: &str,
+        action: GitAction,
+    ) -> oneshot::Receiver<anyhow::Result<GitActionReply>> {
+        let message = match action {
+            GitAction::Commit => {
+                json!({"type": "checkout_commit_request", "cwd": cwd, "addAll": true})
+            }
+            GitAction::Pull | GitAction::PullAndPush => {
+                json!({"type": "checkout_pull_request", "cwd": cwd})
+            }
+            GitAction::Push => json!({"type": "checkout_push_request", "cwd": cwd}),
+            GitAction::CreatePr => json!({"type": "checkout_pr_create_request", "cwd": cwd}),
+            GitAction::MergePr(method) => json!({"type": "checkout_pr_merge_request", "cwd": cwd,
+                                                 "mergeMethod": method.wire()}),
+            GitAction::SetAutoMerge { enabled, method } => {
+                let Some(kind) = self.auto_merge_request() else {
+                    let (reply, receiver) = oneshot::channel();
+                    let _ = reply.send(Err(anyhow!("Update the host to use auto-merge actions.")));
+                    return receiver;
+                };
+                let mut message = json!({"type": kind, "cwd": cwd, "enabled": enabled});
+                if let Some(method) = method {
+                    message["mergeMethod"] = json!(method.wire());
+                }
+                message
+            }
+            // The daemon merges into the checkout's base ref when the request names none.
+            GitAction::MergeBranch => json!({"type": "checkout_merge_request", "cwd": cwd,
+                                             "strategy": "merge", "requireCleanTarget": true}),
+            GitAction::MergeFromBase => json!({"type": "checkout_merge_from_base_request",
+                                               "cwd": cwd, "requireCleanTarget": true}),
+            GitAction::Refresh => json!({"type": "checkout.refresh.request", "cwd": cwd}),
+        };
+        if action == GitAction::PullAndPush {
+            let cwd = cwd.to_string();
+            return self.request_reply(message, |reply| Pending::PullThenPush { cwd, reply });
+        }
+        self.request_reply(message, Pending::GitAction)
+    }
+
+    /// The auto-merge request type the host serves; `None` when it serves neither.
+    fn auto_merge_request(&self) -> Option<&'static str> {
+        let features = &self.server_info.as_ref()?["features"];
+        if features["checkoutForgeSetAutoMerge"] == true {
+            return Some("checkout.forge.set_auto_merge.request");
+        }
+        // COMPAT(githubAutoMergeRpc): added in v0.2.0-beta.1, remove after 2027-01-17
+        // once the supported daemon floor is >= v0.2.0.
+        (features["checkoutGithubSetAutoMerge"] == true)
+            .then_some("checkout.github.set_auto_merge.request")
+    }
+
+    /// The full git status of `cwd`. A folder outside git gives `is_git: false`.
+    pub fn git_status(&mut self, cwd: &str) -> oneshot::Receiver<anyhow::Result<GitStatus>> {
+        self.request_reply(
+            json!({"type": "checkout_status_request", "cwd": cwd}),
+            Pending::GitStatus,
+        )
+    }
+
+    pub fn pr_status(&mut self, cwd: &str) -> oneshot::Receiver<anyhow::Result<PrStatusReply>> {
+        self.request_reply(
+            json!({"type": "checkout_pr_status_request", "cwd": cwd}),
+            Pending::PrStatus,
+        )
+    }
+
+    pub fn pr_timeline(
+        &mut self,
+        cwd: &str,
+        number: u64,
+        repo_owner: &str,
+        repo_name: &str,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<PrTimelineItem>>> {
+        self.request_reply(
+            json!({"type": "pull_request_timeline_request", "cwd": cwd, "prNumber": number,
+                   "repoOwner": repo_owner, "repoName": repo_name}),
+            Pending::PrTimeline,
+        )
+    }
+
+    pub fn switch_branch(
+        &mut self,
+        cwd: &str,
+        branch: &str,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.request_reply(
+            json!({"type": "checkout_switch_branch_request", "cwd": cwd, "branch": branch}),
+            Pending::CheckoutDone,
+        )
+    }
+
+    /// Stashes every change, tagged with `branch` when set.
+    pub fn stash_save(
+        &mut self,
+        cwd: &str,
+        branch: Option<&str>,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let mut message = json!({"type": "stash_save_request", "cwd": cwd});
+        if let Some(branch) = branch {
+            message["branch"] = json!(branch);
+        }
+        self.request_reply(message, Pending::CheckoutDone)
+    }
+
+    pub fn stash_pop(&mut self, cwd: &str, index: u32) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.request_reply(
+            json!({"type": "stash_pop_request", "cwd": cwd, "stashIndex": index}),
+            Pending::CheckoutDone,
+        )
+    }
+
+    pub fn stash_list(
+        &mut self,
+        cwd: &str,
+        paseo_only: bool,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<StashEntry>>> {
+        self.request_reply(
+            json!({"type": "stash_list_request", "cwd": cwd, "paseoOnly": paseo_only}),
+            Pending::StashList,
+        )
+    }
+
+    /// The workspace's scripts, as the last descriptor or `script_status_update` gave them.
+    pub fn workspace_scripts(&self, workspace_id: &str) -> Vec<WorkspaceScript> {
+        self.workspace_scripts
+            .get(workspace_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Starts a workspace script and resolves to its terminal id.
+    pub fn start_workspace_script(
+        &mut self,
+        workspace_id: &str,
+        script_name: &str,
+    ) -> oneshot::Receiver<anyhow::Result<String>> {
+        self.request_reply(
+            json!({"type": "start_workspace_script_request", "workspaceId": workspace_id,
+                   "scriptName": script_name}),
+            Pending::StartScript,
+        )
+    }
+
+    /// Stores a workspace's scripts and reports a change.
+    fn set_workspace_scripts(&mut self, workspace_id: &str, scripts: Vec<WorkspaceScript>) {
+        if self.workspace_scripts.get(workspace_id) == Some(&scripts) {
+            return;
+        }
+        self.workspace_scripts
+            .insert(workspace_id.to_string(), scripts);
+        self.git_status_events.push(GitStatusEvent::ScriptsChanged {
+            workspace_id: workspace_id.to_string(),
+        });
+    }
+
     // ---- incoming ----
 
     fn binary(&mut self, bytes: &[u8]) {
@@ -1850,6 +2048,7 @@ impl ClientCore {
                     let id = payload["id"].as_str().unwrap_or_default();
                     self.workspaces.retain(|workspace| workspace.id != id);
                     self.workspace_meta.remove(id);
+                    self.workspace_scripts.remove(id);
                     self.directory_changed = true;
                 }
                 _ => {}
@@ -1882,6 +2081,19 @@ impl ClientCore {
                 if let Some(cwd) = cwd {
                     self.directory_events
                         .push(DirectoryEvent::CheckoutChanged { cwd });
+                }
+            }
+            "checkout_status_update" => {
+                if let Some(cwd) = payload["cwd"].as_str() {
+                    self.git_status_events.push(GitStatusEvent::Changed {
+                        cwd: cwd.to_string(),
+                    });
+                }
+            }
+            "script_status_update" => {
+                if let Some(workspace_id) = payload["workspaceId"].as_str() {
+                    let scripts = WorkspaceScript::parse_list(&payload["scripts"]);
+                    self.set_workspace_scripts(workspace_id, scripts);
                 }
             }
             "agent_stream" => self.stream(payload),
@@ -2519,6 +2731,98 @@ impl ClientCore {
                     Err(anyhow!("terminal rename failed"))
                 }
             }),
+            pending => self.git_response(pending, kind, payload, error),
+        }
+    }
+
+    /// Answers of the git, PR, stash, and script requests (TASK-204).
+    fn git_response(
+        &mut self,
+        pending: Pending,
+        kind: &str,
+        payload: &Value,
+        error: Option<String>,
+    ) {
+        // An `rpc_error` carries a string; a checkout answer carries `{code, message}`.
+        let checkout_error = match kind {
+            "rpc_error" => error.clone(),
+            _ => files::checkout_error(payload).map(|(_, message)| message),
+        };
+        fn send<T>(reply: Reply<T>, error: Option<String>, ok: impl FnOnce() -> T) {
+            let _ = reply.send(match error {
+                Some(error) => Err(anyhow!(error)),
+                None => Ok(ok()),
+            });
+        }
+        match pending {
+            Pending::GitAction(reply) => send(reply, checkout_error, || GitActionReply {
+                url: payload["url"].as_str().map(str::to_string),
+                number: payload["number"].as_u64(),
+            }),
+            Pending::PullThenPush { cwd, reply } => {
+                if let Some(error) = checkout_error {
+                    let _ = reply.send(Err(anyhow!(error)));
+                    return;
+                }
+                let message = json!({"type": "checkout_push_request", "cwd": cwd});
+                if let Err(pending) = self.request(message, Pending::GitAction(reply)) {
+                    pending.fail(anyhow!("not connected"));
+                }
+            }
+            Pending::GitStatus(reply) => {
+                let not_git = kind != "rpc_error"
+                    && files::checkout_error(payload)
+                        .is_some_and(|(code, _)| code == "NOT_GIT_REPO");
+                if not_git {
+                    let _ = reply.send(Ok(GitStatus::default()));
+                    return;
+                }
+                send(reply, checkout_error, || GitStatus::parse(payload));
+            }
+            Pending::PrStatus(reply) => send(reply, checkout_error, || PrStatusReply {
+                status: PrStatus::parse(&payload["status"]),
+                github_features_enabled: payload["githubFeaturesEnabled"] == true,
+            }),
+            Pending::PrTimeline(reply) => {
+                // A timeline error is `{kind, message}`; the message can be empty.
+                let failure = match &payload["error"] {
+                    _ if kind == "rpc_error" => error,
+                    failure if failure.is_object() => Some(
+                        failure["message"]
+                            .as_str()
+                            .filter(|message| !message.is_empty())
+                            .or_else(|| failure["kind"].as_str())
+                            .unwrap_or("unknown")
+                            .to_string(),
+                    ),
+                    _ => None,
+                };
+                send(reply, failure, || {
+                    payload["items"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(PrTimelineItem::parse)
+                        .collect()
+                });
+            }
+            Pending::StashList(reply) => send(reply, checkout_error, || {
+                payload["entries"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(StashEntry::parse)
+                    .collect()
+            }),
+            Pending::CheckoutDone(reply) => send(reply, checkout_error, || ()),
+            Pending::StartScript(reply) => {
+                let result = match (error, payload["terminalId"].as_str()) {
+                    (Some(error), _) => Err(anyhow!(error)),
+                    (None, Some(terminal_id)) => Ok(terminal_id.to_string()),
+                    (None, None) => Err(anyhow!("the script started without a terminal")),
+                };
+                let _ = reply.send(result);
+            }
             other => other.fail(anyhow!("unexpected response {kind}")),
         }
     }
@@ -2736,6 +3040,10 @@ impl ClientCore {
                 }),
             };
             self.workspace_meta.insert(id.to_string(), meta);
+        }
+        if workspace["scripts"].is_array() {
+            let scripts = WorkspaceScript::parse_list(&workspace["scripts"]);
+            self.set_workspace_scripts(id, scripts);
         }
         match self
             .workspaces

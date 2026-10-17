@@ -33,6 +33,10 @@ pub use model::{
     ChangedFile, CheckoutStatus, DirectoryEvent, FileContent, FileEntry, FileKind, ProjectNode,
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
 };
+pub use model::{
+    GitAction, GitActionReply, GitStatus, GitStatusEvent, MergeMethod, PrCheck, PrMergeCapability,
+    PrStatus, PrStatusReply, PrTimelineItem, StashEntry, WorkspaceScript,
+};
 pub use plugins::{
     PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite, PluginStatus,
 };
@@ -59,6 +63,7 @@ pub struct Client {
 impl EventEmitter<ClientEvent> for Client {}
 impl EventEmitter<DirectoryEvent> for Client {}
 impl EventEmitter<PluginEvent> for Client {}
+impl EventEmitter<GitStatusEvent> for Client {}
 
 /// Waits for a core reply on the background executor.
 fn reply_task<T: Send + 'static>(
@@ -120,6 +125,7 @@ impl Client {
         let events = self.core.take_events();
         let directory_events = self.core.take_directory_events();
         let plugin_events = self.core.take_plugin_events();
+        let git_status_events = self.core.take_git_status_events();
         let changed = !events.is_empty() || !directory_events.is_empty();
         for event in events {
             cx.emit(event);
@@ -128,6 +134,9 @@ impl Client {
             cx.emit(event);
         }
         for event in plugin_events {
+            cx.emit(event);
+        }
+        for event in git_status_events {
             cx.emit(event);
         }
         if self.core.has_dirty_timelines() && self.flush_task.is_none() {
@@ -927,6 +936,116 @@ impl Client {
         cx: &mut Context<Client>,
     ) -> Task<anyhow::Result<Vec<FileDiff>>> {
         let receiver = self.core.checkout_diff_with(cwd, compare);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    // ---- git, PR, stash, and script calls (TASK-204) ----
+
+    /// Runs a git or PR action. Auto-merge fails with "Update the host to use auto-merge
+    /// actions." when the host serves no auto-merge request.
+    pub fn git_action(
+        &mut self,
+        cwd: &str,
+        action: GitAction,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<GitActionReply>> {
+        let receiver = self.core.git_action(cwd, action);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// The full git status of `cwd`. `GitStatusEvent::Changed` follows each change.
+    pub fn git_status(
+        &mut self,
+        cwd: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<GitStatus>> {
+        let receiver = self.core.git_status(cwd);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn pr_status(
+        &mut self,
+        cwd: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<PrStatusReply>> {
+        let receiver = self.core.pr_status(cwd);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn pr_timeline(
+        &mut self,
+        cwd: &str,
+        number: u64,
+        repo_owner: &str,
+        repo_name: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<PrTimelineItem>>> {
+        let receiver = self.core.pr_timeline(cwd, number, repo_owner, repo_name);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn switch_branch(
+        &mut self,
+        cwd: &str,
+        branch: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.switch_branch(cwd, branch);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn stash_save(
+        &mut self,
+        cwd: &str,
+        branch: Option<&str>,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.stash_save(cwd, branch);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn stash_pop(
+        &mut self,
+        cwd: &str,
+        index: u32,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.stash_pop(cwd, index);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn stash_list(
+        &mut self,
+        cwd: &str,
+        paseo_only: bool,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<StashEntry>>> {
+        let receiver = self.core.stash_list(cwd, paseo_only);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// The workspace's scripts. `GitStatusEvent::ScriptsChanged` follows each change.
+    pub fn workspace_scripts(&self, workspace_id: &str) -> Vec<WorkspaceScript> {
+        self.core.workspace_scripts(workspace_id)
+    }
+
+    /// Starts a workspace script and resolves to its terminal id.
+    pub fn start_workspace_script(
+        &mut self,
+        workspace_id: &str,
+        script_name: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<String>> {
+        let receiver = self.core.start_workspace_script(workspace_id, script_name);
         self.publish(cx);
         reply_task(receiver, cx)
     }
