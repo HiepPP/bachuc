@@ -2,9 +2,9 @@
 
 ## Status
 
-BLOCKED
+DONE
 
-Blocked: BUILT, UNVERIFIED (Q-109). The code and its tests pass; trackpad sideways scroll, wrap, and scroll-to-file need the owner's hand check on screen.
+The owner checked sideways scroll of the long README.md line with a trackpad on 2026-10-17: it passes (Q-109). The diff crash fix, wrap, and the mode menu passed the foreground UI check the same day.
 
 ## Changed
 
