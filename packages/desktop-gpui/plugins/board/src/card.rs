@@ -341,7 +341,8 @@ pub(crate) fn run_card(p: &Paint, c: Card, window: &mut Window, cx: &mut App) ->
     let running = run.running();
     let group: SharedString = format!("board-card-{}", run.id).into();
     // One handle per rendered card, tracked on the card root, so focus on any part is inside
-    // it. It is no tab stop, and GPUI drops it when the card leaves the list.
+    // it. It is no tab stop, and GPUI drops it when the card leaves the list. The parts are tab
+    // stops at index 0, so Tab follows their paint order, which is Electron's DOM order.
     let focus = window
         .use_keyed_state(
             SharedString::from(format!("board-focus-{}", run.agent_id)),
@@ -401,6 +402,7 @@ pub(crate) fn run_card(p: &Paint, c: Card, window: &mut Window, cx: &mut App) ->
         t.accent,
         c.embedded || c.subagent,
     )
+    .tab_stop(true)
     .aria_description(open_hint(run, p.now))
     .absolute()
     .inset_0()
@@ -481,6 +483,7 @@ fn star_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEle
         t.accent,
         c.subagent,
     )
+    .tab_stop(true)
     .aria_selected(run.starred)
     .flex_none()
     .size(size)
@@ -526,6 +529,7 @@ fn diffs_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEl
         t.accent,
         false,
     )
+    .tab_stop(true)
     .aria_selected(off)
     .flex_none()
     .size(p.s(28.))
@@ -581,6 +585,7 @@ fn remove_button(p: &Paint, c: &Card, ui: &CardUi, card: &SharedString) -> AnyEl
         t.accent,
         c.subagent,
     )
+    .tab_stop(true)
     .group(group.clone())
     .flex_none()
     .rounded(p.s(CONTROL_RADIUS))
@@ -718,6 +723,7 @@ fn task_chip(p: &Paint, run: &Run, compact: bool) -> Option<AnyElement> {
             .role(Role::Link)
             .aria_label(format!("Open {task} in Watchtower"))
             .focusable()
+            .tab_stop(true)
             .focus_visible(move |style| style.shadow(ring(t.accent, false)))
             .flex_none()
             .cursor_pointer()
@@ -752,6 +758,7 @@ fn card_body(
         t.accent,
         c.embedded,
     )
+    .tab_stop(true)
     .flex_shrink(1.)
     .min_w_0()
     .flex()
@@ -943,9 +950,12 @@ fn subagent_body(
         format!("{label}{duration}{project}"),
         Some((label.len(), label_color(run, t), FontWeight::MEDIUM)),
     );
-    // Hidden actions swap by visibility, never by display.
+    // Hidden actions swap by opacity, never by display or visibility: a hidden element registers no
+    // tab stop, so Tab could not reach them. Focus on the star or Remove shows them (`actionFocused`).
     let pinned = run.starred || ui.starring || ui.removing || ui.star_error || ui.remove_error;
     let actions = h_flex()
+        .id(SharedString::from(format!("board-actions-{}", run.id)))
+        .focusable()
         .absolute()
         .right(-p.s(2.))
         .top(p.s(2.))
@@ -953,8 +963,9 @@ fn subagent_body(
         .bg(t.surface1)
         .when(!pinned, |actions| {
             actions
-                .invisible()
-                .group_hover(group.clone(), |style| style.visible())
+                .opacity(0.)
+                .group_hover(group.clone(), |style| style.opacity(1.))
+                .in_focus(|style| style.opacity(1.))
         })
         .child(star)
         .children(remove);
@@ -1095,6 +1106,7 @@ fn toggle_row(p: &Paint, tree: &RunTree, nested: bool, seen: bool) -> AnyElement
         t.accent,
         true,
     )
+    .tab_stop(true)
     .aria_expanded(expanded)
     .aria_description(if expanded {
         "Hides the subagent cards"
