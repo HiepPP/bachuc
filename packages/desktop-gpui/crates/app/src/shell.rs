@@ -27,7 +27,8 @@ use crate::state::{
 };
 use crate::workspace_draft::{self, WorkspaceDraftPane};
 use bachuc_client::{
-    Client, ClientEvent, CreatedWorkspace, DirectoryEvent, HostConfig, load_hosts, resume_command,
+    AgentSummary, Client, ClientEvent, CreatedWorkspace, DirectoryEvent, HostConfig, ProjectNode,
+    TimelineState, load_hosts, resume_command,
 };
 use bachuc_command::{CommandCenter, CommandEvent, Shortcut, data_dir, load_shortcuts};
 use bachuc_composer::ComposerEvent;
@@ -37,7 +38,7 @@ use bachuc_explorer::{
 };
 use bachuc_icons::{IconName, provider_logo};
 use bachuc_plugin_host::{
-    PanelInput, PanelTarget, PluginHost, PluginHostEvent, SurfacePresentation,
+    AgentAnchor, PanelInput, PanelTarget, PluginHost, PluginHostEvent, SurfacePresentation,
 };
 use bachuc_settings::{Settings, SettingsEvent};
 use bachuc_sidebar::model::archive_prompt;
@@ -45,6 +46,7 @@ use bachuc_sidebar::{Sidebar, SidebarEvent, SidebarPluginEvent};
 use bachuc_terminal::{TerminalEvent, TerminalView};
 use bachuc_theme::metrics::TRAFFIC_LIGHT_WIDTH;
 use bachuc_theme::tokens;
+use bachuc_timeline::grouping::{item_type, message_key};
 use bachuc_timeline::{TimelineEvent, TimelineView};
 use bachuc_workspace::model::Rect;
 use bachuc_workspace::{PaneEvent, PaneItem, SplitAxis, TabKind, TabMenuEvent, Workspace};
@@ -202,6 +204,8 @@ pub struct Shell {
     plugin_active: (Option<String>, Option<String>),
     /// The plugin surface on screen, as a page or an overlay.
     surface: Option<OpenSurface>,
+    /// An agent opened at its latest prompt before its timeline loaded.
+    pending_prompt: Option<String>,
     plugin_views: PluginViews,
     /// The New workspace side panel choice, kept for the session.
     side_panel_open: bool,
@@ -268,6 +272,7 @@ impl Shell {
             plugin_host,
             plugin_active: (None, None),
             surface: None,
+            pending_prompt: None,
             plugin_views: PluginViews::default(),
             side_panel_open: false,
             focus,
@@ -351,6 +356,12 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(agent_id) = self.pending_prompt.clone()
+            && matches!(event, ClientEvent::TimelineChanged { agent_id: id } if *id == agent_id)
+        {
+            self.pending_prompt = None;
+            self.reveal_latest_prompt(&agent_id, window, cx);
+        }
         // Timeline views follow their own changes; the shell has nothing to redraw.
         if matches!(event, ClientEvent::TimelineChanged { .. }) {
             return;
@@ -505,6 +516,7 @@ impl Shell {
         self.known_agents.clear();
         self.command = None;
         self.pending_open = None;
+        self.pending_prompt = None;
         self.connection = Connection::Connecting;
         let client = Client::connect(self.hosts[self.host_index].clone(), cx);
         self.retired = Some(std::mem::replace(&mut self.client, client.clone()));
@@ -649,6 +661,7 @@ impl Shell {
         } else if opened && let Some(key) = active {
             self.activate_key(&id, &key, window, cx);
         }
+        self.close_page_surface(cx);
         self.select(id, window, cx);
     }
 
@@ -1476,8 +1489,17 @@ impl Shell {
                 self.open_new_workspace(preset, window, cx);
             }
             PluginHostEvent::OpenAgent { agent_id }
-            | PluginHostEvent::OpenAgentAt { agent_id, .. } => {
-                self.open_agent(agent_id, window, cx)
+            | PluginHostEvent::OpenAgentAt {
+                agent_id,
+                anchor: AgentAnchor::Latest,
+            } => self.open_agent(agent_id, window, cx),
+            // Electron opens a Board card at `latest-prompt`.
+            PluginHostEvent::OpenAgentAt {
+                agent_id,
+                anchor: AgentAnchor::LatestPrompt,
+            } => {
+                self.open_agent(agent_id, window, cx);
+                self.reveal_latest_prompt(agent_id, window, cx);
             }
             PluginHostEvent::OpenWorkspace { workspace_id } => {
                 self.open_workspace(workspace_id.clone(), window, cx)
@@ -1518,6 +1540,48 @@ impl Shell {
         self.surface = surface;
         self.sidebar
             .update(cx, |sidebar, cx| sidebar.set_active_surface(active, cx));
+    }
+
+    /// Closes a page surface, so a workspace or agent that opens shows in front of it.
+    fn close_page_surface(&mut self, cx: &mut Context<Self>) {
+        if self
+            .surface
+            .as_ref()
+            .is_some_and(|open| closes_surface_on_open(open.presentation))
+        {
+            self.set_surface(None, cx);
+        }
+    }
+
+    /// Scrolls the agent's open tab to its last user message. Before the tab is built or its
+    /// timeline loads, the reveal waits for the agent's next timeline change; with no user
+    /// message the tail stays.
+    fn reveal_latest_prompt(
+        &mut self,
+        agent_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A lazy tab is built on the activation event, after this update.
+        let Some(timeline) = self.agent_timeline(agent_id, cx) else {
+            let identity = agent_key(agent_id);
+            let has_tab = self.workspaces.values().any(|open| {
+                open.panes
+                    .values()
+                    .any(|pane| pane.identity.as_deref() == Some(identity.as_str()))
+            });
+            if has_tab {
+                self.pending_prompt = Some(agent_id.to_string());
+            }
+            return;
+        };
+        match latest_prompt_reveal(self.client.read(cx).timeline(agent_id)) {
+            PromptReveal::Wait => self.pending_prompt = Some(agent_id.to_string()),
+            PromptReveal::Tail => {}
+            PromptReveal::Reveal(message_id) => timeline.update(cx, |timeline, cx| {
+                timeline.reveal_passage(&message_id, None, window, cx)
+            }),
+        }
     }
 
     /// The timeline of the open tab for an agent, in any workspace.
@@ -2040,21 +2104,19 @@ impl Shell {
         );
     }
 
-    /// Opens an agent's tab in its workspace, from the command center or a notification.
+    /// Opens an agent's tab in its workspace, from the command center, a notification, or a
+    /// plugin such as the Board. An open page surface closes, as `open_workspace` does.
     pub(crate) fn open_agent(
         &mut self,
         agent_id: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A later open cancels a reveal that still waits.
+        self.pending_prompt = None;
         let workspace_id = {
             let client = self.client.read(cx);
-            client
-                .projects()
-                .iter()
-                .flat_map(|project| &project.workspaces)
-                .find(|workspace| workspace.agent_ids.iter().any(|id| id == agent_id))
-                .map(|workspace| workspace.id.clone())
+            agent_workspace(client.projects(), client.agents(), agent_id)
         };
         let Some(workspace_id) = workspace_id else {
             return;
@@ -2737,13 +2799,148 @@ pub(crate) fn reload_error(message: &str) -> String {
     }
 }
 
+/// A page surface replaces the workspace, so opening a workspace or an agent closes it, as an
+/// Electron route change does. An overlay floats over the workspace and stays.
+pub(crate) fn closes_surface_on_open(presentation: SurfacePresentation) -> bool {
+    presentation == SurfacePresentation::Page
+}
+
+/// The workspace that holds an agent: the tree's, else the agent's own `workspace_id` when the
+/// tree lists that workspace.
+pub(crate) fn agent_workspace(
+    projects: &[ProjectNode],
+    agents: &[AgentSummary],
+    agent_id: &str,
+) -> Option<String> {
+    let workspaces = || projects.iter().flat_map(|project| &project.workspaces);
+    if let Some(workspace) =
+        workspaces().find(|workspace| workspace.agent_ids.iter().any(|id| id == agent_id))
+    {
+        return Some(workspace.id.clone());
+    }
+    let own = agents
+        .iter()
+        .find(|agent| agent.id == agent_id)?
+        .workspace_id
+        .as_deref()?;
+    workspaces()
+        .any(|workspace| workspace.id == own)
+        .then(|| own.to_string())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PromptReveal {
+    /// The timeline has not loaded; try again on its next change.
+    Wait,
+    /// No user message is loaded; keep the tail view.
+    Tail,
+    /// Scroll to this message key.
+    Reveal(String),
+}
+
+/// Where `AgentAnchor::LatestPrompt` scrolls: the last loaded user message.
+pub(crate) fn latest_prompt_reveal(state: Option<&TimelineState>) -> PromptReveal {
+    let Some(state) = state.filter(|state| state.version > 0) else {
+        return PromptReveal::Wait;
+    };
+    state
+        .entries
+        .iter()
+        .rev()
+        .find(|entry| item_type(entry) == "user_message")
+        .map_or(PromptReveal::Tail, |entry| {
+            PromptReveal::Reveal(message_key(entry))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob brings a `test` macro that shadows the std one.
     use super::{
-        CANNOT_RENAME, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE, RESUME_ID_UNAVAILABLE,
-        RenameTarget, TERMINAL_NOT_OPEN, reload_error, rename_target, resume_text,
+        CANNOT_RENAME, PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE,
+        RESUME_ID_UNAVAILABLE, RenameTarget, TERMINAL_NOT_OPEN, agent_workspace,
+        closes_surface_on_open, latest_prompt_reveal, reload_error, rename_target, resume_text,
     };
+    use bachuc_client::{AgentSummary, ProjectNode, TimelineState, WorkspaceNode};
+    use bachuc_plugin_host::SurfacePresentation;
+    use serde_json::json;
+
+    #[test]
+    fn only_a_page_surface_closes_when_an_agent_or_workspace_opens() {
+        assert!(closes_surface_on_open(SurfacePresentation::Page));
+        assert!(!closes_surface_on_open(SurfacePresentation::Overlay));
+    }
+
+    fn workspace(id: &str, agent_ids: &[&str]) -> WorkspaceNode {
+        WorkspaceNode {
+            id: id.into(),
+            name: id.into(),
+            cwd: format!("/{id}"),
+            branch: None,
+            pinned: false,
+            agent_ids: agent_ids.iter().map(|id| id.to_string()).collect(),
+        }
+    }
+
+    fn agent(id: &str, workspace_id: Option<&str>) -> AgentSummary {
+        AgentSummary {
+            id: id.into(),
+            title: id.into(),
+            status: "idle".into(),
+            cwd: "/w".into(),
+            workspace_id: workspace_id.map(str::to_string),
+            provider: "claude".into(),
+            model: None,
+            pending_permissions: 0,
+        }
+    }
+
+    #[test]
+    fn an_agent_opens_in_the_tree_workspace_else_its_own() {
+        let projects = vec![ProjectNode {
+            id: "p".into(),
+            name: "p".into(),
+            root: "/p".into(),
+            workspaces: vec![workspace("w1", &["a1"]), workspace("w2", &[])],
+        }];
+        let agents = vec![
+            agent("a1", Some("w2")),
+            agent("a2", Some("w2")),
+            agent("a3", Some("gone")),
+            agent("a4", None),
+        ];
+        assert_eq!(
+            agent_workspace(&projects, &agents, "a1").as_deref(),
+            Some("w1")
+        );
+        assert_eq!(
+            agent_workspace(&projects, &agents, "a2").as_deref(),
+            Some("w2")
+        );
+        assert_eq!(agent_workspace(&projects, &agents, "a3"), None);
+        assert_eq!(agent_workspace(&projects, &agents, "a4"), None);
+        assert_eq!(agent_workspace(&projects, &agents, "missing"), None);
+    }
+
+    #[test]
+    fn the_latest_prompt_is_the_last_user_message() {
+        assert_eq!(latest_prompt_reveal(None), PromptReveal::Wait);
+        let mut state = TimelineState::default();
+        assert_eq!(latest_prompt_reveal(Some(&state)), PromptReveal::Wait);
+        state.version = 1;
+        state.entries = vec![json!({"seqStart": 1, "item": {"type": "assistant_message"}})];
+        assert_eq!(latest_prompt_reveal(Some(&state)), PromptReveal::Tail);
+        state.entries = vec![
+            json!({"seqStart": 1, "item": {"type": "user_message", "messageId": "m1"}}),
+            json!({"seqStart": 2, "item": {"type": "assistant_message"}}),
+            json!({"seqStart": 3, "item": {"type": "user_message"}}),
+            json!({"seqStart": 4, "item": {"type": "tool_call"}}),
+        ];
+        assert_eq!(
+            latest_prompt_reveal(Some(&state)),
+            PromptReveal::Reveal("seq:3".into())
+        );
+    }
 
     #[test]
     fn rename_follows_the_tab_kind() {
