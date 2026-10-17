@@ -27,5 +27,5 @@ mod turn_metrics_pill;
 pub use attachments::{Attachment, can_send, mime_for_path};
 pub use composer::{Composer, ComposerEvent};
 pub use dock::composer_dock;
-pub use draft::{DraftOptions, DraftSubmission, SubmitIcon};
+pub use draft::{DraftOptions, DraftSeed, DraftSubmission, SubmitIcon};
 pub use plugin_slots::CornerPills;

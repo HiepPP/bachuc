@@ -20,8 +20,9 @@ use crate::attachments::{Attachment, can_send, mime_for_path};
 use crate::context_window_meter::{SLOT, context_window_meter};
 use crate::diff_stat_pill::{diff_stat_pill, visible_diff_stat};
 use crate::draft::{
-    DraftOptions, DraftSubmission, Generation, SubmitIcon, apply_feature, default_provider,
-    draft_config, min_input_height, model_groups, model_key, split_model_key,
+    DraftOptions, DraftSeed, DraftSubmission, Generation, SubmitIcon, apply_feature,
+    default_provider, draft_config, min_input_height, model_groups, model_key, offered,
+    outgoing_attachments, seed_feature_values, seed_provider_model, split_model_key,
 };
 use crate::input::{CONTROL, MessageInput, round_button};
 use crate::mention::{
@@ -60,8 +61,8 @@ use bachuc_plugin_host::{
     SendKey, SlashInput, StopButtonProps, decode_attachment_search,
 };
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, RADIUS_LG, SPACE_1, SPACE_2,
-    SPACE_3, SPACE_4,
+    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, RADIUS_LG, RADIUS_MD, SPACE_1,
+    SPACE_2, SPACE_3, SPACE_4,
 };
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
 use gpui_kit::component::input::{
@@ -254,6 +255,9 @@ struct DraftState {
     /// The owner creates the workspace: the input keeps its text, locked.
     submitting: bool,
     plugin_draft: Entity<ComposerDraft>,
+    /// The seeded mode and feature values wait for the provider's lists.
+    seed_mode: Option<String>,
+    seed_features: Option<serde_json::Value>,
 }
 
 impl DraftState {
@@ -270,6 +274,12 @@ impl DraftState {
             self.thinking_id.as_deref(),
         )
     }
+}
+
+/// An attachment the composer sends as given, such as a fork's chat history.
+struct RawAttachment {
+    label: String,
+    attachment: serde_json::Value,
 }
 
 /// A plugin chip and its comment field.
@@ -323,6 +333,7 @@ pub struct Composer {
     tick: Option<Task<()>>,
     archive: ArchiveFinished,
     draft: Option<DraftState>,
+    raw_attachments: Vec<RawAttachment>,
     plugin_chips: Vec<PluginChip>,
     /// Interceptors run: the primary button shows a spinner.
     processing: bool,
@@ -411,6 +422,8 @@ impl Composer {
                     cwd,
                     values: BTreeMap::new(),
                 }),
+                seed_mode: None,
+                seed_features: None,
             }
         });
         let weak = cx.weak_entity();
@@ -496,6 +509,7 @@ impl Composer {
             tick: None,
             archive: ArchiveFinished::default(),
             draft,
+            raw_attachments: Vec::new(),
             plugin_chips: Vec::new(),
             processing: false,
             cancelling: false,
@@ -525,7 +539,7 @@ impl Composer {
         Some(DraftSubmission::build(
             self.value(cx).trim().to_string(),
             self.attachments.iter().map(Attachment::to_json).collect(),
-            self.plugin_attachments(cx),
+            outgoing_attachments(&self.raw_json(), self.plugin_attachments(cx)),
             draft.config(),
             &draft.features,
             draft.plugin_draft.read(cx),
@@ -548,6 +562,50 @@ impl Composer {
         self.reload_draft(cx);
     }
 
+    /// Seeds the draft from a source agent as if the owner picked each field. A field the
+    /// provider does not offer is ignored; the mode and features apply when their lists load.
+    pub fn set_draft_seed(
+        &mut self,
+        seed: DraftSeed,
+        _window: &mut Window,
+        cx: &mut Context<Composer>,
+    ) {
+        let Some(draft) = self.draft.as_mut() else {
+            return;
+        };
+        let Some((provider, model)) =
+            seed_provider_model(&seed, draft.provider.as_deref(), &self.watched.providers)
+        else {
+            return;
+        };
+        let client = self.client.read(cx);
+        let model = model.or_else(|| client.default_model(&provider));
+        let thinking = model
+            .as_deref()
+            .and_then(|model| client.model_thinking(&provider, model))
+            .map(|thinking| thinking.options)
+            .unwrap_or_default();
+        draft.thinking_id = offered(seed.thinking_option_id.as_deref(), &thinking);
+        draft.provider = Some(provider);
+        draft.model = model;
+        draft.mode_id = None;
+        draft.seed_mode = seed.mode;
+        draft.seed_features = seed.features;
+        self.reload_draft(cx);
+    }
+
+    /// Adds a chip that the next prompt sends unchanged, such as a fork's chat history.
+    pub fn add_raw_attachment(
+        &mut self,
+        label: String,
+        attachment: serde_json::Value,
+        cx: &mut Context<Composer>,
+    ) {
+        self.raw_attachments
+            .push(RawAttachment { label, attachment });
+        cx.notify();
+    }
+
     /// While the owner submits, the input keeps its text, locked, and the primary button spins.
     pub fn set_submitting(&mut self, submitting: bool, cx: &mut Context<Composer>) {
         if let Some(draft) = self.draft.as_mut() {
@@ -556,9 +614,10 @@ impl Composer {
         }
     }
 
-    /// Empties the input, the images, the plugin chips, and the send error.
+    /// Empties the input, the images, the raw attachments, the plugin chips, and the send error.
     pub fn clear(&mut self, window: &mut Window, cx: &mut Context<Composer>) {
         self.attachments.clear();
+        self.raw_attachments.clear();
         self.plugin_chips.clear();
         self.send_error = None;
         self.clear_input(window, cx);
@@ -595,6 +654,18 @@ impl Composer {
     /// The agent id plugin events address; a draft has none.
     fn plugin_agent_id(&self) -> Option<&str> {
         (!self.is_draft()).then_some(self.agent_id.as_str())
+    }
+
+    fn raw_json(&self) -> Vec<serde_json::Value> {
+        self.raw_attachments
+            .iter()
+            .map(|raw| raw.attachment.clone())
+            .collect()
+    }
+
+    /// The images, raw attachments, and plugin chips the next prompt carries.
+    fn attachment_total(&self) -> usize {
+        self.attachments.len() + self.raw_attachments.len() + self.plugin_chips.len()
     }
 
     fn plugin_attachments(&self, cx: &App) -> Vec<serde_json::Value> {
@@ -804,7 +875,12 @@ impl Composer {
                     return;
                 }
                 match modes {
-                    Ok(modes) => draft.modes = modes,
+                    Ok(modes) => {
+                        if let Some(mode) = draft.seed_mode.take() {
+                            draft.mode_id = offered(Some(&mode), &modes);
+                        }
+                        draft.modes = modes;
+                    }
                     Err(error) => log::warn!("cannot list modes of {provider}: {error}"),
                 }
                 cx.notify();
@@ -818,7 +894,14 @@ impl Composer {
                     return;
                 }
                 match features {
-                    Ok(features) => draft.features = features,
+                    Ok(mut features) => {
+                        let seeded =
+                            seed_feature_values(draft.seed_features.take().as_ref(), &features);
+                        for (feature_id, value) in seeded {
+                            apply_feature(&mut features, &feature_id, &value);
+                        }
+                        draft.features = features;
+                    }
                     Err(error) => log::warn!("cannot list draft features: {error}"),
                 }
                 cx.notify();
@@ -838,6 +921,8 @@ impl Composer {
         };
         if draft.provider.as_deref() != Some(provider) {
             draft.mode_id = None;
+            draft.seed_mode = None;
+            draft.seed_features = None;
         }
         draft.provider = Some(provider.to_string());
         draft.model = Some(model.to_string());
@@ -1225,7 +1310,7 @@ impl Composer {
             return;
         }
         let value = self.value(cx);
-        let attachment_count = self.attachments.len() + self.plugin_chips.len();
+        let attachment_count = self.attachment_total();
         if !self.is_draft()
             && let Some(command) = resolve_client_command(&value, attachment_count)
         {
@@ -1323,7 +1408,7 @@ impl Composer {
             return;
         }
         let attachments = std::mem::take(&mut self.attachments);
-        let chips = self.plugin_attachments(cx);
+        let chips = outgoing_attachments(&self.raw_json(), self.plugin_attachments(cx));
         let count = attachments.len();
         let message = OutgoingMessage {
             text: text.clone(),
@@ -1336,6 +1421,7 @@ impl Composer {
             SendPlan::Queue => client.enqueue_message(&agent_id, message, cx),
         });
         // Clear at once so the sent row and the input stay in step; a failure puts it back.
+        let raw_attachments = std::mem::take(&mut self.raw_attachments);
         let plugin_chips = std::mem::take(&mut self.plugin_chips);
         self.send_error = None;
         self.clear_input(window, cx);
@@ -1356,6 +1442,9 @@ impl Composer {
                 }
                 if this.attachments.is_empty() {
                     this.attachments = attachments;
+                }
+                if this.raw_attachments.is_empty() {
+                    this.raw_attachments = raw_attachments;
                 }
                 if this.plugin_chips.is_empty() {
                     this.plugin_chips = plugin_chips;
@@ -2504,10 +2593,7 @@ impl Composer {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let t = tokens(cx);
-        let sendable = can_send(
-            &self.value(cx),
-            self.attachments.len() + self.plugin_chips.len(),
-        );
+        let sendable = can_send(&self.value(cx), self.attachment_total());
         if let Some(draft) = &self.draft {
             return match draft_primary(
                 &draft.options,
@@ -2599,7 +2685,7 @@ impl Composer {
         }
     }
 
-    /// The image chips, then the plugin chips.
+    /// The image chips, the raw attachment chips, then the plugin chips.
     fn tray(&self, index: &ContributionIndex, cx: &mut Context<Self>) -> Option<AnyElement> {
         let remove_weak = cx.weak_entity();
         let mut chips = image_chips(
@@ -2616,6 +2702,19 @@ impl Composer {
             },
             cx,
         );
+        for (at, raw) in self.raw_attachments.iter().enumerate() {
+            let weak = cx.weak_entity();
+            let remove = Rc::new(move |cx: &mut App| {
+                weak.update(cx, |this, cx| {
+                    if at < this.raw_attachments.len() {
+                        this.raw_attachments.remove(at);
+                        cx.notify();
+                    }
+                })
+                .ok();
+            });
+            chips.push(raw_chip(at, &raw.label, remove, cx));
+        }
         for (at, chip) in self.plugin_chips.iter().enumerate() {
             let on_open = index
                 .attachment_sources()
@@ -2651,6 +2750,57 @@ impl Composer {
         }
         attachment_tray(chips)
     }
+}
+
+/// A raw attachment chip (`AttachmentFrame` with the chat history label): a file glyph, the
+/// label, and its remove button. It is drawn like a plugin chip: 48 px tall, at most 280 wide.
+fn raw_chip(index: usize, label: &str, on_remove: Rc<dyn Fn(&mut App)>, cx: &App) -> AnyElement {
+    let t = tokens(cx);
+    let on_ax_remove = on_remove.clone();
+    h_flex()
+        .id(("composer-raw-chip", index))
+        .role(Role::ListItem)
+        .aria_label(format!("Attachment {label}"))
+        .items_center()
+        .gap(px(SPACE_2))
+        .h(px(48.))
+        .px(px(SPACE_2))
+        .max_w(px(280.))
+        .border_1()
+        .border_color(t.border_accent)
+        .rounded(px(RADIUS_MD))
+        .bg(t.surface1)
+        .child(
+            icon(IconName::FileText)
+                .with_size(px(ICON_SM))
+                .text_color(t.foreground_muted),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .truncate()
+                .text_size(ui_font_size(FONT_SM, cx))
+                .text_color(t.foreground)
+                .child(label.to_string()),
+        )
+        .child(
+            round_button(
+                ("composer-raw-chip-remove", index),
+                IconName::X,
+                "Remove attachment",
+                24.,
+                None,
+                t.foreground_muted,
+                t.surface3,
+            )
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                on_remove(cx);
+            })
+            .on_a11y_action(AccessibleAction::Click, move |_, _, cx| on_ax_remove(cx)),
+        )
+        .into_any_element()
 }
 
 /// The attach button as a menu trigger.
