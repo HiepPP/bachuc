@@ -44,3 +44,45 @@ Run 2026-10-18 by the UI checker, bundle `Bachuc GPUI Check` (PID 80366) on live
 - Seen card dims the right parts: PASS against the Electron rule (`page.tsx:565`); Electron screen UNVERIFIED (reference Board fails to load). Darkest pixel, unseen -> seen card: title 19 -> 132, repo 88 -> 175, tag 18 -> 130, Remove 109 -> 107. So repo, avatar and title, and tags dim, and Remove does not. Evidence: `/tmp/t209-unseen-card.png`, `/tmp/t209-seen-card.png` (from `/tmp/t198r2-04-board.png`).
 - Long Vietnamese title in a narrow Board: PASS. Window 1200 pt, Board size 160%: the title wraps to 2 lines and ends "... cuối cùng ở bảng…" with "bảng" whole. Evidence: `/tmp/t209-narrow-02.png`, crop `/tmp/t209-narrow-03-title-crop.png`. The meta line fit, so meta truncation was not exercised. Board size was reset to 100%.
 - Padding, chips, and Remove against Electron within 1 px: UNVERIFIED. No Electron Board to compare.
+
+## Fix round 1
+
+### Status
+
+DONE (code). This status replaces the first-build status above. The screen checks are DEFERRED (UI checker).
+
+### Cause
+
+- Star and pencil past the card edge. The star had `mr(-6)` inside the `flex_none` actions row (pencil plus star). Taffy 0.13 computes that row's max-content width in `compute/flexbox.rs` (intrinsic main size, about lines 1022-1180). For the star, the content contribution is 28 - 6 = 22, so `content_flex_fraction` is -6 / max(1, 0 _ 28) = -6. Then the size is 28 + max(1, 0) _ 28 \* -6 = -140. The row sum is 28 - 140 < 0, so the row measured 0 wide. `justify_between` put the 0-wide row at the content's right edge, and the pencil and star drew from there to the right, under the card's `overflow_hidden`. This matches the run 1 crop: the pencil glyph is cut about 6 pt inside the clip, and the star is fully outside. The bug is in the code since the first port (`f46da3a49`), not from `72fefd064`.
+- AX press on star, pencil, and Remove. With no `AccessibleAction::Click` listener, GPUI replays a mouse click at the node's centre (`gpui-pre-0.3.9/src/window.rs:7054-7075`). The star's centre was outside the card, so the click hit the next card or empty space. Remove worked because its centre was inside the card, on its own hitbox.
+
+### Changed
+
+- `packages/desktop-gpui/plugins/board/src/card.rs`:
+  - The pure `actions_offset(scale) -> f32` (6 times the Board scale) holds the star's `marginRight: -6` from `page.tsx`. The repo row's actions row takes it as `relative().left(..)`, which moves it without a change to any flex size. The star keeps only `my(-6)`, which is on the cross axis. The new test `the_repo_actions_move_6_px_into_the_padding_and_scale_with_the_board` covers it.
+  - The new `Paint::press` attaches the click (`act`, with `stop_propagation`) and an `AccessibleAction::Click` listener that runs the same `CardAction`. Star, pencil, and Remove use it. An AX action goes only to its target node (`window.rs:7037-7051`), so it never reaches the card's Open. The listener also calls `stop_propagation` to match the click.
+  - Not changed: Remove keeps `mr(-8)`. It is a direct child of the badges row, whose width is definite, so taffy's definite path is used and the UI check saw Remove in place.
+
+### Pencil box (static read)
+
+- With the fix, the actions row ends 6 px into the 12 px right padding. The pencil (28 px, `my(-6)`) is the first item, so its box is inside the content box on the x axis. On the y axis it reaches 6 px above the 16 px repo row, inside the 16 px top padding. The card's `overflow_hidden` does not clip it. The hover rule (opacity 0, `group_hover` 1) is not changed.
+
+### Contract
+
+- Produces `pub(crate) fn actions_offset(scale: f32) -> f32` in `card.rs`. `CardPart` and `part_opacity` do not change.
+- An AX press on star, pencil, or Remove runs the same `CardAction` as a click, and it never opens the agent.
+
+### Verified
+
+- GitNexus impact (index 45 commits stale, callers confirmed with `rg`): `star_button` LOW, `card_body` LOW, `Paint::act` MEDIUM (7 callers, all in `card.rs`; `act` is not changed).
+- `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-plugin-board` -> pass, 94 + 1 tests (rerun after the formatter). Log: `/tmp/task209-fix1-test.txt`.
+- `./cargo.sh fmt --check -p bachuc-plugin-board` -> exit 0.
+- `./cargo.sh metadata --format-version 1 > /dev/null` -> exit 0.
+- UI check: the star shows at 0.35 opacity inside each card, at 100% and 160% Board size -> DEFERRED (UI checker).
+- UI check: an AX press on star, pencil, and Remove runs the action and opens no agent tab -> DEFERRED (UI checker).
+- UI check: hover a card with diffs on -> the pencil shows whole -> DEFERRED (UI checker).
+
+### Lessons
+
+- Never put a negative main-axis margin on a child of a GPUI flex container that is sized by its content (`flex_none` or basis auto). Taffy 0.13 then measures the container as 0 wide. Use `relative()` with `left`/`right`, or put the margin on a child of a row whose width is definite.
+- A GPUI control that an AX press must reach needs an explicit `AccessibleAction::Click` listener. The fallback is a mouse click at the node's centre, so it fails when the centre is clipped or covered.
