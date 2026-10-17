@@ -3,14 +3,14 @@
 //! that cannot take focus. Terminal, file, and diff panes are the crate views themselves.
 
 use crate::actions::{AGENT_CONTEXT, FindInTimeline};
-use bachuc_client::Client;
+use bachuc_client::{Client, ClientEvent};
 use bachuc_command::display_combos;
 use bachuc_composer::{Composer, CornerPills};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_SM, ICON_MD, RADIUS_LG, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_2, SPACE_3,
-    SPACE_6,
+    BORDER_WIDTH_1, FONT_BASE, FONT_SM, ICON_MD, MAX_CONTENT_WIDTH, RADIUS_2XL, RADIUS_LG,
+    RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
 use bachuc_theme::{tokens, ui_font_size};
 use bachuc_timeline::TimelineView;
@@ -59,11 +59,28 @@ impl Render for PaneFrame {
 // ----- agent pane -----
 
 /// One agent tab: its timeline over its composer, with the plugin corner pills over the
-/// timeline's top-right corner.
+/// timeline's top-right corner. An archived agent shows the Unarchive callout in place of the
+/// composer (`archived-agent-callout.tsx`); the composer returns when the agent is live again.
 pub struct AgentPane {
     pub timeline: Entity<TimelineView>,
     pub composer: Entity<Composer>,
     corner_pills: Entity<CornerPills>,
+    client: Entity<Client>,
+    agent_id: String,
+    /// The focus target while the composer is hidden.
+    callout_focus: FocusHandle,
+    /// Stays set after a successful unarchive until the agent is live, as in Electron.
+    unarchiving: bool,
+    unarchive_error: Option<SharedString>,
+    _subscriptions: Vec<Subscription>,
+}
+
+/// `FOOTER_HEIGHT` of `constants/layout.ts`.
+const FOOTER_HEIGHT: f32 = 75.;
+
+/// The Unarchive button works only while connected and with no unarchive in flight.
+pub(crate) fn can_unarchive(connected: bool, unarchiving: bool) -> bool {
+    connected && !unarchiving
 }
 
 impl AgentPane {
@@ -81,22 +98,164 @@ impl AgentPane {
         let pills_client = client.clone();
         let pills_id = agent_id.clone();
         let corner_pills = cx.new(|cx| CornerPills::new(pills_client, pills_id, cx));
-        let composer = cx.new(|cx| Composer::new(client, agent_id, window, cx));
+        let composer_client = client.clone();
+        let composer_id = agent_id.clone();
+        let composer = cx.new(|cx| Composer::new(composer_client, composer_id, window, cx));
+        let subscriptions = vec![cx.subscribe_in(
+            &client,
+            window,
+            |this: &mut AgentPane, client, event: &ClientEvent, window, cx| {
+                // The archived state and the connection change with directory and socket
+                // events only.
+                if matches!(event, ClientEvent::TimelineChanged { .. }) {
+                    return;
+                }
+                if this.unarchiving && !client.read(cx).is_archived(&this.agent_id) {
+                    this.unarchiving = false;
+                    this.unarchive_error = None;
+                    if this.callout_focus.is_focused(window) {
+                        this.composer
+                            .update(cx, |composer, cx| composer.focus(window, cx));
+                    }
+                }
+                cx.notify();
+            },
+        )];
         AgentPane {
             timeline,
             composer,
             corner_pills,
+            client,
+            agent_id,
+            callout_focus: cx.focus_handle(),
+            unarchiving: false,
+            unarchive_error: None,
+            _subscriptions: subscriptions,
         }
     }
 
+    fn archived(&self, cx: &App) -> bool {
+        self.client.read(cx).is_archived(&self.agent_id)
+    }
+
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
-        self.composer
-            .update(cx, |composer, cx| composer.focus(window, cx));
+        if self.archived(cx) {
+            self.callout_focus.focus(window, cx);
+        } else {
+            self.composer
+                .update(cx, |composer, cx| composer.focus(window, cx));
+        }
+    }
+
+    /// `handleUnarchive`: an error shows under the callout and enables the button again.
+    fn unarchive(&mut self, cx: &mut Context<Self>) {
+        if !can_unarchive(self.client.read(cx).is_connected(), self.unarchiving) {
+            return;
+        }
+        self.unarchiving = true;
+        self.unarchive_error = None;
+        let agent_id = self.agent_id.clone();
+        let task = self
+            .client
+            .update(cx, |client, cx| client.unarchive_agent(&agent_id, cx));
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                if let Err(error) = result {
+                    this.unarchiving = false;
+                    this.unarchive_error = Some(format!("{error:#}").into());
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// The callout of `archived-agent-callout.tsx`: the text and a small secondary Unarchive
+    /// button in a bordered row, the error in red under it.
+    fn archived_callout(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = tokens(cx);
+        let size = ui_font_size(FONT_BASE, cx);
+        let enabled = can_unarchive(self.client.read(cx).is_connected(), self.unarchiving);
+        let view = cx.weak_entity();
+        let button = div()
+            .id("agent-unarchive")
+            .role(Role::Button)
+            .aria_label("Unarchive")
+            .flex_shrink_0()
+            .px(px(SPACE_3))
+            .py(px(SPACE_1_5))
+            .rounded(px(RADIUS_MD))
+            .bg(t.surface2)
+            .text_size(ui_font_size(FONT_SM, cx))
+            .text_color(t.foreground)
+            .child("Unarchive")
+            .when(!enabled, |button| button.opacity(0.5))
+            .when(enabled, |button| {
+                button
+                    .cursor_pointer()
+                    .hover(|style| style.bg(t.surface3))
+                    .on_click(cx.listener(|this, _, _, cx| this.unarchive(cx)))
+                    .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                        view.update(cx, |this, cx| this.unarchive(cx)).ok();
+                    })
+            });
+        div()
+            .id("agent-archived")
+            .role(Role::Group)
+            .aria_label("This agent is archived")
+            .track_focus(&self.callout_focus)
+            .w_full()
+            .min_h(px(FOOTER_HEIGHT))
+            .flex()
+            .justify_center()
+            .p(px(SPACE_4))
+            .child(
+                v_flex()
+                    .w_full()
+                    .max_w(px(MAX_CONTENT_WIDTH))
+                    .gap(px(SPACE_2))
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .justify_center()
+                            .gap(px(SPACE_3))
+                            .py(px(SPACE_4))
+                            .px(px(SPACE_6))
+                            .bg(t.surface1)
+                            .border(px(BORDER_WIDTH_1))
+                            .border_color(t.border_accent)
+                            .rounded(px(RADIUS_2XL))
+                            .child(
+                                div()
+                                    .text_size(size)
+                                    .text_color(t.foreground_muted)
+                                    .child("This agent is archived"),
+                            )
+                            .child(button),
+                    )
+                    .when_some(self.unarchive_error.clone(), |stack, error| {
+                        stack.child(
+                            div()
+                                .id("agent-unarchive-error")
+                                .role(Role::Alert)
+                                .aria_label(error.clone())
+                                .w_full()
+                                .text_center()
+                                .text_size(size)
+                                .text_color(t.status_danger)
+                                .child(error),
+                        )
+                    }),
+            )
     }
 }
 
 impl Render for AgentPane {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let archived = self.archived(cx);
         v_flex()
             .id("pane-agent")
             .role(Role::Group)
@@ -116,7 +275,8 @@ impl Render for AgentPane {
                     .child(self.timeline.clone())
                     .child(self.corner_pills.clone()),
             )
-            .child(self.composer.clone())
+            .when(archived, |pane| pane.child(self.archived_callout(cx)))
+            .when(!archived, |pane| pane.child(self.composer.clone()))
     }
 }
 
@@ -372,7 +532,7 @@ pub fn chrome_button(
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob brings a `test` macro that shadows the std one.
-    use super::{LaunchItem, launch_hints};
+    use super::{LaunchItem, can_unarchive, launch_hints};
     use bachuc_command::default_shortcuts;
 
     #[test]
@@ -386,5 +546,12 @@ mod tests {
             shortcut.chord = None;
         }
         assert!(launch_hints(&shortcuts).iter().all(Vec::is_empty));
+    }
+
+    #[test]
+    fn unarchive_needs_a_connection_and_no_request_in_flight() {
+        assert!(can_unarchive(true, false));
+        assert!(!can_unarchive(false, false));
+        assert!(!can_unarchive(true, true));
     }
 }

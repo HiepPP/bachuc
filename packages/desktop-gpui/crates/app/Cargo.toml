@@ -14,6 +14,7 @@ bachuc-command = { path = "../command" }
 bachuc-composer = { path = "../composer" }
 bachuc-diagram = { path = "../diagram" }
 bachuc-explorer = { path = "../explorer" }
+bachuc-history = { path = "../history" }
 bachuc-icons = { path = "../icons" }
 bachuc-plugin-assistant-cite = { path = "../../plugins/assistant-cite" }
 bachuc-plugin-board = { path = "../../plugins/board" }

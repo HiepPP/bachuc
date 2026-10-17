@@ -534,6 +534,7 @@ dependencies = [
  "bachuc-composer",
  "bachuc-diagram",
  "bachuc-explorer",
+ "bachuc-history",
  "bachuc-icons",
  "bachuc-plugin-assistant-cite",
  "bachuc-plugin-board",

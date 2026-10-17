@@ -36,13 +36,14 @@ use bachuc_diagram::DiagramRenderer;
 use bachuc_explorer::{
     DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerTab, FileView,
 };
+use bachuc_history::{HistoryEvent, HistoryScreen};
 use bachuc_icons::{IconName, provider_logo};
 use bachuc_plugin_host::{
     AgentAnchor, PanelInput, PanelTarget, PluginHost, PluginHostEvent, SurfacePresentation,
 };
 use bachuc_settings::{Settings, SettingsEvent};
 use bachuc_sidebar::model::archive_prompt;
-use bachuc_sidebar::{Sidebar, SidebarEvent, SidebarPluginEvent};
+use bachuc_sidebar::{Sidebar, SidebarEvent, SidebarNavEvent, SidebarPluginEvent};
 use bachuc_terminal::{TerminalEvent, TerminalView};
 use bachuc_theme::metrics::TRAFFIC_LIGHT_WIDTH;
 use bachuc_theme::tokens;
@@ -70,6 +71,9 @@ const RETIRE_AFTER: Duration = Duration::from_secs(2);
 /// The workspace view shown while no workspace is selected, for example with zero projects.
 const HOME: &str = "";
 
+/// The identity of the History tab in the home view, so a second open shows the same tab.
+const HISTORY: &str = "history";
+
 /// What a tab shows. Dropping an agent pane stops its timeline sync.
 pub(crate) enum PaneContent {
     Agent(Entity<AgentPane>),
@@ -79,6 +83,9 @@ pub(crate) enum PaneContent {
     Draft(Entity<WorkspaceDraftPane>),
     /// The New workspace screen, in a tab of the home view.
     NewWorkspace(Entity<NewWorkspaceScreen>),
+    /// The History screen, in a tab of the home view. It has no focus handle, so it gets a
+    /// `PaneFrame`.
+    History(Entity<HistoryScreen>),
     NewTab(Entity<NewTabPane>),
     Terminal(Entity<TerminalView>),
     File(Entity<FileView>),
@@ -94,6 +101,7 @@ impl PaneContent {
             PaneContent::LazyAgent(view) => view.clone().into(),
             PaneContent::Draft(view) => view.clone().into(),
             PaneContent::NewWorkspace(view) => view.clone().into(),
+            PaneContent::History(view) => view.clone().into(),
             PaneContent::NewTab(view) => view.clone().into(),
             PaneContent::Terminal(view) => view.clone().into(),
             PaneContent::File(view) => view.clone().into(),
@@ -311,6 +319,15 @@ impl Shell {
             cx.subscribe_in(
                 &self.sidebar,
                 window,
+                |this: &mut Shell, _, event: &SidebarNavEvent, window, cx| match event {
+                    SidebarNavEvent::OpenHistory => this.open_history(window, cx),
+                    // TASK-203 opens the New workspace screen here.
+                    SidebarNavEvent::NewWorkspace { .. } => {}
+                },
+            ),
+            cx.subscribe_in(
+                &self.sidebar,
+                window,
                 |this: &mut Shell, _, event: &SidebarPluginEvent, window, cx| match event {
                     SidebarPluginEvent::OpenSurface {
                         plugin_id,
@@ -431,12 +448,14 @@ impl Shell {
         self.complete_logos(cx);
     }
 
+    /// A live agent's title, else an archived one's, which is never in `agents`.
     fn agent_tab_title(&self, agent_id: &str, cx: &App) -> String {
-        self.client
-            .read(cx)
+        let client = self.client.read(cx);
+        client
             .agents()
             .iter()
             .find(|agent| agent.id == agent_id)
+            .or_else(|| client.archived_agent(agent_id))
             .map(agent_title)
             .unwrap_or_else(|| "Agent".to_string())
     }
@@ -966,12 +985,14 @@ impl Shell {
         cx.notify();
     }
 
+    /// A live agent's provider, else an archived one's.
     fn agent_provider(&self, agent_id: &str, cx: &App) -> Option<String> {
-        self.client
-            .read(cx)
+        let client = self.client.read(cx);
+        client
             .agents()
             .iter()
             .find(|agent| agent.id == agent_id)
+            .or_else(|| client.archived_agent(agent_id))
             .map(|agent| agent.provider.clone())
     }
 
@@ -1322,6 +1343,44 @@ impl Shell {
     ) {
         self.ensure_home(window, cx);
         self.open_new_workspace_screen(HOME, None, preset, window, cx);
+        self.select(HOME.to_string(), window, cx);
+    }
+
+    /// Shows the History screen in a tab of the home view, as `open_new_workspace` does. A
+    /// second open shows the same tab. A page surface closes, as for a route change.
+    fn open_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ensure_home(window, cx);
+        match self.find_identity(HOME, HISTORY) {
+            Some(key) => self.activate_key(HOME, &key, window, cx),
+            None => {
+                let client = self.client.clone();
+                let view = cx.new(|cx| HistoryScreen::new(client, window, cx));
+                let subscription = cx.subscribe_in(
+                    &view,
+                    window,
+                    |this: &mut Shell, _, event: &HistoryEvent, window, cx| {
+                        let HistoryEvent::OpenAgent {
+                            agent_id,
+                            workspace_id,
+                        } = event;
+                        this.open_agent_in(agent_id, workspace_id.as_deref(), window, cx);
+                    },
+                );
+                let key = self.next_key();
+                self.put_pane(
+                    HOME,
+                    key,
+                    Some(HISTORY.to_string()),
+                    "History".into(),
+                    IconName::History,
+                    PaneContent::History(view),
+                    vec![subscription],
+                    window,
+                    cx,
+                );
+            }
+        }
+        self.close_page_surface(cx);
         self.select(HOME.to_string(), window, cx);
     }
 
@@ -2116,19 +2175,56 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let (live, archived) = {
+            let client = self.client.read(cx);
+            (
+                agent_workspace(client.projects(), client.agents(), agent_id),
+                client
+                    .archived_agent(agent_id)
+                    .map(|agent| agent.workspace_id.clone()),
+            )
+        };
+        match (live, archived) {
+            (Some(workspace_id), _) => {
+                self.open_agent_in(agent_id, Some(&workspace_id), window, cx)
+            }
+            // An archived agent opens in its own workspace, else in the home view.
+            (None, Some(workspace_id)) => {
+                self.open_agent_in(agent_id, workspace_id.as_deref(), window, cx)
+            }
+            (None, None) => self.pending_prompt = None,
+        }
+    }
+
+    /// Opens an agent's tab in `workspace_id` without the tree lookup, as a History row does
+    /// in Electron. A workspace the tree does not list, or none, opens the tab in the home view.
+    pub(crate) fn open_agent_in(
+        &mut self,
+        agent_id: &str,
+        workspace_id: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // A later open cancels a reveal that still waits.
         self.pending_prompt = None;
-        let workspace_id = {
-            let client = self.client.read(cx);
-            agent_workspace(client.projects(), client.agents(), agent_id)
+        let target = agent_target(self.client.read(cx).projects(), workspace_id);
+        let workspace_id = match target {
+            Some(workspace_id) => {
+                self.open_workspace(workspace_id.clone(), window, cx);
+                workspace_id
+            }
+            None => {
+                self.ensure_home(window, cx);
+                self.close_page_surface(cx);
+                HOME.to_string()
+            }
         };
-        let Some(workspace_id) = workspace_id else {
-            return;
-        };
-        self.open_workspace(workspace_id.clone(), window, cx);
         match self.find_identity(&workspace_id, &agent_key(agent_id)) {
             Some(key) => self.activate_key(&workspace_id, &key, window, cx),
             None => self.open_agent_pane(&workspace_id, None, agent_id, window, cx),
+        }
+        if workspace_id == HOME {
+            self.select(HOME.to_string(), window, cx);
         }
     }
 
@@ -2832,6 +2928,13 @@ pub(crate) fn agent_workspace(
         .then(|| own.to_string())
 }
 
+/// Where `open_agent_in` opens a tab: the given workspace when the tree lists it, else the
+/// home view (`None`), the Q-114 rule.
+pub(crate) fn agent_target(projects: &[ProjectNode], workspace_id: Option<&str>) -> Option<String> {
+    let workspace_id = workspace_id?;
+    find_workspace(projects, workspace_id).map(|_| workspace_id.to_string())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PromptReveal {
     /// The timeline has no entries yet; try again on its next change.
@@ -2863,7 +2966,7 @@ mod tests {
     // Not `super::*`: the gpui glob brings a `test` macro that shadows the std one.
     use super::{
         CANNOT_RENAME, PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE,
-        RESUME_ID_UNAVAILABLE, RenameTarget, TERMINAL_NOT_OPEN, agent_workspace,
+        RESUME_ID_UNAVAILABLE, RenameTarget, TERMINAL_NOT_OPEN, agent_target, agent_workspace,
         closes_surface_on_open, latest_prompt_reveal, reload_error, rename_target, resume_text,
     };
     use bachuc_client::{AgentSummary, ProjectNode, TimelineState, WorkspaceNode};
@@ -2925,6 +3028,20 @@ mod tests {
         assert_eq!(agent_workspace(&projects, &agents, "a3"), None);
         assert_eq!(agent_workspace(&projects, &agents, "a4"), None);
         assert_eq!(agent_workspace(&projects, &agents, "missing"), None);
+    }
+
+    #[test]
+    fn a_history_row_opens_in_its_tree_workspace_else_the_home_view() {
+        let projects = vec![ProjectNode {
+            id: "p".into(),
+            name: "p".into(),
+            root: "/p".into(),
+            workspaces: vec![workspace("w1", &[])],
+        }];
+        assert_eq!(agent_target(&projects, Some("w1")).as_deref(), Some("w1"));
+        assert_eq!(agent_target(&projects, Some("gone")), None);
+        assert_eq!(agent_target(&projects, None), None);
+        assert_eq!(agent_target(&[], Some("w1")), None);
     }
 
     #[test]
