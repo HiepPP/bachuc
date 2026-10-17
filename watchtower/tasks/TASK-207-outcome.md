@@ -80,3 +80,13 @@ DONE (code). The prose line pitch is fixed in code; its screen check is DEFERRED
 
 - The old `LINE_BOX_ROUNDING` comment named a web pitch of 47 that no longer holds: Electron's prose is `round(content * 1.4)`, so read `markdown-styles.ts` before trusting a pitch in a comment.
 - The turn header summary and the Edit row use different path rules in Electron too (`shortPath` against `displayPath`), so a `~` on one and not the other matches Electron.
+
+## UI Checks Run 3
+
+Run 2026-10-18 by the UI checker (run 3). Bundle `Bachuc GPUI Check` built from HEAD `2d5734c11` (includes `e9a78e843`, `77a9730cb`, and `22906f2cb`), PID 31420, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The app stayed in the background. The checker forced each frame with the AX "zoom the window" action and read the AX tree after a no-op F15 key. Scratch repo `/tmp/t202-repo` (branches `main` and `feature-x`, script `hello`) was the live workspace `wks_4a3662191ab77c60` with disposable mock agents "t202 scratch", "t200 archive me", "t200 board card", and "t208 cpu stream". The workspace was archived after the run; PID 31420 quit and exited.
+
+Thread "t207 prose check" (`f324881`, t207-ws), window zoomed to 1710 pt wide (3420 device px), as in run 2. Electron: the run 2 shot `/tmp/t207-ref-02-zoomed.png` of the same frozen reference build and the same prompt, measured again with the same script; the reference app was not opened again. Measures are in device px at 2x, script `/tmp/bands.py`.
+
+- Prose line pitch after `77a9730cb`: PASS. GPUI 42 px (21 pt): bands at 305, 347, 389, 431, 473 (`/tmp/r3-30-t207-gpui.png`). Electron 42 px: 218, 260, 302, 344, 386, 428.
+- Paragraph gap: PASS. Space added between paragraphs over the pitch: GPUI 48 px (last line 473, next paragraph 563, minus 42). Electron 49 px (+-1, from a line cut at the top of the view). Run 2 read GPUI 47.
+- Quote: differs, as expected (Q-117). GPUI: a 4 device px (2 pt) left border and a white background (`/tmp/r3-31-gpui-quote-crop.png`). Electron: a padded box with background (250, 250, 250) (`/tmp/r3-32-electron-quote-crop.png`).

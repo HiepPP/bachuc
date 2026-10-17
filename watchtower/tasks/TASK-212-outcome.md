@@ -42,3 +42,10 @@ DONE
 - `bachuc-app` was not rebuilt; the explorer API only gained exports.
 - The item kebab closes on `on_mouse_down_out`, so a second press on the kebab closes the menu and then opens it again. `GitActionsButton`'s caret has the same behavior.
 - `Load::Ready` boxes the `PrStatusReply`, because clippy flags `large_enum_variant`.
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker (run 3). Bundle `Bachuc GPUI Check` built from HEAD `2d5734c11` (includes `e9a78e843`, `77a9730cb`, and `22906f2cb`), PID 31420, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The app stayed in the background. The checker forced each frame with the AX "zoom the window" action and read the AX tree after a no-op F15 key. Scratch repo `/tmp/t202-repo` (branches `main` and `feature-x`, script `hello`) was the live workspace `wks_4a3662191ab77c60` with disposable mock agents "t202 scratch", "t200 archive me", "t200 board card", and "t208 cpu stream". The workspace was archived after the run; PID 31420 quit and exited.
+
+- A repo with a PR shows the header, checks, and activity: UNVERIFIED (unattended): no PR. No live workspace the checker may read has a PR: `calendar-ref` on `main` has none (`gh pr view`), and `HiepPP/bachuc` has no open PR. The scratch repo has no remote, so the PR tab did not auto-open.
+- Anti-goal, no PR status request over 60 idle seconds: PASS. With the check app idle on the scratch workspace, the 4 metric windows from 18:27:38Z to 18:29:38Z (120 s) show no `checkout_pr_status_request`. The window before (branch switches) had 4, as the git status change asks for it.

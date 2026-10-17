@@ -39,3 +39,11 @@ DONE (code). The screen checks are DEFERRED (UI checker). The fork boundary send
 ## Questions
 
 - Add `Client::timeline_epoch(&self, agent_id: &str) -> Option<&str>` (group C, client files) so the timeline can send `boundaryCursor`? The safe default taken: no cursor, message id only. The fork then needs the assistant `messageId`; the Claude provider sets it (`packages/server/src/server/agent/providers/claude/agent.ts:1333`).
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker (run 3). Bundle `Bachuc GPUI Check` built from HEAD `2d5734c11` (includes `e9a78e843`, `77a9730cb`, and `22906f2cb`), PID 31420, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The app stayed in the background. The checker forced each frame with the AX "zoom the window" action and read the AX tree after a no-op F15 key. Scratch repo `/tmp/t202-repo` (branches `main` and `feature-x`, script `hello`) was the live workspace `wks_4a3662191ab77c60` with disposable mock agents "t202 scratch", "t200 archive me", "t200 board card", and "t208 cpu stream". The workspace was archived after the run; PID 31420 quit and exited.
+
+- A completed turn footer shows the fork button: PASS. The footer of a completed turn has "Copy turn" and "Fork chat from here" (a split glyph) before "Worked for 9s" (`/tmp/r3-03-archived-open.png`).
+- Its menu shows both items: PASS. The press opened AX `menu Fork chat from here` with "Fork in a new tab" and "Fork in a new workspace" (`/tmp/r3-04-fork-menu.png`). No item was pressed. Escape did not close the menu; a second press on the trigger closed it (`/tmp/r3-05-fork-closed.png`).
+- Anti-goal, CPU under 10% during the mock stream: UNVERIFIED (unattended): background frame. With "t208 cpu stream" (five-minute stream) open, `ps` gave 1.7% and 1.2% for PID 31420, but the background window does not paint, so the paint cost is not in this reading (`/tmp/r3-33-cpu-stream.png`).

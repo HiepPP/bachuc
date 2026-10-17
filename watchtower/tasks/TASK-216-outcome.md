@@ -35,3 +35,11 @@ DONE
 
 - The sidebar crate exports its event types from `lib.rs`; a new event type needs a `pub use` there, or the app cannot subscribe.
 - TASK-200 and TASK-203: subscribe with `cx.subscribe(&sidebar, |shell, _, event: &SidebarNavEvent, cx| ...)`.
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker (run 3). Bundle `Bachuc GPUI Check` built from HEAD `2d5734c11` (includes `e9a78e843`, `77a9730cb`, and `22906f2cb`), PID 31420, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The app stayed in the background. The checker forced each frame with the AX "zoom the window" action and read the AX tree after a no-op F15 key. Scratch repo `/tmp/t202-repo` (branches `main` and `feature-x`, script `hello`) was the live workspace `wks_4a3662191ab77c60` with disposable mock agents "t202 scratch", "t200 archive me", "t200 board card", and "t208 cpu stream". The workspace was archived after the run; PID 31420 quit and exited.
+
+- Nav rows in order: PASS. AX order and screen order are "New workspace", "History", "Search", "Board", "Plugins" (`/tmp/r3-01-start.png`). History opens the History tab (TASK-200).
+- Hover "+" on a project: UNVERIFIED (unattended): needs pointer. The "+" is not drawn without hover. The AX tree has one "Create a new workspace for <project>" button per project row, before "Project actions".
+- Anti-goal, 3 existing rows keep their height: PASS. Text band pitch on the same 3420 x 2024 screenshot size, before (`/tmp/t198r2-10-sidebar-workspace.png`, build without `93fc8d183`) and after (`/tmp/r3-01-start.png`): nav rows 60 px in both, project rows 80 px in both (for example 750 -> 830 and 1490 -> 1570 in both), workspace rows 80 px in both. Script `/tmp/r3-bands.py`.

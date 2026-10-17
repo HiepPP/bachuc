@@ -43,3 +43,11 @@ DONE
 - `has_upstream: false` stands for a null `aheadOfOrigin` and a null `behindOfOrigin`.
 - In Electron the split button draws nothing when there is no primary action. TASK-202 must allow for a zero-size button when the folder is not git or the first status has not arrived.
 - The view uses the forge words "GitHub" and "PR" only. GitLab "MR" wording is not ported.
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker (run 3). Bundle `Bachuc GPUI Check` built from HEAD `2d5734c11` (includes `e9a78e843`, `77a9730cb`, and `22906f2cb`), PID 31420, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). The app stayed in the background. The checker forced each frame with the AX "zoom the window" action and read the AX tree after a no-op F15 key. Scratch repo `/tmp/t202-repo` (branches `main` and `feature-x`, script `hello`) was the live workspace `wks_4a3662191ab77c60` with disposable mock agents "t202 scratch", "t200 archive me", "t200 board card", and "t208 cpu stream". The workspace was archived after the run; PID 31420 quit and exited.
+
+- Split button in the header: PASS. "Commit" primary with a commit glyph and a separate caret, inside one bordered group (`/tmp/r3-16-changes-before-commit.png`). On `feature-x` behind `main` the primary is "Update from main" (`/tmp/r3-23-branch-switched.png`).
+- Caret menu: PASS. AX `menu More options` with "Pull", "Push", "Pull and push" (shown disabled, no remote) and "Archive workspace" below a divider (`/tmp/r3-17-git-caret-menu.png`). A second press on the caret closed it. No item was pressed.
+- Spinner while an action runs: PASS. The primary showed a spinner in place of "Commit" during the commit (`/tmp/r3-18-after-commit.png`), then the toast "Committed".
