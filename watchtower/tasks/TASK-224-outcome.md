@@ -36,3 +36,10 @@ DONE
 
 - The timeline's own `markdown_style` lives in `bachuc-timeline` and `bachuc-plugin-host`. The explorer cannot depend on the timeline (the timeline depends on the explorer), so the PR view uses the theme's installed `TextView` style, as `card_view.rs` does.
 - In a `canvas` closure that takes a `size: f32` parameter, call `gpui_kit::size(..)` by path; the glob `size` is shadowed.
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker (run 5). Bundle `Bachuc GPUI Check` built from HEAD `08064a6f3` (includes `626143dc7` and TASK-225 `699395706`), PID 34022, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). Frames were forced with the AX "zoom the window" action; keys went to the check app only. Scratch repo `/tmp/t202-repo` (branches `feature-x` and `main`, new commit `1f8a4a9` with a `web` service script) was the live workspace `wks_9cd2d5d43fcc7b08` with the disposable mock agent "r5 fork src" (`d8ef867`). Request counts come from the live `daemon.log` `ws_runtime_metrics` lines (30 s windows, all clients), parsed by `/tmp/r5-metrics.py`. After the run, PID 34022 exited, the agent and the workspace were archived, and the scratch terminal was killed.
+
+- A repo with a real PR shows the ring, durations, and Markdown bodies: UNVERIFIED (unattended): no PR. No live workspace has a PR: only `calendar-ref` has a remote, on `main`, and `gh pr list --head main` returns none. The checker did not add a real repo to live.
+- Anti-goal, 0 `checkout_pr_status_request` over 60 idle seconds: PASS. With the scratch workspace open and idle, the windows 04:00:38, 04:01:08, 04:01:38, 04:02:08, 04:02:38, 04:03:08, and 04:03:38 (3.5 min, all clients) had 0. Note: the workspace has no PR, so no Pull request tab was open.

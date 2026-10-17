@@ -40,3 +40,10 @@ DONE
 - TASK-231: until it runs, the app answers every full-list keystroke through `query_files`, and its error branch shows a toast per failed search. Move the error to `set_file_error` and drop the toast.
 - TASK-231: answer with `set_file_rows`, with icons from `bachuc_explorer::file_icon` on the file name (the last path segment).
 - A view crate keeps its layout rules in free functions (`layout_of`, `with_files`, `file_of`) so the full-list cases test without a GPUI context.
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker (run 5). Bundle `Bachuc GPUI Check` built from HEAD `08064a6f3` (includes `626143dc7` and TASK-225 `699395706`), PID 34022, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). Frames were forced with the AX "zoom the window" action; keys went to the check app only. Scratch repo `/tmp/t202-repo` (branches `feature-x` and `main`, new commit `1f8a4a9` with a `web` service script) was the live workspace `wks_9cd2d5d43fcc7b08` with the disposable mock agent "r5 fork src" (`d8ef867`). Request counts come from the live `daemon.log` `ws_runtime_metrics` lines (30 s windows, all clients), parsed by `/tmp/r5-metrics.py`. After the run, PID 34022 exited, the agent and the workspace were archived, and the scratch terminal was killed.
+
+- Cmd+K, "main" -> a Files section with file icons below the other sections: PASS. The command center listed "Workspaces" (4 rows), a divider, then "Files" with "main.rs src" and a Rust file icon. Evidence: `/tmp/r5-228-01-cmdk-main.png`.
+- Note: Cmd+K did nothing until the composer had focus; after a branch switcher pick, the window had no focused element.

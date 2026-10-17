@@ -34,3 +34,12 @@ DONE
 ## Lessons
 
 - The composer slash menu is the nearby pattern for list keys over an input: `intercept_keystrokes`, then `stop_propagation` when the list takes the key, plus `ScrollHandle::scroll_to_item` on a `track_scroll` list.
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker (run 5). Bundle `Bachuc GPUI Check` built from HEAD `08064a6f3` (includes `626143dc7` and TASK-225 `699395706`), PID 34022, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). Frames were forced with the AX "zoom the window" action; keys went to the check app only. Scratch repo `/tmp/t202-repo` (branches `feature-x` and `main`, new commit `1f8a4a9` with a `web` service script) was the live workspace `wks_9cd2d5d43fcc7b08` with the disposable mock agent "r5 fork src" (`d8ef867`). Request counts come from the live `daemon.log` `ws_runtime_metrics` lines (30 s windows, all clients), parsed by `/tmp/r5-metrics.py`. After the run, PID 34022 exited, the agent and the workspace were archived, and the scratch terminal was killed.
+
+- Arrow keys move the highlight: PASS. The open list had "(selected) feature-x" (the current branch). Down -> "(selected) main"; Down again wrapped to feature-x; Up -> main. Evidence: `/tmp/r5-223-01-down.png`.
+- Enter switches to the highlighted branch: PASS. Down, Enter from feature-x on a clean tree after a stash -> "Current branch: main"; the same from main -> feature-x (4 times in the run).
+- Detached HEAD shows no switcher and no label: PASS, with a finding. After `git checkout --detach` in the scratch repo, the header went to "t202-repo" at once, but the Explorer still showed "Current branch: feature-x" after 4 s and 14 s. After a press on the Changes Refresh button, the Repository toolbar was empty (no switcher, no "Unknown"). Evidence: `/tmp/r5-223-03-detached-after-refresh.png`. Finding: the Explorer does not refetch the branch on an external checkout; not checked whether this is older than this TASK.
+- Anti-goal, one `branch_suggestions_request` per open: PASS. 9 opens (03:56:11, 03:56:48, 03:57:04, 03:57:58, 03:58:05, 03:58:44, 03:58:57, 03:59:30, 03:59:38) gave 6 requests (windows 03:56:38:1, 03:57:08:2, 03:58:08:1, 03:59:08:1, 03:59:38:1). The 3 opens without a request came within 15 s of the last load (`BRANCH_CACHE`). No open sent 2.

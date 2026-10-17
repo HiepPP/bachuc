@@ -36,3 +36,13 @@ DONE
 ## Lessons
 
 - A struct of menu inputs with `..ALL` in the tests keeps old test literals short when a new gate is added.
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker (run 5). Bundle `Bachuc GPUI Check` built from HEAD `08064a6f3` (includes `626143dc7` and TASK-225 `699395706`), PID 34022, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). Frames were forced with the AX "zoom the window" action; keys went to the check app only. Scratch repo `/tmp/t202-repo` (branches `feature-x` and `main`, new commit `1f8a4a9` with a `web` service script) was the live workspace `wks_9cd2d5d43fcc7b08` with the disposable mock agent "r5 fork src" (`d8ef867`). Request counts come from the live `daemon.log` `ws_runtime_metrics` lines (30 s windows, all clients), parsed by `/tmp/r5-metrics.py`. After the run, PID 34022 exited, the agent and the workspace were archived, and the scratch terminal was killed.
+
+- A switch on a dirty tree, then Cancel: PASS. Enter on "main" with `a.txt` modified opened the dialog "Uncommitted changes" (Cancel, Stash & Switch). Cancel closed it; 3 reads showed no toast, no inline notice, and "Current branch: feature-x". Evidence: `/tmp/r5-222-02-after-cancel.png`.
+- A forced stash pop error -> a toast shows, the inline notice does not: PASS. After Stash & Switch to main and a switch back, "Restore stashed changes?" showed. The checker added a conflicting line to `a.txt` and pressed Restore. A red toast at the top center read "Git command failed: git stash pop stash@{0} (exit code: 1...) ... would be overwritten by merge: a.txt". The Explorer showed no notice line. Evidence: `/tmp/r5-226-02-error-toast.png`.
+- Restore success -> "Stashed changes restored" toast: PASS (timing in TASK-226).
+- Review focus, host without `checkoutDiscardChanges` -> no Discard item: UNVERIFIED (unattended): live has the feature, and the file menu opens only by right-click (needs pointer).
+- Review focus, no agent or draft tab focused -> no Add to chat item: UNVERIFIED (unattended): needs pointer (right-click menu).

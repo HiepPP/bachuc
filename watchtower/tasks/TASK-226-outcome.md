@@ -34,3 +34,12 @@ DONE. The UI check is DEFERRED (UI checker).
 
 - The first test run failed in `bachuc-explorer` (`has_branch` missing) while the other builder edited that crate. A later run compiled. A shared-checkout build failure in a crate outside your Files is not yours to fix; wait and retry.
 - Electron's toast pauses its timer on hover (`pauseDismiss`/`resumeDismiss`). GPUI notes do not pause; that is outside this TASK.
+
+## UI Checks
+
+Run 2026-10-18 by the UI checker (run 5). Bundle `Bachuc GPUI Check` built from HEAD `08064a6f3` (includes `626143dc7` and TASK-225 `699395706`), PID 34022, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected only to live `127.0.0.1:6768` (`lsof`). Frames were forced with the AX "zoom the window" action; keys went to the check app only. Scratch repo `/tmp/t202-repo` (branches `feature-x` and `main`, new commit `1f8a4a9` with a `web` service script) was the live workspace `wks_9cd2d5d43fcc7b08` with the disposable mock agent "r5 fork src" (`d8ef867`). Request counts come from the live `daemon.log` `ws_runtime_metrics` lines (30 s windows, all clients), parsed by `/tmp/r5-metrics.py`. After the run, PID 34022 exited, the agent and the workspace were archived, and the scratch terminal was killed.
+
+- A commit in the scratch repo shows the success toast at the top center: PASS. Commit (header button) committed `a.txt` as `86a7ccc` after about 19 s (message generation). The toast "Committed" box spans x 1586-1833 device px in a 3420 px window: center 1709.5 against the window center 1710. Its top is 88 device px = 44 pt = header 36 + 8. Evidence: `/tmp/r5-226-01-commit-toast.png`.
+- Success toast leaves after about 2.2 s: PASS. Commit toast, zoom-forced polls: visible at 19.6 s and 21.4 s, gone at 22.8 s (coarse). "Stashed changes restored", F15 polls at about 0.5 s: visible for at least 1.69 s and at most 2.69 s.
+- Error toast stays about 3.2 s: PASS. "Git command failed: git stash pop ...": visible for at least 2.57 s and at most 3.60 s. The error toast also shows at the top center (`/tmp/r5-226-02-error-toast.png`).
+- Note: a second Commit press at about 04:00 sent `checkout_commit_request`, but after 8 min the daemon had sent no reply and the header showed a spinner. The daemon logged "Agent MCP transport error ... Unsupported protocol version: 2026-07-28" at 04:00:06. This looks like the daemon commit message generator, not the toast.
