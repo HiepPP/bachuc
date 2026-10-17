@@ -922,6 +922,17 @@ impl Client {
         reply_task(receiver, cx)
     }
 
+    /// Fetches one agent; an archived agent then shows in `archived_agent`.
+    pub fn fetch_agent(
+        &mut self,
+        agent_id: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.fetch_agent(agent_id);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
     /// An archived agent this client has seen; archived agents are never in `agents`.
     pub fn archived_agent(&self, agent_id: &str) -> Option<&AgentSummary> {
         self.core.archived_agent(agent_id)

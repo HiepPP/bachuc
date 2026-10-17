@@ -2552,16 +2552,41 @@ impl Shell {
                     .map(|agent| agent.workspace_id.clone()),
             )
         };
-        match (live, archived) {
-            (Some(workspace_id), _) => {
-                self.open_agent_in(agent_id, Some(&workspace_id), window, cx)
-            }
-            // An archived agent opens in its own workspace, else in the home view.
-            (None, Some(workspace_id)) => {
+        match agent_open(live, archived) {
+            AgentOpen::In(workspace_id) => {
                 self.open_agent_in(agent_id, workspace_id.as_deref(), window, cx)
             }
-            (None, None) => self.pending_prompt = None,
+            AgentOpen::Fetch => {
+                self.pending_prompt = None;
+                self.open_fetched_agent(agent_id, window, cx);
+            }
         }
+    }
+
+    /// Fetches an agent the client does not know and opens it when it is archived. The agent
+    /// subscription has no `includeArchived`, so the daemon sends `remove` on an archive and the
+    /// client never sees the archived agent; a stale Board card of that agent lands here.
+    fn open_fetched_agent(&mut self, agent_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let task = self
+            .client
+            .update(cx, |client, cx| client.fetch_agent(agent_id, cx));
+        let agent_id = agent_id.to_string();
+        cx.spawn_in(window, async move |this, cx| {
+            if let Err(error) = task.await {
+                return log::warn!("cannot open agent {agent_id}: {error:#}");
+            }
+            let _ = this.update_in(cx, |shell, window, cx| {
+                let archived = shell
+                    .client
+                    .read(cx)
+                    .archived_agent(&agent_id)
+                    .map(|agent| agent.workspace_id.clone());
+                if let Some(workspace_id) = archived {
+                    shell.open_agent_in(&agent_id, workspace_id.as_deref(), window, cx);
+                }
+            });
+        })
+        .detach();
     }
 
     /// Opens an agent's tab in `workspace_id` without the tree lookup, as a History row does
@@ -3308,6 +3333,25 @@ pub(crate) fn agent_workspace(
         .then(|| own.to_string())
 }
 
+/// How `open_agent` opens an agent.
+#[derive(Debug, PartialEq)]
+pub(crate) enum AgentOpen {
+    /// In this workspace; `None` or a workspace the tree lacks is the home view.
+    In(Option<String>),
+    /// The client knows neither a live nor an archived agent: fetch it first.
+    Fetch,
+}
+
+/// A live agent opens in its tree workspace; an archived agent opens in its own workspace. An
+/// agent the client does not know is fetched, because an archived one may only be stale.
+pub(crate) fn agent_open(live: Option<String>, archived: Option<Option<String>>) -> AgentOpen {
+    match (live, archived) {
+        (Some(workspace_id), _) => AgentOpen::In(Some(workspace_id)),
+        (None, Some(workspace_id)) => AgentOpen::In(workspace_id),
+        (None, None) => AgentOpen::Fetch,
+    }
+}
+
 /// Where `open_agent_in` opens a tab: the given workspace when the tree lists it, else the
 /// home view (`None`), the Q-114 rule.
 pub(crate) fn agent_target(projects: &[ProjectNode], workspace_id: Option<&str>) -> Option<String> {
@@ -3469,12 +3513,12 @@ pub(crate) fn latest_prompt_reveal(state: Option<&TimelineState>) -> PromptRevea
 mod tests {
     // Not `super::*`: the gpui glob brings a `test` macro that shadows the std one.
     use super::{
-        CANNOT_RENAME, FORK_ATTACHMENT_LABEL, FORK_FAILED, FORK_MISSING_WORKSPACE, PromptReveal,
-        RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE, RESUME_ID_UNAVAILABLE, RenameTarget,
-        TERMINAL_NOT_OPEN, agent_target, agent_workspace, auto_opens_pr_tab,
-        closes_surface_on_open, fork_attachment_label, fork_draft_seed, fork_error, fork_tab_cwd,
-        fork_workspace_preset, has_pull_request, latest_prompt_reveal, reload_error, rename_target,
-        resume_text,
+        AgentOpen, CANNOT_RENAME, FORK_ATTACHMENT_LABEL, FORK_FAILED, FORK_MISSING_WORKSPACE,
+        PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE, RESUME_ID_UNAVAILABLE,
+        RenameTarget, TERMINAL_NOT_OPEN, agent_open, agent_target, agent_workspace,
+        auto_opens_pr_tab, closes_surface_on_open, fork_attachment_label, fork_draft_seed,
+        fork_error, fork_tab_cwd, fork_workspace_preset, has_pull_request, latest_prompt_reveal,
+        reload_error, rename_target, resume_text,
     };
     use bachuc_client::{
         AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, PrMergeCapability, PrStatus,
@@ -3586,6 +3630,19 @@ mod tests {
         assert_eq!(agent_target(&projects, Some("gone")), None);
         assert_eq!(agent_target(&projects, None), None);
         assert_eq!(agent_target(&[], Some("w1")), None);
+    }
+
+    #[test]
+    fn an_unknown_agent_is_fetched_before_it_opens() {
+        let ws = |id: &str| Some(id.to_string());
+        assert_eq!(
+            agent_open(ws("w1"), Some(ws("w2"))),
+            AgentOpen::In(ws("w1"))
+        );
+        assert_eq!(agent_open(None, Some(ws("w2"))), AgentOpen::In(ws("w2")));
+        assert_eq!(agent_open(None, Some(None)), AgentOpen::In(None));
+        // An agent archived while its Board card still shows is in neither map.
+        assert_eq!(agent_open(None, None), AgentOpen::Fetch);
     }
 
     #[test]

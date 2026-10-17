@@ -137,6 +137,7 @@ enum Pending {
     CheckoutDone(Reply<()>),
     StartScript(Reply<String>),
     History(Reply<HistoryPage>),
+    FetchAgent(Reply<()>),
     ForkContext(Reply<ForkContext>),
     DirectorySuggestions(Reply<Vec<DirectorySuggestion>>),
     /// An `fs.entry.*` answer with `success` and a string `error`.
@@ -192,6 +193,7 @@ impl Pending {
             Pending::CheckoutDone(reply) => send(reply, error),
             Pending::StartScript(reply) => send(reply, error),
             Pending::History(reply) => send(reply, error),
+            Pending::FetchAgent(reply) => send(reply, error),
             Pending::ForkContext(reply) => send(reply, error),
             Pending::DirectorySuggestions(reply) => send(reply, error),
             Pending::FsEntry(reply) => send(reply, error),
@@ -1211,6 +1213,15 @@ impl ClientCore {
     /// The daemon unarchives the agent and restores its workspace on a refresh.
     pub fn unarchive_agent(&mut self, agent_id: &str) -> oneshot::Receiver<anyhow::Result<()>> {
         self.refresh_agent(agent_id)
+    }
+
+    /// Fetches one agent by id. An archived agent fills the archived map: the agent subscription
+    /// has no `includeArchived`, so the daemon sends `remove` when an agent is archived.
+    pub fn fetch_agent(&mut self, agent_id: &str) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.request_reply(
+            json!({"type": "fetch_agent_request", "agentId": agent_id}),
+            Pending::FetchAgent,
+        )
     }
 
     pub fn archived_agent(&self, agent_id: &str) -> Option<&AgentSummary> {
@@ -2935,6 +2946,20 @@ impl ClientCore {
                     self.archive_history_rows(payload);
                 }
                 reply(sender, error, || Ok(history_page(payload)))
+            }
+            Pending::FetchAgent(sender) => {
+                let agent = &payload["agent"];
+                // A live agent comes through the subscription; only an archived one is stored.
+                if error.is_none() && !agent["archivedAt"].is_null() {
+                    self.upsert_agent(agent);
+                }
+                reply(sender, error, || {
+                    if agent.is_null() {
+                        Err(anyhow!("agent not found"))
+                    } else {
+                        Ok(())
+                    }
+                })
             }
             Pending::ForkContext(sender) => reply(sender, error, || {
                 let attachment = &payload["attachment"];

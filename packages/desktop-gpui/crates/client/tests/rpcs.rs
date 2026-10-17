@@ -2050,6 +2050,60 @@ fn archived_upserts_move_to_the_archived_map_and_back() {
     assert!(harness.core.agents().iter().any(|a| a.id == "a1"));
 }
 
+/// The daemon sends `remove`, not an archived upsert, to a subscription without
+/// `includeArchived`, so only a fetch fills the archived map (a stale Board card).
+#[test]
+fn an_archived_remove_needs_a_fetch_to_fill_the_archived_map() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut archived = agent_snapshot("a1", "idle");
+    archived["archivedAt"] = json!("2026-10-17T00:00:00.000Z");
+    archived["workspaceId"] = json!("ws1");
+    server.reply(
+        "fetch_agent_request",
+        "fetch_agent_response",
+        json!({"agent": archived, "project": null, "error": null}),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.agents().len() == 1));
+
+    server.broadcast(json!({"type": "agent_update",
+                            "payload": {"kind": "remove", "agentId": "a1"}}));
+    assert!(harness.pump_until(WAIT, |h| h.core.agents().is_empty()));
+    assert!(!harness.core.is_archived("a1"));
+
+    let reply = harness.core.fetch_agent("a1");
+    harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        server.requests_of("fetch_agent_request")[0]["agentId"],
+        json!("a1")
+    );
+    assert_eq!(
+        harness
+            .core
+            .archived_agent("a1")
+            .and_then(|a| a.workspace_id.as_deref()),
+        Some("ws1")
+    );
+    assert!(harness.core.agents().is_empty());
+}
+
+#[test]
+fn a_fetch_of_a_missing_agent_fails() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "fetch_agent_request",
+        "fetch_agent_response",
+        json!({"agent": null, "project": null, "error": "Agent not found: gone"}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.fetch_agent("gone");
+    let error = harness.wait(reply, WAIT).unwrap_err();
+    assert_eq!(error.to_string(), "Agent not found: gone");
+    assert!(!harness.core.is_archived("gone"));
+}
+
 #[test]
 fn unarchive_sends_a_refresh() {
     let server = FakeServer::start();
