@@ -5,7 +5,8 @@ counts, and below it the diff with file line numbers and syntax colors. These ro
 the Overview tool call groups, so they show even when the commands around them are collapsed.
 
 - **Settings → Plugins → Edit diffs → Auto-expand edit diffs** opens every edit's diff in
-  the chat. It is on by default. When off, press the row to open the diff.
+  the chat. It is off by default, because each open diff locates its lines and highlights them,
+  and on a long thread that slows opening and scrolling. When off, press the row to open the diff.
 - **Turn edit diffs off in one thread** for long automatic runs, where diff rows make a long thread
   slow. Use the Command Center item **Turn edit diffs on or off in this thread**, or the pencil
   button on a Board card. An off thread shows Paseo's own edit rows, which collapse into the tool
@@ -17,10 +18,9 @@ the Overview tool call groups, so they show even when the commands around them a
 - A write shows the whole written file as added lines, numbered from line 1. The provider
   sends no old content, so overwriting an existing file also shows only added lines.
 - Only edit and write tool calls change. Read, shell, and other tool calls keep Paseo's rows.
-- Each new agent's system prompt gets a rule: change files only with edit tools, never with shell
-  scripts such as `python3 - <<EOF` or `sed -i`. A shell edit has no diff to show. Claude's
-  bypass mode tells it to prefer shell edits, so the rule says it overrides that. Agents created
-  before the plugin loaded keep their old prompt.
+- A file changed through the shell, such as `sed -i` or `gopls rename`, shows no diff row. The
+  plugin does not tell agents to avoid shell edits: that rule cost agent turns and was removed.
+  Agents created while the rule was active keep it in their prompt.
 
 ## Line numbers
 

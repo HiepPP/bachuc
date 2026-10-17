@@ -6,6 +6,7 @@ export const displaySettings = defineSettings({
   scope: "host",
   version: 1,
   schema: z.object({
-    autoExpand: z.boolean().default(true),
+    // Off by default: expanded rows each locate and highlight, which slows long threads.
+    autoExpand: z.boolean().default(false),
   }),
 });
