@@ -240,15 +240,47 @@ fn meta_text(text: String, label: Option<(usize, Hsla, FontWeight)>) -> StyledTe
     StyledText::new(text).with_highlights(highlights)
 }
 
-/// Seen cards dim their content until the card is hovered.
-fn dim(el: Div, seen: bool, group: &SharedString, factor: f32) -> Div {
-    if seen {
-        el.opacity(SEEN_OPACITY * factor)
-            .group_hover(group.clone(), move |style| style.opacity(factor))
-    } else if factor < 1. {
-        el.opacity(factor)
-    } else {
+/// The parts of a card that the seen rule looks at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CardPart {
+    Repo,
+    /// The avatar and the title column.
+    Main,
+    Tags,
+    /// The subagent elbow.
+    Elbow,
+    Star,
+    Diffs,
+    Remove,
+}
+
+/// `dim = seen && !active ? 0.5 : 1` (`page.tsx:565`): only the repo, the avatar and title,
+/// the model tags, and the elbow (at 0.6) dim; the actions keep full contrast.
+pub(crate) fn part_opacity(part: CardPart, seen: bool, active: bool) -> f32 {
+    let dim = if seen && !active { SEEN_OPACITY } else { 1. };
+    match part {
+        CardPart::Repo | CardPart::Main | CardPart::Tags => dim,
+        CardPart::Elbow => 0.6 * dim,
+        CardPart::Star | CardPart::Diffs | CardPart::Remove => 1.,
+    }
+}
+
+/// Applies `part_opacity`; hovering the card is the active state.
+fn dim<E: Styled + InteractiveElement>(
+    el: E,
+    part: CardPart,
+    seen: bool,
+    group: &SharedString,
+) -> E {
+    let (rest, active) = (
+        part_opacity(part, seen, false),
+        part_opacity(part, seen, true),
+    );
+    let el = if rest < 1. { el.opacity(rest) } else { el };
+    if rest == active {
         el
+    } else {
+        el.group_hover(group.clone(), move |style| style.opacity(active))
     }
 }
 
@@ -276,7 +308,7 @@ pub(crate) fn run_card(p: &Paint, c: Card, window: &mut Window, cx: &mut App) ->
     let group: SharedString = format!("board-card-{}", run.id).into();
 
     let star = star_button(p, &c, &ui, &group);
-    let remove = (c.can_remove && !running).then(|| remove_button(p, &c, &ui));
+    let remove = (c.can_remove && !running).then(|| remove_button(p, &c, &ui, &group));
 
     let body = if c.subagent {
         subagent_body(p, &c, &ui, &group, star, remove)
@@ -385,7 +417,7 @@ fn star_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEle
             .text_color(t.foreground_muted)
             .into_any_element()
     };
-    button(
+    let star = button(
         SharedString::from(format!("board-star-{}", run.id)),
         format!(
             "{} {}",
@@ -421,14 +453,14 @@ fn star_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEle
                 starred: !run.starred,
             }))
     })
-    .child(glyph)
-    .into_any_element()
+    .child(glyph);
+    dim(star, CardPart::Star, c.seen, group).into_any_element()
 }
 
 fn diffs_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyElement {
     let (run, t) = (c.run, &p.t);
     let off = run.diffs_off;
-    button(
+    let diffs = button(
         SharedString::from(format!("board-diffs-{}", run.id)),
         format!(
             "Turn edit diffs {} for {}",
@@ -479,11 +511,11 @@ fn diffs_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEl
         } else {
             t.foreground_muted
         }),
-    )
-    .into_any_element()
+    );
+    dim(diffs, CardPart::Diffs, c.seen, group).into_any_element()
 }
 
-fn remove_button(p: &Paint, c: &Card, ui: &CardUi) -> AnyElement {
+fn remove_button(p: &Paint, c: &Card, ui: &CardUi, card: &SharedString) -> AnyElement {
     let (run, t) = (c.run, &p.t);
     let group: SharedString = format!("board-remove-{}", run.id).into();
     let base = button(
@@ -504,6 +536,7 @@ fn remove_button(p: &Paint, c: &Card, ui: &CardUi) -> AnyElement {
                 agent_id: run.agent_id.clone(),
             }))
     });
+    let base = dim(base, CardPart::Remove, c.seen, card);
     if c.subagent {
         base.p(p.s(5.))
             .child(
@@ -688,9 +721,9 @@ fn card_body(
         .mb(p.s(2.))
         .child(dim(
             div().flex_shrink(1.).min_w_0().child(repo),
+            CardPart::Repo,
             c.seen,
             group,
-            1.,
         ))
         .child(
             h_flex()
@@ -748,6 +781,8 @@ fn card_body(
                 .child(
                     p.text(14., 19.)
                         .line_clamp(2)
+                        // `numberOfLines={2}` ends the cut on an ellipsis.
+                        .text_ellipsis()
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(t.foreground)
                         .child(run.title.clone()),
@@ -769,9 +804,9 @@ fn card_body(
                         ),
                 ),
         ),
+        CardPart::Main,
         c.seen,
         group,
-        1.,
     );
 
     let badges = h_flex()
@@ -788,9 +823,9 @@ fn card_body(
                 .flex()
                 .overflow_hidden()
                 .child(model_tags(p, run, false)),
+            CardPart::Tags,
             c.seen,
             group,
-            1.,
         ))
         .children(remove);
 
@@ -876,17 +911,17 @@ fn subagent_body(
                             .with_size(p.s(14.))
                             .text_color(t.foreground_muted),
                     ),
+                    CardPart::Elbow,
                     c.seen,
                     group,
-                    0.6,
                 ))
                 .child(dim(
                     div()
                         .flex_none()
                         .child(agent_avatar(&run.agent_id, p.s(24.))),
+                    CardPart::Main,
                     c.seen,
                     group,
-                    1.,
                 ))
                 .child(dim(
                     v_flex()
@@ -916,9 +951,9 @@ fn subagent_body(
                                         .child(meta),
                                 ),
                         ),
+                    CardPart::Main,
                     c.seen,
                     group,
-                    1.,
                 ))
                 .child(actions),
         )
@@ -936,9 +971,9 @@ fn subagent_body(
                         .flex()
                         .overflow_hidden()
                         .child(model_tags(p, run, true)),
+                    CardPart::Tags,
                     c.seen,
                     group,
-                    1.,
                 )),
         )
         .into_any_element()
@@ -1233,7 +1268,7 @@ fn nested_cluster(
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob import brings a `test` attribute of its own.
-    use super::pulse_opacity;
+    use super::{CardPart, part_opacity, pulse_opacity};
 
     #[test]
     fn a_pulse_fades_to_0_35_and_back_in_one_loop() {
@@ -1242,5 +1277,33 @@ mod tests {
         assert!((pulse_opacity(1.) - 1.).abs() < 1e-6);
         assert!(pulse_opacity(0.25) < 1. && pulse_opacity(0.25) > 0.35);
         assert!((pulse_opacity(0.25) - pulse_opacity(0.75)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_seen_card_dims_only_the_repo_main_row_tags_and_elbow() {
+        assert_eq!(part_opacity(CardPart::Repo, true, false), 0.5);
+        assert_eq!(part_opacity(CardPart::Main, true, false), 0.5);
+        assert_eq!(part_opacity(CardPart::Tags, true, false), 0.5);
+        assert!((part_opacity(CardPart::Elbow, true, false) - 0.3).abs() < 1e-6);
+        for part in [CardPart::Star, CardPart::Diffs, CardPart::Remove] {
+            assert_eq!(part_opacity(part, true, false), 1., "{part:?}");
+        }
+    }
+
+    #[test]
+    fn hover_and_unseen_cards_keep_full_contrast_but_the_elbow_stays_at_0_6() {
+        for (seen, active) in [(true, true), (false, false), (false, true)] {
+            for part in [
+                CardPart::Repo,
+                CardPart::Main,
+                CardPart::Tags,
+                CardPart::Star,
+                CardPart::Diffs,
+                CardPart::Remove,
+            ] {
+                assert_eq!(part_opacity(part, seen, active), 1., "{part:?}");
+            }
+            assert!((part_opacity(CardPart::Elbow, seen, active) - 0.6).abs() < 1e-6);
+        }
     }
 }
