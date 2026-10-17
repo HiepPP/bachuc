@@ -141,6 +141,46 @@ pub(crate) fn restore_index(entries: &[StashEntry], branch: &str) -> Option<u32>
         .map(|entry| entry.index)
 }
 
+/// The row Up or Down moves the highlight to, wrapping at both ends (`getNextActiveIndex`).
+/// With no highlight, Down starts at the first row and Up at the last.
+pub(crate) fn next_highlight(current: Option<usize>, count: usize, down: bool) -> Option<usize> {
+    if count == 0 {
+        return None;
+    }
+    let Some(current) = current else {
+        return Some(if down { 0 } else { count - 1 });
+    };
+    let current = current % count;
+    Some(if down {
+        (current + 1) % count
+    } else {
+        (current + count - 1) % count
+    })
+}
+
+/// The highlight when the list opens, the query changes, or the branches load
+/// (`resolveInitialActiveIndex`, rows under the search): the current branch while the query is
+/// empty, else the first row.
+pub(crate) fn initial_highlight(
+    visible: &[String],
+    query: &str,
+    current: Option<&str>,
+) -> Option<usize> {
+    if visible.is_empty() {
+        return None;
+    }
+    if !query.trim().is_empty() {
+        return Some(0);
+    }
+    let selected = current.and_then(|current| visible.iter().position(|name| name == current));
+    Some(selected.unwrap_or(0))
+}
+
+/// The row Enter picks: the highlighted one, or the first when there is no highlight.
+pub(crate) fn enter_row(count: usize, highlight: Option<usize>) -> Option<usize> {
+    (count > 0).then(|| highlight.filter(|&index| index < count).unwrap_or(0))
+}
+
 /// The loaded list is still fresh, so opening the switcher asks the daemon nothing.
 pub(crate) fn cache_fresh(loaded_at: Option<Instant>, now: Instant) -> bool {
     loaded_at.is_some_and(|loaded_at| now.saturating_duration_since(loaded_at) < BRANCH_CACHE)
@@ -167,6 +207,9 @@ enum ListLoad {
 
 struct Search {
     query: Entity<InputState>,
+    /// The row that Enter picks; Up and Down move it.
+    highlight: Option<usize>,
+    scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -205,10 +248,6 @@ impl BranchSwitcher {
         }
     }
 
-    pub(crate) fn has_branch(&self) -> bool {
-        self.branch.is_some()
-    }
-
     pub(crate) fn set_branch(&mut self, branch: Option<String>, cx: &mut Context<Self>) {
         if self.branch != branch {
             self.branch = branch;
@@ -245,33 +284,27 @@ impl BranchSwitcher {
                 &query,
                 window,
                 |this: &mut BranchSwitcher, _, event: &InputEvent, _, cx| match event {
-                    InputEvent::Change => cx.notify(),
+                    InputEvent::Change => this.reset_highlight(cx),
                     InputEvent::PressEnter { .. } => {
-                        if let Some(name) = this.visible_branches(cx).into_iter().next() {
-                            this.pick(name, cx);
+                        let mut visible = this.visible_branches(cx);
+                        let highlight = this.search.as_ref().and_then(|search| search.highlight);
+                        if let Some(index) = enter_row(visible.len(), highlight) {
+                            this.pick(visible.swap_remove(index), cx);
                         }
                     }
                     _ => {}
                 },
             ),
-            // The input keeps Escape for itself, so the switcher reads it first.
+            // The input keeps Escape, Up, and Down for itself, so the switcher reads them first.
             cx.intercept_keystrokes(move |event, window, cx| {
-                if event.keystroke.key != "escape" {
+                let key = event.keystroke.key.as_str();
+                if !matches!(key, "escape" | "up" | "down") {
                     return;
                 }
-                let closed = weak
-                    .update(cx, |this, cx| {
-                        let focused = this
-                            .search
-                            .as_ref()
-                            .is_some_and(|search| search.query.focus_handle(cx).is_focused(window));
-                        if focused {
-                            this.close(cx);
-                        }
-                        focused
-                    })
+                let handled = weak
+                    .update(cx, |this, cx| this.list_key(key, window, cx))
                     .unwrap_or(false);
-                if closed {
+                if handled {
                     cx.stop_propagation();
                 }
             }),
@@ -279,10 +312,54 @@ impl BranchSwitcher {
         query.update(cx, |query, cx| query.focus(window, cx));
         self.search = Some(Search {
             query,
+            highlight: None,
+            scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         });
+        self.reset_highlight(cx);
         if !cache_fresh(self.loaded_at, Instant::now()) {
             self.load(cx);
+        }
+        cx.notify();
+    }
+
+    /// Escape, Up, and Down while the filter has focus. Returns whether it took the key.
+    fn list_key(&mut self, key: &str, window: &Window, cx: &mut Context<Self>) -> bool {
+        let Some(search) = &self.search else {
+            return false;
+        };
+        if !search.query.focus_handle(cx).is_focused(window) {
+            return false;
+        }
+        if key == "escape" {
+            self.close(cx);
+            return true;
+        }
+        let current = search.highlight;
+        let count = self.visible_branches(cx).len();
+        self.set_highlight(next_highlight(current, count, key == "down"), cx);
+        true
+    }
+
+    fn reset_highlight(&mut self, cx: &mut Context<Self>) {
+        let Some(search) = &self.search else {
+            return;
+        };
+        let query = search.query.read(cx).value().to_string();
+        let visible = rank_branches(&self.branches, &query);
+        self.set_highlight(
+            initial_highlight(&visible, &query, self.branch.as_deref()),
+            cx,
+        );
+    }
+
+    fn set_highlight(&mut self, highlight: Option<usize>, cx: &mut Context<Self>) {
+        let Some(search) = &mut self.search else {
+            return;
+        };
+        search.highlight = highlight;
+        if let Some(index) = highlight {
+            search.scroll.scroll_to_item(index);
         }
         cx.notify();
     }
@@ -316,6 +393,7 @@ impl BranchSwitcher {
                         this.branches = branches.into_iter().map(|branch| branch.name).collect();
                         this.loaded_at = Some(Instant::now());
                         this.list = ListLoad::Ready;
+                        this.reset_highlight(cx);
                     }
                     Err(error) => {
                         log::warn!("branch_suggestions {}: {error:#}", this.cwd);
@@ -542,6 +620,7 @@ impl BranchSwitcher {
         let text_size = ui_font_size(FONT_BASE, cx);
         let small = ui_font_size(FONT_SM, cx);
         let current = self.branch.clone();
+        let highlight = search.highlight;
         let visible = self.visible_branches(cx);
         let status = match &self.list {
             ListLoad::Failed(message) => Some(message.clone()),
@@ -553,6 +632,7 @@ impl BranchSwitcher {
             .enumerate()
             .map(|(index, name)| {
                 let selected = current.as_deref() == Some(name.as_str());
+                let highlighted = highlight == Some(index);
                 let view = cx.weak_entity();
                 let ax_name = name.clone();
                 let click_name = name.clone();
@@ -560,6 +640,7 @@ impl BranchSwitcher {
                     .id(SharedString::from(format!("branch-switcher-item-{index}")))
                     .role(Role::MenuItem)
                     .aria_label(name.clone())
+                    .aria_selected(highlighted)
                     .min_h(px(ROW_HEIGHT))
                     .mx(px(SPACE_1))
                     .px(px(SPACE_2))
@@ -567,6 +648,7 @@ impl BranchSwitcher {
                     .gap(px(SPACE_2))
                     .rounded(px(RADIUS_MD))
                     .cursor_pointer()
+                    .when(highlighted, |row| row.bg(colors.surface1))
                     .hover(move |style| style.bg(colors.surface2))
                     .on_click(cx.listener(move |this, _, _, cx| this.pick(click_name.clone(), cx)))
                     .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
@@ -629,6 +711,7 @@ impl BranchSwitcher {
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
+                        .track_scroll(&search.scroll)
                         .children(rows),
                 )
                 .children(status.map(|status| {
@@ -797,8 +880,8 @@ impl Render for BranchSwitcher {
 #[cfg(test)]
 mod tests {
     use super::{
-        BRANCH_CACHE, cache_fresh, offers_stash, rank_branches, restore_index, restore_notice,
-        should_switch, switch_failure_notice,
+        BRANCH_CACHE, cache_fresh, enter_row, initial_highlight, next_highlight, offers_stash,
+        rank_branches, restore_index, restore_notice, should_switch, switch_failure_notice,
     };
     use crate::explorer::ExplorerNoticeEvent;
     use bachuc_client::StashEntry;
@@ -881,6 +964,38 @@ mod tests {
         assert!(cache_fresh(Some(now), now));
         assert!(cache_fresh(Some(now), now + Duration::from_secs(14)));
         assert!(!cache_fresh(Some(now), now + BRANCH_CACHE));
+    }
+
+    #[test]
+    fn branch_highlight_moves_and_wraps() {
+        assert_eq!(next_highlight(None, 3, true), Some(0));
+        assert_eq!(next_highlight(None, 3, false), Some(2));
+        assert_eq!(next_highlight(Some(0), 3, true), Some(1));
+        assert_eq!(next_highlight(Some(2), 3, true), Some(0));
+        assert_eq!(next_highlight(Some(0), 3, false), Some(2));
+        assert_eq!(next_highlight(Some(5), 3, true), Some(0));
+        assert_eq!(next_highlight(Some(1), 0, true), None);
+    }
+
+    #[test]
+    fn branch_highlight_starts_on_current_branch_or_first_match() {
+        let list = names(&["main", "feat/a", "feat/b"]);
+        assert_eq!(initial_highlight(&list, "", Some("feat/a")), Some(1));
+        assert_eq!(initial_highlight(&list, "", Some("gone")), Some(0));
+        assert_eq!(initial_highlight(&list, "feat", Some("feat/b")), Some(0));
+        assert_eq!(initial_highlight(&[], "", Some("main")), None);
+    }
+
+    #[test]
+    fn branch_down_down_enter_picks_the_third_row() {
+        let list = names(&["main", "feat/a", "feat/b", "fix/c"]);
+        let mut highlight = initial_highlight(&list, "", Some("main"));
+        highlight = next_highlight(highlight, list.len(), true);
+        highlight = next_highlight(highlight, list.len(), true);
+        assert_eq!(enter_row(list.len(), highlight), Some(2));
+        assert_eq!(enter_row(list.len(), None), Some(0));
+        assert_eq!(enter_row(2, Some(3)), Some(0));
+        assert_eq!(enter_row(0, Some(0)), None);
     }
 
     #[test]

@@ -1556,8 +1556,7 @@ impl Explorer {
                 let added = view.files.iter().map(|file| file.additions).sum();
                 let removed = view.files.iter().map(|file| file.deletions).sum();
                 let has_files = !view.files.is_empty();
-                let header =
-                    self.render_changes_header(view.branch.clone(), added, removed, has_files, cx);
+                let header = self.render_changes_header(added, removed, has_files, cx);
                 let body = if !has_files {
                     state_message("explorer-changes-empty", "No changes to display", false, cx)
                         .into_any_element()
@@ -1843,10 +1842,9 @@ impl Explorer {
     /// The two toolbar rows over the Changes tree (`ChangesRepositoryToolbar` and
     /// `ChangesComparisonToolbar`): the branch, then the diff mode menu with the total count,
     /// the Open Diff tab button, and the refresh button. A detached HEAD has no branch to
-    /// switch from, so it shows as a passive label.
+    /// switch from, so the branch slot stays empty, as in Electron.
     fn render_changes_header(
         &self,
-        branch: String,
         added: u32,
         removed: u32,
         has_files: bool,
@@ -1867,30 +1865,12 @@ impl Explorer {
                 .border_b_1()
                 .border_color(colors.border)
         };
-        let label = |id: &'static str, text: SharedString| {
-            div()
-                .id(id)
-                .role(Role::Label)
-                .aria_label(text.clone())
-                .min_w_0()
-                .p(px(SPACE_1))
-                .truncate()
-                .text_size(ui_font_size(FONT_SM, cx))
-                .text_color(colors.foreground_muted)
-                .child(text)
-        };
         v_flex()
             .flex_shrink_0()
             .child(
                 toolbar_row("changes-repository-header")
                     .aria_label("Repository")
-                    .map(|row| {
-                        if self.branch_switcher.read(cx).has_branch() {
-                            row.child(self.branch_switcher.clone())
-                        } else {
-                            row.child(label("changes-branch", branch.into()))
-                        }
-                    }),
+                    .child(self.branch_switcher.clone()),
             )
             .child(
                 toolbar_row("changes-header")
