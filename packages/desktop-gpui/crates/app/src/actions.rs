@@ -35,6 +35,38 @@ pub const SETTINGS_CONTEXT: &str = "BachucSettings";
 /// terminal or a text field, so they never bind on the whole window.
 const AGENT_ACTIONS: [&str; 2] = ["agent.interrupt", "message-input.mode-cycle"];
 
+/// Actions on a bare key, such as `?`, that must type in a text field or the terminal. Electron
+/// binds them with `focusScope: "other"`.
+const OUTSIDE_TEXT_ACTIONS: [&str; 1] = ["shortcuts.dialog.toggle"];
+
+/// The key contexts that take typed text: gpui-kit inputs (the composer, the command center,
+/// and settings fields) and the terminal.
+const TEXT_CONTEXTS: [&str; 5] = ["Input", "Terminal", "NumberInput", "TimeField", "Combobox"];
+
+/// The shell context with no text field or terminal focused, as a binding predicate. GPUI's
+/// `!` tests every context of the focus path, so a focused composer in the shell fails it.
+pub fn outside_text_context() -> &'static str {
+    static CONTEXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    CONTEXT.get_or_init(|| {
+        TEXT_CONTEXTS
+            .iter()
+            .fold(SHELL_CONTEXT.to_string(), |predicate, context| {
+                format!("{predicate} && !{context}")
+            })
+    })
+}
+
+/// The key context a shortcut action binds in.
+pub fn binding_context(action: &str) -> &'static str {
+    if AGENT_ACTIONS.contains(&action) {
+        AGENT_CONTEXT
+    } else if OUTSIDE_TEXT_ACTIONS.contains(&action) {
+        outside_text_context()
+    } else {
+        SHELL_CONTEXT
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Bound {
     Run(String),
@@ -97,11 +129,7 @@ pub fn binding_specs(shortcuts: &[Shortcut]) -> Vec<BindingSpec> {
             }
             continue;
         }
-        let context = if AGENT_ACTIONS.contains(&shortcut.action.as_str()) {
-            AGENT_CONTEXT
-        } else {
-            SHELL_CONTEXT
-        };
+        let context = binding_context(&shortcut.action);
         for keys in keystrokes {
             specs.push(BindingSpec {
                 keys,
@@ -252,6 +280,56 @@ mod tests {
             assert!(predicate.eval(std::slice::from_ref(&workspace)));
             assert!(!predicate.eval(std::slice::from_ref(&shell)));
         }
+    }
+
+    #[test]
+    fn question_mark_runs_only_outside_text_fields_and_the_terminal() {
+        let spec = binding_specs(&default_shortcuts())
+            .into_iter()
+            .find(|spec| spec.action == Bound::Run("shortcuts.dialog.toggle".into()))
+            .expect("bound");
+        assert_eq!(spec.keys, "?");
+        let predicate = spec.binding().predicate().expect("scoped");
+        let path = |contexts: &[&str]| -> Vec<KeyContext> {
+            contexts
+                .iter()
+                .map(|context| KeyContext::try_from(*context).unwrap())
+                .collect()
+        };
+        let allowed = [
+            vec![SHELL_CONTEXT],
+            vec![SHELL_CONTEXT, WORKSPACE_CONTEXT, AGENT_CONTEXT, "Timeline"],
+        ];
+        for contexts in allowed {
+            assert!(
+                predicate.depth_of(&path(&contexts)).is_some(),
+                "{contexts:?}"
+            );
+        }
+        let settings = settings_key_context();
+        let typing = [
+            // The composer of an agent pane.
+            vec![
+                SHELL_CONTEXT,
+                WORKSPACE_CONTEXT,
+                AGENT_CONTEXT,
+                "Input mode=editor",
+            ],
+            vec![SHELL_CONTEXT, WORKSPACE_CONTEXT, "Terminal"],
+            // The command center input.
+            vec![SHELL_CONTEXT, "Input"],
+            vec![settings.as_str(), "Input"],
+            vec![settings.as_str(), "NumberInput", "Input"],
+        ];
+        for contexts in typing {
+            assert!(
+                predicate.depth_of(&path(&contexts)).is_none(),
+                "{contexts:?}"
+            );
+        }
+        // Every other shortcut keeps its context.
+        assert_eq!(binding_context("command-center.toggle"), SHELL_CONTEXT);
+        assert_eq!(binding_context("agent.interrupt"), AGENT_CONTEXT);
     }
 
     #[test]

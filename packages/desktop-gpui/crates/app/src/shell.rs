@@ -33,12 +33,15 @@ use bachuc_client::{
     CreatedWorkspace, DirectoryEvent, GitStatusEvent, HostConfig, PrStatus, ProjectNode,
     ThinkingControls, TimelineState, load_hosts, resume_command,
 };
-use bachuc_command::{CommandCenter, CommandEvent, Shortcut, data_dir, load_shortcuts};
+use bachuc_command::{
+    CommandCenter, CommandEvent, CommandFileEvent, Shortcut, ShortcutsDialog, ShortcutsDialogEvent,
+    data_dir, load_shortcuts,
+};
 use bachuc_composer::{ComposerEvent, DraftSeed};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_explorer::{
-    DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerTab, FileView, GitActionsButton,
-    GitActionsEvent, PullRequestEvent, PullRequestView,
+    DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerFileEvent, ExplorerTab, FileView,
+    GitActionsButton, GitActionsEvent, PullRequestEvent, PullRequestView,
 };
 use bachuc_history::{HistoryEvent, HistoryScreen};
 use bachuc_icons::{IconName, provider_logo};
@@ -216,7 +219,13 @@ pub struct Shell {
     known_agents: HashSet<String>,
     next_pane: u64,
     pub(crate) hosts_open: bool,
-    command: Option<(Entity<CommandCenter>, Subscription)>,
+    command: Option<(Entity<CommandCenter>, Vec<Subscription>)>,
+    /// The generation of the last Files scope query, so an answer to an older one is dropped.
+    file_query: u64,
+    shortcuts_dialog: Option<(Entity<ShortcutsDialog>, Subscription)>,
+    /// A file that "Open to the side" puts in the group a split just made: (workspace, cwd,
+    /// path). The split's `PaneEvent::NewTab` opens it in place of a new tab.
+    side_file: Option<(String, String, String)>,
     settings: Option<(Entity<Settings>, Subscription)>,
     pub(crate) dragging_window: bool,
     /// A workspace the New workspace screen created, opened once the client lists it.
@@ -305,6 +314,9 @@ impl Shell {
             next_pane: 0,
             hosts_open: false,
             command: None,
+            file_query: 0,
+            shortcuts_dialog: None,
+            side_file: None,
             settings: None,
             dragging_window: false,
             pending_open: None,
@@ -373,8 +385,9 @@ impl Shell {
                 window,
                 |this: &mut Shell, _, event: &SidebarNavEvent, window, cx| match event {
                     SidebarNavEvent::OpenHistory => this.open_history(window, cx),
-                    // TASK-203 opens the New workspace screen here.
-                    SidebarNavEvent::NewWorkspace { .. } => {}
+                    SidebarNavEvent::NewWorkspace { project_id } => {
+                        this.new_workspace(project_id.clone(), window, cx)
+                    }
                 },
             ),
             cx.subscribe_in(
@@ -836,8 +849,21 @@ impl Shell {
                         }
                     },
                 );
+                let file_subscription = cx.subscribe_in(
+                    &explorer,
+                    window,
+                    |this: &mut Shell, _, event: &ExplorerFileEvent, window, cx| match event {
+                        ExplorerFileEvent::OpenToSide { cwd, path } => {
+                            this.open_file_to_side(cwd, path, window, cx)
+                        }
+                        ExplorerFileEvent::AddToChat { cwd, path } => {
+                            this.add_file_to_chat(cwd, path, window, cx)
+                        }
+                    },
+                );
                 self.host_subscriptions.push(subscription);
                 self.host_subscriptions.push(diff_subscription);
+                self.host_subscriptions.push(file_subscription);
                 self.explorer = Some(explorer);
             }
             (None, _) => {}
@@ -957,7 +983,12 @@ impl Shell {
                 self.sync_plugin_active(cx);
                 cx.notify();
             }
-            PaneEvent::NewTab => self.open_new_tab(workspace_id, None, window, cx),
+            PaneEvent::NewTab => match self.side_file.take() {
+                Some((workspace, cwd, path)) if workspace == workspace_id => {
+                    self.open_file(&cwd, &path, None, window, cx)
+                }
+                _ => self.open_new_tab(workspace_id, None, window, cx),
+            },
         }
     }
 
@@ -2385,15 +2416,17 @@ impl Shell {
         let subscription = cx.subscribe_in(
             &view,
             window,
-            move |this: &mut Shell, _, event: &TerminalEvent, _, cx| {
-                if let TerminalEvent::Opened { id } = event {
-                    this.set_pane_kind(
-                        &workspace,
-                        &pane_key,
-                        TabKind::Terminal { id: id.clone() },
-                        cx,
-                    );
+            move |this: &mut Shell, _, event: &TerminalEvent, window, cx| match event {
+                TerminalEvent::Opened { id } => this.set_pane_kind(
+                    &workspace,
+                    &pane_key,
+                    TabKind::Terminal { id: id.clone() },
+                    cx,
+                ),
+                TerminalEvent::OpenFile { cwd, path, line } => {
+                    this.open_file(cwd, path, *line, window, cx)
                 }
+                TerminalEvent::Exited => {}
             },
         );
         self.put_pane(
@@ -2781,20 +2814,214 @@ impl Shell {
         center.update(cx, |center, cx| {
             center.set_plugin_context(workspace, agent, cx)
         });
-        let subscription = cx.subscribe_in(
-            &center,
-            window,
-            |this: &mut Shell, _, event: &CommandEvent, window, cx| {
-                this.command = None;
-                match event {
-                    CommandEvent::Run { id } => this.run_command(id, window, cx),
-                    CommandEvent::Dismissed => this.refocus(window, cx),
+        let subscriptions = vec![
+            cx.subscribe_in(
+                &center,
+                window,
+                |this: &mut Shell, _, event: &CommandEvent, window, cx| {
+                    this.command = None;
+                    match event {
+                        CommandEvent::Run { id } => this.run_command(id, window, cx),
+                        CommandEvent::Dismissed => this.refocus(window, cx),
+                    }
+                    cx.notify();
+                },
+            ),
+            cx.subscribe_in(
+                &center,
+                window,
+                |this: &mut Shell, center, event: &CommandFileEvent, window, cx| match event {
+                    CommandFileEvent::FileQuery { query } => {
+                        this.query_files(center.clone(), query, cx)
+                    }
+                    CommandFileEvent::OpenFile { path } => {
+                        this.command = None;
+                        if let Some(cwd) = this.selected_cwd().map(str::to_string) {
+                            this.open_file(&cwd, path, None, window, cx);
+                        }
+                        cx.notify();
+                    }
+                },
+            ),
+        ];
+        self.command = Some((center, subscriptions));
+        cx.notify();
+    }
+
+    /// Answers a Files scope query with the files of the selected workspace. An answer to an
+    /// older query, or to a closed command center, is dropped.
+    fn query_files(&mut self, center: Entity<CommandCenter>, query: &str, cx: &mut Context<Self>) {
+        self.file_query += 1;
+        let generation = self.file_query;
+        let Some(cwd) = self.selected_cwd().map(str::to_string) else {
+            center.update(cx, |center, cx| center.set_file_results(Vec::new(), cx));
+            return;
+        };
+        let task = self.client.update(cx, |client, cx| {
+            client.directory_suggestions(&cwd, query, true, false, 100, cx)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |shell, cx| {
+                let open = shell
+                    .command
+                    .as_ref()
+                    .is_some_and(|(open, _)| *open == center);
+                if shell.file_query != generation || !open {
+                    return;
                 }
+                let paths = match result {
+                    Ok(found) => found
+                        .into_iter()
+                        .filter(|entry| !entry.is_directory)
+                        .map(|entry| entry.path)
+                        .collect(),
+                    Err(error) => {
+                        shell.show_toast(false, format!("{error:#}"), cx);
+                        Vec::new()
+                    }
+                };
+                center.update(cx, |center, cx| center.set_file_results(paths, cx));
+            });
+        })
+        .detach();
+    }
+
+    /// `shortcuts.dialog.toggle`: shows the shortcuts dialog, or hides it when it shows.
+    fn toggle_shortcuts_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcuts_dialog.take().is_some() {
+            self.refocus(window, cx);
+            return;
+        }
+        let dialog = cx.new(|cx| ShortcutsDialog::new(window, cx));
+        let subscription = cx.subscribe_in(
+            &dialog,
+            window,
+            |this: &mut Shell, _, event: &ShortcutsDialogEvent, window, cx| {
+                let ShortcutsDialogEvent::Dismissed = event;
+                this.shortcuts_dialog = None;
+                this.refocus(window, cx);
                 cx.notify();
             },
         );
-        self.command = Some((center, subscription));
-        cx.notify();
+        self.shortcuts_dialog = Some((dialog, subscription));
+    }
+
+    /// The New workspace screen, on the project when one is given. A page surface closes, as
+    /// for a route change.
+    fn new_workspace(
+        &mut self,
+        project_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let preset = NewWorkspacePreset {
+            project_id,
+            ..NewWorkspacePreset::default()
+        };
+        self.open_new_workspace(preset, window, cx);
+        self.close_page_surface(cx);
+    }
+
+    /// `agent.new` ("Open project"): a folder dialog, then `add_project`, then the New
+    /// workspace screen on the added project, as Electron's add project flow ends.
+    fn open_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Open project".into()),
+        });
+        let client = self.client.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else {
+                return;
+            };
+            let Some(path) = paths.first().map(|path| path.to_string_lossy().to_string()) else {
+                return;
+            };
+            let Ok(task) = cx.update(|_, cx| client.update(cx, |c, cx| c.add_project(&path, cx)))
+            else {
+                return;
+            };
+            let result = task.await;
+            let _ = this.update_in(cx, |shell, window, cx| match result {
+                Ok(added) => shell.new_workspace(Some(added.id), window, cx),
+                Err(error) => shell.show_toast(false, format!("{error:#}"), cx),
+            });
+        })
+        .detach();
+    }
+
+    /// `workspace.pin`: pins the selected workspace, or unpins it.
+    fn toggle_pin(&mut self, cx: &mut Context<Self>) {
+        let pinned = find_workspace(self.client.read(cx).projects(), &self.selected)
+            .map(|(_, workspace)| workspace.pinned);
+        if let Some(pinned) = pinned {
+            let id = self.selected.clone();
+            self.client
+                .update(cx, |client, cx| client.pin_workspace(&id, !pinned, cx));
+        }
+    }
+
+    /// Explorer "Open to the side": the file in the group right of the focused one, or in a
+    /// new group split to the right. An open file tab only shows.
+    fn open_file_to_side(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selected = self.selected.clone();
+        if self
+            .find_identity(&selected, &file_key(cwd, path))
+            .is_some()
+        {
+            self.open_file(cwd, path, None, window, cx);
+            return;
+        }
+        let right = self
+            .workspaces
+            .get(&selected)
+            .and_then(|open| neighbor_active_key(open.view.read(cx), "right"));
+        match right {
+            Some(key) => {
+                self.activate_key(&selected, &key, window, cx);
+                self.open_file(cwd, path, None, window, cx);
+            }
+            None => {
+                self.side_file = Some((selected.clone(), cwd.to_string(), path.to_string()));
+                self.with_workspace(
+                    &selected,
+                    cx,
+                    |workspace, window, cx| workspace.split(SplitAxis::Right, window, cx),
+                    window,
+                );
+            }
+        }
+    }
+
+    /// Explorer "Add to chat": the path as a mention in the active agent tab's composer. With
+    /// no agent tab active it does nothing, as Electron hides the item then.
+    fn add_file_to_chat(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(key) = self.active_key(cx) else {
+            return;
+        };
+        let composer = match self.pane(&self.selected, &key).map(|pane| &pane.content) {
+            Some(PaneContent::Agent(view)) => view.read(cx).composer.clone(),
+            _ => return,
+        };
+        let path = absolute_path(cwd, path);
+        composer.update(cx, |composer, cx| {
+            composer.insert_path_mention(&path, window, cx)
+        });
     }
 
     fn run_command(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -2874,6 +3101,16 @@ impl Shell {
                 Some(_) => self.refocus(window, cx),
                 None => self.open_command_center(window, cx),
             },
+            "workspace.new" => self.new_workspace(None, window, cx),
+            "agent.new" => self.open_project(window, cx),
+            "command-center.files" => {
+                self.open_command_center(window, cx);
+                if let Some(center) = self.command.as_ref().map(|(center, _)| center.clone()) {
+                    center.update(cx, |center, cx| center.open_files_scope(window, cx));
+                }
+            }
+            "workspace.pin" => self.toggle_pin(cx),
+            "shortcuts.dialog.toggle" => self.toggle_shortcuts_dialog(window, cx),
             "settings.toggle" => match self.settings.take() {
                 Some(_) => self.refocus(window, cx),
                 None => self.open_settings(window, cx),
@@ -3157,6 +3394,9 @@ impl Render for Shell {
                 .bg(t.surface0)
                 .text_color(t.foreground)
                 .child(self.render_settings(settings, cx))
+                .when_some(self.shortcuts_dialog.as_ref(), |root, (dialog, _)| {
+                    root.child(dialog.clone())
+                })
                 .into_any_element();
         }
         let sidebar = self
@@ -3252,6 +3492,9 @@ impl Render for Shell {
             .children(overlay)
             .when_some(self.command.as_ref(), |root, (center, _)| {
                 root.child(center.clone())
+            })
+            .when_some(self.shortcuts_dialog.as_ref(), |root, (dialog, _)| {
+                root.child(dialog.clone())
             })
             .children(render_toasts(&self.toasts, cx))
             .into_any_element()
