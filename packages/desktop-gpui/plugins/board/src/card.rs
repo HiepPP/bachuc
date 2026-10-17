@@ -182,6 +182,110 @@ pub(crate) fn button(
         .cursor_pointer()
 }
 
+/// The card parts that take focus, in Tab order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FocusPart {
+    Open,
+    Repo,
+    Diffs,
+    Star,
+    Task,
+    Remove,
+}
+
+const FOCUS_PARTS: [FocusPart; 6] = [
+    FocusPart::Open,
+    FocusPart::Repo,
+    FocusPart::Diffs,
+    FocusPart::Star,
+    FocusPart::Task,
+    FocusPart::Remove,
+];
+
+/// The ring's distance outside the part edge and its corner radius. Electron draws a 2 px outline
+/// at offset 1, or at -2 inside a surface that clips its overflow (`focus.ts`), so the inset ring
+/// covers the part's outer 2 px.
+pub(crate) fn ring_box(radius: f32, inset: bool) -> (f32, f32) {
+    let outset = if inset { 0. } else { 1. + RING_WIDTH };
+    (outset, if radius > 0. { radius + outset } else { 0. })
+}
+
+/// `actionsVisible = ... || actionFocused` (`page.tsx:386-394`): any focus on the star or
+/// Remove, from a click too, shows a subagent row's actions.
+pub(crate) fn subagent_actions_shown(pinned: bool, focused: Option<FocusPart>) -> bool {
+    pinned || matches!(focused, Some(FocusPart::Star | FocusPart::Remove))
+}
+
+/// One keyed focus handle per focusable part of a rendered card, so the render knows which part
+/// has focus. GPUI drops a handle when its card is not rendered.
+struct Parts {
+    handles: [FocusHandle; 6],
+    focused: Option<FocusPart>,
+    keyboard: bool,
+}
+
+impl Parts {
+    fn new(agent_id: &str, keyboard: bool, window: &mut Window, cx: &mut App) -> Self {
+        let key = SharedString::from(format!("board-part-{agent_id}"));
+        // The handle carries the tab stop: `.tab_stop` on the element is ignored for a tracked handle.
+        let handles = std::array::from_fn(|ix| {
+            window
+                .use_keyed_state(ElementId::named_usize(key.clone(), ix), cx, |_, cx| {
+                    cx.focus_handle().tab_stop(true)
+                })
+                .read(cx)
+                .clone()
+        });
+        let focused = FOCUS_PARTS
+            .into_iter()
+            .find(|&part| handles[part as usize].is_focused(window));
+        Self {
+            handles,
+            focused,
+            keyboard,
+        }
+    }
+
+    fn handle(&self, part: FocusPart) -> &FocusHandle {
+        &self.handles[part as usize]
+    }
+
+    /// The ring is for keyboard focus only; a click focuses the part without drawing it.
+    fn ring(&self, part: FocusPart) -> bool {
+        self.keyboard && self.focused == Some(part)
+    }
+}
+
+/// A focusable card part with a role and a label; `focus_ring` draws its ring.
+fn part(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    focus: &FocusHandle,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .role(Role::Button)
+        .aria_label(label)
+        .track_focus(focus)
+        .cursor_pointer()
+}
+
+/// The 2 px keyboard focus ring as a border with no fill, laid over the part. A spread `BoxShadow`
+/// does not work here: GPUI paints its whole quad under the part, so a transparent part showed a
+/// solid box.
+fn focus_ring(color: Hsla, radius: f32, inset: bool) -> Div {
+    let (outset, radius) = ring_box(radius, inset);
+    div()
+        .absolute()
+        .top(px(-outset))
+        .left(px(-outset))
+        .right(px(-outset))
+        .bottom(px(-outset))
+        .border_2()
+        .border_color(color)
+        .rounded(px(radius))
+}
+
 pub(crate) fn spinner(color: Hsla, size: Pixels) -> AnyElement {
     div()
         .flex_none()
@@ -352,6 +456,7 @@ pub(crate) fn run_card(p: &Paint, c: Card, window: &mut Window, cx: &mut App) ->
         .read(cx)
         .clone();
     let keyboard = window.last_input_was_keyboard();
+    let f = Parts::new(&run.agent_id, keyboard, window, cx);
     let c = Card {
         focused: card_active(
             false,
@@ -361,13 +466,13 @@ pub(crate) fn run_card(p: &Paint, c: Card, window: &mut Window, cx: &mut App) ->
         ..c
     };
 
-    let star = star_button(p, &c, &ui, &group);
-    let remove = (c.can_remove && !running).then(|| remove_button(p, &c, &ui, &group));
+    let star = star_button(p, &c, &ui, &f, &group);
+    let remove = (c.can_remove && !running).then(|| remove_button(p, &c, &ui, &f, &group));
 
     let body = if c.subagent {
-        subagent_body(p, &c, &ui, &group, star, remove)
+        subagent_body(p, &c, &ui, &f, &group, star, remove)
     } else {
-        card_body(p, &c, &ui, &group, star, remove, window, cx)
+        card_body(p, &c, &ui, &f, &group, star, remove, window, cx)
     };
     let errors = [
         (ui.star_error, "Could not update star. Please retry."),
@@ -396,13 +501,11 @@ pub(crate) fn run_card(p: &Paint, c: Card, window: &mut Window, cx: &mut App) ->
     } else {
         p.s(CARD_RADIUS)
     };
-    let open = button(
+    let open = part(
         SharedString::from(format!("board-open-{}", run.id)),
         format!("Open conversation {}", run.title),
-        t.accent,
-        c.embedded || c.subagent,
+        f.handle(FocusPart::Open),
     )
-    .tab_stop(true)
     .aria_description(open_hint(run, p.now))
     .absolute()
     .inset_0()
@@ -452,10 +555,15 @@ pub(crate) fn run_card(p: &Paint, c: Card, window: &mut Window, cx: &mut App) ->
                     }),
             ))
         })
+        // The open target covers the card, whose clip would hide an outer ring, so it draws inset,
+        // last, over the attention border.
+        .when(f.ring(FocusPart::Open), |card| {
+            card.child(focus_ring(t.accent, f32::from(radius), true))
+        })
         .into_any_element()
 }
 
-fn star_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyElement {
+fn star_button(p: &Paint, c: &Card, ui: &CardUi, f: &Parts, group: &SharedString) -> AnyElement {
     let (run, t) = (c.run, &p.t);
     let size = p.s(if c.subagent { 24. } else { 28. });
     let quiet = !(c.subagent || run.starred || ui.starring);
@@ -473,17 +581,15 @@ fn star_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEle
             .text_color(t.foreground_muted)
             .into_any_element()
     };
-    let star = button(
+    let star = part(
         SharedString::from(format!("board-star-{}", run.id)),
         format!(
             "{} {}",
             if run.starred { "Unstar" } else { "Star" },
             run.title
         ),
-        t.accent,
-        c.subagent,
+        f.handle(FocusPart::Star),
     )
-    .tab_stop(true)
     .aria_selected(run.starred)
     .flex_none()
     .size(size)
@@ -497,11 +603,9 @@ fn star_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEle
     })
     .when(ui.starring, |star| star.opacity(0.5))
     .when(quiet, |star| {
-        // A second `focus_visible` replaces the first, so this one draws the ring too.
-        let inset = c.subagent;
         star.opacity(0.35)
             .group_hover(group.clone(), |style| style.opacity(1.))
-            .focus_visible(move |style| style.opacity(1.).shadow(ring(t.accent, inset)))
+            .focus_visible(|style| style.opacity(1.))
     })
     .when(!ui.starring, |star| {
         p.press(
@@ -512,24 +616,25 @@ fn star_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEle
             },
         )
     })
-    .child(glyph);
+    .child(glyph)
+    .when(f.ring(FocusPart::Star), |star| {
+        star.child(focus_ring(t.accent, CONTROL_RADIUS * p.scale, c.subagent))
+    });
     dim(star, CardPart::Star, c.seen, c.focused, group).into_any_element()
 }
 
-fn diffs_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyElement {
+fn diffs_button(p: &Paint, c: &Card, ui: &CardUi, f: &Parts, group: &SharedString) -> AnyElement {
     let (run, t) = (c.run, &p.t);
     let off = run.diffs_off;
-    let diffs = button(
+    let diffs = part(
         SharedString::from(format!("board-diffs-{}", run.id)),
         format!(
             "Turn edit diffs {} for {}",
             if off { "on" } else { "off" },
             run.title
         ),
-        t.accent,
-        false,
+        f.handle(FocusPart::Diffs),
     )
-    .tab_stop(true)
     .aria_selected(off)
     .flex_none()
     .size(p.s(28.))
@@ -548,7 +653,7 @@ fn diffs_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEl
             diffs
                 .opacity(0.)
                 .group_hover(group.clone(), |style| style.opacity(1.))
-                .focus_visible(move |style| style.opacity(1.).shadow(ring(t.accent, false)))
+                .focus_visible(|style| style.opacity(1.))
         }
     })
     .when(!ui.toggling_diffs, |diffs| {
@@ -572,20 +677,21 @@ fn diffs_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEl
         } else {
             t.foreground_muted
         }),
-    );
+    )
+    .when(f.ring(FocusPart::Diffs), |diffs| {
+        diffs.child(focus_ring(t.accent, CONTROL_RADIUS * p.scale, false))
+    });
     dim(diffs, CardPart::Diffs, c.seen, c.focused, group).into_any_element()
 }
 
-fn remove_button(p: &Paint, c: &Card, ui: &CardUi, card: &SharedString) -> AnyElement {
+fn remove_button(p: &Paint, c: &Card, ui: &CardUi, f: &Parts, card: &SharedString) -> AnyElement {
     let (run, t) = (c.run, &p.t);
     let group: SharedString = format!("board-remove-{}", run.id).into();
-    let base = button(
+    let base = part(
         group.clone(),
         remove_name(&run.title, c.remove_count),
-        t.accent,
-        c.subagent,
+        f.handle(FocusPart::Remove),
     )
-    .tab_stop(true)
     .group(group.clone())
     .flex_none()
     .rounded(p.s(CONTROL_RADIUS))
@@ -599,7 +705,10 @@ fn remove_button(p: &Paint, c: &Card, ui: &CardUi, card: &SharedString) -> AnyEl
             },
         )
     });
-    let base = dim(base, CardPart::Remove, c.seen, c.focused, card);
+    let base = dim(base, CardPart::Remove, c.seen, c.focused, card)
+        .when(f.ring(FocusPart::Remove), |remove| {
+            remove.child(focus_ring(t.accent, CONTROL_RADIUS * p.scale, c.subagent))
+        });
     if c.subagent {
         base.p(p.s(5.))
             .child(
@@ -700,7 +809,7 @@ fn model_tags(p: &Paint, run: &Run, compact: bool) -> Div {
 }
 
 /// The Watchtower TASK a thread served; a link when Watchtower can open it.
-fn task_chip(p: &Paint, run: &Run, compact: bool) -> Option<AnyElement> {
+fn task_chip(p: &Paint, run: &Run, f: &Parts, compact: bool) -> Option<AnyElement> {
     let task = run.task_id.clone()?;
     let t = &p.t;
     let chip = p
@@ -722,14 +831,15 @@ fn task_chip(p: &Paint, run: &Run, compact: bool) -> Option<AnyElement> {
             .id(SharedString::from(format!("board-task-{}", run.id)))
             .role(Role::Link)
             .aria_label(format!("Open {task} in Watchtower"))
-            .focusable()
-            .tab_stop(true)
-            .focus_visible(move |style| style.shadow(ring(t.accent, false)))
+            .track_focus(f.handle(FocusPart::Task))
             .flex_none()
             .cursor_pointer()
             .active(|style| style.opacity(0.7))
             .on_click(p.act(CardAction::OpenTask(Box::new(run.clone()))))
             .child(chip)
+            .when(f.ring(FocusPart::Task), |link| {
+                link.child(focus_ring(t.accent, 4. * p.scale, false))
+            })
             .into_any_element()
     } else {
         chip.into_any_element()
@@ -741,6 +851,7 @@ fn card_body(
     p: &Paint,
     c: &Card,
     ui: &CardUi,
+    f: &Parts,
     group: &SharedString,
     star: AnyElement,
     remove: Option<AnyElement>,
@@ -750,15 +861,13 @@ fn card_body(
     let (run, t) = (c.run, &p.t);
     let running = run.running();
     let hue = if c.seen { None } else { p.hue(run) };
-    let diffs = p.online.then(|| diffs_button(p, c, ui, group));
+    let diffs = p.online.then(|| diffs_button(p, c, ui, f, group));
 
-    let repo = button(
+    let repo = part(
         SharedString::from(format!("board-repo-{}", run.id)),
         format!("New conversation in {}", run.project),
-        t.accent,
-        c.embedded,
+        f.handle(FocusPart::Repo),
     )
-    .tab_stop(true)
     .flex_shrink(1.)
     .min_w_0()
     .flex()
@@ -778,7 +887,10 @@ fn card_body(
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(repo_label(hue, t))
             .child(run.project.clone()),
-    );
+    )
+    .when(f.ring(FocusPart::Repo), |repo| {
+        repo.child(focus_ring(t.accent, CONTROL_RADIUS * p.scale, c.embedded))
+    });
     let repo_row = h_flex()
         .items_center()
         .justify_between()
@@ -884,7 +996,7 @@ fn card_body(
         .pl(p.s(46.))
         .mt(p.s(2.))
         .min_h(p.s(23.))
-        .children(task_chip(p, run, false))
+        .children(task_chip(p, run, f, false))
         .child(dim(
             div()
                 .flex_1()
@@ -911,6 +1023,7 @@ fn subagent_body(
     p: &Paint,
     c: &Card,
     ui: &CardUi,
+    f: &Parts,
     group: &SharedString,
     star: AnyElement,
     remove: Option<AnyElement>,
@@ -951,21 +1064,19 @@ fn subagent_body(
         Some((label.len(), label_color(run, t), FontWeight::MEDIUM)),
     );
     // Hidden actions swap by opacity, never by display or visibility: a hidden element registers no
-    // tab stop, so Tab could not reach them. Focus on the star or Remove shows them (`actionFocused`).
+    // tab stop, so Tab could not reach them. `in_focus` cannot show them: it tests whether the
+    // container is inside the focused element, not whether it holds the focused star.
     let pinned = run.starred || ui.starring || ui.removing || ui.star_error || ui.remove_error;
     let actions = h_flex()
-        .id(SharedString::from(format!("board-actions-{}", run.id)))
-        .focusable()
         .absolute()
         .right(-p.s(2.))
         .top(p.s(2.))
         .rounded(p.s(CONTROL_RADIUS))
         .bg(t.surface1)
-        .when(!pinned, |actions| {
+        .when(!subagent_actions_shown(pinned, f.focused), |actions| {
             actions
                 .opacity(0.)
                 .group_hover(group.clone(), |style| style.opacity(1.))
-                .in_focus(|style| style.opacity(1.))
         })
         .child(star)
         .children(remove);
@@ -1040,7 +1151,7 @@ fn subagent_body(
                 .gap(p.s(8.))
                 .pl(p.s(54.))
                 .mt(p.s(2.))
-                .children(task_chip(p, run, true))
+                .children(task_chip(p, run, f, true))
                 .child(dim(
                     div()
                         .flex_1()
@@ -1350,7 +1461,10 @@ fn nested_cluster(
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob import brings a `test` attribute of its own.
-    use super::{CardPart, actions_offset, card_active, part_opacity, pulse_opacity};
+    use super::{
+        CardPart, FocusPart, actions_offset, card_active, part_opacity, pulse_opacity, ring_box,
+        subagent_actions_shown,
+    };
 
     #[test]
     fn a_pulse_fades_to_0_35_and_back_in_one_loop() {
@@ -1415,5 +1529,32 @@ mod tests {
             part_opacity(CardPart::Main, true, card_active(false, true, false)),
             0.5
         );
+    }
+
+    #[test]
+    fn the_focus_ring_sits_1_px_outside_the_part_or_inside_a_clipping_surface() {
+        // Electron's 2 px outline at offset 1: the ring's outer edge is 3 px out.
+        assert_eq!(ring_box(6., false), (3., 9.));
+        // Offset -2: the ring covers the part's outer 2 px and keeps its radius.
+        assert_eq!(ring_box(6., true), (0., 6.));
+        // A square part keeps square corners.
+        assert_eq!(ring_box(0., false), (3., 0.));
+        assert_eq!(ring_box(0., true), (0., 0.));
+    }
+
+    #[test]
+    fn focus_on_the_star_or_remove_shows_a_subagent_rows_actions() {
+        assert!(!subagent_actions_shown(false, None));
+        assert!(subagent_actions_shown(true, None));
+        assert!(subagent_actions_shown(false, Some(FocusPart::Star)));
+        assert!(subagent_actions_shown(false, Some(FocusPart::Remove)));
+        for part in [
+            FocusPart::Open,
+            FocusPart::Repo,
+            FocusPart::Diffs,
+            FocusPart::Task,
+        ] {
+            assert!(!subagent_actions_shown(false, Some(part)), "{part:?}");
+        }
     }
 }
