@@ -96,9 +96,33 @@ impl Paint<'_> {
         }
     }
 
+    /// A click and an AX press run the same action. GPUI's default AX press replays a click at
+    /// the node centre, which hits whatever is drawn there, or nothing when the centre is clipped.
+    fn press<E: StatefulInteractiveElement>(&self, el: E, action: CardAction) -> E {
+        let on = self.on.clone();
+        el.on_click(self.act(action.clone())).on_a11y_action(
+            AccessibleAction::Click,
+            move |_, window, cx| {
+                // An AX action goes only to its own node, so the card's Open never runs; this
+                // keeps the click's contract anyway.
+                cx.stop_propagation();
+                on(action.clone(), window, cx);
+            },
+        )
+    }
+
     fn text(&self, size: f32, line: f32) -> Div {
         div().text_size(self.s(size)).line_height(self.s(line))
     }
+}
+
+/// How far the repo row's pencil and star move right into the card padding: the star's
+/// `marginRight: -6` in `page.tsx`. GPUI takes it as a relative offset, never as a negative margin:
+/// taffy sizes a `flex_none` row as 0 wide when a child has a negative main-axis margin (its
+/// max-content code scales the negative contribution by the flex basis), so the pencil and star
+/// drew past the card's clip.
+pub(crate) fn actions_offset(scale: f32) -> f32 {
+    6. * scale
 }
 
 /// The opacity of a pulse at `delta` of its loop: ease in and out from 1 to 0.35 and back.
@@ -436,7 +460,7 @@ fn star_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEle
     .rounded(p.s(CONTROL_RADIUS))
     .when(!c.subagent, |star| {
         // Keeps the repo row one text line tall.
-        star.my(-p.s(6.)).mr(-p.s(6.))
+        star.my(-p.s(6.))
     })
     .when(ui.starring, |star| star.opacity(0.5))
     .when(quiet, |star| {
@@ -447,11 +471,13 @@ fn star_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEle
             .focus_visible(move |style| style.opacity(1.).shadow(ring(t.accent, inset)))
     })
     .when(!ui.starring, |star| {
-        star.hover(|style| style.bg(t.surface2))
-            .on_click(p.act(CardAction::Star {
+        p.press(
+            star.hover(|style| style.bg(t.surface2)),
+            CardAction::Star {
                 run_id: run.id.clone(),
                 starred: !run.starred,
-            }))
+            },
+        )
     })
     .child(glyph);
     dim(star, CardPart::Star, c.seen, group).into_any_element()
@@ -492,12 +518,13 @@ fn diffs_button(p: &Paint, c: &Card, ui: &CardUi, group: &SharedString) -> AnyEl
         }
     })
     .when(!ui.toggling_diffs, |diffs| {
-        diffs
-            .hover(|style| style.bg(t.surface2))
-            .on_click(p.act(CardAction::Diffs {
+        p.press(
+            diffs.hover(|style| style.bg(t.surface2)),
+            CardAction::Diffs {
                 agent_id: run.agent_id.clone(),
                 off: !off,
-            }))
+            },
+        )
     })
     .child(
         icon(if off {
@@ -529,12 +556,13 @@ fn remove_button(p: &Paint, c: &Card, ui: &CardUi, card: &SharedString) -> AnyEl
     .rounded(p.s(CONTROL_RADIUS))
     .when(ui.removing, |remove| remove.opacity(0.5))
     .when(!ui.removing, |remove| {
-        remove
-            .hover(|style| style.bg(t.surface2))
-            .on_click(p.act(CardAction::Remove {
+        p.press(
+            remove.hover(|style| style.bg(t.surface2)),
+            CardAction::Remove {
                 run_id: run.id.clone(),
                 agent_id: run.agent_id.clone(),
-            }))
+            },
+        )
     });
     let base = dim(base, CardPart::Remove, c.seen, card);
     if c.subagent {
@@ -728,6 +756,8 @@ fn card_body(
         .child(
             h_flex()
                 .flex_none()
+                .relative()
+                .left(px(actions_offset(p.scale)))
                 .items_center()
                 .children(diffs)
                 .child(star),
@@ -1268,7 +1298,7 @@ fn nested_cluster(
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob import brings a `test` attribute of its own.
-    use super::{CardPart, part_opacity, pulse_opacity};
+    use super::{CardPart, actions_offset, part_opacity, pulse_opacity};
 
     #[test]
     fn a_pulse_fades_to_0_35_and_back_in_one_loop() {
@@ -1277,6 +1307,14 @@ mod tests {
         assert!((pulse_opacity(1.) - 1.).abs() < 1e-6);
         assert!(pulse_opacity(0.25) < 1. && pulse_opacity(0.25) > 0.35);
         assert!((pulse_opacity(0.25) - pulse_opacity(0.75)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_repo_actions_move_6_px_into_the_padding_and_scale_with_the_board() {
+        assert_eq!(actions_offset(1.), 6.);
+        assert!((actions_offset(1.6) - 9.6).abs() < 1e-6);
+        // Inside the 12 px card padding at every scale, so the star is never clipped.
+        assert!(actions_offset(1.6) < 12. * 1.6);
     }
 
     #[test]
