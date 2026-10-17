@@ -5,7 +5,7 @@
 //!
 //! [`Sidebar`] never opens anything itself. The app handles [`SidebarEvent`]. The plugin rows,
 //! sections, and the Add project button request their work through [`SidebarPluginEvent`], a
-//! second event type.
+//! second event type, and the built-in nav rows and the project "+" through [`SidebarNavEvent`].
 
 mod metrics;
 pub mod model;
@@ -13,4 +13,4 @@ pub mod plugin;
 mod ring;
 mod sidebar;
 
-pub use sidebar::{Sidebar, SidebarEvent, SidebarPluginEvent};
+pub use sidebar::{Sidebar, SidebarEvent, SidebarNavEvent, SidebarPluginEvent};
