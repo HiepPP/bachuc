@@ -47,3 +47,36 @@ Run 2026-10-18 by the UI checker. GPUI: bundle `Bachuc GPUI Check` (PID 80366) o
 - Quote: differs, as expected (Q-117). GPUI: 2 pt left border, no background. Electron: 4 pt left border, background `#FAFAFA`, padded box. Evidence: `/tmp/t207-ref-quote-crop.png`; the GPUI quote sits under the composer (`/tmp/t207-gpui-quote-crop.png`), and the view could not be scrolled without the pointer.
 - Edit row of a file under home outside the cwd: PASS. The row shows `~/.t207-check/x.md`. Evidence: `/tmp/t198r2-03-finished-open.png`. Note: the turn header summary on the same turn shows `.t207-check/x.md` without `~/`; that text comes from another code path.
 - Cleanup: both apps quit. The scratch file `~/.t207-check/x.md` (made by the checker) stays.
+
+## Fix round 1
+
+### Status
+
+DONE (code). The prose line pitch is fixed in code; its screen check is DEFERRED (UI checker). The quote and the letter spacing stay as recorded above.
+
+### Changed
+
+- `packages/desktop-gpui/crates/timeline/src/lib.rs`:
+  - `BODY_LINE_HEIGHT` 1.618 -> 1.4, the markdown `body` of `markdown-styles.ts:37` (`Math.round(15 * 1.4)` = 21). `body_line_height` keeps its rounding.
+  - `LINE_BOX_ROUNDING` removed and `PARAGRAPH_GAP` = `BLOCK_GAP` (24). The 1 px take-back existed because the old web line box was fractional; both line boxes are now whole pixels (21). Pitch: 21 + 24 = 45, as the web's 21 + `marginBottom: 12` + block 12. The gap moves from 23 to 24, the Electron value; the UI check measured Electron 24.5 against GPUI 23.5 with the same +0.5 read bias, so the new gap should read the same as Electron.
+  - The `markdown_style` doc comment and the test `paragraph_pitch_matches_the_web_stream` (now 21, `BLOCK_GAP`, 45) follow.
+- Other text: only `render_markdown` uses `body_line_height`. Lists and step notes draw inside that text view and take its 21, which is also the Electron `bullet_list_icon` and `ordered_list_icon` line height (`markdown-styles.ts:298-308`). Fences keep `FENCE_LINE_HEIGHT` 1.45, headings `HEADING_LINE_HEIGHT` 1.3; both have their own Electron values and did not use the body value.
+- Turn header summary path: not changed. It is `short_path` (`lib.rs`, the `render_turn_header` summary), a port of Electron's `shortPath` (`packages/app/src/tool-calls/detail-level/turn/view.tsx:131`), which shows the last 2 path segments and so also shows `.t207-check/x.md`. It is not a display path, and the TASK Boundaries say the summary already matches and must not change.
+
+### Contract
+
+- No Produces or Consumes lines. No signature changed.
+
+### Verified
+
+- `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-timeline` -> pass (lib 23 tests, with the TASK-208 tests). Logs: `/tmp/t207r1-tl.txt`, `/tmp/t208-tl.txt`.
+- `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-plugin-edit-diffs` -> pass (37 + 1). Log: `/tmp/t207r1-ed.txt`.
+- `./cargo.sh fmt --check -p bachuc-timeline` -> exit 0.
+- `./cargo.sh metadata --format-version 1 > /dev/null` -> exit 0. `CARGO_BUILD_JOBS=4 ./cargo.sh build -p bachuc-app` -> exit 0.
+- UI check: prose line pitch 21 pt and paragraph gap beside Electron -> DEFERRED (UI checker).
+- Anti-goal: CPU under 10% during the mock stream -> DEFERRED (UI checker). The change alters two constants only.
+
+### Lessons
+
+- The old `LINE_BOX_ROUNDING` comment named a web pitch of 47 that no longer holds: Electron's prose is `round(content * 1.4)`, so read `markdown-styles.ts` before trusting a pitch in a comment.
+- The turn header summary and the Edit row use different path rules in Electron too (`shortPath` against `displayPath`), so a `~` on one and not the other matches Electron.
