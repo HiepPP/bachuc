@@ -29,11 +29,12 @@ use crate::state::{
 use crate::toast::{TOAST_DURATION, ToastStack, render_toasts};
 use crate::workspace_draft::{self, WorkspaceDraftPane};
 use bachuc_client::{
-    AgentSummary, Client, ClientEvent, CreatedWorkspace, DirectoryEvent, GitStatusEvent,
-    HostConfig, PrStatus, ProjectNode, TimelineState, load_hosts, resume_command,
+    AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, Client, ClientEvent,
+    CreatedWorkspace, DirectoryEvent, GitStatusEvent, HostConfig, PrStatus, ProjectNode,
+    ThinkingControls, TimelineState, load_hosts, resume_command,
 };
 use bachuc_command::{CommandCenter, CommandEvent, Shortcut, data_dir, load_shortcuts};
-use bachuc_composer::ComposerEvent;
+use bachuc_composer::{ComposerEvent, DraftSeed};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_explorer::{
     DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerTab, FileView, GitActionsButton,
@@ -51,7 +52,7 @@ use bachuc_terminal::{TerminalEvent, TerminalView};
 use bachuc_theme::metrics::TRAFFIC_LIGHT_WIDTH;
 use bachuc_theme::tokens;
 use bachuc_timeline::grouping::{item_type, message_key};
-use bachuc_timeline::{TimelineEvent, TimelineView};
+use bachuc_timeline::{ForkTarget, TimelineEvent, TimelineForkEvent, TimelineView};
 use bachuc_workspace::model::Rect;
 use bachuc_workspace::{PaneEvent, PaneItem, SplitAxis, TabKind, TabMenuEvent, Workspace};
 use gpui_kit::component::button::ButtonVariant;
@@ -1371,6 +1372,18 @@ impl Shell {
             self.open_new_workspace_screen(workspace_id, replace, preset, window, cx);
             return;
         };
+        self.open_draft_pane(workspace_id, replace, cwd, window, cx);
+    }
+
+    /// A workspace draft tab in `cwd`; its submit replaces it with the agent tab.
+    fn open_draft_pane(
+        &mut self,
+        workspace_id: &str,
+        replace: Option<String>,
+        cwd: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<WorkspaceDraftPane> {
         let key = replace.unwrap_or_else(|| self.next_key());
         let client = self.client.clone();
         let pane_key = key.clone();
@@ -1402,6 +1415,7 @@ impl Shell {
             cx,
         );
         view.update(cx, |pane, cx| pane.focus(window, cx));
+        view
     }
 
     /// Opens the New workspace screen in a new tab of the home view and shows it.
@@ -1410,10 +1424,11 @@ impl Shell {
         preset: NewWorkspacePreset,
         window: &mut Window,
         cx: &mut Context<Shell>,
-    ) {
+    ) -> Entity<NewWorkspaceScreen> {
         self.ensure_home(window, cx);
-        self.open_new_workspace_screen(HOME, None, preset, window, cx);
+        let screen = self.open_new_workspace_screen(HOME, None, preset, window, cx);
         self.select(HOME.to_string(), window, cx);
+        screen
     }
 
     /// Shows the History screen in a tab of the home view, as `open_new_workspace` does. A
@@ -1461,7 +1476,7 @@ impl Shell {
         preset: NewWorkspacePreset,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Entity<NewWorkspaceScreen> {
         let key = replace.unwrap_or_else(|| self.next_key());
         let client = self.client.clone();
         let pane_key = key.clone();
@@ -1505,6 +1520,7 @@ impl Shell {
             cx,
         );
         view.update(cx, |screen, cx| screen.focus(window, cx));
+        view
     }
 
     /// Opens the workspace the New workspace screen created once the client lists it, then its
@@ -1578,6 +1594,97 @@ impl Shell {
         })
         .detach();
         cx.notify();
+    }
+
+    /// A fork picked in a turn footer, as `useForkAgent`: asks the chat history, then opens a
+    /// draft seeded from the source agent, in a new tab of the same workspace or on the New
+    /// workspace screen. Nothing runs until the user sends.
+    fn fork(
+        &mut self,
+        workspace_id: &str,
+        timeline: Entity<TimelineView>,
+        event: &TimelineForkEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let TimelineForkEvent::Fork {
+            agent_id,
+            target,
+            boundary,
+        } = event;
+        let client = self.client.read(cx);
+        let agent = client
+            .agents()
+            .iter()
+            .find(|agent| agent.id == *agent_id)
+            .or_else(|| client.archived_agent(agent_id));
+        let seed = fork_draft_seed(
+            agent,
+            client.agent_controls(agent_id).as_ref(),
+            client.agent_thinking(agent_id).as_ref(),
+            &client.agent_features(agent_id),
+        );
+        let agent_cwd = agent.map(|agent| agent.cwd.clone()).unwrap_or_default();
+        let open = match target {
+            ForkTarget::Tab => {
+                let workspace_cwd = self
+                    .workspaces
+                    .get(workspace_id)
+                    .and_then(|open| open.cwd.as_deref());
+                match fork_tab_cwd(workspace_id, &agent_cwd, workspace_cwd) {
+                    Ok(cwd) => ForkOpen::Tab(cwd),
+                    Err(message) => {
+                        self.show_toast(false, message.to_string(), cx);
+                        return;
+                    }
+                }
+            }
+            ForkTarget::Workspace => {
+                let source_workspace = agent
+                    .and_then(|agent| agent.workspace_id.clone())
+                    .or_else(|| (workspace_id != HOME).then(|| workspace_id.to_string()));
+                ForkOpen::Workspace(fork_workspace_preset(
+                    client.projects(),
+                    source_workspace.as_deref(),
+                    &agent_cwd,
+                ))
+            }
+        };
+        timeline.update(cx, |timeline, cx| timeline.set_fork_pending(true, cx));
+        let task = self.client.update(cx, |client, cx| {
+            client.fork_context(agent_id, boundary.clone(), cx)
+        });
+        let workspace = workspace_id.to_string();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            let _ = this.update_in(cx, |shell, window, cx| {
+                timeline.update(cx, |timeline, cx| timeline.set_fork_pending(false, cx));
+                let context = match result {
+                    Ok(context) => context,
+                    Err(error) => {
+                        shell.show_toast(false, fork_error(&format!("{error:#}")), cx);
+                        return;
+                    }
+                };
+                let label = fork_attachment_label(context.title.as_deref());
+                let attachment = context.attachment;
+                match open {
+                    ForkOpen::Tab(cwd) => {
+                        let draft = shell.open_draft_pane(&workspace, None, cwd, window, cx);
+                        draft.update(cx, |draft, cx| {
+                            draft.seed_fork(seed, label, attachment, window, cx)
+                        });
+                    }
+                    ForkOpen::Workspace(preset) => {
+                        let screen = shell.open_new_workspace(preset, window, cx);
+                        screen.update(cx, |screen, cx| {
+                            screen.seed_fork(seed, label, attachment, window, cx)
+                        });
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
     /// Makes the header's git split button of a workspace with a folder, with the repo's saved
@@ -2170,6 +2277,12 @@ impl Shell {
                     this.open_file(cwd, path, *line, window, cx);
                 },
             ),
+            cx.subscribe_in(&timeline, window, {
+                let workspace = workspace.clone();
+                move |this: &mut Shell, timeline, event: &TimelineForkEvent, window, cx| {
+                    this.fork(&workspace, timeline.clone(), event, window, cx)
+                }
+            }),
             cx.subscribe_in(&composer, window, {
                 let key = key.clone();
                 move |this: &mut Shell, _, event: &ComposerEvent, window, cx| match event {
@@ -3217,6 +3330,115 @@ pub(crate) fn auto_opens_pr_tab(
     has_pull_request(status) && !found_before && !has_tab
 }
 
+/// `message.actions.forkFailed`.
+pub(crate) const FORK_FAILED: &str = "Failed to fork chat";
+/// `message.actions.forkMissingWorkspace`.
+pub(crate) const FORK_MISSING_WORKSPACE: &str = "This agent is not in a workspace.";
+/// The chip label of a chat history without a title, as Electron's text attachment.
+pub(crate) const FORK_ATTACHMENT_LABEL: &str = "Text attachment";
+
+/// Where a fork draft opens, decided before the chat history request.
+enum ForkOpen {
+    /// A draft tab in this folder, in the source tab's workspace.
+    Tab(String),
+    Workspace(NewWorkspacePreset),
+}
+
+/// `buildForkDraftSetup`: the draft settings of a fork, from the source agent. An agent with no
+/// provider gives none, and the draft keeps its own.
+pub(crate) fn fork_draft_seed(
+    agent: Option<&AgentSummary>,
+    controls: Option<&AgentControls>,
+    thinking: Option<&ThinkingControls>,
+    features: &[AgentFeature],
+) -> Option<DraftSeed> {
+    let agent = agent.filter(|agent| !agent.provider.is_empty())?;
+    let values = features
+        .iter()
+        .map(|feature| {
+            let value = match &feature.kind {
+                AgentFeatureKind::Toggle { value } => serde_json::json!(value),
+                AgentFeatureKind::Select { value, .. } => serde_json::json!(value),
+            };
+            (feature.id.clone(), value)
+        })
+        .collect();
+    Some(DraftSeed {
+        provider: Some(agent.provider.clone()),
+        model: agent
+            .model
+            .clone()
+            .or_else(|| controls.and_then(|controls| controls.current_model.clone())),
+        mode: controls.and_then(|controls| controls.current_mode.clone()),
+        thinking_option_id: thinking.and_then(|thinking| thinking.current.clone()),
+        features: Some(serde_json::Value::Object(values)),
+    })
+}
+
+/// The folder of a fork draft tab: the agent's own, as the draft setup's `cwd`, else the
+/// workspace's. A tab outside a workspace gets `forkMissingWorkspace`.
+pub(crate) fn fork_tab_cwd(
+    workspace_id: &str,
+    agent_cwd: &str,
+    workspace_cwd: Option<&str>,
+) -> Result<String, &'static str> {
+    if workspace_id == HOME {
+        return Err(FORK_MISSING_WORKSPACE);
+    }
+    [Some(agent_cwd), workspace_cwd]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|cwd| !cwd.is_empty())
+        .map(str::to_string)
+        .ok_or(FORK_MISSING_WORKSPACE)
+}
+
+/// The New workspace screen of a fork: the source workspace's folder and project, else the
+/// agent's folder (`checkout.cwd || cwd`). The route's display name is the project's name, which
+/// the screen shows from the project, so the title stays unset.
+pub(crate) fn fork_workspace_preset(
+    projects: &[ProjectNode],
+    workspace_id: Option<&str>,
+    agent_cwd: &str,
+) -> NewWorkspacePreset {
+    let found = workspace_id.and_then(|id| find_workspace(projects, id));
+    let cwd = [
+        found.map(|(_, workspace)| workspace.cwd.as_str()),
+        Some(agent_cwd),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .find(|cwd| !cwd.is_empty())
+    .map(str::to_string);
+    NewWorkspacePreset {
+        cwd,
+        project_id: found.map(|(project, _)| project.id.clone()),
+        title: None,
+    }
+}
+
+/// The chip label of a fork's chat history: the attachment title, else the fallback.
+pub(crate) fn fork_attachment_label(title: Option<&str>) -> String {
+    title
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .unwrap_or(FORK_ATTACHMENT_LABEL)
+        .to_string()
+}
+
+/// The toast of a failed fork: the error, as `toErrorMessage`, but `forkFailed` for an empty
+/// context (the client's "Nothing to fork") or an empty text.
+pub(crate) fn fork_error(message: &str) -> String {
+    let message = message.trim();
+    if message.is_empty() || message == "Nothing to fork" {
+        FORK_FAILED.to_string()
+    } else {
+        message.to_string()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PromptReveal {
     /// The timeline has no entries yet; try again on its next change.
@@ -3247,14 +3469,18 @@ pub(crate) fn latest_prompt_reveal(state: Option<&TimelineState>) -> PromptRevea
 mod tests {
     // Not `super::*`: the gpui glob brings a `test` macro that shadows the std one.
     use super::{
-        CANNOT_RENAME, PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE,
-        RESUME_ID_UNAVAILABLE, RenameTarget, TERMINAL_NOT_OPEN, agent_target, agent_workspace,
-        auto_opens_pr_tab, closes_surface_on_open, has_pull_request, latest_prompt_reveal,
-        reload_error, rename_target, resume_text,
+        CANNOT_RENAME, FORK_ATTACHMENT_LABEL, FORK_FAILED, FORK_MISSING_WORKSPACE, PromptReveal,
+        RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE, RESUME_ID_UNAVAILABLE, RenameTarget,
+        TERMINAL_NOT_OPEN, agent_target, agent_workspace, auto_opens_pr_tab,
+        closes_surface_on_open, fork_attachment_label, fork_draft_seed, fork_error, fork_tab_cwd,
+        fork_workspace_preset, has_pull_request, latest_prompt_reveal, reload_error, rename_target,
+        resume_text,
     };
     use bachuc_client::{
-        AgentSummary, PrMergeCapability, PrStatus, ProjectNode, TimelineState, WorkspaceNode,
+        AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, PrMergeCapability, PrStatus,
+        ProjectNode, ThinkingControls, TimelineState, WorkspaceNode,
     };
+    use bachuc_composer::DraftSeed;
 
     fn pr(url: &str, number: Option<u64>) -> PrStatus {
         PrStatus {
@@ -3430,5 +3656,127 @@ mod tests {
         assert_eq!(reload_error("not connected"), "not connected");
         assert_eq!(reload_error(""), RELOAD_FAILED);
         assert_eq!(reload_error("  "), RELOAD_FAILED);
+    }
+
+    fn feature(id: &str, kind: AgentFeatureKind) -> AgentFeature {
+        AgentFeature {
+            id: id.into(),
+            label: id.into(),
+            description: None,
+            tooltip: None,
+            icon: None,
+            kind,
+        }
+    }
+
+    #[test]
+    fn a_fork_seed_carries_the_source_agent_settings() {
+        let mut source = agent("a", Some("w1"));
+        source.model = Some("opus".into());
+        let controls = AgentControls {
+            modes: Vec::new(),
+            current_mode: Some("plan".into()),
+            models: Vec::new(),
+            current_model: Some("sonnet".into()),
+            running: false,
+        };
+        let thinking = ThinkingControls {
+            options: Vec::new(),
+            current: Some("high".into()),
+        };
+        let features = vec![
+            feature("fast", AgentFeatureKind::Toggle { value: true }),
+            feature(
+                "tier",
+                AgentFeatureKind::Select {
+                    value: Some("pro".into()),
+                    options: Vec::new(),
+                },
+            ),
+            feature(
+                "unset",
+                AgentFeatureKind::Select {
+                    value: None,
+                    options: Vec::new(),
+                },
+            ),
+        ];
+        let seed =
+            fork_draft_seed(Some(&source), Some(&controls), Some(&thinking), &features).unwrap();
+        assert_eq!(
+            seed,
+            DraftSeed {
+                provider: Some("claude".into()),
+                // The agent's model wins over the runtime one, as `agent.model ?? runtimeInfo`.
+                model: Some("opus".into()),
+                mode: Some("plan".into()),
+                thinking_option_id: Some("high".into()),
+                features: Some(json!({"fast": true, "tier": "pro", "unset": null})),
+            }
+        );
+        // No agent model: the runtime model.
+        source.model = None;
+        let seed = fork_draft_seed(Some(&source), Some(&controls), None, &[]).unwrap();
+        assert_eq!(seed.model.as_deref(), Some("sonnet"));
+        assert_eq!(seed.thinking_option_id, None);
+        assert_eq!(seed.features, Some(json!({})));
+        // No controls loaded yet: provider only.
+        let seed = fork_draft_seed(Some(&source), None, None, &[]).unwrap();
+        assert_eq!((seed.model, seed.mode), (None, None));
+        // No provider or no agent: no seed, so the draft keeps its own settings.
+        source.provider = String::new();
+        assert_eq!(
+            fork_draft_seed(Some(&source), Some(&controls), None, &[]),
+            None
+        );
+        assert_eq!(fork_draft_seed(None, None, None, &[]), None);
+    }
+
+    #[test]
+    fn a_fork_tab_needs_a_workspace_and_a_folder() {
+        assert_eq!(fork_tab_cwd("w1", "/agent", Some("/ws")).unwrap(), "/agent");
+        assert_eq!(fork_tab_cwd("w1", "  ", Some("/ws")).unwrap(), "/ws");
+        assert_eq!(
+            fork_tab_cwd("w1", "", None).unwrap_err(),
+            FORK_MISSING_WORKSPACE
+        );
+        // The home view is no workspace.
+        assert_eq!(
+            fork_tab_cwd("", "/agent", None).unwrap_err(),
+            FORK_MISSING_WORKSPACE
+        );
+    }
+
+    #[test]
+    fn a_fork_workspace_opens_on_the_source_folder_and_project() {
+        let projects = vec![ProjectNode {
+            id: "p1".into(),
+            name: "Project".into(),
+            root: "/p1".into(),
+            workspaces: vec![workspace("w1", &["a"])],
+        }];
+        let preset = fork_workspace_preset(&projects, Some("w1"), "/agent");
+        assert_eq!(preset.cwd.as_deref(), Some("/w1"));
+        assert_eq!(preset.project_id.as_deref(), Some("p1"));
+        assert_eq!(preset.title, None);
+        // An unknown workspace: the agent's folder, no project.
+        let preset = fork_workspace_preset(&projects, Some("gone"), " /agent ");
+        assert_eq!(preset.cwd.as_deref(), Some("/agent"));
+        assert_eq!(preset.project_id, None);
+        assert_eq!(fork_workspace_preset(&projects, None, "").cwd, None);
+    }
+
+    #[test]
+    fn a_fork_labels_its_chip_and_names_its_failure() {
+        assert_eq!(fork_attachment_label(Some("Chat history")), "Chat history");
+        assert_eq!(fork_attachment_label(Some(" ")), FORK_ATTACHMENT_LABEL);
+        assert_eq!(fork_attachment_label(None), FORK_ATTACHMENT_LABEL);
+        // An empty context fails with `forkFailed`; other errors show their text.
+        assert_eq!(fork_error("Nothing to fork"), FORK_FAILED);
+        assert_eq!(fork_error(""), FORK_FAILED);
+        assert_eq!(
+            fork_error("Update the host to use this."),
+            "Update the host to use this."
+        );
     }
 }
