@@ -16,6 +16,7 @@ use crate::model::{
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode, WorkspaceSummary,
     provider_label,
 };
+use crate::model::{DirectorySuggestion, NewEntryKind};
 use crate::model::{ForkBoundary, ForkContext, HistoryEntry, HistoryPage};
 use crate::model::{
     GitAction, GitActionReply, GitStatus, GitStatusEvent, PrStatus, PrStatusReply, PrTimelineItem,
@@ -33,6 +34,13 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 type Reply<T> = oneshot::Sender<anyhow::Result<T>>;
+
+/// A receiver that already holds `Err(message)`, for a call that sends no request.
+fn failed<T>(message: &'static str) -> oneshot::Receiver<anyhow::Result<T>> {
+    let (reply, receiver) = oneshot::channel();
+    let _ = reply.send(Err(anyhow!(message)));
+    receiver
+}
 
 /// Takes a plugin RPC `output`, or the error, and answers the caller with its decoded form.
 type RpcFinish = Box<dyn FnOnce(anyhow::Result<Value>) + Send>;
@@ -130,6 +138,9 @@ enum Pending {
     StartScript(Reply<String>),
     History(Reply<HistoryPage>),
     ForkContext(Reply<ForkContext>),
+    DirectorySuggestions(Reply<Vec<DirectorySuggestion>>),
+    /// An `fs.entry.*` answer with `success` and a string `error`.
+    FsEntry(Reply<()>),
 }
 
 impl Pending {
@@ -182,6 +193,8 @@ impl Pending {
             Pending::StartScript(reply) => send(reply, error),
             Pending::History(reply) => send(reply, error),
             Pending::ForkContext(reply) => send(reply, error),
+            Pending::DirectorySuggestions(reply) => send(reply, error),
+            Pending::FsEntry(reply) => send(reply, error),
             _ => {}
         }
     }
@@ -1257,9 +1270,7 @@ impl ClientCore {
         boundary: ForkBoundary,
     ) -> oneshot::Receiver<anyhow::Result<ForkContext>> {
         if !self.fork_supported() {
-            let (reply, receiver) = oneshot::channel();
-            let _ = reply.send(Err(anyhow!("Update the host to use this.")));
-            return receiver;
+            return failed("Update the host to use this.");
         }
         let mut message = json!({"type": "agent.fork_context.request", "agentId": agent_id});
         if let Some(cursor) = boundary.cursor
@@ -1271,6 +1282,108 @@ impl ClientCore {
             message["boundaryMessageId"] = json!(message_id);
         }
         self.request_reply(message, Pending::ForkContext)
+    }
+
+    /// Files and folders under `cwd` that match `query`, at most `limit` (1 to 100).
+    pub fn directory_suggestions(
+        &mut self,
+        cwd: &str,
+        query: &str,
+        include_files: bool,
+        include_directories: bool,
+        limit: u32,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<DirectorySuggestion>>> {
+        self.request_reply(
+            json!({"type": "directory_suggestions_request", "cwd": cwd, "query": query,
+                   "includeFiles": include_files, "includeDirectories": include_directories,
+                   "limit": limit.clamp(1, 100)}),
+            Pending::DirectorySuggestions,
+        )
+    }
+
+    /// Whether the host creates, renames, and deletes entries (`features.fsEntryOps`).
+    pub fn fs_entry_ops_supported(&self) -> bool {
+        self.server_feature("fsEntryOps")
+    }
+
+    /// Whether the host duplicates entries (`features.fsEntryDuplicate`).
+    pub fn fs_entry_duplicate_supported(&self) -> bool {
+        self.server_feature("fsEntryDuplicate")
+    }
+
+    /// Sends an `fs.entry.*` request, or fails without one when the host lacks the feature.
+    fn fs_entry(
+        &mut self,
+        supported: bool,
+        message: Value,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        if !supported {
+            return failed("Update the host to use this.");
+        }
+        self.request_reply(message, Pending::FsEntry)
+    }
+
+    pub fn create_entry(
+        &mut self,
+        cwd: &str,
+        parent_path: &str,
+        name: &str,
+        kind: NewEntryKind,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let supported = self.fs_entry_ops_supported();
+        self.fs_entry(
+            supported,
+            json!({"type": "fs.entry.create.request", "cwd": cwd, "parentPath": parent_path,
+                   "name": name, "kind": kind.wire()}),
+        )
+    }
+
+    pub fn rename_entry(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        name: &str,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let supported = self.fs_entry_ops_supported();
+        self.fs_entry(
+            supported,
+            json!({"type": "fs.entry.rename.request", "cwd": cwd, "path": path, "name": name}),
+        )
+    }
+
+    pub fn duplicate_entry(
+        &mut self,
+        cwd: &str,
+        path: &str,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let supported = self.fs_entry_duplicate_supported();
+        self.fs_entry(
+            supported,
+            json!({"type": "fs.entry.duplicate.request", "cwd": cwd, "path": path}),
+        )
+    }
+
+    pub fn delete_entry(&mut self, cwd: &str, path: &str) -> oneshot::Receiver<anyhow::Result<()>> {
+        let supported = self.fs_entry_ops_supported();
+        self.fs_entry(
+            supported,
+            json!({"type": "fs.entry.delete.request", "cwd": cwd, "path": path}),
+        )
+    }
+
+    /// Discards the changes of `paths`; the protocol needs at least one path.
+    pub fn discard_changes(
+        &mut self,
+        cwd: &str,
+        paths: Vec<String>,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        if paths.is_empty() {
+            return failed("No files to discard");
+        }
+        self.request_reply(
+            json!({"type": "checkout.discard_changes.request", "cwd": cwd, "paths": paths}),
+            Pending::CheckoutDone,
+        )
     }
 
     /// The provider-native session id: `runtimeInfo.sessionId`, else `persistence.sessionId`.
@@ -2833,6 +2946,16 @@ impl ClientCore {
                     title: attachment["title"].as_str().map(str::to_string),
                     item_count: payload["itemCount"].as_u64().unwrap_or_default() as u32,
                 })
+            }),
+            Pending::DirectorySuggestions(sender) => reply(sender, error, || {
+                Ok(DirectorySuggestion::parse_all(payload))
+            }),
+            Pending::FsEntry(sender) => reply(sender, error, || {
+                if payload["success"] == true {
+                    Ok(())
+                } else {
+                    Err(anyhow!("the file operation failed"))
+                }
             }),
             pending => self.git_response(pending, kind, payload, error),
         }

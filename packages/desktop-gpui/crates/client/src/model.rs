@@ -892,3 +892,63 @@ pub struct ForkContext {
     pub title: Option<String>,
     pub item_count: u32,
 }
+
+/// One `directory_suggestions_request` match; `path` is as the daemon gives it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DirectorySuggestion {
+    pub path: String,
+    pub is_directory: bool,
+}
+
+impl DirectorySuggestion {
+    /// The `entries`, or the `directories` of a host that sends only those, as the app reads
+    /// them (`use-agent-autocomplete.ts` `mapDirectorySuggestionsToEntries`).
+    pub(crate) fn parse_all(payload: &serde_json::Value) -> Vec<Self> {
+        let entries: Vec<Self> = payload["entries"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| {
+                let is_directory = match entry["kind"].as_str()? {
+                    "file" => false,
+                    "directory" => true,
+                    _ => return None,
+                };
+                Some(Self {
+                    path: entry["path"].as_str()?.to_string(),
+                    is_directory,
+                })
+            })
+            .collect();
+        if !entries.is_empty() {
+            return entries;
+        }
+        payload["directories"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|path| {
+                Some(Self {
+                    path: path.as_str()?.to_string(),
+                    is_directory: true,
+                })
+            })
+            .collect()
+    }
+}
+
+/// What `fs.entry.create.request` makes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NewEntryKind {
+    File,
+    Directory,
+}
+
+impl NewEntryKind {
+    pub(crate) fn wire(self) -> &'static str {
+        match self {
+            NewEntryKind::File => "file",
+            NewEntryKind::Directory => "directory",
+        }
+    }
+}

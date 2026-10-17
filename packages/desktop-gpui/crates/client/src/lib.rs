@@ -33,6 +33,7 @@ pub use model::{
     ChangedFile, CheckoutStatus, DirectoryEvent, FileContent, FileEntry, FileKind, ProjectNode,
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
 };
+pub use model::{DirectorySuggestion, NewEntryKind};
 pub use model::{ForkBoundary, ForkContext, ForkCursor, HistoryEntry, HistoryPage};
 pub use model::{
     GitAction, GitActionReply, GitStatus, GitStatusEvent, MergeMethod, PrCheck, PrMergeCapability,
@@ -1103,6 +1104,94 @@ impl Client {
         cx: &mut Context<Client>,
     ) -> Task<anyhow::Result<String>> {
         let receiver = self.core.start_workspace_script(workspace_id, script_name);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    // ---- file suggestion, entry, and discard calls (TASK-206) ----
+
+    /// Files and folders under `cwd` that match `query`, at most `limit` (1 to 100).
+    pub fn directory_suggestions(
+        &mut self,
+        cwd: &str,
+        query: &str,
+        include_files: bool,
+        include_directories: bool,
+        limit: u32,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<DirectorySuggestion>>> {
+        let receiver =
+            self.core
+                .directory_suggestions(cwd, query, include_files, include_directories, limit);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn fs_entry_ops_supported(&self) -> bool {
+        self.core.fs_entry_ops_supported()
+    }
+
+    pub fn fs_entry_duplicate_supported(&self) -> bool {
+        self.core.fs_entry_duplicate_supported()
+    }
+
+    /// Fails with "Update the host to use this." when `fs_entry_ops_supported` is false.
+    pub fn create_entry(
+        &mut self,
+        cwd: &str,
+        parent_path: &str,
+        name: &str,
+        kind: NewEntryKind,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.create_entry(cwd, parent_path, name, kind);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn rename_entry(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        name: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.rename_entry(cwd, path, name);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Needs `fs_entry_duplicate_supported`.
+    pub fn duplicate_entry(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.duplicate_entry(cwd, path);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn delete_entry(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.delete_entry(cwd, path);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Fails without a request when `paths` is empty.
+    pub fn discard_changes(
+        &mut self,
+        cwd: &str,
+        paths: Vec<String>,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.discard_changes(cwd, paths);
         self.publish(cx);
         reply_task(receiver, cx)
     }

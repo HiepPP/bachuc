@@ -6,10 +6,10 @@ mod common;
 use bachuc_client::{
     AgentFeature, AgentFeatureKind, AgentFeatureOption, AttentionReason, ChangedFile,
     ChangedFileDetails, CheckoutDetails, CheckoutStatus, CommitFile, CommitList, CommitSummary,
-    DiffStat, DirectoryEvent, FileDiff, FileDiffStatus, FileKind, ForkBoundary, ForkCursor,
-    GitAction, GitActionReply, GitStatus, GitStatusEvent, HistoryEntry, HistoryPage, MergeMethod,
-    PrCheck, PrMergeCapability, PrStatus, PrTimelineItem, ProjectNode, QueuedPrompt, StashEntry,
-    TurnBehavior, WorkspaceNode, WorkspaceScript,
+    DiffStat, DirectoryEvent, DirectorySuggestion, FileDiff, FileDiffStatus, FileKind,
+    ForkBoundary, ForkCursor, GitAction, GitActionReply, GitStatus, GitStatusEvent, HistoryEntry,
+    HistoryPage, MergeMethod, NewEntryKind, PrCheck, PrMergeCapability, PrStatus, PrTimelineItem,
+    ProjectNode, QueuedPrompt, StashEntry, TurnBehavior, WorkspaceNode, WorkspaceScript,
 };
 use bachuc_protocol::generated::ServerInfoPermissionsItem;
 use common::{FakeServer, Harness, agent_snapshot, session};
@@ -2154,4 +2154,294 @@ fn fork_context_without_the_feature_fails_without_a_request() {
         "Update the host to use this."
     );
     assert!(server.requests_of("agent.fork_context.request").is_empty());
+}
+
+// ---- file suggestion, entry, and discard calls (TASK-206) ----
+
+#[test]
+fn directory_suggestions_send_their_fields_and_read_entries_or_directories() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "directory_suggestions_request",
+        "directory_suggestions_response",
+        json!({"directories": ["src"], "error": null, "entries": [
+            {"path": "src", "kind": "directory"},
+            {"path": "src/main.rs", "kind": "file"},
+            {"path": "odd", "kind": "socket"}
+        ]}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness
+        .core
+        .directory_suggestions("/repo", "ma", true, false, 50);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        [
+            DirectorySuggestion {
+                path: "src".into(),
+                is_directory: true,
+            },
+            DirectorySuggestion {
+                path: "src/main.rs".into(),
+                is_directory: false,
+            },
+        ]
+    );
+    let request = &server.requests_of("directory_suggestions_request")[0];
+    assert_eq!(request["cwd"], json!("/repo"));
+    assert_eq!(request["query"], json!("ma"));
+    assert_eq!(request["includeFiles"], json!(true));
+    assert_eq!(request["includeDirectories"], json!(false));
+    assert_eq!(request["limit"].as_f64(), Some(50.0));
+    assert!(request.get("matchMode").is_none());
+
+    // A host without `entries` gives only folders.
+    server.reply(
+        "directory_suggestions_request",
+        "directory_suggestions_response",
+        json!({"directories": ["docs"], "error": null}),
+    );
+    let reply = harness
+        .core
+        .directory_suggestions("/repo", "do", true, true, 500);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        [DirectorySuggestion {
+            path: "docs".into(),
+            is_directory: true,
+        }]
+    );
+    let request = server
+        .requests_of("directory_suggestions_request")
+        .pop()
+        .unwrap();
+    assert_eq!(request["limit"].as_f64(), Some(100.0));
+
+    server.reply(
+        "directory_suggestions_request",
+        "directory_suggestions_response",
+        json!({"directories": [], "entries": [], "error": "cwd not found"}),
+    );
+    let reply = harness
+        .core
+        .directory_suggestions("/gone", "", true, true, 10);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "cwd not found"
+    );
+}
+
+fn entry_reply(success: bool, error: Value) -> Value {
+    json!({"cwd": "/repo", "path": "src/a.rs", "parentPath": "src", "renamedPath": null,
+           "duplicatedPath": null, "success": success, "error": error})
+}
+
+#[test]
+fn create_entry_sends_its_fields_and_reports_the_error() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["fsEntryOps"]);
+    server.reply(
+        "fs.entry.create.request",
+        "fs.entry.create.response",
+        entry_reply(true, Value::Null),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.core.fs_entry_ops_supported());
+    let reply = harness
+        .core
+        .create_entry("/repo", "src", "a.rs", NewEntryKind::File);
+    harness.wait(reply, WAIT).unwrap();
+    let reply = harness
+        .core
+        .create_entry("/repo", "", "lib", NewEntryKind::Directory);
+    harness.wait(reply, WAIT).unwrap();
+    let requests = server.requests_of("fs.entry.create.request");
+    assert_eq!(requests[0]["cwd"], json!("/repo"));
+    assert_eq!(requests[0]["parentPath"], json!("src"));
+    assert_eq!(requests[0]["name"], json!("a.rs"));
+    assert_eq!(requests[0]["kind"], json!("file"));
+    assert_eq!(requests[1]["parentPath"], json!(""));
+    assert_eq!(requests[1]["kind"], json!("directory"));
+
+    server.reply(
+        "fs.entry.create.request",
+        "fs.entry.create.response",
+        entry_reply(false, json!("An entry named a.rs already exists")),
+    );
+    let reply = harness
+        .core
+        .create_entry("/repo", "src", "a.rs", NewEntryKind::File);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "An entry named a.rs already exists"
+    );
+}
+
+#[test]
+fn rename_entry_sends_its_fields_and_reports_the_error() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["fsEntryOps"]);
+    server.reply(
+        "fs.entry.rename.request",
+        "fs.entry.rename.response",
+        entry_reply(true, Value::Null),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.rename_entry("/repo", "src/a.rs", "b.rs");
+    harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("fs.entry.rename.request")[0];
+    assert_eq!(request["cwd"], json!("/repo"));
+    assert_eq!(request["path"], json!("src/a.rs"));
+    assert_eq!(request["name"], json!("b.rs"));
+
+    server.reply(
+        "fs.entry.rename.request",
+        "fs.entry.rename.response",
+        entry_reply(false, json!("Invalid name")),
+    );
+    let reply = harness.core.rename_entry("/repo", "src/a.rs", "../b");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Invalid name"
+    );
+}
+
+#[test]
+fn duplicate_entry_needs_its_own_feature() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["fsEntryOps"]);
+    let mut harness = connect(&server);
+    assert!(!harness.core.fs_entry_duplicate_supported());
+    let reply = harness.core.duplicate_entry("/repo", "src/a.rs");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Update the host to use this."
+    );
+    assert!(server.requests_of("fs.entry.duplicate.request").is_empty());
+
+    with_features(&server, &["fsEntryDuplicate"]);
+    server.reply(
+        "fs.entry.duplicate.request",
+        "fs.entry.duplicate.response",
+        entry_reply(true, Value::Null),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.core.fs_entry_duplicate_supported());
+    let reply = harness.core.duplicate_entry("/repo", "src/a.rs");
+    harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("fs.entry.duplicate.request")[0];
+    assert_eq!(request["cwd"], json!("/repo"));
+    assert_eq!(request["path"], json!("src/a.rs"));
+
+    server.reply(
+        "fs.entry.duplicate.request",
+        "fs.entry.duplicate.response",
+        entry_reply(false, json!("Not found")),
+    );
+    let reply = harness.core.duplicate_entry("/repo", "src/gone.rs");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Not found"
+    );
+}
+
+#[test]
+fn delete_entry_sends_its_fields_and_reports_a_failure() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["fsEntryOps"]);
+    server.reply(
+        "fs.entry.delete.request",
+        "fs.entry.delete.response",
+        entry_reply(true, Value::Null),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.delete_entry("/repo", "src/a.rs");
+    harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("fs.entry.delete.request")[0];
+    assert_eq!(request["cwd"], json!("/repo"));
+    assert_eq!(request["path"], json!("src/a.rs"));
+
+    server.reply(
+        "fs.entry.delete.request",
+        "fs.entry.delete.response",
+        entry_reply(false, Value::Null),
+    );
+    let reply = harness.core.delete_entry("/repo", "src/a.rs");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "the file operation failed"
+    );
+}
+
+#[test]
+fn entry_calls_without_fs_entry_ops_fail_without_a_request() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    assert!(!harness.core.fs_entry_ops_supported());
+    let replies = [
+        harness
+            .core
+            .create_entry("/repo", "", "a", NewEntryKind::File),
+        harness.core.rename_entry("/repo", "a", "b"),
+        harness.core.delete_entry("/repo", "a"),
+    ];
+    for reply in replies {
+        assert_eq!(
+            harness.wait(reply, WAIT).unwrap_err().to_string(),
+            "Update the host to use this."
+        );
+    }
+    for kind in [
+        "fs.entry.create.request",
+        "fs.entry.rename.request",
+        "fs.entry.delete.request",
+    ] {
+        assert!(server.requests_of(kind).is_empty(), "{kind} is not sent");
+    }
+}
+
+#[test]
+fn discard_changes_sends_the_paths_and_needs_one() {
+    let server = checkout_server(&[(
+        "checkout.discard_changes.request",
+        "checkout.discard_changes.response",
+    )]);
+    let mut harness = connect(&server);
+    let reply = harness.core.discard_changes("/repo", Vec::new());
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "No files to discard"
+    );
+    assert!(
+        server
+            .requests_of("checkout.discard_changes.request")
+            .is_empty()
+    );
+
+    let reply = harness
+        .core
+        .discard_changes("/repo", vec!["a.rs".into(), "src/b.rs".into()]);
+    harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("checkout.discard_changes.request")[0];
+    assert_eq!(request["cwd"], json!("/repo"));
+    assert_eq!(request["paths"], json!(["a.rs", "src/b.rs"]));
+
+    server.reply(
+        "checkout.discard_changes.request",
+        "checkout.discard_changes.response",
+        checkout_failure("pathspec did not match"),
+    );
+    let reply = harness
+        .core
+        .discard_changes("/repo", vec!["gone.rs".into()]);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "pathspec did not match"
+    );
 }
