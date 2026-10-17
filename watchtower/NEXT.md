@@ -77,6 +77,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 ## Handoff
 
 - Done (implement, 2026-10-17): TASK-168 to TASK-195, all 28 TASKs built and committed on `feat/bachuc-gpui`; nothing pushed. Plan Verify passed: 1,201 tests, release build, no change in the existing packages, `fmt --check` on every changed crate.
+- Fixed after the run (2026-10-17): the timeline scrolled jerky on long threads because `mono_font_family` enumerated every system font on each row draw; it now picks the family once per process (`c1887709e`). The owner confirmed smooth scroll. Cause and lesson are in [watchtower/MEMORY.md](watchtower/MEMORY.md) ("GPUI timeline scroll lag").
 - Done (implement, 2026-10-16): TASK-157 to TASK-167, all 11 TASKs built and committed.
 - Owner answered Q-089 to Q-109 on 2026-10-17; TASK-196 (archive confirm on a dirty tree) and TASK-197 (palette 400 toggles) are DONE.
 - Background UI checks, three rounds (2026-10-17): the four measured FAIL rows (TASK-173, 175, 181, 188) were fixed and now PASS; AX press now opens the sidebar rows and pills. Round 2 found a crash on opening a diff from Changes (TASK-179); it is fixed in code (11a6592ba) but round 3 could not open the diff in the background, so it is UNVERIFIED. Most other lines stay UNVERIFIED: no runnable mock agent, no plugins in the Electron 6770 build, or they need the pointer. Details are in each outcome's `## UI Checks` sections.

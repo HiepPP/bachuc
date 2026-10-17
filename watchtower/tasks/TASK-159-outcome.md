@@ -36,3 +36,10 @@ Existing token comparison tests (`light_tokens_match_theme_ts`, `claude_dark_tok
 - `set_font_families` and the other cx setters have no test: a GPUI `App` needs `test-support`, which breaks workspace resolution. The fallback logic lives in pure functions (`installed_family`, `clamp_content_font_size`) that tests cover.
 - The palette test parses the TS sources (`include_str!`), so a change in `themes.ts` or `colors.ts` fails the test until the Rust palettes follow.
 - `Theme.font_family` was not set before; `apply` now sets `.SystemUIFont` when no override exists. On Linux desktops that lack the family, gpui-kit swaps it in `Theme::change`, and `apply` would undo that swap.
+
+## Post-run fix (2026-10-17)
+
+- Cause: the owner saw jerky, slow timeline scroll on long release threads. `mono_font_family`, which `code_font_family` falls back to, called `all_font_names` on every call. That builds a CoreText collection of every installed family, and the timeline and plugin rows call it on every row draw.
+- Fix: commit `c1887709e` picks the family once per process in a `OnceLock`, with the rule in the pure `pick_mono_family` and the test `mono_family_prefers_sf_mono_and_falls_back_to_menlo`. Signature and result are unchanged; GitNexus rated the symbol CRITICAL (65 dependents) for that reason.
+- Verified: `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-theme` -> 19 passed; the owner confirmed smooth scroll in the rebuilt app (2026-10-17).
+- Still open: `installed_font_families` enumerates on each call; only the Settings font picker may call it.

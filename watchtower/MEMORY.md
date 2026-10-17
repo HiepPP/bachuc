@@ -307,3 +307,13 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: each crate tested alone with `-p` gets its own gpui-kit build, because cargo unifies features per package selection; `target/debug` held 6 gpui-kit variants.
 - Source: TASK-170 and TASK-181 outcomes.
 - Use next time: watch free disk during a long run, and clean the dev profile only when no builder runs.
+
+### 2026-10-17 - GPUI timeline scroll lag
+
+- Learned: the GPUI timeline scrolled jerky and slow on long release threads. `bachuc_theme::mono_font_family` called `cx.text_system().all_font_names()` on every call, and that builds a CoreText collection of every installed family (`gpui-pre-apple-0.3.9/src/text_system.rs:108`). The timeline calls it on every draw of a tool row and a code row (`crates/timeline/src/tool_view.rs`, `crates/timeline/src/lib.rs`), and the plugin crates call it per row too, so each scroll frame enumerated the fonts many times.
+- Fix: `mono_font_family` picks the family once per process in a `OnceLock` (commit `c1887709e`); the pure `pick_mono_family` holds the rule and has a test. The owner confirmed the scroll is smooth after the fix (2026-10-17).
+- Source: owner report and hand test, 2026-10-17; `packages/desktop-gpui/crates/theme/src/lib.rs`.
+- Use next time: never call `all_font_names`, or anything that queries the system, from a render or row path; compute it once and cache it. `installed_font_families` still enumerates on each call, so only a picker may call it, never a row.
+- Learned: `sample <pid>` taken while the owner scrolled showed the GPUI main thread idle four times, and `cua_repl` `scroll` moved neither the timeline nor the sidebar, so neither proves a GPUI scroll bug or its absence.
+- Source: profiles `/tmp/gpui-scroll-sample*.txt` and the cua scroll control test, 2026-10-17.
+- Use next time: for a GPUI scroll or lag report, read the per-row render path for system queries first, and confirm with the owner's own scroll on an A/B pair of bundles (for example a `Bachuc GPUI Before.app` built from the base commit).
