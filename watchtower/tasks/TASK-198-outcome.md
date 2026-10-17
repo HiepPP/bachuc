@@ -95,3 +95,43 @@ The UI checker saw the toast "That message isn't loaded in this chat" and the ta
 ### Questions
 
 - May the lead add `packages/desktop-gpui/crates/timeline/src/plugin_view.rs` to this TASK (or a follow-up TASK) for the one-line `scroll_to` change in `reveal_now`? Without it, no reveal shows on a timeline that follows the tail.
+
+## Fix round 2
+
+### Status
+
+DONE. The lead widened this TASK (Q-120) to the timeline and workspace crates. This status replaces the fix round 1 status. The UI checks are DEFERRED (UI checker).
+
+### Changed
+
+- `packages/desktop-gpui/crates/timeline/src/plugin_view.rs:123`: `reveal_now` calls `self.list.scroll_to(ListOffset { item_ix: row, offset_in_item: px(0.) })` instead of `scroll_to_reveal_item(row)`. `scroll_to` stops tail follow (`gpui-pre-0.3.9/src/elements/list.rs:668-670`), so the next layout of a new view no longer moves back to the end. The message row now shows at the top.
+- `packages/desktop-gpui/crates/workspace/src/workspace.rs:994`: the tab chip has an `AccessibleAction::Click` handler. It calls `focus_group(group)` and then `activate_tab(group, index)`, as a left mouse-down does through the group's capture mouse-down. This follows the sidebar and composer pattern (`crates/sidebar/src/sidebar.rs:112`). It lets the UI checker press a tab by AX for TASK-199.
+
+### Callers of `reveal_passage`
+
+- `shell.rs:1586`, Board latest prompt: top alignment is the wanted result. The prompt shows at the top and the reply follows below it.
+- `shell.rs:1516`, `RevealTimelinePassage`: the message now shows at the top. If the passage text is far down a long message, the text view's `reveal_range` requests an autoscroll (`vendor/gpui-base/src/text/inline.rs:471`). The list honors child autoscroll in its normal prepaint (`list.rs:1289-1326`, called with `autoscroll: true` at `list.rs:1564`), so the passage still scrolls into view. This is from reading, not from a run.
+- A reveal now always stops tail follow. New output does not pull the view down after a reveal. The user returns to the tail with the normal scroll-to-end control.
+
+### Contract
+
+- `TimelineView::reveal_passage` keeps its signature. A found message now shows at the top of the view, and tail follow stops.
+- The workspace tab chip answers an AX press like a left mouse-down.
+
+### Verified
+
+- `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-timeline`: pass, 80 tests.
+- `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-workspace`: pass, 34 tests.
+- `CARGO_BUILD_JOBS=4 ./cargo.sh build -p bachuc-app`: exit 0. It has 1 warning that was already there (`next_theme` is not used, `state.rs:272`).
+- `./cargo.sh fmt --check -p bachuc-timeline` and `-p bachuc-workspace`: exit 0.
+- `./cargo.sh metadata --format-version 1 > /dev/null`: exit 0.
+- GitNexus impact (index stale, confirmed with `rg`): `reveal_now` LOW, `activate_tab` LOW, `focus_group` HIGH (6 upstream). `focus_group` was not changed, only called, so its callers keep their behavior.
+- No unit test was added. The timeline and workspace crates have no GPUI test context (`rg "gpui::test|TestAppContext"` finds none). `reveal_now` needs a `TimelineView` entity with a client, and the AX handler needs a window. A test of `ListState` alone would test GPUI, not this code.
+- UI check, a Board card click shows the latest prompt at the top, with no toast: DEFERRED (UI checker).
+- UI check, a plugin `RevealTimelinePassage` with text highlights the passage in view: DEFERRED (UI checker).
+- UI check, an AX press on a tab activates it: DEFERRED (UI checker).
+- Anti-goal, under 300 ms: DEFERRED (UI checker). The change adds no work.
+
+### Lessons
+
+- For an AX press on a workspace tab, the handler must focus the group itself. The group's `capture_any_mouse_down` runs only for a mouse event.

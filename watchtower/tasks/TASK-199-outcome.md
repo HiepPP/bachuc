@@ -43,3 +43,7 @@ Each suspect of the Brief, checked by reading:
 
 - How does the empty pane look: "Loading agent", "Loading timeline..." with a composer, or blank? Which workspace and which tab layout (one group or a split)? The answer picks the crate that holds the cause.
 - May the plan add an `AccessibleAction::Click` handler to the workspace tab chip (`crates/workspace/src/workspace.rs:973`), so the UI checker can press tabs?
+
+## Update from TASK-198 fix round 2
+
+- The workspace tab chip now has an `AccessibleAction::Click` handler (`packages/desktop-gpui/crates/workspace/src/workspace.rs:994`). It focuses the group and activates the tab, as a left mouse-down does. The UI checker can now press a tab by AX to reproduce the empty pane. Not yet run: DEFERRED (UI checker).
