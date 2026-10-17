@@ -247,6 +247,7 @@ struct WorkspaceMeta {
     branch: Option<String>,
     pinned_at: Option<String>,
     diff_stat: Option<DiffStat>,
+    is_dirty: Option<bool>,
 }
 
 /// Thinking options of one model, as `(id, label)`, and its default.
@@ -520,6 +521,12 @@ impl ClientCore {
 
     pub fn workspace_diff_stat(&self, workspace_id: &str) -> Option<DiffStat> {
         self.workspace_meta.get(workspace_id)?.diff_stat
+    }
+
+    /// The workspace `gitRuntime.isDirty`, which also counts untracked files. `None` when the
+    /// flag is absent or null, or the workspace is unknown.
+    pub fn workspace_is_dirty(&self, workspace_id: &str) -> Option<bool> {
+        self.workspace_meta.get(workspace_id)?.is_dirty
     }
 
     pub fn workspace_pinned_at(&self, workspace_id: &str) -> Option<String> {
@@ -2717,6 +2724,7 @@ impl ClientCore {
                 branch: workspace["gitRuntime"]["currentBranch"]
                     .as_str()
                     .map(str::to_string),
+                is_dirty: workspace["gitRuntime"]["isDirty"].as_bool(),
                 pinned_at: workspace["pinnedAt"].as_str().map(str::to_string),
                 diff_stat: workspace["diffStat"].is_object().then(|| DiffStat {
                     additions: workspace["diffStat"]["additions"]

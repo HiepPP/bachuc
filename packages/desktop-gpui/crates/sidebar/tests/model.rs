@@ -384,6 +384,35 @@ fn archive_from_the_diff_stat_asks_only_for_a_changed_line() {
     assert_eq!(prompt.message, "Uncommitted changes (2 deleted lines)");
 }
 
+/// Anti-goal tripwire: the confirm shows in exactly the 5 cases where either signal shows
+/// changes, and never when both are clean or unknown.
+#[test]
+fn archive_from_the_checkout_asks_when_the_stat_or_the_dirty_flag_shows_changes() {
+    let mut asked = 0;
+    for stat in [None, Some((0, 0)), Some((1, 0))] {
+        for is_dirty in [None, Some(false), Some(true)] {
+            let prompt = archive_prompt_for_checkout("main", stat, is_dirty);
+            let changed = stat == Some((1, 0)) || is_dirty == Some(true);
+            assert_eq!(
+                prompt.is_some(),
+                changed,
+                "stat {stat:?}, dirty {is_dirty:?}"
+            );
+            if let Some(prompt) = prompt {
+                asked += 1;
+                assert_eq!(prompt.title, "Archive \"main\"?");
+                let message = if stat == Some((1, 0)) {
+                    "Uncommitted changes (1 added line)"
+                } else {
+                    "Uncommitted changes"
+                };
+                assert_eq!(prompt.message, message, "stat {stat:?}, dirty {is_dirty:?}");
+            }
+        }
+    }
+    assert_eq!(asked, 5);
+}
+
 /// The bucket of a workspace with one agent that has this status and attention data.
 fn attention_bucket(requires: bool, reason: Option<AttentionReason>, status: &str) -> StatusBucket {
     let projects = [project("a", vec![workspace("a1", false, &["x"])])];

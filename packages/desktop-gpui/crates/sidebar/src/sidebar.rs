@@ -7,7 +7,7 @@
 
 use crate::model::{
     Facts, Group, ProjectRow, Row, RowShape, StatusBucket, ViewState, WorkspaceRow,
-    archive_prompt_for_stat, changed_range, clamp_width, format_diff_count, identity_color,
+    archive_prompt_for_checkout, changed_range, clamp_width, format_diff_count, identity_color,
     project_initial, workspace_label,
 };
 use crate::plugin::{
@@ -513,18 +513,19 @@ impl Sidebar {
         window.push_notification("Path copied", cx);
     }
 
-    /// Asks for a confirm only when the workspace diff stat has a changed line; a clean workspace
-    /// goes at once. The stat comes with the workspace, so the menu sends no request.
+    /// Asks for a confirm when the workspace diff stat has a changed line or the checkout is
+    /// dirty; a clean workspace goes at once. Both come with the workspace, so the menu sends no
+    /// request.
     fn archive(&mut self, id: String, name: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.archiving.contains(&id) {
             return;
         }
-        let stat = self
-            .client
-            .read(cx)
+        let client = self.client.read(cx);
+        let stat = client
             .workspace_diff_stat(&id)
             .map(|stat| (stat.additions, stat.deletions));
-        match archive_prompt_for_stat(&name, stat) {
+        let is_dirty = client.workspace_is_dirty(&id);
+        match archive_prompt_for_checkout(&name, stat, is_dirty) {
             None => self.start_archive(id, cx),
             Some(prompt) => {
                 let weak = cx.weak_entity();

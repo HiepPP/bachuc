@@ -825,6 +825,39 @@ fn workspace_diff_stat_and_pinned_at() {
 }
 
 #[test]
+fn workspace_is_dirty_reads_the_git_runtime_flag() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut dirty = workspace("w1", "p1", Some("main"), Value::Null);
+    dirty["gitRuntime"]["isDirty"] = json!(true);
+    let mut clean = workspace("w2", "p1", Some("main"), Value::Null);
+    clean["gitRuntime"]["isDirty"] = json!(false);
+    let mut null = workspace("w3", "p1", None, Value::Null);
+    null["gitRuntime"]["isDirty"] = Value::Null;
+    server.reply(
+        "fetch_workspaces_request",
+        "fetch_workspaces_response",
+        json!({"subscriptionId": "sub-w", "entries": [
+            dirty, clean, null, workspace("w4", "p1", None, Value::Null),
+        ], "pageInfo": page_info()}),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.workspace_is_dirty("w1").is_some()));
+    assert_eq!(harness.core.workspace_is_dirty("w1"), Some(true));
+    assert_eq!(harness.core.workspace_is_dirty("w2"), Some(false));
+    assert_eq!(harness.core.workspace_is_dirty("w3"), None, "null");
+    assert_eq!(harness.core.workspace_is_dirty("w4"), None, "absent");
+    assert_eq!(harness.core.workspace_is_dirty("missing"), None, "unknown");
+
+    let mut cleaned = workspace("w1", "p1", Some("main"), Value::Null);
+    cleaned["gitRuntime"]["isDirty"] = json!(false);
+    server.broadcast(json!({"type": "workspace_update", "payload": {
+        "kind": "upsert", "workspace": cleaned,
+    }}));
+    assert!(harness.pump_until(WAIT, |h| h.core.workspace_is_dirty("w1") == Some(false)));
+}
+
+#[test]
 fn checkout_details_carry_the_git_flag_and_the_file_fields() {
     let server = git_server();
     server.reply(

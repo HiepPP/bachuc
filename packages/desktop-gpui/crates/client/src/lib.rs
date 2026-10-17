@@ -520,6 +520,11 @@ impl Client {
         self.core.workspace_diff_stat(workspace_id)
     }
 
+    /// The workspace `gitRuntime.isDirty`; `None` when absent, null, or the workspace is unknown.
+    pub fn workspace_is_dirty(&self, workspace_id: &str) -> Option<bool> {
+        self.core.workspace_is_dirty(workspace_id)
+    }
+
     pub fn workspace_pinned_at(&self, workspace_id: &str) -> Option<String> {
         self.core.workspace_pinned_at(workspace_id)
     }

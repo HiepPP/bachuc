@@ -569,6 +569,19 @@ pub fn archive_prompt_for_stat(
     Some(archive_confirm(workspace_name, added, removed))
 }
 
+/// `archive_prompt_for_stat`, and also a confirm when the daemon reports the checkout dirty
+/// (`gitRuntime.isDirty`). The stat comes from `git diff --shortstat`, which misses untracked
+/// files, and archiving a Paseo-owned worktree removes them. Electron trusts the stat here; this
+/// client asks on purpose (owner, Q-095). `None` and `Some(false)` keep the stat rule.
+pub fn archive_prompt_for_checkout(
+    workspace_name: &str,
+    stat: Option<(u32, u32)>,
+    is_dirty: Option<bool>,
+) -> Option<ArchivePrompt> {
+    archive_prompt_for_stat(workspace_name, stat)
+        .or_else(|| (is_dirty == Some(true)).then(|| archive_confirm(workspace_name, 0, 0)))
+}
+
 fn archive_confirm(workspace_name: &str, added: u32, removed: u32) -> ArchivePrompt {
     let mut parts = Vec::new();
     if added > 0 {
