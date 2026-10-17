@@ -477,9 +477,7 @@ impl TimelineView {
         if !client.fork_supported() {
             return None;
         }
-        // The client keeps no timeline epoch on its entries, so the timeline sends no cursor
-        // until the client exposes one.
-        let epoch = None;
+        let epoch = client.timeline_epoch(&self.agent_id);
         latest_assistant(&self.entries, start, end)
             .and_then(|entry| fork_boundary(entry, epoch, client.fork_cursor_supported()))
     }
