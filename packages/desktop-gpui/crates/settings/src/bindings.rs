@@ -6,50 +6,13 @@
 use bachuc_command::{Shortcut, default_shortcuts, gpui_keystrokes, is_valid_chord};
 use gpui_kit::Keystroke;
 
-/// The help sections of the Electron shortcuts page.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Section {
-    General,
-    Workspaces,
-    TabsPanes,
-    Layout,
-    AgentInput,
-}
-
-impl Section {
-    pub const ALL: [Section; 5] = [
-        Section::General,
-        Section::Workspaces,
-        Section::TabsPanes,
-        Section::Layout,
-        Section::AgentInput,
-    ];
-
-    /// `settings.shortcuts.sections.*` of the Electron app.
-    pub fn title(self) -> &'static str {
-        match self {
-            Section::General => "General",
-            Section::Workspaces => "Projects & Workspaces",
-            Section::TabsPanes => "Tabs & Panes",
-            Section::Layout => "Layout",
-            Section::AgentInput => "Agent Input",
-        }
-    }
-}
+/// The help sections of the Electron shortcuts page. The table in `bachuc_command` owns them,
+/// so the settings page and the shortcuts dialog group the same way.
+pub use bachuc_command::ShortcutSection as Section;
 
 /// The help section of an action.
 pub fn section_of(action: &str) -> Section {
-    if action.starts_with("workspace.navigate") || action == "workspace.archive" {
-        Section::Workspaces
-    } else if action.starts_with("workspace.") {
-        Section::TabsPanes
-    } else if action.starts_with("sidebar.") {
-        Section::Layout
-    } else if action.starts_with("message-input.") || action.starts_with("agent.") {
-        Section::AgentInput
-    } else {
-        Section::General
-    }
+    bachuc_command::shortcut_section(action)
 }
 
 /// The Electron combo string for a key press, for example `Cmd+Shift+P`, or None for a key that
@@ -216,10 +179,42 @@ mod tests {
         assert_eq!(section_of("workspace.pane.close"), Section::TabsPanes);
         assert_eq!(section_of("sidebar.toggle.both"), Section::Layout);
         assert_eq!(section_of("agent.interrupt"), Section::AgentInput);
+        assert_eq!(section_of("no.such.action"), Section::General);
         for shortcut in default_shortcuts() {
             // Every default lands in a known section; the page shows them all.
             assert!(Section::ALL.contains(&section_of(&shortcut.action)));
         }
+    }
+
+    #[test]
+    fn the_new_rows_land_in_the_electron_sections() {
+        // The `help.section` of each binding in `keyboard-shortcuts.ts`.
+        for (action, section) in [
+            ("workspace.new", Section::Workspaces),
+            ("agent.new", Section::Workspaces),
+            ("command-center.files", Section::General),
+            ("workspace.pin", Section::Workspaces),
+            ("shortcuts.dialog.toggle", Section::General),
+        ] {
+            assert_eq!(section_of(action), section, "{action}");
+        }
+        // Rows keep Electron's order inside a section.
+        let workspaces: Vec<String> = default_shortcuts()
+            .into_iter()
+            .filter(|s| section_of(&s.action) == Section::Workspaces)
+            .map(|s| s.action)
+            .collect();
+        assert_eq!(
+            workspaces,
+            [
+                "agent.new",
+                "workspace.new",
+                "workspace.navigate.prev",
+                "workspace.navigate.next",
+                "workspace.pin",
+                "workspace.archive",
+            ]
+        );
     }
 
     #[test]

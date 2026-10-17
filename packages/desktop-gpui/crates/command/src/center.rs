@@ -8,6 +8,12 @@
 //! global, before the app's items. It runs a plugin row itself and then emits `Run` with an id
 //! that starts with `plugin:`, which the app ignores. The app calls `set_plugin_context` to tell
 //! the view which workspace and agent are open.
+//!
+//! In the Files scope (`open_files_scope`, Cmd+P) the view lists only files. The command crate
+//! has no daemon client, so the view emits `CommandFileEvent::FileQuery` after a typing pause,
+//! the app answers with `set_file_results`, and a pick emits `CommandFileEvent::OpenFile`. The
+//! app removes the view after `OpenFile` too. Backspace in an empty field, or the scope chip,
+//! goes back to the full list.
 
 use crate::chord::display_combos;
 use crate::plugin_rows::{self, PluginRow};
@@ -15,17 +21,27 @@ use crate::search::{Layout, Row, SearchIndex, step};
 use bachuc_icons::{IconName, icon};
 use bachuc_plugin_host::{CommandInput, PluginHost, PluginHostEvent};
 use bachuc_theme::metrics::{
-    BORDER_WIDTH_1, FONT_BASE, FONT_SM, ICON_MD, RADIUS_LG, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_2,
-    SPACE_3, SPACE_4, SPACE_6,
+    BORDER_WIDTH_1, FONT_BASE, FONT_SM, ICON_MD, ICON_SM, ICON_XS, RADIUS_LG, RADIUS_MD, SPACE_0_5,
+    SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
-use gpui_kit::component::h_flex;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::{Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use std::time::Duration;
 
 /// The placeholder of the search field, as in the Electron app.
 const PLACEHOLDER: &str = "Search commands, files, workspaces, and agents...";
+/// The placeholder in the Files scope, `shell.commandCenter.filePlaceholder`.
+const FILE_PLACEHOLDER: &str = "Search files...";
+/// The section title and scope chip label of the Files scope.
+const FILES: &str = "Files";
+/// The typing pause before a file search, `FILE_SEARCH_DEBOUNCE_MS` in
+/// `workspace-file-search.ts`. An empty query searches at once.
+const FILE_SEARCH_DEBOUNCE: Duration = Duration::from_millis(100);
+/// The status slot right of the input, `fileSearchStatus`.
+const SPIN: Duration = Duration::from_millis(1000);
 /// Panel size and the share of the window it may take, from `command-center.tsx`.
 const PANEL_WIDTH: f32 = 640.;
 const PANEL_HEIGHT: f32 = 560.;
@@ -50,6 +66,87 @@ pub struct CommandItem {
     pub icon: Option<IconName>,
     /// An Electron combo string such as `Cmd+Shift+P`, shown as a hint on the row.
     pub shortcut: Option<String>,
+}
+
+/// What the palette asks of its owner in the Files scope. A separate type from `CommandEvent`,
+/// which the app matches exhaustively.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CommandFileEvent {
+    /// Search the workspace files for `query`: files only, at most 100. The app answers with
+    /// `CommandCenter::set_file_results`.
+    FileQuery { query: String },
+    /// A file row was picked: open `path` in a file tab, then remove the view.
+    OpenFile { path: String },
+}
+
+/// What the palette lists.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Scope {
+    /// Actions, workspaces, agents, and plugin rows.
+    #[default]
+    All,
+    /// Only the files of the app's last `set_file_results`.
+    Files,
+}
+
+/// The scope after a key press in the search field, or None when the key does not change it.
+/// Backspace in an empty field leaves the Files scope, as in Electron.
+fn scope_after_key(scope: Scope, key: &str, query: &str) -> Option<Scope> {
+    (scope == Scope::Files && key == "backspace" && query.trim().is_empty()).then_some(Scope::All)
+}
+
+/// How long to wait after a change before the file search.
+fn file_query_delay(query: &str) -> Duration {
+    if query.trim().is_empty() {
+        Duration::ZERO
+    } else {
+        FILE_SEARCH_DEBOUNCE
+    }
+}
+
+/// One file row: the name in front, the folder after it in the muted color.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FileRow {
+    path: String,
+    name: SharedString,
+    directory: SharedString,
+}
+
+/// `describeWorkspaceFilePath`: backslashes become slashes, then the last segment is the name.
+fn file_row(path: &str) -> FileRow {
+    let normalized = path.replace('\\', "/");
+    let (directory, name) = match normalized.rfind('/') {
+        Some(separator) => (
+            normalized[..separator].to_string(),
+            normalized[separator + 1..].to_string(),
+        ),
+        None => (String::new(), normalized.clone()),
+    };
+    FileRow {
+        path: normalized,
+        name: name.into(),
+        directory: directory.into(),
+    }
+}
+
+/// The Files scope list: one titled section with the files in the daemon's order. The daemon
+/// already matched them, so nothing is filtered or ranked here.
+fn files_layout(count: usize) -> Layout {
+    let mut layout = Layout::default();
+    if count == 0 {
+        return layout;
+    }
+    layout.rows.push(Row::Section {
+        title: Some(FILES.to_string()),
+        divider: false,
+        height: crate::search::TITLED_SECTION_HEIGHT,
+    });
+    for item in 0..count {
+        layout.row_of.push(layout.rows.len());
+        layout.order.push(item);
+        layout.rows.push(Row::Item { item });
+    }
+    layout
 }
 
 /// What the palette tells its owner.
@@ -79,10 +176,18 @@ pub struct CommandCenter {
     /// The highlighted position in `layout.order`.
     active: Option<usize>,
     list: ListState,
+    scope: Scope,
+    /// The rows of the last `set_file_results`. `layout` indexes into them in the Files scope.
+    files: Vec<FileRow>,
+    /// A file search is waiting for its answer.
+    file_loading: bool,
+    /// The pending `FileQuery`; replacing it drops the older one.
+    file_query: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<CommandEvent> for CommandCenter {}
+impl EventEmitter<CommandFileEvent> for CommandCenter {}
 
 /// The rows of the active plugins for this context. Before `set_plugin_context`, both ids are
 /// None, so only `Global` items show.
@@ -164,6 +269,10 @@ impl CommandCenter {
             applied: String::new(),
             active: None,
             list,
+            scope: Scope::All,
+            files: Vec::new(),
+            file_loading: false,
+            file_query: None,
             _subscriptions: subscriptions,
         };
         center.active = center.first();
@@ -206,6 +315,10 @@ impl CommandCenter {
             return;
         }
         self.rebuild_items();
+        if self.scope == Scope::Files {
+            // The plugin rows are hidden in the Files scope; the next relayout picks them up.
+            return;
+        }
         let selected = self
             .active
             .and_then(|position| self.layout.order.get(position))
@@ -238,6 +351,62 @@ impl CommandCenter {
         self.query.read(cx).value().to_string()
     }
 
+    /// Lists only files, and asks the app for the files of the current query at once. Call it
+    /// right after `new` for Cmd+P.
+    pub fn open_files_scope(&mut self, window: &mut Window, cx: &mut Context<CommandCenter>) {
+        if self.scope != Scope::Files {
+            self.scope = Scope::Files;
+            self.files.clear();
+            self.query.update(cx, |input, cx| {
+                input.set_placeholder(FILE_PLACEHOLDER, window, cx)
+            });
+            self.relayout(cx);
+        }
+        self.schedule_file_query(cx);
+        self.focus(window, cx);
+    }
+
+    /// The answer to the last `FileQuery`: workspace-relative file paths in the daemon's order.
+    /// Outside the Files scope the paths are kept but not shown.
+    pub fn set_file_results(&mut self, paths: Vec<String>, cx: &mut Context<CommandCenter>) {
+        self.files = paths.iter().map(|path| file_row(path)).collect();
+        self.file_loading = false;
+        if self.scope == Scope::Files {
+            self.relayout(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    fn leave_files_scope(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.scope = Scope::All;
+        self.file_query = None;
+        self.file_loading = false;
+        self.query.update(cx, |input, cx| {
+            input.set_placeholder(PLACEHOLDER, window, cx)
+        });
+        self.relayout(cx);
+    }
+
+    /// Emits `FileQuery` for the current text after `file_query_delay`. A newer change drops
+    /// the pending one. The emit always runs on a later tick, so an owner that subscribes right
+    /// after `open_files_scope` still gets the first query.
+    fn schedule_file_query(&mut self, cx: &mut Context<Self>) {
+        let query = self.query.read(cx).value().to_string();
+        let delay = file_query_delay(&query);
+        self.file_loading = true;
+        self.file_query = Some(cx.spawn(async move |this, cx| {
+            if !delay.is_zero() {
+                cx.background_executor().timer(delay).await;
+            }
+            let _ = this.update(cx, |this: &mut CommandCenter, cx| {
+                this.file_query = None;
+                cx.emit(CommandFileEvent::FileQuery { query });
+            });
+        }));
+        cx.notify();
+    }
+
     fn first(&self) -> Option<usize> {
         (!self.layout.order.is_empty()).then_some(0)
     }
@@ -247,21 +416,36 @@ impl CommandCenter {
         if value == self.applied {
             return;
         }
+        if self.scope == Scope::Files {
+            // The daemon matches files; the list stays until the answer comes.
+            self.applied = value;
+            self.active = self.first();
+            self.schedule_file_query(cx);
+            return;
+        }
         self.relayout(cx);
     }
 
     fn relayout(&mut self, cx: &mut Context<Self>) {
         self.applied = self.query.read(cx).value().to_string();
-        self.layout = self.index.layout(&self.applied);
+        self.layout = match self.scope {
+            Scope::All => self.index.layout(&self.applied),
+            Scope::Files => files_layout(self.files.len()),
+        };
         self.list.reset(self.layout.rows.len());
         // Changing the query re-ranks everything, so an old selection means nothing.
         self.active = self.first();
         cx.notify();
     }
 
-    fn key_down(&mut self, key: &str, window: &Window, cx: &mut Context<Self>) -> bool {
+    fn key_down(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.query.read(cx).focus_handle(cx).is_focused(window) {
             return false;
+        }
+        let query = self.query.read(cx).value().to_string();
+        if let Some(Scope::All) = scope_after_key(self.scope, key, &query) {
+            self.leave_files_scope(window, cx);
+            return true;
         }
         match key {
             "down" | "up" => {
@@ -291,6 +475,14 @@ impl CommandCenter {
         let Some(&index) = self.layout.order.get(position) else {
             return;
         };
+        if self.scope == Scope::Files {
+            if let Some(file) = self.files.get(index) {
+                cx.emit(CommandFileEvent::OpenFile {
+                    path: file.path.clone(),
+                });
+            }
+            return;
+        }
         let Some(item) = self.items.get(index) else {
             return;
         };
@@ -343,9 +535,140 @@ impl CommandCenter {
                     )
                 })
                 .into_any_element(),
+            Some(Row::Item { item }) if self.scope == Scope::Files => {
+                self.render_file(row, *item, cx)
+            }
             Some(Row::Item { item }) => self.render_item(row, *item, cx),
             None => div().into_any_element(),
         }
+    }
+
+    /// A file row, as `ResultContent` draws a `file` result: an icon slot, then the name and
+    /// the folder on one 20 px line.
+    fn render_file(&self, row: usize, item: usize, cx: &mut Context<Self>) -> AnyElement {
+        let colors = tokens(cx);
+        let Some(file) = self.files.get(item) else {
+            return div().into_any_element();
+        };
+        let position = self.layout.row_of.iter().position(|r| *r == row);
+        let active = position.is_some() && position == self.active;
+        div()
+            .id(("command-file", item))
+            .role(Role::Button)
+            .aria_label(SharedString::from(file.path.clone()))
+            .w_full()
+            .h(px(crate::search::ROW_HEIGHT))
+            .px(px(SPACE_4))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(SPACE_3))
+            .cursor_pointer()
+            .when(active, |this| this.bg(colors.surface1))
+            .hover(|style| style.bg(colors.surface1))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if let Some(position) = position {
+                    this.run(position, window, cx);
+                }
+            }))
+            .on_a11y_action(AccessibleAction::Click, {
+                let view = cx.weak_entity();
+                move |_, window, cx| {
+                    if let Some(position) = position {
+                        view.update(cx, |this, cx| this.run(position, window, cx))
+                            .ok();
+                    }
+                }
+            })
+            .child(
+                div()
+                    .w(px(ICON_MD))
+                    .h(px(20.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .flex_shrink_0()
+                    .child(
+                        icon(IconName::File)
+                            .with_size(px(ICON_MD))
+                            .text_color(colors.foreground_muted),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .gap(px(SPACE_1))
+                    .text_size(ui_font_size(FONT_BASE, cx))
+                    .line_height(px(20.))
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .max_w_full()
+                            .truncate()
+                            .text_color(colors.foreground)
+                            .child(file.name.clone()),
+                    )
+                    .when(!file.directory.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(colors.foreground_muted)
+                                .child(file.directory.clone()),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    /// The Files chip left of the input; a press leaves the scope. It fills the input's line
+    /// box, so the header keeps its height.
+    fn render_scope_chip(&self, cx: &mut Context<Self>) -> AnyElement {
+        let colors = tokens(cx);
+        h_flex()
+            .id("command-center-files-scope")
+            .role(Role::Button)
+            .aria_label(FILES)
+            .flex_shrink_0()
+            .h_full()
+            .items_center()
+            .gap(px(SPACE_1_5))
+            .mr(px(SPACE_1))
+            .px(px(SPACE_2))
+            .rounded(px(RADIUS_MD))
+            .border_1()
+            .border_color(colors.border_accent)
+            .bg(colors.surface2)
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, window, cx| this.leave_files_scope(window, cx)))
+            .on_a11y_action(AccessibleAction::Click, {
+                let view = cx.weak_entity();
+                move |_, window, cx| {
+                    view.update(cx, |this, cx| this.leave_files_scope(window, cx))
+                        .ok();
+                }
+            })
+            .child(
+                icon(IconName::Folder)
+                    .with_size(px(ICON_SM))
+                    .text_color(colors.foreground),
+            )
+            .child(
+                div()
+                    .text_size(ui_font_size(FONT_BASE, cx))
+                    .line_height(px(17.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(colors.foreground)
+                    .child(FILES),
+            )
+            .child(
+                icon(IconName::X)
+                    .with_size(px(ICON_XS))
+                    .text_color(colors.foreground),
+            )
+            .into_any_element()
     }
 
     fn render_item(&self, row: usize, item: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -456,7 +779,11 @@ impl Render for CommandCenter {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = tokens(cx);
         let input_font = ui_font_size(FONT_BASE, cx).as_f32();
-        let body = if self.layout.rows.is_empty() {
+        let files = self.scope == Scope::Files;
+        let body = if self.layout.rows.is_empty() && files && self.file_loading {
+            // As Electron: no "No matches" while the search runs.
+            div().flex_1().into_any_element()
+        } else if self.layout.rows.is_empty() {
             div()
                 .id("command-center-empty")
                 .role(Role::Status)
@@ -529,25 +856,68 @@ impl Render for CommandCenter {
                             .border_b_1()
                             .border_color(colors.border)
                             .text_size(ui_font_size(FONT_BASE, cx))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(SPACE_2))
+                            .when(files, |this| this.child(self.render_scope_chip(cx)))
                             .child(
-                                Input::new(&self.query)
-                                    .appearance(false)
-                                    .bordered(false)
-                                    .focus_bordered(false)
-                                    // Replace the gpui-kit Medium padding, height, and text_sm
-                                    // with the Electron input: SPACE_1 above and below one
-                                    // line of FONT_BASE, no side inset.
-                                    .px_0()
-                                    .py(px(SPACE_1))
-                                    // `Input::h` sets only a multi-line height and shadows
-                                    // `Styled::h`; without this the frame keeps the Medium
-                                    // `h_8` (2 rem, 28 px) and the header is 53 px.
-                                    .map(|input| Styled::h(input, px(input_height(input_font))))
-                                    .line_height(px(input_line_height(input_font)))
-                                    .text_size(ui_font_size(FONT_BASE, cx))
-                                    .accessibility_id("command-center-input")
-                                    .aria_label("Search commands"),
-                            ),
+                                div().flex_1().min_w_0().child(
+                                    Input::new(&self.query)
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        // Replace the gpui-kit Medium padding, height, and text_sm
+                                        // with the Electron input: SPACE_1 above and below one
+                                        // line of FONT_BASE, no side inset.
+                                        .px_0()
+                                        .py(px(SPACE_1))
+                                        // `Input::h` sets only a multi-line height and shadows
+                                        // `Styled::h`; without this the frame keeps the Medium
+                                        // `h_8` (2 rem, 28 px) and the header is 53 px.
+                                        .map(|input| Styled::h(input, px(input_height(input_font))))
+                                        .line_height(px(input_line_height(input_font)))
+                                        .text_size(ui_font_size(FONT_BASE, cx))
+                                        .accessibility_id("command-center-input")
+                                        .aria_label(if files {
+                                            "Search files"
+                                        } else {
+                                            "Search commands"
+                                        }),
+                                ),
+                            )
+                            .when(files, |this| {
+                                this.child(
+                                    div()
+                                        .id("command-center-file-search-status")
+                                        .w(px(ICON_SM))
+                                        .h(px(ICON_SM))
+                                        .flex_shrink_0()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .when(self.file_loading, |this| {
+                                            this.role(Role::ProgressIndicator)
+                                                .aria_label("Searching files...")
+                                                .child(
+                                                    icon(IconName::LoaderCircle)
+                                                        .with_size(px(ICON_SM))
+                                                        .text_color(colors.foreground_muted)
+                                                        .with_animation(
+                                                            "command-center-file-spin",
+                                                            Animation::new(SPIN).repeat(),
+                                                            |icon, delta| {
+                                                                icon.transform(
+                                                                    Transformation::rotate(
+                                                                        percentage(delta),
+                                                                    ),
+                                                                )
+                                                            },
+                                                        ),
+                                                )
+                                        }),
+                                )
+                            }),
                     )
                     .child(body),
             )
@@ -556,7 +926,55 @@ impl Render for CommandCenter {
 
 #[cfg(test)]
 mod tests {
-    use super::{FONT_BASE, header_height, input_height, input_line_height};
+    use super::{
+        Duration, FONT_BASE, Row, Scope, file_query_delay, file_row, files_layout, header_height,
+        input_height, input_line_height, scope_after_key,
+    };
+
+    #[test]
+    fn scope_backspace_in_an_empty_field_leaves_the_files_scope() {
+        assert_eq!(
+            scope_after_key(Scope::Files, "backspace", ""),
+            Some(Scope::All)
+        );
+        assert_eq!(
+            scope_after_key(Scope::Files, "backspace", "  "),
+            Some(Scope::All)
+        );
+        assert_eq!(scope_after_key(Scope::Files, "backspace", "src"), None);
+        assert_eq!(scope_after_key(Scope::Files, "a", ""), None);
+        assert_eq!(scope_after_key(Scope::All, "backspace", ""), None);
+    }
+
+    #[test]
+    fn scope_file_query_waits_100_ms_unless_empty() {
+        assert_eq!(file_query_delay(""), Duration::ZERO);
+        assert_eq!(file_query_delay("   "), Duration::ZERO);
+        assert_eq!(file_query_delay("main"), Duration::from_millis(100));
+    }
+
+    #[test]
+    fn scope_file_rows_split_name_and_folder() {
+        let row = file_row("src\\app\\main.rs");
+        assert_eq!(row.path, "src/app/main.rs");
+        assert_eq!(row.name.as_ref(), "main.rs");
+        assert_eq!(row.directory.as_ref(), "src/app");
+        let top = file_row("README.md");
+        assert_eq!(top.name.as_ref(), "README.md");
+        assert_eq!(top.directory.as_ref(), "");
+    }
+
+    #[test]
+    fn scope_files_layout_keeps_the_daemon_order_under_one_section() {
+        assert!(files_layout(0).rows.is_empty());
+        let layout = files_layout(3);
+        assert!(matches!(
+            &layout.rows[0],
+            Row::Section { title: Some(title), divider: false, .. } if title == "Files"
+        ));
+        assert_eq!(layout.order, [0, 1, 2]);
+        assert_eq!(layout.row_of, [1, 2, 3]);
+    }
 
     #[test]
     fn header_matches_the_electron_50_px_header() {
