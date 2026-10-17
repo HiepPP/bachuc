@@ -72,3 +72,9 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - GPUI's `focus_visible` keeps only the last style. A second call for opacity drops the ring, so put both in one call.
 - GPUI `list` re-renders and re-measures its visible items every frame. Call `splice` only for changed item keys and `remeasure` only for a scale or width change, so a poll keeps the scroll position.
 - A Verify grep for `plugin-[a-z-]+` over a plugin's own `Cargo.toml` always matches its `name =` line. Scope such a grep to `[dependencies]`.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows `board` as `failed`, so it draws no Board.
+
+- UI check (GPUI Board Runs view against Electron 6770: lane rail, columns, cards, colors) -> UNVERIFIED (unattended): AX press on the `Board` row now opens the Board page with the tabs `Runs`, `Timeline`, `Recaps`, the size control at 100%, the host row `live`, and the columns `Running 0` and `Just finished 0` (`/tmp/wt-ui2/board.jpg`). No thread is running or finished on live, and no agent can start (a send fails on a missing working directory), so no card shows. The reference has no Board.

@@ -84,3 +84,10 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - The Spaces page check needs the `Plugins` row to open; that row now takes an AX press directly (TASK-175 Fix Round 1).
 - Tests: `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-plugin-workspace-spaces` -> 50 passed; `./cargo.sh fmt --check -p bachuc-plugin-workspace-spaces` -> exit 0.
 - UI check (tab sizes) -> DEFERRED (UI checker). UI check (Spaces page with two Spaces) -> DEFERRED (UI checker).
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows `workspace-spaces` as `failed`; the reference is the source `spaces-strip.tsx` (tab 26, strip 39). Measures in points from `/tmp/wt-ui2/initial.jpg` (pixel scan).
+
+- UI check (sidebar strip: tab sizes, selected fill) -> PASS. Column x 15: the strip border at y 704, the `1` tab fill from y 710.5 to 737 (26 pt), and the footer border at y 743, so the strip is 39 pt. Row y 715: the `1` tab fill from x 10 to 36 (26 pt) and the `+` tab border from x 40.5 to 65.5 (26 pt incl. border), gap 4. The selected fill is (56,111,78) to (64,117,87), the accent green as in round 1. Evidence: `/tmp/wt-ui2/initial.jpg`.
+- UI check (Spaces page layout, heading name, with two Spaces) -> UNVERIFIED (unattended): needs pointer. `Plugins` and `Settings` open the Settings page, which has no Spaces screen (`/tmp/wt-ui2/plugins.jpg`); the Spaces page opens from a Space tab menu (right-click). Live has one Space, and `Create a Space` would add one to live.

@@ -75,3 +75,10 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - AX press: the `Search`, `Board`, and `Plugins` rows now call their handler from `AccessibleAction::Click` too; see TASK-175 Fix Round 1 for the full list and reason.
 - Tests: `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-sidebar` -> all pass, new `metrics::tests::nav_rows_are_30_px_apart`; `./cargo.sh fmt --check -p bachuc-sidebar` -> exit 0.
 - UI check (`Plugins` row placement, nav pitch 30) -> DEFERRED (UI checker). UI check (stop-orb) -> DEFERRED (UI checker): it needs an agent view, which the AX press fix may now open.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron reference: the round-1 screenshot `/tmp/wt-ui/electron-initial.jpg` (no plugin rows there). Measures in points from `/tmp/wt-ui2/initial.jpg` (pixel scan).
+
+- UI check (`Plugins` sidebar row with the blocks icon, placed as in Electron 6770) -> PASS. Icon centres are y 90, 120, and 150 (`Search`, `Board`, `Plugins`): a pitch of 30 pt, as in Electron (81, 110, 140). The `Plugins` row fill spans y 136-164, 28 pt tall (round 1: pitch 33). The first GPUI row is 9 pt lower than Electron's because the GPUI sidebar has a host row above it. Evidence: `/tmp/wt-ui2/initial.jpg`.
+- UI check (stop-orb: red solving orb in the stop button's place, with an agent running) -> UNVERIFIED (unattended): no agent can run. The only mock agent that opens (`wt-long-thread`) has a working directory that does not exist, so a send fails with "Working directory does not exist: /tmp/wt-long-thread" (`/tmp/wt-ui2/run-agent-2.jpg`). The reference has no plugin. The test draft text was cleared.

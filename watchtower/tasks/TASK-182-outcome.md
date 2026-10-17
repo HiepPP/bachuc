@@ -61,3 +61,10 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - `.when` on a `Stateful` element needs `use gpui_kit::prelude::FluentBuilder as _;`; `use gpui_kit::*` does not bring it in.
 - gpui `ElementId` has no `From<(&str, &str)>`; use `(&str, usize)` with the row index.
 - `cargo fmt` rewrites the files at once; a read after it shows "changed on disk" notices that come from the formatter.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows every plugin as `failed`, so it draws no plugin UI.
+
+- UI check (Skills pill in the toolbar of an agent composer, with pinned short names, placed and sized as in Electron 6770) -> UNVERIFIED (unattended): the pill shows in the agent composer toolbar after `Default` and before the model pill, and an AX press opens its menu (`Watchtower`, `Chase goal`, `Sequential thinking`, clear-all; `/tmp/wt-ui2/skills-popover.jpg`, `/tmp/wt-ui2/after-press-ws31.jpg`). No skill is pinned on live, so no short names show, and the reference has no pill to compare. Pinning would change live settings.
+- UI check (Settings page `Skill pins` with three switch rows) -> PASS. The `Plugins` row and `Settings` open the Settings page, and the `Skill pins` screen shows the heading `skill-pins · Skill pins`, the section `Default pins for new agents`, and three switch rows (`Watchtower`, `Chase goal`, `Sequential thinking`, all off) (`/tmp/wt-ui2/settings-skill-pins.jpg`). The texts match `hiep-plugins/plugins/skill-pins/shared/catalog.ts` and `client/settings.tsx:41`. The reference has no such page, so the layout is not compared.

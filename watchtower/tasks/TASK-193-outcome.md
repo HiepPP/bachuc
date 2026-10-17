@@ -64,3 +64,9 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - GPUI `Styled::flex_shrink` takes a factor; use `flex_shrink(1.)`.
 - A GPUI `list` paints its overdraw too, so an animation that asks for frames from paint must check `window.content_mask().bounds` first.
 - `git diff` in this checkout runs through a wrapper that indents lines; use `git --no-pager diff --no-ext-diff` and grep `^  -` for removed lines.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows `board` as `failed`.
+
+- UI check (Timeline, running orb, and corner pills against Electron 6770) -> UNVERIFIED (unattended): AX press on `Board` and then on the `Timeline` tab opens the Timeline view, which shows `No agents ran` under the host heading `live` (`/tmp/wt-ui2/board-timeline.jpg`). No thread runs on live and none can start (a send fails on a missing working directory), so no bar, orb, or corner pill shows. The reference has no Board.

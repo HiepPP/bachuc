@@ -51,3 +51,9 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - The models map holds weak entities: a model lives while one of its agent's panels holds it, so an agent that has no mounted panel gets no reads.
 - The `prompts.host` read for the command waits for `ClientEvent::Connected` when the client is not yet connected, because an earlier request fails.
 - A JS replace string is literal, but `regex` and `fancy-regex` expand `$` in replacements. The port replaces the first match by its byte range.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground).
+
+- UI check (panel with Recap chips and one card per prompt, Edit and Send, against Electron 6770) -> UNVERIFIED (unattended): the agent thread opens now, but its last reply (mock stream text) has no Recap or `What Next` fence, so the panel does not show (`/tmp/wt-ui2/after-press-ws31.jpg`). A reply with a fence needs a prompt to an agent. The reference lacks the plugin (`failed` on 6770).

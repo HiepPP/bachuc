@@ -60,3 +60,9 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - In a debug build, `HashMap` work dominated the overview rules: a 40-entry map costs about 18 us per build-and-lookup pass. A sorted `Vec` with binary search costs 3 us. Use one when a debug timing test covers a hot pure function.
 - `ListState::splice` over the whole range resets the scroll position; `changed_range` plus `remeasure()` keeps it while heights change.
 - A backdrop that does not `occlude()` lets a click reach the list rows under it.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows `watchtower-board` as `failed`.
+
+- UI check (Watchtower overlay at width 1,300 and 700 against Electron 6770) -> UNVERIFIED (unattended): needs pointer. AX press on `Open Watchtower` in the agent composer now opens the overlay at the window width of 1,200 pt, with the header, a left column (`0%`, `0 of 0 done`, `Tasks`) and a right column (`Watchtower`, `No plan yet`, and the cards `Needs you`, `Decisions`, `Archived plans`) (`/tmp/wt-ui2/watchtower-overlay.jpg`). The workspace `/tmp/wt-long-thread` has no plan, the window cannot be resized without the pointer, and the reference has no plugin. The header, plan tree, and stacked order are not compared.

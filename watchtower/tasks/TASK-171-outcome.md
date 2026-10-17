@@ -48,3 +48,9 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - In this gpui, `flex_grow` and `flex_shrink` take a value, and `Icon::with_size` needs `Sizable` in scope.
 - Every test module in a file with `use gpui_kit::*` needs named imports; `use super::*` hits the gpui `test` macro recursion.
 - Defaults taken (see questions): the diff pill label is the Electron string "Open Changes tab"; the running mark in the strip is a static ring, because the animated `RunningRing` is private to `bachuc-sidebar`; the bulk archive progress is tracked locally from the rows that leave the list, because `Client::archive_agent` returns no result, so no failure count shows; the meter keeps a track-only ring while the agent starts or runs without usage, as Electron does.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). AX press on a workspace row now opens its agent view.
+
+- UI check (strip height, divider, pill gaps, trailing order against Electron 6770) -> UNVERIFIED (unattended): no agent with tasks and a diff stat exists on live. The only agent that opens (`wt-long-thread`, mock) has a diff but no tasks, and its track holds only the `Open Watchtower` pill (`/tmp/wt-ui2/after-press-ws31.jpg`). A prompt to create one is not allowed.

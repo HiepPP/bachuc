@@ -71,3 +71,10 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - A failed mode read retries after the next reconnect or after the plugin reactivates (a new store), not on a timer. This matches the skill-pins crate.
 - The model inputs are seeded once, when the settings first load. A change of the stored models from another client does not reach the inputs, as `initialValue` in Electron.
 - In a file with `use gpui_kit::*`, the test module imports by name, not `use super::*`.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows every plugin as `failed`, so it draws no plugin UI.
+
+- UI check (right-aligned `EN` note under a Vietnamese prompt bubble) -> UNVERIFIED (unattended): the agent thread opens now, but the note needs a Vietnamese prompt, and the plugin translates it through a real model. No prompt was sent.
+- UI check (Caveman mode pill in the agent composer toolbar, with the mode label) -> PASS. The agent composer toolbar shows the pill with the label `Default`, right after the attach button and before `Skills`; an AX press opens a menu with `Default`, `Lite`, `Full`, `Ultra`, `Wenyan Lite`, `Wenyan Full`, `Wenyan Ultra`, and a second press closes it (`/tmp/wt-ui2/after-press-ws31.jpg`, `/tmp/wt-ui2/caveman-popover.jpg`). The reference has no pill, so the size and position are not compared with Electron.

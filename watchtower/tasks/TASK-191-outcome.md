@@ -54,3 +54,9 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - The plugin crates share the app's one gpui-kit feature set, so linking 15 more crates adds no gpui-kit build.
 - `Option<(Entity<T>, Subscription)>` is not `Clone`; copy the entity with `.as_ref().map(|(entity, _)| entity.clone())`.
 - A plugin crate's lib name is its package name with `_`, for example `bachuc_plugin_edit_diffs`.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows all three plugins as `failed`, so it draws none of their pills.
+
+- UI check (prompt-translate, skill-pins, and watchtower-board pills on one agent composer, GPUI against Electron 6770) -> PASS. The GPUI agent composer of `wt-long-thread` shows `Default` (Caveman mode, prompt-translate), `Skills` (skill-pins), and `Watchtower` (watchtower-board, in the track row above the input) (`/tmp/wt-ui2/after-press-ws31.jpg`). AX press on `Skills` and on `Caveman mode` opened their menus, and AX press on `Watchtower` opened the Watchtower overlay (`/tmp/wt-ui2/watchtower-overlay.jpg`). The reference shows none, so there is no side-by-side match, and the line's "where Electron shows them" holds vacuously.

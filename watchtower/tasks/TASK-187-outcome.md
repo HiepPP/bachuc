@@ -66,3 +66,9 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - A gpui `div` has no disabled state in the accessibility tree (`aria_disabled` does not exist). Use `aria_description("Disabled")` and drop the click handler.
 - gpui-kit `TextareaState` has no max length and `min_h` goes through `Styled` on `Textarea`; a length cap needs `InputEvent::Change` with `set_value`, which emits no event, so it cannot loop.
 - A pure `Poller` with a queued user request keeps the in-flight guard testable without a GPUI context.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground).
+
+- UI check (Direct route panel and Delegated work panel against Electron 6770) -> UNVERIFIED (unattended): `jev-orchestrator` is not running on live (round 1: `disabled`), so the Settings plugin screens list `Thinking orb`, `Edit diffs`, `Next prompt actions`, `Prompt translate`, and `Skill pins` only (`/tmp/wt-ui2/plugins.jpg`). The reference lists it as `failed`. Enabling it changes live.

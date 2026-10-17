@@ -58,3 +58,9 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - A regex compile per task row made `build_plan_tree` take 47 ms on 200 tasks in a debug build; `task_title` now strips the ID by hand.
 - `commit_shas` needs JS lookahead, which the `regex` crate lacks: it matches whole hex words of 7 to 40 characters and keeps the first with a digit, which is the same set.
 - Real payloads for decode tests come from running the server's `readBoard`, `readOverview`, and `readDecision` with `tsx` on this repo and on a `/tmp` copy of an archived plan that has a RUN.md.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows `watchtower-board` as `failed`, so it draws no pill.
+
+- UI check (composer pill and New workspace `board` panel against Electron 6770: pill label, progress strip, waiting card, task list) -> UNVERIFIED (unattended): the reference has no plugin, so nothing is compared. GPUI shows the pill `Watchtower` with an icon in the track row of the New workspace draft of project `bachuc`. AX press on it opens the side panel with the plan title `GPUI parity follow-ups: ...`, `95%`, `39 of 41 done`, a dot strip, `39 done · 2 waiting · 0 not started`, and a `Tasks 41` list with `Active 0`, `Blocked 2` (`TASK-175`, `TASK-179`, with `BLOCKED` badges), `Todo 0`, and `Done 39` (`/tmp/wt-ui2/watchtower-bachuc.jpg`). Round 1 saw nothing on press. No separate waiting card shows in this panel.

@@ -77,3 +77,9 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - A gpui-base `TextViewState` emits no selection event, but it notifies on each selection change, with `is_selecting` updated. `cx.observe` on each state is enough to track a settled selection.
 - Any left press clears text selections in the capture phase, before a click lands. A toolbar that acts on the selection must read the selection before the press and act on mouse down.
 - Projecting after grouping leaves the grouper and its tests alone. Turn rows are reused while a group's `Rc` is unchanged, so a projection change outside `grouper.changed()` must set `rows_stale`.
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground).
+
+- UI check (find ring screenshot against Electron 6770) -> UNVERIFIED (unattended): needs foreground. The thread view now opens (`/tmp/wt-ui2/after-press-ws31.jpg`), but its AX tree has no find button, so the find bar needs a keyboard shortcut, which is not an AX action. The reference also lacks the plugin (`failed` on 6770).

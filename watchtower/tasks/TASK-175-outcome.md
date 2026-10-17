@@ -82,3 +82,11 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, and window screen
 - AX press: Search, the plugin nav rows (`Board`, `Plugins`), `Add project`, `Settings`, the project rows, the workspace rows, the `Pinned` header, and the show-more rows now run their handler from `AccessibleAction::Click` as well as `on_click`, through one `OnPress::on_press` helper in `sidebar.rs`. Each already had `Role::Button` and `on_click`, so GPUI exposed the press, but its default handler replays a mouse click at the node centre; the UI check saw that do nothing. The root cause of the failed replay is not proven (no app run here). The project and workspace kebabs open a gpui-kit menu and are unchanged.
 - Tests: `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-sidebar` -> all pass (2 + 1 + 22 + 24), new `metrics::tests::the_footer_is_57_px_tall` and `nav_rows_are_30_px_apart`; `./cargo.sh fmt --check -p bachuc-sidebar` -> exit 0.
 - UI check (footer height and label) -> DEFERRED (UI checker). UI check (AX press on the sidebar rows, Search, Board, Plugins, Settings) -> DEFERRED (UI checker).
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron reference: the round-1 screenshot `/tmp/wt-ui/electron-initial.jpg`. Measures in points from `/tmp/wt-ui2/initial.jpg` (pixel scan).
+
+- UI check (sidebar footer `Add project` button against Electron 6770: icon, label, height, colors) -> PASS. The footer border sits at y 743.0 in both (round 1: 740.5 against 743). The `Add project` label ink is y 767-780 in both, and the icon ink is y 766-777 in both. Evidence: `/tmp/wt-ui2/initial.jpg`.
+- UI check (AX press on Search, Board, Plugins, Settings, project rows, workspace rows) -> PASS. `Search` opened the command center dialog (`/tmp/wt-ui2/search.jpg`); `Board` opened the Board page (`/tmp/wt-ui2/board.jpg`); `Plugins` and `Settings` opened the Settings page with the Plugins screens (`/tmp/wt-ui2/plugins.jpg`, `/tmp/wt-ui2/settings-btn.jpg`); a project row changed the list (`/tmp/wt-ui2/proj-press.jpg`); a workspace row opened its agent view (`/tmp/wt-ui2/after-press-ws31.jpg`).
+- UI check (`Add project` AX press) -> UNVERIFIED: not pressed, because it can open a native folder dialog that takes the foreground.
