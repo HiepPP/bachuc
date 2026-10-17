@@ -78,10 +78,11 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 - Done (implement, 2026-10-17): TASK-168 to TASK-195, all 28 TASKs built and committed on `feat/bachuc-gpui`; nothing pushed. Plan Verify passed: 1,201 tests, release build, no change in the existing packages, `fmt --check` on every changed crate.
 - Done (implement, 2026-10-16): TASK-157 to TASK-167, all 11 TASKs built and committed.
-- Proof is code tests only for both runs. Live (6768) was down, so no `UI check:` line ran (Q-109, OPEN). TASK-175 and TASK-179 stay BLOCKED until the owner checks the swipe, sideways scroll, and wrap by hand.
-- Owner choices to review: the `DEFAULTED` rows Q-089 to Q-108 in [watchtower/QUESTIONS.md](watchtower/QUESTIONS.md); Q-095 (archive confirm on uncommitted changes) carries data-loss risk.
+- Owner answered Q-089 to Q-109 on 2026-10-17; TASK-196 (archive confirm on a dirty tree) and TASK-197 (palette 400 toggles) are DONE.
+- Background UI checks, three rounds (2026-10-17): the four measured FAIL rows (TASK-173, 175, 181, 188) were fixed and now PASS; AX press now opens the sidebar rows and pills. Round 2 found a crash on opening a diff from Changes (TASK-179); it is fixed in code (11a6592ba) but round 3 could not open the diff in the background, so it is UNVERIFIED. Most other lines stay UNVERIFIED: no runnable mock agent, no plugins in the Electron 6770 build, or they need the pointer. Details are in each outcome's `## UI Checks` sections.
+- TASK-175 and TASK-179 stay BLOCKED until the owner tries, with the app in front: opening a diff from Changes (the crash path), the sidebar swipe, sideways scroll, and wrap.
 - Left out, follow-up candidates: split diff layout, explorer New file and New folder, Modified sort, markdown inline capture colors, @file mentions (Q-080), and the `html-reply` plugin.
-- Next action: start live, check the screens in `Bachuc GPUI.app` (Q-109), then `/watchtower archive`.
+- Next action: start live, run those hand checks in `Bachuc GPUI.app`, then `/watchtower archive`.
 - The owner measures the CPU of the previous plan's TASK-155 by hand (Q-088 in the archived plan).
 
 ## Archive
