@@ -360,7 +360,11 @@ impl Shell {
             && matches!(event, ClientEvent::TimelineChanged { agent_id: id } if *id == agent_id)
         {
             self.pending_prompt = None;
-            self.reveal_latest_prompt(&agent_id, window, cx);
+            // The shell subscribed to the client before the timeline view, so the view has not
+            // synced this change yet; the reveal runs once every subscriber has.
+            cx.defer_in(window, move |this, window, cx| {
+                this.reveal_latest_prompt(&agent_id, window, cx)
+            });
         }
         // Timeline views follow their own changes; the shell has nothing to redraw.
         if matches!(event, ClientEvent::TimelineChanged { .. }) {
@@ -2830,7 +2834,7 @@ pub(crate) fn agent_workspace(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PromptReveal {
-    /// The timeline has not loaded; try again on its next change.
+    /// The timeline has no entries yet; try again on its next change.
     Wait,
     /// No user message is loaded; keep the tail view.
     Tail,
@@ -2838,9 +2842,10 @@ pub(crate) enum PromptReveal {
     Reveal(String),
 }
 
-/// Where `AgentAnchor::LatestPrompt` scrolls: the last loaded user message.
+/// Where `AgentAnchor::LatestPrompt` scrolls: the last loaded user message. A state with no
+/// entries waits, because a permission change can come before the first page.
 pub(crate) fn latest_prompt_reveal(state: Option<&TimelineState>) -> PromptReveal {
-    let Some(state) = state.filter(|state| state.version > 0) else {
+    let Some(state) = state.filter(|state| state.version > 0 && !state.entries.is_empty()) else {
         return PromptReveal::Wait;
     };
     state
@@ -2927,7 +2932,9 @@ mod tests {
         assert_eq!(latest_prompt_reveal(None), PromptReveal::Wait);
         let mut state = TimelineState::default();
         assert_eq!(latest_prompt_reveal(Some(&state)), PromptReveal::Wait);
+        // A permission can change the state before the first page arrives.
         state.version = 1;
+        assert_eq!(latest_prompt_reveal(Some(&state)), PromptReveal::Wait);
         state.entries = vec![json!({"seqStart": 1, "item": {"type": "assistant_message"}})];
         assert_eq!(latest_prompt_reveal(Some(&state)), PromptReveal::Tail);
         state.entries = vec![
