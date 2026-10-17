@@ -68,6 +68,41 @@ pub fn find_matches(lines: &[String], query: &str) -> (Vec<Match>, bool) {
     (matches, false)
 }
 
+/// The search of the find bar. The query outlives the bar, as in `TerminalFind`, which keeps it
+/// when the bar closes and searches it again when the bar opens.
+#[derive(Default)]
+pub struct Search {
+    pub query: String,
+    pub matches: Vec<Match>,
+    /// The search stopped at [`MATCH_LIMIT`].
+    pub limited: bool,
+    pub current: Option<usize>,
+    /// Output arrived after the search, so the next step searches again.
+    pub stale: bool,
+}
+
+impl Search {
+    /// Searches `lines` for the query again and keeps the current match in range.
+    pub fn run(&mut self, lines: &[String]) {
+        let (matches, limited) = find_matches(lines, &self.query);
+        self.current = self
+            .current
+            .filter(|_| !matches.is_empty())
+            .map(|current| current.min(matches.len() - 1));
+        self.matches = matches;
+        self.limited = limited;
+        self.stale = false;
+    }
+
+    /// Drops the matches when the bar closes and keeps the query.
+    pub fn close(&mut self) {
+        self.matches = Vec::new();
+        self.limited = false;
+        self.current = None;
+        self.stale = false;
+    }
+}
+
 /// The buffer lines, oldest first: the history, then the screen. The emulator reads only the
 /// rows on screen, so this scrolls through the history and puts the view back where it was.
 pub fn buffer_lines(emulator: &mut Emulator) -> Vec<String> {
@@ -193,8 +228,8 @@ pub fn paint(
 mod tests {
     // Not `super::*`: the gpui glob brings its own `test` attribute.
     use super::{
-        MATCH_LIMIT, Match, buffer_lines, current_place, find_matches, first_from, match_ranges,
-        paint, reveal_offset, status, step,
+        MATCH_LIMIT, Match, Search, buffer_lines, current_place, find_matches, first_from,
+        match_ranges, paint, reveal_offset, status, step,
     };
     use crate::emulator::Emulator;
     use gpui_kit::{HighlightStyle, hsla};
@@ -240,6 +275,34 @@ mod tests {
         for (index, line) in lines.iter().take(30).enumerate() {
             assert_eq!(line, &format!("line {}", index + 1));
         }
+    }
+
+    #[test]
+    fn a_closed_search_keeps_its_query_and_finds_it_again_on_open() {
+        let mut emulator = Emulator::new(3, 20);
+        emulator.feed(b"say hello\r\nhello");
+        let mut search = Search {
+            query: "hello".into(),
+            ..Search::default()
+        };
+        search.run(&buffer_lines(&mut emulator));
+        search.current = Some(1);
+        search.close();
+        assert_eq!(search.query, "hello");
+        assert!(search.matches.is_empty() && search.current.is_none());
+        // Output that arrives while the bar is closed is found when it opens again.
+        emulator.feed(b" hello");
+        search.run(&buffer_lines(&mut emulator));
+        assert_eq!(search.matches.len(), 3);
+        assert_eq!(
+            status(
+                &search.query,
+                search.matches.len(),
+                search.current,
+                search.limited
+            ),
+            "3 matches"
+        );
     }
 
     #[test]

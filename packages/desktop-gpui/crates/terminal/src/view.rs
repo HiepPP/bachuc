@@ -3,12 +3,13 @@
 //! a Cmd-click opens a URL or a file path.
 
 use crate::emulator::{Emulator, Palette};
-use crate::find::{self, Match};
+use crate::find::{self, Search};
 use crate::keys::{key_bytes, paste_bytes};
 use crate::links::{self, LinkTarget};
 use crate::size::{PADDING, cell_at, grid_size};
 use alacritty_terminal::term::TermMode;
-use bachuc_client::{Client, TerminalFrame, TerminalHandle};
+use bachuc_client::{Client, MatchMode, TerminalFrame, TerminalHandle};
+use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
     BORDER_WIDTH_2, FONT_SM, ICON_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3,
 };
@@ -16,7 +17,7 @@ use bachuc_theme::{ShadowSize, Tokens, shadow, tokens, ui_font_size};
 use futures::StreamExt;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::theme::Theme;
-use gpui_kit::component::{Icon, Sizable as _, h_flex};
+use gpui_kit::component::{Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::cell::Cell;
@@ -80,25 +81,19 @@ enum Source {
     Attach(String),
 }
 
-/// The open find bar.
+/// The open find bar. Its search lives in the view, so the query outlives the bar.
 struct Finder {
     input: Entity<InputState>,
-    query: String,
-    matches: Vec<Match>,
-    /// The search stopped at `find::MATCH_LIMIT`.
-    limited: bool,
-    current: Option<usize>,
-    /// Output arrived after the search, so the next step searches again.
-    stale: bool,
     _subscriptions: Vec<Subscription>,
 }
 
-/// The link under the pointer while Cmd is held: its screen cell and its byte range in the row.
+/// The link under the pointer while Cmd is held: its screen cell and its byte range in each row
+/// it covers, as a wrapped link covers several.
 #[derive(Clone, PartialEq)]
 struct Hover {
     row: usize,
     col: usize,
-    range: Range<usize>,
+    spans: Vec<(usize, Range<usize>)>,
 }
 
 #[derive(Clone, Copy)]
@@ -180,6 +175,7 @@ pub struct TerminalView {
     wheel_remainder: f32,
     reader: Option<Task<()>>,
     finder: Option<Finder>,
+    search: Search,
     hover: Option<Hover>,
     /// The last pointer position, so a Cmd press can underline the link under it.
     pointer: Option<Point<Pixels>>,
@@ -289,6 +285,7 @@ impl TerminalView {
             wheel_remainder: 0.0,
             reader: Some(reader),
             finder: None,
+            search: Search::default(),
             hover: None,
             pointer: None,
             link_lookup: None,
@@ -362,8 +359,8 @@ impl TerminalView {
                 }
             }
         }
-        if let Some(finder) = &mut self.finder {
-            finder.stale = true;
+        if self.finder.is_some() {
+            self.search.stale = true;
         }
         let replies = self.emulator.take_replies();
         if !replies.is_empty() {
@@ -566,9 +563,11 @@ fn focus_ring(color: Hsla) -> Div {
 type BarAction = fn(&mut TerminalView, &mut Window, &mut Context<TerminalView>);
 
 impl TerminalView {
-    /// Opens the find bar, or focuses it and selects its text when it is open.
+    /// Opens the find bar, or focuses it and selects its text when it is open. A new bar shows
+    /// the last query and searches it again.
     fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.finder.is_none() {
+        let opening = self.finder.is_none();
+        if opening {
             let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find in pane"));
             let weak = cx.weak_entity();
             let input_focus = input.focus_handle(cx);
@@ -609,13 +608,11 @@ impl TerminalView {
                         }
                     }),
                 ];
+            // `set_value` sends no change event, so the kept query is searched below.
+            let query = self.search.query.clone();
+            input.update(cx, |input, cx| input.set_value(query, window, cx));
             self.finder = Some(Finder {
                 input,
-                query: String::new(),
-                matches: Vec::new(),
-                limited: false,
-                current: None,
-                stale: false,
                 _subscriptions: subscriptions,
             });
         }
@@ -625,11 +622,15 @@ impl TerminalView {
                 input.select_all(window, cx);
             });
         }
+        if opening && !self.search.query.is_empty() {
+            self.find_first(cx);
+        }
         cx.notify();
     }
 
     fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.finder.take().is_some() {
+            self.search.close();
             self.focus.focus(window, cx);
             cx.notify();
         }
@@ -652,66 +653,56 @@ impl TerminalView {
 
     /// A new query searches again and shows the first match from the top of the screen down.
     fn set_query(&mut self, query: String, cx: &mut Context<Self>) {
-        let Some(finder) = &mut self.finder else {
-            return;
-        };
-        if finder.query == query {
+        if self.finder.is_none() || self.search.query == query {
             return;
         }
-        finder.query = query;
+        self.search.query = query;
+        self.find_first(cx);
+    }
+
+    /// Searches the query and shows the first match from the top of the screen down.
+    fn find_first(&mut self, cx: &mut Context<Self>) {
         self.search(cx);
         let top = find::top_line(self.emulator.history_size(), self.emulator.display_offset());
-        if let Some(finder) = &mut self.finder {
-            finder.current = find::first_from(&finder.matches, top);
-        }
+        self.search.current = find::first_from(&self.search.matches, top);
         self.reveal_current(cx);
     }
 
     fn step_find(&mut self, forward: bool, cx: &mut Context<Self>) {
-        if self.finder.as_ref().is_some_and(|finder| finder.stale) {
+        if self.finder.is_none() {
+            return;
+        }
+        if self.search.stale {
             self.search(cx);
         }
         let top = find::top_line(self.emulator.history_size(), self.emulator.display_offset());
-        let Some(finder) = &mut self.finder else {
-            return;
-        };
-        let count = finder.matches.len();
-        finder.current = match finder.current {
+        let search = &mut self.search;
+        let count = search.matches.len();
+        search.current = match search.current {
             Some(current) => (count > 0).then(|| find::step(current, count, forward)),
-            None => find::first_from(&finder.matches, top),
+            None => find::first_from(&search.matches, top),
         };
         self.reveal_current(cx);
     }
 
-    /// Finds the query in the history and the screen. It runs on a query change and on a step
-    /// after new output, never per output frame.
+    /// Finds the query in the history and the screen. It runs on a query change, on opening the
+    /// bar, and on a step after new output, never per output frame.
     fn search(&mut self, cx: &mut Context<Self>) {
-        let Some(query) = self.finder.as_ref().map(|finder| finder.query.clone()) else {
-            return;
-        };
-        let (matches, limited) = if query.is_empty() {
-            (Vec::new(), false)
+        let lines = if self.search.query.is_empty() {
+            Vec::new()
         } else {
-            find::find_matches(&find::buffer_lines(&mut self.emulator), &query)
+            find::buffer_lines(&mut self.emulator)
         };
-        if let Some(finder) = &mut self.finder {
-            finder.current = finder
-                .current
-                .filter(|_| !matches.is_empty())
-                .map(|current| current.min(matches.len() - 1));
-            finder.matches = matches;
-            finder.limited = limited;
-            finder.stale = false;
-        }
+        self.search.run(&lines);
         cx.notify();
     }
 
     /// Scrolls the history so the current match is on screen.
     fn reveal_current(&mut self, cx: &mut Context<Self>) {
         let Some(line) = self
-            .finder
-            .as_ref()
-            .and_then(|finder| finder.matches.get(finder.current?))
+            .search
+            .current
+            .and_then(|current| self.search.matches.get(current))
             .map(|found| found.line)
         else {
             cx.notify();
@@ -728,10 +719,14 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// The link drawn in a screen cell.
-    fn link_under(&mut self, row: usize, col: usize) -> Option<links::Link> {
-        let line = self.emulator.lines().nth(row)?;
-        links::link_at(&line.text, col)
+    /// The link drawn in a screen cell, joined across the rows it wraps over.
+    fn link_under(&mut self, row: usize, col: usize) -> Option<links::RowLink> {
+        let rows: Vec<(&str, bool)> = self
+            .emulator
+            .lines()
+            .map(|line| (line.text.as_ref(), line.wrapped))
+            .collect();
+        links::link_in_rows(&rows, row, col)
     }
 
     /// Opens a URL in the browser. A file link asks the daemon for the file and opens it only
@@ -743,13 +738,15 @@ impl TerminalView {
                 let Some(lookup) = links::lookup(&self.cwd, &path) else {
                     return;
                 };
+                // The daemon matches by path suffix; `resolve` still checks the suffix.
                 let found = self.client.update(cx, |client, cx| {
-                    client.directory_suggestions(
+                    client.directory_suggestions_matching(
                         &lookup.cwd,
                         &lookup.query,
                         true,
                         false,
                         LOOKUP_LIMIT,
+                        MatchMode::Suffix,
                         cx,
                     )
                 });
@@ -779,13 +776,13 @@ impl TerminalView {
             self.link_under(row, col).map(|link| Hover {
                 row,
                 col,
-                range: link.range,
+                spans: link.spans,
             })
         } else {
             None
         };
         let moved = |a: &Option<Hover>, b: &Option<Hover>| match (a, b) {
-            (Some(a), Some(b)) => a.row != b.row || a.range != b.range,
+            (Some(a), Some(b)) => a.spans != b.spans,
             (a, b) => a.is_some() != b.is_some(),
         };
         if moved(&self.hover, &hover) {
@@ -797,7 +794,7 @@ impl TerminalView {
     fn bar_button(
         id: &'static str,
         label: &'static str,
-        icon: &'static str,
+        icon_name: IconName,
         enabled: bool,
         run: BarAction,
         t: &Tokens,
@@ -823,8 +820,7 @@ impl TerminalView {
                 weak.update(cx, |this, cx| run(this, window, cx)).ok();
             })
             .child(
-                Icon::default()
-                    .path(icon)
+                icon(icon_name)
                     .with_size(px(ICON_SM))
                     .text_color(t.foreground_muted),
             )
@@ -833,10 +829,11 @@ impl TerminalView {
     /// The bar over the top right of the pane, as `PaneFind`.
     fn render_find_bar(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let finder = self.finder.as_ref()?;
+        let search = &self.search;
         let t = tokens(cx);
         let focused = finder.input.focus_handle(cx).is_focused(window);
-        let count = finder.matches.len();
-        let text = find::status(&finder.query, count, finder.current, finder.limited);
+        let count = search.matches.len();
+        let text = find::status(&search.query, count, search.current, search.limited);
         let size = ui_font_size(FONT_SM, cx);
         let line_height = px((f32::from(size) * 4. / 3.).round());
         let can_step = count > 0;
@@ -907,7 +904,7 @@ impl TerminalView {
                         .child(Self::bar_button(
                             "terminal-find-previous",
                             "Previous match",
-                            "lucide/arrow-up.svg",
+                            IconName::ArrowUp,
                             can_step,
                             previous,
                             &t,
@@ -916,7 +913,7 @@ impl TerminalView {
                         .child(Self::bar_button(
                             "terminal-find-next",
                             "Next match",
-                            "lucide/arrow-down.svg",
+                            IconName::ArrowDown,
                             can_step,
                             next,
                             &t,
@@ -925,7 +922,7 @@ impl TerminalView {
                         .child(Self::bar_button(
                             "terminal-find-close",
                             "Close Find",
-                            "lucide/x.svg",
+                            IconName::X,
                             true,
                             close,
                             &t,
@@ -946,15 +943,9 @@ impl Render for TerminalView {
         // Find marks and the link underline are found in each drawn row, so they follow output
         // that arrived after the search.
         let top = find::top_line(self.emulator.history_size(), self.emulator.display_offset());
-        let query = self
-            .finder
-            .as_ref()
-            .map(|finder| finder.query.clone())
-            .filter(|query| !query.is_empty());
-        let current = self
-            .finder
-            .as_ref()
-            .and_then(|finder| find::current_place(&finder.matches, finder.current));
+        let open = self.finder.is_some();
+        let query = Some(self.search.query.clone()).filter(|query| open && !query.is_empty());
+        let current = find::current_place(&self.search.matches, self.search.current);
         let hover = self.hover.clone();
         let mark = |color: Hsla, alpha: f32| HighlightStyle {
             background_color: Some(color.opacity(alpha)),
@@ -970,9 +961,19 @@ impl Render for TerminalView {
             }),
             ..Default::default()
         };
-        let lines: Vec<AnyElement> = self
-            .emulator
-            .lines()
+        let drawn: Vec<&crate::emulator::RenderedLine> = self.emulator.lines().collect();
+        // The hovered link is found again in the drawn rows, so it follows new output.
+        let hover_spans = hover
+            .and_then(|hover| {
+                let rows: Vec<(&str, bool)> = drawn
+                    .iter()
+                    .map(|line| (line.text.as_ref(), line.wrapped))
+                    .collect();
+                links::link_in_rows(&rows, hover.row, hover.col)
+            })
+            .map_or_else(Vec::new, |link| link.spans);
+        let lines: Vec<AnyElement> = drawn
+            .into_iter()
             .enumerate()
             .map(|(row, line)| {
                 let mut overlays = Vec::new();
@@ -989,11 +990,9 @@ impl Render for TerminalView {
                         overlays.push((range, style));
                     }
                 }
-                if let Some(hover) = &hover
-                    && hover.row == row
-                    && let Some(link) = links::link_at(&line.text, hover.col)
+                if let Some((_, range)) = hover_spans.iter().find(|(span_row, _)| *span_row == row)
                 {
-                    overlays.push((link.range, underline));
+                    overlays.push((range.clone(), underline));
                 }
                 let runs = if overlays.is_empty() {
                     line.runs.clone()

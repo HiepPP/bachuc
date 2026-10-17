@@ -2,7 +2,8 @@
 //! file paths with an optional line (`terminal-local-link-parsing.ts`), plus the rule that picks
 //! the file a path link opens (Q-112).
 //!
-//! Only one row is read, so a link that wraps onto the next row is cut at the row end.
+//! Rows that wrap are joined before links are found, as the Electron provider joins wrapped
+//! buffer lines, so a path cut by the row end opens whole.
 
 use bachuc_client::DirectorySuggestion;
 use std::ops::Range;
@@ -227,12 +228,61 @@ pub fn byte_at_column(row: &str, col: usize) -> Option<usize> {
     None
 }
 
-/// The link drawn in cell `col` of `row`.
-pub fn link_at(row: &str, col: usize) -> Option<Link> {
-    let byte = byte_at_column(row, col)?;
-    detect_links(row)
+/// `MAX_LINK_LENGTH` of the Electron provider: a wrapped line is joined up to about this many
+/// bytes before and after the row.
+const MAX_LINK_LENGTH: usize = 500;
+
+/// A link in a line that may wrap over several rows: what it opens, and the byte range it covers
+/// in each row it touches, as (row, range).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RowLink {
+    pub target: LinkTarget,
+    pub spans: Vec<(usize, Range<usize>)>,
+}
+
+/// The first and last row of the wrapped line that holds `row`. `rows[i].1` tells whether row
+/// `i` goes on in row `i + 1`.
+fn wrapped_rows(rows: &[(&str, bool)], row: usize) -> (usize, usize) {
+    let (mut first, mut before) = (row, 0);
+    while first > 0 && rows[first - 1].1 && before < MAX_LINK_LENGTH {
+        first -= 1;
+        before += rows[first].0.len();
+    }
+    let (mut last, mut after) = (row, 0);
+    while last + 1 < rows.len() && rows[last].1 && after < MAX_LINK_LENGTH {
+        last += 1;
+        after += rows[last].0.len();
+    }
+    (first, last)
+}
+
+/// The link drawn in cell `col` of row `row`. `rows` holds each drawn row's text and whether it
+/// wraps onto the next row.
+pub fn link_in_rows(rows: &[(&str, bool)], row: usize, col: usize) -> Option<RowLink> {
+    let byte_in_row = byte_at_column(rows.get(row)?.0, col)?;
+    let (first, last) = wrapped_rows(rows, row);
+    let mut text = String::new();
+    let mut starts = Vec::with_capacity(last - first + 1);
+    for (row_text, _) in &rows[first..=last] {
+        starts.push(text.len());
+        text.push_str(row_text);
+    }
+    let byte = starts[row - first] + byte_in_row;
+    let link = detect_links(&text)
         .into_iter()
-        .find(|link| link.range.contains(&byte))
+        .find(|link| link.range.contains(&byte))?;
+    let spans = (first..=last)
+        .filter_map(|index| {
+            let start = starts[index - first];
+            let end = start + rows[index].0.len();
+            let (from, to) = (link.range.start.max(start), link.range.end.min(end));
+            (from < to).then(|| (index, from - start..to - start))
+        })
+        .collect();
+    Some(RowLink {
+        target: link.target,
+        spans,
+    })
 }
 
 /// How to ask the daemon whether a link's file exists: the folder to search, the name to search
@@ -401,6 +451,7 @@ mod tests {
 
     #[test]
     fn a_cell_finds_its_link_across_wide_characters() {
+        let link_at = |row: &str, col| link_in_rows(&[(row, false)], 0, col);
         let row = "日本 src/a.rs:3";
         // Each wide character takes two cells, so the path starts at cell 5.
         assert_eq!(link_at(row, 4), None);
@@ -408,6 +459,46 @@ mod tests {
         assert_eq!(link_at(row, 14).unwrap().target, file("src/a.rs", Some(3)));
         assert_eq!(link_at(row, 15), None);
         assert_eq!(byte_at_column("e\u{301}x", 1), Some(3));
+    }
+
+    #[test]
+    fn a_path_wrapped_over_two_rows_opens_whole_from_either_row() {
+        let rows = [
+            ("see src/lo", true),
+            ("ng.rs:7 ok", false),
+            ("next/a.rs ", false),
+        ];
+        let whole = RowLink {
+            target: file("src/long.rs", Some(7)),
+            spans: vec![(0, 4..10), (1, 0..7)],
+        };
+        assert_eq!(link_in_rows(&rows, 0, 5), Some(whole.clone()));
+        assert_eq!(link_in_rows(&rows, 1, 2), Some(whole));
+        assert_eq!(link_in_rows(&rows, 1, 9), None);
+        // A row that did not wrap is not joined to the next one.
+        assert_eq!(link_in_rows(&rows, 2, 0).unwrap().spans, [(2, 0..9)]);
+    }
+
+    #[test]
+    fn a_path_wrapped_over_three_rows_opens_whole_from_the_middle() {
+        let rows = [
+            ("$ cat /tmp", true),
+            ("/very/deep", true),
+            ("/dir/x.log", false),
+        ];
+        let link = link_in_rows(&rows, 1, 4).unwrap();
+        assert_eq!(link.target, file("/tmp/very/deep/dir/x.log", None));
+        assert_eq!(link.spans, [(0, 6..10), (1, 0..10), (2, 0..10)]);
+        assert_eq!(link_in_rows(&rows, 2, 9).unwrap().target, link.target);
+    }
+
+    #[test]
+    fn a_wrapped_url_opens_whole() {
+        let rows = [("https://ex", true), ("ample.com/", true), ("a", false)];
+        assert_eq!(
+            link_in_rows(&rows, 2, 0).unwrap().target,
+            LinkTarget::Url("https://example.com/a".into())
+        );
     }
 
     #[test]

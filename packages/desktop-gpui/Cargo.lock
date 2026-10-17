@@ -950,6 +950,7 @@ version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
  "bachuc-client",
+ "bachuc-icons",
  "bachuc-theme",
  "futures",
  "gpui-kit",
