@@ -661,6 +661,10 @@ pub struct PrCheck {
     pub status: String,
     pub url: Option<String>,
     pub workflow: Option<String>,
+    /// The forge's display text, such as `2m 5s`.
+    pub duration: Option<String>,
+    /// Forge-neutral refinements, such as `required`; unknown ones are kept.
+    pub traits: Vec<String>,
 }
 
 /// The PR of a checkout's branch.
@@ -695,6 +699,13 @@ impl PrStatus {
                     status: check["status"].as_str().unwrap_or_default().to_string(),
                     url: text(&check["url"]),
                     workflow: text(&check["workflow"]),
+                    duration: text(&check["duration"]),
+                    traits: check["traits"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|item| item.as_str().map(str::to_string))
+                        .collect(),
                 })
             })
             .collect();
@@ -810,6 +821,9 @@ pub struct WorkspaceScript {
     pub health: Option<String>,
     pub terminal_id: Option<String>,
     pub exit_code: Option<i32>,
+    pub proxy_url: Option<String>,
+    pub local_proxy_url: Option<String>,
+    pub public_proxy_url: Option<String>,
 }
 
 impl WorkspaceScript {
@@ -829,6 +843,9 @@ impl WorkspaceScript {
                     health: script["health"].as_str().map(str::to_string),
                     terminal_id: script["terminalId"].as_str().map(str::to_string),
                     exit_code: script["exitCode"].as_i64().map(|code| code as i32),
+                    proxy_url: script["proxyUrl"].as_str().map(str::to_string),
+                    local_proxy_url: script["localProxyUrl"].as_str().map(str::to_string),
+                    public_proxy_url: script["publicProxyUrl"].as_str().map(str::to_string),
                 })
             })
             .collect()
@@ -891,6 +908,22 @@ pub struct ForkContext {
     pub attachment: serde_json::Value,
     pub title: Option<String>,
     pub item_count: u32,
+}
+
+/// How `directory_suggestions_request` matches `query`: `suffix` matches the end of a path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchMode {
+    Fuzzy,
+    Suffix,
+}
+
+impl MatchMode {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Fuzzy => "fuzzy",
+            Self::Suffix => "suffix",
+        }
+    }
 }
 
 /// One `directory_suggestions_request` match; `path` is as the daemon gives it.

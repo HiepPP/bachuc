@@ -144,6 +144,11 @@ impl TimelineSync {
         self.generation
     }
 
+    /// The epoch of the current timeline window; `None` before the first page.
+    pub fn epoch(&self) -> Option<&str> {
+        self.epoch.as_deref()
+    }
+
     /// The last applied source sequence.
     pub fn end_seq(&self) -> Option<u64> {
         self.end_seq

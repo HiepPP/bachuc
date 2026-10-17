@@ -16,7 +16,7 @@ use crate::model::{
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode, WorkspaceSummary,
     provider_label,
 };
-use crate::model::{DirectorySuggestion, NewEntryKind};
+use crate::model::{DirectorySuggestion, MatchMode, NewEntryKind};
 use crate::model::{ForkBoundary, ForkContext, HistoryEntry, HistoryPage};
 use crate::model::{
     GitAction, GitActionReply, GitStatus, GitStatusEvent, PrStatus, PrStatusReply, PrTimelineItem,
@@ -40,6 +40,19 @@ fn failed<T>(message: &'static str) -> oneshot::Receiver<anyhow::Result<T>> {
     let (reply, receiver) = oneshot::channel();
     let _ = reply.send(Err(anyhow!(message)));
     receiver
+}
+
+/// A `directory_suggestions_request` without `matchMode`; `limit` is clamped to 1 to 100.
+fn directory_suggestions_message(
+    cwd: &str,
+    query: &str,
+    include_files: bool,
+    include_directories: bool,
+    limit: u32,
+) -> Value {
+    json!({"type": "directory_suggestions_request", "cwd": cwd, "query": query,
+           "includeFiles": include_files, "includeDirectories": include_directories,
+           "limit": limit.clamp(1, 100)})
 }
 
 /// Takes a plugin RPC `output`, or the error, and answers the caller with its decoded form.
@@ -501,6 +514,11 @@ impl ClientCore {
 
     pub fn timeline(&self, agent_id: &str) -> Option<&TimelineState> {
         self.timelines.get(agent_id).map(|sync| &sync.state)
+    }
+
+    /// The epoch of the agent's current timeline window, for building fork cursors.
+    pub fn timeline_epoch(&self, agent_id: &str) -> Option<&str> {
+        self.timelines.get(agent_id)?.epoch()
     }
 
     /// Events since the last call, with one `AgentsChanged` for any directory change.
@@ -1305,11 +1323,30 @@ impl ClientCore {
         limit: u32,
     ) -> oneshot::Receiver<anyhow::Result<Vec<DirectorySuggestion>>> {
         self.request_reply(
-            json!({"type": "directory_suggestions_request", "cwd": cwd, "query": query,
-                   "includeFiles": include_files, "includeDirectories": include_directories,
-                   "limit": limit.clamp(1, 100)}),
+            directory_suggestions_message(cwd, query, include_files, include_directories, limit),
             Pending::DirectorySuggestions,
         )
+    }
+
+    /// `directory_suggestions` with an explicit `matchMode`.
+    pub fn directory_suggestions_matching(
+        &mut self,
+        cwd: &str,
+        query: &str,
+        include_files: bool,
+        include_directories: bool,
+        limit: u32,
+        mode: MatchMode,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<DirectorySuggestion>>> {
+        let mut message =
+            directory_suggestions_message(cwd, query, include_files, include_directories, limit);
+        message["matchMode"] = json!(mode.as_str());
+        self.request_reply(message, Pending::DirectorySuggestions)
+    }
+
+    /// Whether the host discards checkout changes (`features.checkoutDiscardChanges`).
+    pub fn discard_changes_supported(&self) -> bool {
+        self.server_feature("checkoutDiscardChanges")
     }
 
     /// Whether the host creates, renames, and deletes entries (`features.fsEntryOps`).

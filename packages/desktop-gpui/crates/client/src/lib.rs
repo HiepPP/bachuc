@@ -33,7 +33,7 @@ pub use model::{
     ChangedFile, CheckoutStatus, DirectoryEvent, FileContent, FileEntry, FileKind, ProjectNode,
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
 };
-pub use model::{DirectorySuggestion, NewEntryKind};
+pub use model::{DirectorySuggestion, MatchMode, NewEntryKind};
 pub use model::{ForkBoundary, ForkContext, ForkCursor, HistoryEntry, HistoryPage};
 pub use model::{
     GitAction, GitActionReply, GitStatus, GitStatusEvent, MergeMethod, PrCheck, PrMergeCapability,
@@ -206,6 +206,11 @@ impl Client {
 
     pub fn timeline(&self, agent_id: &str) -> Option<&TimelineState> {
         self.core.timeline(agent_id)
+    }
+
+    /// The epoch of the agent's current timeline window; `None` before its first page.
+    pub fn timeline_epoch(&self, agent_id: &str) -> Option<&str> {
+        self.core.timeline_epoch(agent_id)
     }
 
     /// Fetches the page before the first entry when `has_older` is set.
@@ -1136,6 +1141,34 @@ impl Client {
                 .directory_suggestions(cwd, query, include_files, include_directories, limit);
         self.publish(cx);
         reply_task(receiver, cx)
+    }
+
+    /// `directory_suggestions` with an explicit `matchMode`, such as `suffix` for file links.
+    #[allow(clippy::too_many_arguments)]
+    pub fn directory_suggestions_matching(
+        &mut self,
+        cwd: &str,
+        query: &str,
+        include_files: bool,
+        include_directories: bool,
+        limit: u32,
+        mode: MatchMode,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<DirectorySuggestion>>> {
+        let receiver = self.core.directory_suggestions_matching(
+            cwd,
+            query,
+            include_files,
+            include_directories,
+            limit,
+            mode,
+        );
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn discard_changes_supported(&self) -> bool {
+        self.core.discard_changes_supported()
     }
 
     pub fn fs_entry_ops_supported(&self) -> bool {

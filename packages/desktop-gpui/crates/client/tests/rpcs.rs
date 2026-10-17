@@ -8,8 +8,9 @@ use bachuc_client::{
     ChangedFileDetails, CheckoutDetails, CheckoutStatus, CommitFile, CommitList, CommitSummary,
     DiffStat, DirectoryEvent, DirectorySuggestion, FileDiff, FileDiffStatus, FileKind,
     ForkBoundary, ForkCursor, GitAction, GitActionReply, GitStatus, GitStatusEvent, HistoryEntry,
-    HistoryPage, MergeMethod, NewEntryKind, PrCheck, PrMergeCapability, PrStatus, PrTimelineItem,
-    ProjectNode, QueuedPrompt, StashEntry, TurnBehavior, WorkspaceNode, WorkspaceScript,
+    HistoryPage, MatchMode, MergeMethod, NewEntryKind, PrCheck, PrMergeCapability, PrStatus,
+    PrTimelineItem, ProjectNode, QueuedPrompt, StashEntry, TurnBehavior, WorkspaceNode,
+    WorkspaceScript,
 };
 use bachuc_protocol::generated::ServerInfoPermissionsItem;
 use common::{FakeServer, Harness, agent_snapshot, session};
@@ -1575,12 +1576,16 @@ fn pr_status_parses_the_pr_checks_and_merge_capability() {
                     status: "success".into(),
                     url: Some("https://ci/1".into()),
                     workflow: Some("CI".into()),
+                    duration: None,
+                    traits: vec![],
                 },
                 PrCheck {
                     name: "lint".into(),
                     status: "pending".into(),
                     url: None,
                     workflow: None,
+                    duration: None,
+                    traits: vec![],
                 },
             ],
             review_decision: Some("APPROVED".into()),
@@ -1832,6 +1837,68 @@ fn start_workspace_script_returns_the_terminal_id() {
 }
 
 #[test]
+fn pr_checks_parse_duration_and_traits() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut payload = pr_status_payload();
+    payload["status"]["checks"] = json!([
+        {"name": "build", "status": "success", "url": null, "duration": "2m 5s",
+         "traits": ["required", "future-trait"]}
+    ]);
+    server.reply(
+        "checkout_pr_status_request",
+        "checkout_pr_status_response",
+        payload,
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.pr_status("/repo");
+    let checks = harness.wait(reply, WAIT).unwrap().status.unwrap().checks;
+    assert_eq!(
+        checks,
+        [PrCheck {
+            name: "build".into(),
+            status: "success".into(),
+            url: None,
+            workflow: None,
+            duration: Some("2m 5s".into()),
+            traits: vec!["required".into(), "future-trait".into()],
+        }]
+    );
+}
+
+#[test]
+fn workspace_scripts_parse_their_proxy_urls() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut described = workspace("w1", "p1", Some("main"), Value::Null);
+    described["scripts"] = json!([{"scriptName": "web", "type": "service", "hostname": "web",
+        "port": 3000, "lifecycle": "running", "health": "healthy",
+        "proxyUrl": "https://web.example.test", "localProxyUrl": "http://web.localhost:6767",
+        "publicProxyUrl": "https://web.example.test", "exitCode": null, "terminalId": "t1"}]);
+    server.reply(
+        "fetch_workspaces_request",
+        "fetch_workspaces_response",
+        json!({"subscriptionId": "sub-w", "entries": [described], "pageInfo": page_info()}),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| !h.core.workspace_scripts("w1").is_empty()));
+    assert_eq!(
+        harness.core.workspace_scripts("w1"),
+        [WorkspaceScript {
+            name: "web".into(),
+            kind: "service".into(),
+            lifecycle: "running".into(),
+            health: Some("healthy".into()),
+            terminal_id: Some("t1".into()),
+            exit_code: None,
+            proxy_url: Some("https://web.example.test".into()),
+            local_proxy_url: Some("http://web.localhost:6767".into()),
+            public_proxy_url: Some("https://web.example.test".into()),
+        }]
+    );
+}
+
+#[test]
 fn status_updates_are_subscribed_and_emit_git_status_events() {
     let server = FakeServer::start();
     server.add_agent("a1", "idle");
@@ -1868,6 +1935,9 @@ fn status_updates_are_subscribed_and_emit_git_status_events() {
             health: None,
             terminal_id: None,
             exit_code: None,
+            proxy_url: None,
+            local_proxy_url: None,
+            public_proxy_url: None,
         }]
     );
     assert!(seen.contains(&GitStatusEvent::ScriptsChanged {
@@ -2197,6 +2267,46 @@ fn fork_context_keeps_the_raw_attachment_and_gates_the_cursor() {
 }
 
 #[test]
+fn timeline_epoch_follows_the_page_and_a_reset_page() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.append(
+        "a1",
+        json!({"type": "user_message", "text": "hi", "messageId": "u1"}),
+        "t1",
+        false,
+    );
+    let mut harness = connect(&server);
+    assert_eq!(harness.core.timeline_epoch("a1"), None);
+    assert_eq!(harness.core.timeline_epoch("nobody"), None);
+    harness.core.view_agent("a1");
+    assert!(harness.pump_until(WAIT, |h| h.core.timeline_epoch("a1") == Some("e1")));
+
+    // A new epoch makes the resume cursor stale, so the daemon answers with a reset page.
+    server.with(|s| s.timelines.get_mut("a1").unwrap().epoch = "e2".into());
+    server.drop_connections();
+    assert!(harness.pump_until(WAIT, |h| !h.core.is_connected()));
+    assert!(harness.pump_until(WAIT, |h| h.core.timeline_epoch("a1") == Some("e2")));
+    let resume = server
+        .requests_of("fetch_agent_timeline_request")
+        .pop()
+        .unwrap();
+    assert_eq!(resume["cursor"]["epoch"], json!("e1"));
+}
+
+#[test]
+fn discard_changes_supported_follows_the_host_feature() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let harness = connect(&server);
+    assert!(!harness.core.discard_changes_supported());
+
+    with_features(&server, &["checkoutDiscardChanges"]);
+    let harness = connect(&server);
+    assert!(harness.core.discard_changes_supported());
+}
+
+#[test]
 fn fork_context_without_the_feature_fails_without_a_request() {
     let server = FakeServer::start();
     server.add_agent("a1", "idle");
@@ -2284,6 +2394,41 @@ fn directory_suggestions_send_their_fields_and_read_entries_or_directories() {
         harness.wait(reply, WAIT).unwrap_err().to_string(),
         "cwd not found"
     );
+}
+
+#[test]
+fn directory_suggestions_matching_sends_the_match_mode() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "directory_suggestions_request",
+        "directory_suggestions_response",
+        json!({"directories": [], "error": null, "entries": [
+            {"path": "src/main.rs", "kind": "file"}
+        ]}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.directory_suggestions_matching(
+        "/repo",
+        "main.rs",
+        true,
+        false,
+        5,
+        MatchMode::Suffix,
+    );
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        [DirectorySuggestion {
+            path: "src/main.rs".into(),
+            is_directory: false,
+        }]
+    );
+    let request = &server.requests_of("directory_suggestions_request")[0];
+    assert_eq!(request["matchMode"], json!("suffix"));
+    assert_eq!(request["query"], json!("main.rs"));
+    assert_eq!(request["includeFiles"], json!(true));
+    assert_eq!(request["includeDirectories"], json!(false));
+    assert_eq!(request["limit"].as_f64(), Some(5.0));
 }
 
 fn entry_reply(success: bool, error: Value) -> Value {
