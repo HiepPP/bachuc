@@ -281,6 +281,9 @@ mod tests {
             assert_eq!(t.tint_success, base.tint_success);
             assert_eq!(t.tint_merged, base.tint_merged);
             assert_eq!(t.dot_running, base.dot_running);
+            assert_eq!(t.palette_yellow_400, base.palette_yellow_400);
+            assert_eq!(t.palette_green_400, base.palette_green_400);
+            assert_eq!(t.palette_blue_400, base.palette_blue_400);
             assert_eq!(t.diff_addition, base.diff_addition);
             assert_eq!(t.diff_deletion, base.diff_deletion);
             assert_eq!(t.destructive, base.destructive);

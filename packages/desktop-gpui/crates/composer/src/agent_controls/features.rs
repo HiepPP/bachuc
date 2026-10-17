@@ -3,6 +3,8 @@
 
 use bachuc_client::{AgentFeature, AgentFeatureKind};
 use bachuc_icons::IconName;
+use bachuc_theme::Tokens;
+use gpui_kit::Hsla;
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
@@ -50,6 +52,17 @@ pub fn active_highlight(feature: &AgentFeature) -> Highlight {
     match feature.kind {
         AgentFeatureKind::Toggle { value: true } => feature_highlight(&feature.id),
         _ => Highlight::Default,
+    }
+}
+
+/// `getFeatureIconColor`: the palette 400 color of the highlight while a toggle is on, else the
+/// muted foreground.
+pub fn feature_tint(feature: &AgentFeature, t: &Tokens) -> Hsla {
+    match active_highlight(feature) {
+        Highlight::Yellow => t.palette_yellow_400,
+        Highlight::Green => t.palette_green_400,
+        Highlight::Blue => t.palette_blue_400,
+        Highlight::Default => t.foreground_muted,
     }
 }
 
@@ -200,6 +213,30 @@ mod tests {
             active_highlight(&select("fast_mode", Some("low"))),
             Highlight::Default
         );
+    }
+
+    #[test]
+    fn an_enabled_toggle_gets_its_palette_color_and_the_rest_the_muted_foreground() {
+        for t in [Tokens::light(), Tokens::claude_dark()] {
+            for (id, on) in [
+                ("fast_mode", t.palette_yellow_400),
+                ("auto_accept", t.palette_green_400),
+                ("plan_mode", t.palette_blue_400),
+                ("other", t.foreground_muted),
+            ] {
+                assert_eq!(feature_tint(&toggle(id, true), &t), on, "{id} on");
+                assert_eq!(
+                    feature_tint(&toggle(id, false), &t),
+                    t.foreground_muted,
+                    "{id} off"
+                );
+                assert_eq!(
+                    feature_tint(&select(id, Some("low")), &t),
+                    t.foreground_muted,
+                    "{id} select"
+                );
+            }
+        }
     }
 
     #[test]

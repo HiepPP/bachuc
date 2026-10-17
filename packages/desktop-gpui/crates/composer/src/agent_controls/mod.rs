@@ -14,8 +14,7 @@ use bachuc_theme::metrics::{FONT_BASE, FONT_SM, ICON_SM, RADIUS_2XL, RADIUS_MD, 
 use bachuc_theme::{tokens, ui_font_size};
 use control::{GLYPH, Glyph, PillTrigger, TriggerLook};
 use features::{
-    FeatureRequests, Highlight, active_highlight, feature_icon, feature_tooltip, select_choices,
-    select_current,
+    FeatureRequests, feature_icon, feature_tint, feature_tooltip, select_choices, select_current,
 };
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::tooltip::Tooltip;
@@ -175,16 +174,6 @@ fn feature_toggle(
         .into_any_element()
 }
 
-fn highlight_color(feature: &AgentFeature, cx: &App) -> Hsla {
-    let t = tokens(cx);
-    match active_highlight(feature) {
-        Highlight::Yellow => t.status_warning,
-        Highlight::Green => t.status_success,
-        Highlight::Blue => t.accent,
-        Highlight::Default => t.foreground_muted,
-    }
-}
-
 /// What a feature press asks for. The owner sends the request.
 #[derive(Clone)]
 pub struct FeatureHandlers {
@@ -208,7 +197,7 @@ fn feature_pills(
                 let (toggle, feature_id) = (handlers.toggle.clone(), feature.id.clone());
                 feature_toggle(
                     feature,
-                    highlight_color(feature, cx),
+                    feature_tint(feature, &t),
                     t.surface2,
                     requests.is_pending(&feature.id),
                     move |cx| toggle(&feature_id, cx),

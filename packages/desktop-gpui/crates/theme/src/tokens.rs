@@ -48,6 +48,12 @@ pub struct Tokens {
     pub dot_warning: Hsla,
     pub dot_running: Hsla,
 
+    /// `baseColors.yellow[400]`, `green[400]`, and `blue[400]`: the tint of an enabled feature
+    /// toggle. `theme.ts` gives the same palette to the light and the dark theme.
+    pub palette_yellow_400: Hsla,
+    pub palette_green_400: Hsla,
+    pub palette_blue_400: Hsla,
+
     pub diff_addition: Hsla,
     pub diff_deletion: Hsla,
 
@@ -137,6 +143,10 @@ impl Tokens {
             dot_warning: hex(0xb37824),
             dot_running: hex(0x268ae0),
 
+            palette_yellow_400: hex(0xfbbf24),
+            palette_green_400: hex(0x4ade80),
+            palette_blue_400: hex(0x60a5fa),
+
             diff_addition: hex(0x15803d),
             diff_deletion: hex(0xb91c1c),
 
@@ -213,6 +223,10 @@ impl Tokens {
             dot_danger: hex(0xf7796d),
             dot_warning: hex(0xdb932e),
             dot_running: hex(0x5caaf6),
+
+            palette_yellow_400: hex(0xfbbf24),
+            palette_green_400: hex(0x4ade80),
+            palette_blue_400: hex(0x60a5fa),
 
             diff_addition: hex(0x4ade80),
             diff_deletion: hex(0xef4444),
@@ -549,6 +563,24 @@ mod tests {
             true,
             "29",
         );
+    }
+
+    #[test]
+    fn feature_palette_tokens_match_theme_ts_in_both_themes() {
+        let source = theme_ts();
+        let pick = |scale: &str| block(&source, &format!("  {scale}: {{"))["400"].clone();
+        let (yellow, green, blue) = (pick("yellow"), pick("green"), pick("blue"));
+        assert_eq!(
+            (yellow.as_str(), green.as_str(), blue.as_str()),
+            ("#fbbf24", "#4ade80", "#60a5fa")
+        );
+        // Both theme builders take `palette: baseColors`, so the two themes share these values.
+        assert_eq!(source.matches("palette: baseColors,").count(), 2);
+        for tokens in [Tokens::light(), Tokens::claude_dark()] {
+            assert_token(tokens.palette_yellow_400, &yellow, "palette yellow 400");
+            assert_token(tokens.palette_green_400, &green, "palette green 400");
+            assert_token(tokens.palette_blue_400, &blue, "palette blue 400");
+        }
     }
 
     #[test]
