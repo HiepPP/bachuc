@@ -5,6 +5,7 @@
 //! click on a changed file emits `ExplorerDiffEvent::OpenAllDiffs`, a click on a file of a
 //! commit emits `ExplorerDiffEvent::OpenCommitDiff`, and the app opens the viewer pane.
 
+use crate::branch_switcher::{BranchSwitched, BranchSwitcher};
 use crate::changes::{ChangeRow, CheckoutView};
 use crate::commits::{CommitRow, CommitsState, commit_rows, time_ago};
 use crate::diff_doc::Latest;
@@ -132,6 +133,8 @@ pub struct Explorer {
     commits_request: Latest,
     /// The commits whose files show.
     open_commits: HashSet<String>,
+    /// The branch label of the Changes header, which switches branches.
+    branch_switcher: Entity<BranchSwitcher>,
     watching: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -146,7 +149,17 @@ impl Explorer {
         _window: &mut Window,
         cx: &mut Context<Explorer>,
     ) -> Explorer {
+        let branch_switcher = cx.new(|_| BranchSwitcher::new(client.clone(), cwd.clone()));
         let subscriptions = vec![
+            cx.subscribe(
+                &branch_switcher,
+                |this: &mut Explorer, _, _: &BranchSwitched, cx| {
+                    this.request_status(cx);
+                    if this.commits_open {
+                        this.request_commits(cx);
+                    }
+                },
+            ),
             cx.subscribe(
                 &client,
                 |this: &mut Explorer, _, event: &DirectoryEvent, cx| {
@@ -207,6 +220,7 @@ impl Explorer {
             commits: CommitsState::Loading,
             commits_request: Latest::default(),
             open_commits: HashSet::new(),
+            branch_switcher,
             watching: false,
             _subscriptions: subscriptions,
         };
@@ -220,6 +234,8 @@ impl Explorer {
             return;
         }
         self.stop_watching(cx);
+        self.branch_switcher
+            .update(cx, |switcher, cx| switcher.set_cwd(cwd.clone(), cx));
         self.cwd = cwd;
         self.generation += 1;
         self.tree.reset();
@@ -414,6 +430,11 @@ impl Explorer {
         result: anyhow::Result<bachuc_client::CheckoutDetails>,
         cx: &mut Context<Explorer>,
     ) {
+        if let Ok(details) = &result {
+            let branch = details.branch.clone().filter(|_| details.is_git);
+            self.branch_switcher
+                .update(cx, |switcher, cx| switcher.set_branch(branch, cx));
+        }
         if let Ok(details) = &result
             && details.is_git
         {
@@ -1233,8 +1254,8 @@ impl Explorer {
 
     /// The two toolbar rows over the Changes tree (`ChangesRepositoryToolbar` and
     /// `ChangesComparisonToolbar`): the branch, then the diff mode menu with the total count,
-    /// the Open Diff tab button, and the refresh button. Branch switching is out of scope, so
-    /// the branch shows as a passive label.
+    /// the Open Diff tab button, and the refresh button. A detached HEAD has no branch to
+    /// switch from, so it shows as a passive label.
     fn render_changes_header(
         &self,
         branch: String,
@@ -1275,7 +1296,13 @@ impl Explorer {
             .child(
                 toolbar_row("changes-repository-header")
                     .aria_label("Repository")
-                    .child(label("changes-branch", branch.into())),
+                    .map(|row| {
+                        if self.branch_switcher.read(cx).has_branch() {
+                            row.child(self.branch_switcher.clone())
+                        } else {
+                            row.child(label("changes-branch", branch.into()))
+                        }
+                    }),
             )
             .child(
                 toolbar_row("changes-header")

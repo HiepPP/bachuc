@@ -5,6 +5,7 @@
 //! `DiffView` in a workspace pane for them. The models (`tree`, `changes`, `diff`, `diff_doc`,
 //! `commits`) hold no GPUI state and have their own tests.
 
+mod branch_switcher;
 pub mod changes;
 mod code;
 pub mod commits;
