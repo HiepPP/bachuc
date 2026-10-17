@@ -812,6 +812,9 @@ mod tests {
             health: None,
             terminal_id: None,
             exit_code: None,
+            proxy_url: None,
+            local_proxy_url: None,
+            public_proxy_url: None,
         };
         assert_eq!(script_state(&script), "stopped");
         script.exit_code = Some(1);

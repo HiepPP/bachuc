@@ -695,6 +695,8 @@ impl Shell {
             .into_any_element()
     }
 
+    /// One script, in Electron's order: name and state, then View service, View terminal, and
+    /// Restart while it runs, then Stop or Run. A running service with a URL adds a URL row.
     fn script_row(
         &mut self,
         workspace_id: &str,
@@ -713,51 +715,74 @@ impl Shell {
         };
         let busy_key = format!("{workspace_id}/{}", script.name);
         let busy = self.scripts_busy.contains(&busy_key);
-        let (label, glyph) = if running {
-            (format!("Stop {}", script.name), IconName::Square)
-        } else {
-            (format!("Run {} script", script.name), IconName::Play)
-        };
-        let action = h_flex()
-            .id(("script-action", ix))
-            .role(Role::Button)
-            .aria_label(label)
-            .size(px(22.))
-            .flex_shrink_0()
-            .justify_center()
-            .rounded(px(RADIUS_MD))
-            .text_color(t.foreground_muted)
-            .child(icon(glyph).with_size(px(ICON_SM)));
-        let action = if busy {
-            action.opacity(0.5)
-        } else {
-            let (workspace_id, name) = (workspace_id.to_string(), script.name.clone());
+        let name = script.name.clone();
+        let url = script_url(&script).map(str::to_string);
+        let mut actions = Vec::new();
+        if let Some(url) = url.clone() {
+            actions.push(script_action(
+                ("script-open", ix),
+                format!("View {name} service"),
+                IconName::Eye,
+                Some(open_url_action(url)),
+                cx,
+            ));
+        }
+        if running && let Some(terminal_id) = script.terminal_id.clone() {
+            let name = name.clone();
+            actions.push(script_action(
+                ("script-view", ix),
+                format!("View {name} terminal"),
+                IconName::SquareTerminal,
+                Some(Rc::new(move |this: &mut Shell, window, cx| {
+                    this.view_script_terminal(&name, &terminal_id, window, cx)
+                })),
+                cx,
+            ));
+        }
+        if running {
+            let (workspace_id, name) = (workspace_id.to_string(), name.clone());
             let terminal_id = script.terminal_id.clone();
-            pressable(
-                action
-                    .cursor_pointer()
-                    .hover(|style| style.bg(t.surface2).text_color(t.foreground)),
-                act(move |this: &mut Shell, cx: &mut Context<Shell>| {
-                    if running {
-                        this.stop_script(&name, terminal_id.as_deref(), cx);
-                    } else {
-                        this.start_script(&workspace_id, &name, cx);
-                    }
+            actions.push(script_action(
+                ("script-restart", ix),
+                format!("Restart {name}"),
+                IconName::RotateCw,
+                (!busy).then(|| {
+                    act(move |this: &mut Shell, cx: &mut Context<Shell>| {
+                        this.restart_script(&workspace_id, &name, terminal_id.as_deref(), cx)
+                    })
                 }),
                 cx,
-            )
+            ));
+        }
+        let (label, glyph) = if running {
+            (format!("Stop {name}"), IconName::Square)
+        } else {
+            (format!("Run {name} script"), IconName::Play)
         };
+        let lifecycle = (!busy).then(|| {
+            let (workspace_id, name) = (workspace_id.to_string(), name.clone());
+            let terminal_id = script.terminal_id.clone();
+            act(move |this: &mut Shell, cx: &mut Context<Shell>| {
+                if running {
+                    this.stop_script(&name, terminal_id.as_deref(), cx);
+                } else {
+                    this.start_script(&workspace_id, &name, cx);
+                }
+            })
+        });
+        actions.push(script_action(
+            ("script-action", ix),
+            label,
+            glyph,
+            lifecycle,
+            cx,
+        ));
         let state = script_state(&script);
-        h_flex()
-            .id(("script-row", ix))
-            .role(Role::Group)
-            .aria_label(format!("{} script, {state}", script.name))
+        let header = h_flex()
             .h(px(MENU_ITEM_HEIGHT))
             .px(px(SPACE_2))
             .gap(px(SPACE_2))
             .items_center()
-            .text_size(ui_font_size(FONT_SM, cx))
-            .line_height(relative(1.3))
             .child(
                 icon(if service {
                     IconName::Globe
@@ -777,7 +802,7 @@ impl Shell {
                     } else {
                         t.foreground_muted
                     })
-                    .child(script.name.clone()),
+                    .child(name.clone()),
             )
             .child(
                 div()
@@ -789,10 +814,36 @@ impl Shell {
                             t.foreground_extra_muted
                         },
                     )
-                    .child(state),
+                    .child(state.clone()),
             )
             .child(div().flex_1())
-            .child(action)
+            .children(actions);
+        let url_row = url.map(|url| {
+            let label = url_label(&url).to_string();
+            let row = h_flex()
+                .id(("script-url", ix))
+                .role(Role::Button)
+                .aria_label(format!("Open {label}"))
+                .h(px(MENU_ITEM_HEIGHT))
+                .mx(px(SPACE_1))
+                .pl(px(SPACE_2 + ICON_SM + SPACE_2 - SPACE_1))
+                .pr(px(SPACE_2))
+                .items_center()
+                .rounded(px(RADIUS_MD))
+                .cursor_pointer()
+                .text_color(t.foreground_muted)
+                .hover(|style| style.bg(t.surface2).text_color(t.foreground))
+                .child(div().min_w_0().truncate().child(label));
+            pressable(row, open_url_action(url), cx)
+        });
+        v_flex()
+            .id(("script-row", ix))
+            .role(Role::Group)
+            .aria_label(format!("{name} script, {state}"))
+            .text_size(ui_font_size(FONT_SM, cx))
+            .line_height(relative(1.3))
+            .child(header)
+            .children(url_row)
             .into_any_element()
     }
 
@@ -1021,6 +1072,106 @@ impl Shell {
             None => self.show_toast(false, format!("Failed to stop {name}"), cx),
         }
     }
+
+    /// Restart, as Electron: stops the script, then starts it once the daemon reports it
+    /// stopped (`restart_stopped_scripts`).
+    fn restart_script(
+        &mut self,
+        workspace_id: &str,
+        name: &str,
+        terminal_id: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        if terminal_id.is_some() {
+            self.scripts_restart
+                .insert(format!("{workspace_id}/{name}"));
+        }
+        self.stop_script(name, terminal_id, cx);
+    }
+
+    /// Starts each script of `workspace_id` that Restart stopped and the daemon no longer lists
+    /// as running.
+    pub(crate) fn restart_stopped_scripts(&mut self, workspace_id: &str, cx: &mut Context<Self>) {
+        if self.scripts_restart.is_empty() {
+            return;
+        }
+        let stopped: Vec<String> = self
+            .client
+            .read(cx)
+            .workspace_scripts(workspace_id)
+            .into_iter()
+            .filter(|script| script.lifecycle != "running")
+            .map(|script| script.name)
+            .filter(|name| {
+                self.scripts_restart
+                    .remove(&format!("{workspace_id}/{name}"))
+            })
+            .collect();
+        for name in stopped {
+            self.start_script(workspace_id, &name, cx);
+        }
+    }
+}
+
+/// The URL a running service opens: `proxy_url` first, as the header Scripts menu asks, then the
+/// public and the local proxy URL. A script, or a stopped service, has none.
+pub(crate) fn script_url(script: &WorkspaceScript) -> Option<&str> {
+    if script.kind == "script" || script.lifecycle != "running" {
+        return None;
+    }
+    script
+        .proxy_url
+        .as_deref()
+        .or(script.public_proxy_url.as_deref())
+        .or(script.local_proxy_url.as_deref())
+        .filter(|url| !url.is_empty())
+}
+
+/// A URL without its `http://` or `https://`, as Electron's route label.
+fn url_label(url: &str) -> &str {
+    url.strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url)
+}
+
+fn open_url_action(url: String) -> ShellAction {
+    act(move |this: &mut Shell, cx: &mut Context<Shell>| {
+        this.header_menu = None;
+        cx.open_url(&url);
+        cx.notify();
+    })
+}
+
+/// A 22 px icon button of a script row; `None` draws it dimmed and inert, as a busy action.
+fn script_action(
+    id: impl Into<ElementId>,
+    label: String,
+    glyph: IconName,
+    run: Option<ShellAction>,
+    cx: &mut Context<Shell>,
+) -> AnyElement {
+    let t = tokens(cx);
+    let button = h_flex()
+        .id(id)
+        .role(Role::Button)
+        .aria_label(label)
+        .size(px(22.))
+        .flex_shrink_0()
+        .justify_center()
+        .rounded(px(RADIUS_MD))
+        .text_color(t.foreground_muted)
+        .child(icon(glyph).with_size(px(ICON_SM)));
+    match run {
+        Some(run) => pressable(
+            button
+                .cursor_pointer()
+                .hover(|style| style.bg(t.surface2).text_color(t.foreground)),
+            run,
+            cx,
+        )
+        .into_any_element(),
+        None => button.opacity(0.5).into_any_element(),
+    }
 }
 
 /// One menu row with a leading icon and a check on the selected item.
@@ -1104,4 +1255,37 @@ fn header_popover(
             .with_priority(gpui_kit::base::POPUP_PRIORITY),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{script_url, url_label};
+    use bachuc_client::WorkspaceScript;
+
+    #[test]
+    fn a_running_service_opens_its_proxy_url_first() {
+        let mut script = WorkspaceScript {
+            name: "web".into(),
+            kind: "service".into(),
+            lifecycle: "running".into(),
+            health: None,
+            terminal_id: Some("t1".into()),
+            exit_code: None,
+            proxy_url: None,
+            local_proxy_url: Some("http://web.localhost:6767".into()),
+            public_proxy_url: Some("https://web.example.com".into()),
+        };
+        assert_eq!(script_url(&script), Some("https://web.example.com"));
+        script.proxy_url = Some("http://web--repo.localhost:6767".into());
+        assert_eq!(script_url(&script), Some("http://web--repo.localhost:6767"));
+        assert_eq!(
+            url_label("http://web--repo.localhost:6767"),
+            "web--repo.localhost:6767"
+        );
+        script.lifecycle = "stopped".into();
+        assert_eq!(script_url(&script), None);
+        script.lifecycle = "running".into();
+        script.kind = "script".into();
+        assert_eq!(script_url(&script), None);
+    }
 }

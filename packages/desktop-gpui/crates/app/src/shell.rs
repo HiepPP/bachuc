@@ -34,14 +34,15 @@ use bachuc_client::{
     ThinkingControls, TimelineState, load_hosts, resume_command,
 };
 use bachuc_command::{
-    CommandCenter, CommandEvent, CommandFileEvent, Shortcut, ShortcutsDialog, ShortcutsDialogEvent,
-    data_dir, load_shortcuts,
+    CommandCenter, CommandEvent, CommandFileEvent, FileResult, Shortcut, ShortcutsDialog,
+    ShortcutsDialogEvent, data_dir, load_shortcuts,
 };
 use bachuc_composer::{ComposerEvent, DraftSeed};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_explorer::{
-    DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerFileEvent, ExplorerTab, FileView,
-    GitActionsButton, GitActionsEvent, PullRequestEvent, PullRequestView,
+    DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerFileEvent, ExplorerNoticeEvent,
+    ExplorerTab, FileView, GitActionsButton, GitActionsEvent, PullRequestEvent,
+    PullRequestNoticeEvent, PullRequestView, file_icons::file_icon,
 };
 use bachuc_history::{HistoryEvent, HistoryScreen};
 use bachuc_icons::{IconName, provider_logo};
@@ -257,6 +258,9 @@ pub struct Shell {
     pub(crate) editor_github: Option<(String, String)>,
     /// Scripts with a start or stop in flight, as `workspace_id/name`.
     pub(crate) scripts_busy: HashSet<String>,
+    /// Scripts that Restart stopped, as `workspace_id/name`; each starts again once the daemon
+    /// reports it stopped.
+    pub(crate) scripts_restart: HashSet<String>,
     focus: FocusHandle,
     /// Subscriptions to the client and the views that hold it; a host switch replaces them.
     host_subscriptions: Vec<Subscription>,
@@ -335,6 +339,7 @@ impl Shell {
             editor_choice: None,
             editor_github: None,
             scripts_busy: HashSet::new(),
+            scripts_restart: HashSet::new(),
             focus,
             host_subscriptions: Vec::new(),
             _subscriptions: subscriptions,
@@ -362,6 +367,7 @@ impl Shell {
                 window,
                 |this: &mut Shell, _, event: &GitStatusEvent, window, cx| match event {
                     GitStatusEvent::ScriptsChanged { workspace_id } => {
+                        this.restart_stopped_scripts(workspace_id, cx);
                         if *workspace_id == this.selected {
                             cx.notify();
                         }
@@ -792,6 +798,7 @@ impl Shell {
 
     /// Tells the plugin host the selected workspace and the focused agent tab, on a change.
     fn sync_plugin_active(&mut self, cx: &mut Context<Self>) {
+        self.sync_chat_target(cx);
         let workspace = (self.selected != HOME).then(|| self.selected.clone());
         let active = (workspace, self.active_agent(cx));
         if active == self.plugin_active {
@@ -861,10 +868,18 @@ impl Shell {
                         }
                     },
                 );
+                let notice_subscription = cx.subscribe(
+                    &explorer,
+                    |this: &mut Shell, _, event: &ExplorerNoticeEvent, cx| {
+                        this.show_toast(event.ok, event.message.clone(), cx)
+                    },
+                );
                 self.host_subscriptions.push(subscription);
                 self.host_subscriptions.push(diff_subscription);
                 self.host_subscriptions.push(file_subscription);
+                self.host_subscriptions.push(notice_subscription);
                 self.explorer = Some(explorer);
+                self.sync_chat_target(cx);
             }
             (None, _) => {}
         }
@@ -1084,6 +1099,8 @@ impl Shell {
             workspace.set_item_kind(&key, kind, cx);
             workspace.set_item_logo(&key, logo, cx);
         });
+        // A tab replaced in place (a new tab that becomes a draft) emits no `Activated`.
+        self.sync_chat_target(cx);
         cx.notify();
     }
 
@@ -1867,6 +1884,12 @@ impl Shell {
                     PullRequestEvent::OpenUrl { url } => cx.open_url(url),
                 },
             );
+        let notice_subscription = cx.subscribe(
+            &view,
+            |this: &mut Shell, _, event: &PullRequestNoticeEvent, cx| {
+                this.show_toast(event.ok, event.message.clone(), cx)
+            },
+        );
         let key = self.next_key();
         self.put_pane(
             workspace_id,
@@ -1875,7 +1898,7 @@ impl Shell {
             "Pull request".into(),
             IconName::GitPullRequest,
             PaneContent::PullRequest(view),
-            vec![subscription],
+            vec![subscription, notice_subscription],
             window,
             cx,
         );
@@ -2442,6 +2465,73 @@ impl Shell {
         );
     }
 
+    /// Scripts "View terminal": shows the tab of the script's daemon terminal, or attaches a new
+    /// tab to it in the selected workspace.
+    pub(crate) fn view_script_terminal(
+        &mut self,
+        name: &str,
+        terminal_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let workspace_id = self.selected.clone();
+        self.header_menu = None;
+        let open_key = self.workspaces.get(&workspace_id).and_then(|open| {
+            open.panes
+                .iter()
+                .find_map(|(key, pane)| match &pane.content {
+                    PaneContent::Terminal(view)
+                        if view.read(cx).terminal_id() == Some(terminal_id) =>
+                    {
+                        Some(key.clone())
+                    }
+                    _ => None,
+                })
+        });
+        if let Some(key) = open_key {
+            self.activate_key(&workspace_id, &key, window, cx);
+            cx.notify();
+            return;
+        }
+        let key = self.next_key();
+        let client = self.client.clone();
+        let (id, title) = (terminal_id.to_string(), name.to_string());
+        let view = cx.new(|cx| {
+            let mut terminal = TerminalView::attach(client, id, window, cx);
+            terminal.set_name(title, cx);
+            terminal
+        });
+        let workspace = workspace_id.clone();
+        let pane_key = key.clone();
+        let subscription = cx.subscribe_in(
+            &view,
+            window,
+            move |this: &mut Shell, _, event: &TerminalEvent, window, cx| match event {
+                TerminalEvent::Opened { id } => this.set_pane_kind(
+                    &workspace,
+                    &pane_key,
+                    TabKind::Terminal { id: id.clone() },
+                    cx,
+                ),
+                TerminalEvent::OpenFile { cwd, path, line } => {
+                    this.open_file(cwd, path, *line, window, cx)
+                }
+                TerminalEvent::Exited => {}
+            },
+        );
+        self.put_pane(
+            &workspace_id,
+            key,
+            None,
+            name.to_string().into(),
+            IconName::SquareTerminal,
+            PaneContent::Terminal(view),
+            vec![subscription],
+            window,
+            cx,
+        );
+    }
+
     /// Opens a file in the selected workspace, or shows its open tab and scrolls to `line`.
     fn open_file(
         &mut self,
@@ -2848,13 +2938,13 @@ impl Shell {
         cx.notify();
     }
 
-    /// Answers a Files scope query with the files of the selected workspace. An answer to an
-    /// older query, or to a closed command center, is dropped.
+    /// Answers a file query with the files of the selected workspace, each with its file icon.
+    /// An answer to an older query, or to a closed command center, is dropped.
     fn query_files(&mut self, center: Entity<CommandCenter>, query: &str, cx: &mut Context<Self>) {
         self.file_query += 1;
         let generation = self.file_query;
         let Some(cwd) = self.selected_cwd().map(str::to_string) else {
-            center.update(cx, |center, cx| center.set_file_results(Vec::new(), cx));
+            center.update(cx, |center, cx| center.set_file_rows(Vec::new(), cx));
             return;
         };
         let task = self.client.update(cx, |client, cx| {
@@ -2870,18 +2960,20 @@ impl Shell {
                 if shell.file_query != generation || !open {
                     return;
                 }
-                let paths = match result {
-                    Ok(found) => found
-                        .into_iter()
-                        .filter(|entry| !entry.is_directory)
-                        .map(|entry| entry.path)
-                        .collect(),
-                    Err(error) => {
-                        shell.show_toast(false, format!("{error:#}"), cx);
-                        Vec::new()
+                center.update(cx, |center, cx| match result {
+                    Ok(found) => {
+                        let rows = found
+                            .into_iter()
+                            .filter(|entry| !entry.is_directory)
+                            .map(|entry| FileResult {
+                                icon: file_icon(&file_name(&entry.path)),
+                                path: entry.path,
+                            })
+                            .collect();
+                        center.set_file_rows(rows, cx)
                     }
-                };
-                center.update(cx, |center, cx| center.set_file_results(paths, cx));
+                    Err(error) => center.set_file_error(Some(format!("{error:#}")), cx),
+                });
             });
         })
         .detach();
@@ -3002,26 +3094,67 @@ impl Shell {
         }
     }
 
-    /// Explorer "Add to chat": the path as a mention in the active agent tab's composer. With
-    /// no agent tab active it does nothing, as Electron hides the item then.
+    /// Explorer "Add to chat", as Electron's `useAddFileToChat`: a workspace-file chip in the
+    /// composer of the chat target (`chat_target`), then that tab takes the focus. A lazy agent
+    /// tab gets its composer first. With no chat target the menu hides the item.
     fn add_file_to_chat(
         &mut self,
-        cwd: &str,
+        _cwd: &str,
         path: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(key) = self.active_key(cx) else {
+        let workspace_id = self.selected.clone();
+        let Some(key) = self.chat_target_key(cx) else {
             return;
         };
-        let composer = match self.pane(&self.selected, &key).map(|pane| &pane.content) {
-            Some(PaneContent::Agent(view)) => view.read(cx).composer.clone(),
+        self.materialize(&workspace_id, &key, window, cx);
+        let (label, attachment) = workspace_file_attachment(path);
+        match self.pane(&workspace_id, &key).map(|pane| &pane.content) {
+            Some(PaneContent::Agent(view)) => {
+                let composer = view.read(cx).composer.clone();
+                composer.update(cx, |composer, cx| {
+                    composer.add_raw_attachment(label, attachment, cx)
+                });
+            }
+            // The draft pane keeps its composer private; `seed_fork` without a seed only adds
+            // the chip through `Composer::add_raw_attachment`.
+            Some(PaneContent::Draft(view)) => view.update(cx, |draft, cx| {
+                draft.seed_fork(None, label, attachment, window, cx)
+            }),
             _ => return,
+        }
+        self.activate_key(&workspace_id, &key, window, cx);
+        self.focus_pane(&workspace_id, &key, window, cx);
+    }
+
+    /// The tab key of the selected workspace's chat target, from its focused tab and the active
+    /// tab of each group.
+    fn chat_target_key(&self, cx: &App) -> Option<String> {
+        let open = self.workspaces.get(&self.selected)?;
+        let workspace = open.view.read(cx);
+        let layout = workspace.layout();
+        let actives: Vec<&str> = layout
+            .groups()
+            .into_iter()
+            .filter_map(|group| group.active_item().map(|item| item.key.as_str()))
+            .collect();
+        let is_chat = |key: &str| {
+            matches!(
+                open.panes.get(key).map(|pane| &pane.content),
+                Some(PaneContent::Agent(_) | PaneContent::LazyAgent(_) | PaneContent::Draft(_))
+            )
         };
-        let path = absolute_path(cwd, path);
-        composer.update(cx, |composer, cx| {
-            composer.insert_path_mention(&path, window, cx)
-        });
+        chat_target(layout.active_key(), &actives, is_chat).map(str::to_string)
+    }
+
+    /// Tells the Explorer whether "Add to chat" has a target; it ignores an unchanged value.
+    fn sync_chat_target(&mut self, cx: &mut Context<Self>) {
+        let Some(explorer) = self.explorer.clone() else {
+            return;
+        };
+        let available = self.chat_target_key(cx).is_some();
+        explorer.update(cx, |explorer, cx| explorer.set_chat_target(available, cx));
     }
 
     fn run_command(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -3715,6 +3848,33 @@ pub(crate) fn fork_attachment_label(title: Option<&str>) -> String {
         .to_string()
 }
 
+/// The tab that "Add to chat" attaches to, as Electron's `resolveFocusedChatTarget`: the focused
+/// tab when it is a chat (agent, lazy agent, or draft), else the active tab of the first group in
+/// reading order that is a chat. GPUI tabs record no parent tab, so Electron's middle step (the
+/// chat a file was opened beside) has nothing to read.
+pub(crate) fn chat_target<'a>(
+    focused: Option<&'a str>,
+    group_actives: &[&'a str],
+    is_chat: impl Fn(&str) -> bool,
+) -> Option<&'a str> {
+    focused
+        .filter(|key| is_chat(key))
+        .or_else(|| group_actives.iter().copied().find(|key| is_chat(key)))
+}
+
+/// The chip label and attachment of a workspace file, as Electron's
+/// `workspaceFileAttachmentToAgentAttachment` for a whole file.
+pub(crate) fn workspace_file_attachment(path: &str) -> (String, serde_json::Value) {
+    let name = path.rsplit('/').next().unwrap_or(path).to_string();
+    let attachment = serde_json::json!({
+        "type": "text",
+        "mimeType": "text/plain",
+        "title": name,
+        "text": format!("Workspace file: {path}"),
+    });
+    (name, attachment)
+}
+
 /// The toast of a failed fork: the error, as `toErrorMessage`, but `forkFailed` for an empty
 /// context (the client's "Nothing to fork") or an empty text.
 pub(crate) fn fork_error(message: &str) -> String {
@@ -3759,9 +3919,9 @@ mod tests {
         AgentOpen, CANNOT_RENAME, FORK_ATTACHMENT_LABEL, FORK_FAILED, FORK_MISSING_WORKSPACE,
         PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE, RESUME_ID_UNAVAILABLE,
         RenameTarget, TERMINAL_NOT_OPEN, agent_open, agent_target, agent_workspace,
-        auto_opens_pr_tab, closes_surface_on_open, fork_attachment_label, fork_draft_seed,
-        fork_error, fork_tab_cwd, fork_workspace_preset, has_pull_request, latest_prompt_reveal,
-        reload_error, rename_target, resume_text,
+        auto_opens_pr_tab, chat_target, closes_surface_on_open, fork_attachment_label,
+        fork_draft_seed, fork_error, fork_tab_cwd, fork_workspace_preset, has_pull_request,
+        latest_prompt_reveal, reload_error, rename_target, resume_text, workspace_file_attachment,
     };
     use bachuc_client::{
         AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, PrMergeCapability, PrStatus,
@@ -4078,5 +4238,42 @@ mod tests {
             fork_error("Update the host to use this."),
             "Update the host to use this."
         );
+    }
+
+    #[test]
+    fn the_chat_target_is_the_focused_chat_else_the_first_group_with_a_chat() {
+        let chats = ["agent", "draft"];
+        let is_chat = |key: &str| chats.contains(&key);
+        // The focused tab wins when it is a chat.
+        assert_eq!(
+            chat_target(Some("draft"), &["agent", "draft"], is_chat),
+            Some("draft")
+        );
+        // A focused file falls back to the first group whose active tab is a chat.
+        assert_eq!(
+            chat_target(Some("file"), &["terminal", "agent", "draft"], is_chat),
+            Some("agent")
+        );
+        assert_eq!(
+            chat_target(Some("file"), &["file", "terminal"], is_chat),
+            None
+        );
+        assert_eq!(chat_target(None, &[], is_chat), None);
+    }
+
+    #[test]
+    fn a_workspace_file_attaches_as_electron_text_attachment() {
+        let (label, attachment) = workspace_file_attachment("src/lib/main.rs");
+        assert_eq!(label, "main.rs");
+        assert_eq!(
+            attachment,
+            serde_json::json!({
+                "type": "text",
+                "mimeType": "text/plain",
+                "title": "main.rs",
+                "text": "Workspace file: src/lib/main.rs",
+            })
+        );
+        assert_eq!(workspace_file_attachment("README.md").0, "README.md");
     }
 }
