@@ -2,7 +2,7 @@
 
 ## Status
 
-BLOCKED. Reading the code found no break in the app crate. The cause needs a live reproduction, and builders may not run one. No code changed for this TASK.
+DONE (implement: manual checks pending, Q-133). Re-scoped by Q-127 on 2026-10-18; the earlier status follows. Earlier: BLOCKED. Reading the code found no break in the app crate. The cause needs a live reproduction, and builders may not run one. No code changed for this TASK.
 
 ## Changed
 
@@ -61,3 +61,11 @@ Run 2026-10-18 by the UI checker, same bundle and setup as TASK-198 UI Checks Ru
 ## Lead Status
 
 Blocked: not reproduced by the UI checker (Q-127). No code changed, so group S goes on with TASK-200 (the dependency is file order only).
+
+## Resolution
+
+- Q-127 answered (2026-10-18): the real bug was the Board staying in front after a sidebar workspace click. It was not an empty pane.
+- Fixed by TASK-198 commit `150a36be3` (`open_workspace` closes a page surface).
+- UI checker run 2: "With Board open, press a sidebar workspace -> the workspace shows": PASS (`/tmp/t198r2-10-sidebar-workspace.png`, recorded in the TASK-198 outcome).
+- Owner hand test on a new build (Q-133): with the Board open, click a sidebar workspace; and without the Board, click tab chips in a workspace.
+- No code changed for this TASK.

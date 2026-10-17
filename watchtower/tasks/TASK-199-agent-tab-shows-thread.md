@@ -5,9 +5,15 @@ Class: risky
 
 ## Brief
 
-Goal: A click on an agent tab in the workspace screen shows that agent's thread, not an empty pane.
+Goal: With the Board open, a click on a workspace row in the sidebar shows that workspace and its thread, not the Board.
 
-Change: a clicked agent tab shows empty content -> it shows the timeline and the composer.
+Change: the thread opens behind the Board page, so the screen stays on the Board -> the Board page closes and the workspace shows in front.
+
+Owner answer (Q-127, 2026-10-18): the bug is on the GPUI app. The Board was open, Hiep clicked a workspace row in the sidebar, and the screen stayed on the Board. The owner does not remember whether a tab chip click without the Board also failed. The first Brief ("a clicked agent tab shows an empty pane") misdescribed the bug.
+
+Fixed by: [TASK-198](TASK-198-board-card-opens-thread.md) commit `150a36be3`. Every `open_workspace` caller now closes a page surface (`close_page_surface`), and `SidebarEvent::OpenWorkspace` calls `open_workspace`.
+
+Earlier Brief, kept for history: a click on an agent tab in the workspace screen shows empty content -> it shows the timeline and the composer.
 
 Boundaries:
 
