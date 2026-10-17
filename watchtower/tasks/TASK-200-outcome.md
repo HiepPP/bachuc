@@ -55,3 +55,42 @@ Run 2026-10-18 by the UI checker (run 3). Bundle `Bachuc GPUI Check` built from 
 - Unarchive brings the composer back: PASS. After the press the AX tree has `text entry area Message, ID: composer-input` and no callout (`/tmp/r3-06-unarchived.png`); `paseo inspect` shows `Archived false`.
 - Archive an agent, then click its Board card: FAIL. "t200 board card" (`d9d6e2d`) was archived by CLI while its card still showed on the Board ("Stale" snapshot). Two AX presses on "Open conversation t200 board card" left the Board open with no tab (`/tmp/r3-08-board-archived-card.png`, `/tmp/r3-09-board-archived-retry.png`). A control press on the live card "t202 scratch" opened its tab at once (`/tmp/r3-10-board-control.png`). Cause not diagnosed. `open_agent` falls back to `Client::archived_agent`, which `upsert_agent` fills from an `agent_update` with `archivedAt` (`crates/client/src/core.rs:3102`); a check of whether that update reached the client was not done. Note: the Board hides archived cards by design (`hiep-plugins/plugins/board/server/snapshot.ts:19`), so the card is only there until the next snapshot; an agent archived earlier ("t200 archive me") never has a card.
 - Anti-goal, click to first paint under 300 ms: UNVERIFIED. The app logs no click or paint timestamps, and a background window paints only when forced.
+
+## Fix round 1
+
+### Status
+
+DONE. The Board card of an archived agent now opens its tab. The UI check is DEFERRED (UI checker).
+
+### Cause
+
+Found by reading the code and the daemon. The client subscribes to agent updates with `"subscribe": {}` and no filter (`crates/client/src/core.rs`, `opened`). For a subscription without `includeArchived`, the daemon sends `agent_update { kind: "remove" }` when an agent is archived, not an upsert with `archivedAt` (`packages/server/src/server/session/agent-updates/agent-updates-service.ts:134-137` and `:255-262`). The client then calls `remove_agent`, so `Client::archived_agent` stays empty. `open_agent` found neither a live nor an archived agent and did nothing. The History path passed because a History page fills the archived map (`archive_history_rows`) and the row gives its own `workspace_id`. The test `archived_upserts_move_to_the_archived_map_and_back` used an archived upsert, a message the daemon never sends to this client, so it hid the gap. The shell, the `LatestPrompt` arm, and the Board plugin were ruled out: the press reached `open_agent` (the live card opened with the same path).
+
+The fix fetches the unknown agent instead of subscribing with `includeArchived`. That filter would load every archived agent at each connect.
+
+### Changed
+
+- `packages/desktop-gpui/crates/client/src/core.rs` and `lib.rs`: `fetch_agent(agent_id)` sends `fetch_agent_request` (`Pending::FetchAgent`). An archived answer goes through `upsert_agent`, so it fills the archived map. A live answer is not stored, because the subscription owns live agents. A `null` agent or an error fails the reply. Reason for the client change: the cause is in the client, the fix is small, and no running builder owns the client crate (the other builder owns `crates/command` and `crates/settings`).
+- `packages/desktop-gpui/crates/client/tests/rpcs.rs`: `an_archived_remove_needs_a_fetch_to_fill_the_archived_map` (a `remove` leaves the archived map empty; a fetch fills it with the `workspace_id`) and `a_fetch_of_a_missing_agent_fails`.
+- `packages/desktop-gpui/crates/app/src/shell.rs`: `open_agent` uses the pure rule `agent_open`. When the client knows neither a live nor an archived agent, `open_fetched_agent` fetches it and then opens an archived agent with `open_agent_in` in its own workspace (else the home view, Q-114). A fetch error is logged and nothing opens, as before. Test `an_unknown_agent_is_fetched_before_it_opens`.
+
+### Contract
+
+- Produces: `Client::fetch_agent(&mut self, agent_id: &str, cx: &mut Context<Client>) -> Task<anyhow::Result<()>>`.
+- `Shell::open_agent` keeps its signature. It now also opens an agent that was archived after this client last saw it.
+
+### Verified
+
+- `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-client --test rpcs`: the new test failed first (`no method named fetch_agent`), then passed. All `bachuc-client` suites pass (rpcs 54).
+- `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-app`: pass, 75 tests, including `an_unknown_agent_is_fetched_before_it_opens` and `the_shell_refreshes_logos_only_from_the_theme_observer`.
+- `CARGO_BUILD_JOBS=4 ./cargo.sh build -p bachuc-app`: exit 0, only the old `next_theme` warning.
+- `./cargo.sh fmt --check -p bachuc-app` and `-p bachuc-client`: exit 0.
+- `./cargo.sh clippy -p bachuc-app --tests`: no warning in the changed files.
+- `./cargo.sh metadata --format-version 1 > /dev/null`: exit 0.
+- GitNexus impact (index 54 commits stale): `open_agent` LOW. `composer_response` HIGH (the response dispatcher); only a new `Pending::FetchAgent` arm was added, the other arms are unchanged.
+- UI check, archive an agent and then press its Board card: the tab opens with the archived callout: DEFERRED (UI checker).
+
+### Lessons
+
+- An agent update subscription without `includeArchived` gets `remove` on an archive. A client test must send what the daemon sends to that filter, not an archived upsert.
+- An archived agent opened from a stale Board card shows the tail, not the latest prompt. The tab exists only after the fetch, so the `LatestPrompt` reveal in the same event finds no tab.
