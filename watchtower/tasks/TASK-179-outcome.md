@@ -119,3 +119,16 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, and window screen
 Next: a human opens the GPUI app in front, presses the `README.md` and `src/main.rs` rows in the `gpui-bench` Changes tab, and confirms there is no crash and that the diff, mode menu, and long-line cut look right.
 
 The checker quit the app (`pgrep` finds no `Bachuc GPUI.app` process) and made no source change.
+
+## UI Checks, foreground
+
+Checked 2026-10-17 by the UI checker with the app in front (owner permission for this run): AX clicks, pointer clicks, and window screenshots through cua_repl. Bundle `Bachuc GPUI.app` (pid 26407), commit `11a6592ba` build. Evidence under `/tmp/wt-ui4/`. The app found on start was connected to release (6767), so the checker quit it and relaunched it with `BACHUC_HOST=live`; all checks ran against live (6768), and no release data was opened.
+
+- UI check (open `gpui-bench` Changes, press the `README.md` row then the `src/main.rs` row; app stays alive; all-files diff shows both files) -> PASS. Both presses ran; the app stayed alive (`pgrep` found pid 26407 after each; `~/Library/Logs/DiagnosticReports` holds only the two round-2 `bachuc-desktop-*.ips`, none new). The all-files diff lists `README.md`, `shot.png`, `src/extra.rs`, and `src/main.rs`; the `main.rs` press selected its row. The whole diff fits the pane, so a scroll-to-file move is not visible. Evidence: `/tmp/wt-ui4/01-changes-list.jpg`, `02-readme-diff.jpg`, `03-main-rs-press.jpg`.
+- UI check (sideways scroll over the 330-column line; code moves, gutter stays) -> UNVERIFIED: cua `scroll` right and left, 0.3 to 20 pages, over the `README.md` long line moved nothing, and the later scroll calls failed with `Computer Use server error -10005: noWindowsAvailable` (also for vertical scroll), so the tool did not deliver a horizontal wheel event. This is not a proven product defect: `scroll_sideways` (`crates/explorer/src/diff_view.rs:342`) reads `event.delta.x`, and no control showed that the wheel event reaches the app. A human check with a trackpad is still needed.
+- UI check (wrap toggle) -> PASS. The `Wrap long lines` button wraps the 330-column line into 6 rows at the pane width with the line number kept in the gutter; pressing it again returns to the cut line, and the button label switches to `Scroll long lines`. Evidence: `/tmp/wt-ui4/04-wrap-on.jpg`.
+- UI check (hide-whitespace toggle) -> UNVERIFIED for effect: the button toggles without a crash, but the fixture has no whitespace-only change, so the diff cannot differ. The request carrying `ignore_whitespace` stays covered by the unit test only.
+- UI check (mode menu: Uncommitted, separator, Committed with `<branch> -> <base>`) -> PASS for labels, UNVERIFIED for the description. The menu shows `Uncommitted` with a check, a separator, and `Committed` (`/tmp/wt-ui4/05-mode-menu.jpg`). `Committed` has no description, which matches the spec for this fixture: branch `main` is also the base. A branch that differs from its base was not tried.
+- UI check (markdown heading colors) -> PASS in the diff view: `# gpui-bench`, `## Round 2 heading`, and `### Round 2 sub heading` draw in blue (`02-readme-diff.jpg`). No Electron 6770 frame was taken for a side-by-side compare.
+
+The checker left the app open on live (6768) and made no source change.
