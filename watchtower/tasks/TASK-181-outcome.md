@@ -65,3 +65,13 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - Port JS string rules with JS semantics: `length` is UTF-16 units, `trim` and `\s` add U+FEFF and drop U+0085 against Rust, `split(/\r?\n/)` leaves a lone `\r`, and a one-pass `replace` differs from chained `str::replace`. Run the real JS in Node to pin golden strings.
 - The `thinking-orbs` internals are exported by short names (`M` = `MODE_FRAMES`, `r` = `resolvePreset`, `a` = `scaleRadii`), so Node can print golden frames for a port test.
 - Defaults taken (no question needed): the faces map keeps one entity per agent id until the plugin deactivates; the frame time jumps when hover starts or stops, as the library's effect restart does; a title cut that splits a surrogate pair drops the half pair, where JS keeps a lone surrogate; the spec cites `STOP_RED` at `composer.rs:43`, which is line 80 now, so the constant cites only the Electron source.
+
+## Fix Round 1
+
+2026-10-17, code tests only. The lead re-runs the screen check.
+
+- Cause of the 33 pt pitch: Search and the plugin nav rows (drawn by `crates/sidebar`) used GPUI's default line height 1.618, so each 28 px `minHeight` row grew to 22.7 + 8 = 30.7 px. Electron `sidebar-header-row.tsx` (compact: `minHeight` 28, `paddingVertical` 4) draws the label at about 1.2, so its rows stay 28 px; with the 2 px group gap the pitch is 30.
+- Change: both rows use `NAV_ROW_MIN` 28 and `line_height(LABEL_LINE)` 20 from the new `crates/sidebar/src/metrics.rs`, so each row is 28 px and the pitch is 30 (Electron 30). The text centre in the row does not move.
+- AX press: the `Search`, `Board`, and `Plugins` rows now call their handler from `AccessibleAction::Click` too; see TASK-175 Fix Round 1 for the full list and reason.
+- Tests: `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-sidebar` -> all pass, new `metrics::tests::nav_rows_are_30_px_apart`; `./cargo.sh fmt --check -p bachuc-sidebar` -> exit 0.
+- UI check (`Plugins` row placement, nav pitch 30) -> DEFERRED (UI checker). UI check (stop-orb) -> DEFERRED (UI checker): it needs an agent view, which the AX press fix may now open.

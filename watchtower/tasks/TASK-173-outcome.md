@@ -58,3 +58,15 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - Safe defaults taken (see questions): the forced-worktree error on a non-git project is the Electron string "Failed to create worktree" (`newWorkspace.errors.createWorktreeFailed`), shown before any request; the project and isolation chips use the `Folder` and `GitBranch` icons, not a project favicon or initial; the base rows leave out the divergence text.
 - The client gets no upstream ref, so the base default is always `refs/heads/<current branch>`.
 - Builds failed twice only inside other groups' crates (`crates/sidebar`, `crates/timeline`, and a half-created `plugins/edit-diffs`); a retry after 4 to 7 minutes passed.
+
+## Fix Round 1
+
+2026-10-17, code tests only. The lead re-runs the screen check.
+
+- Cause of the chip row offset: the title set no line height, so GPUI drew the 20 px title at its default 1.618 (32.4 px). Electron `composerTitle` sets none either and draws it at about 1.2 (24 px). The title line was 8.4 px too tall, and the centered dock spread that around the stack.
+- Change: `crates/app/src/new_workspace.rs` adds `TITLE_LINE_HEIGHT` 24 and sets it on the title. Expected effect: title top to chip centre 69.5 -> about 65.3 (Electron 64.5); the title ink stays at y 250 (Electron 248.5), because the stack shrinks by the same amount the line does.
+- Absolute y is not a fair compare: the GPUI screen sits under the 60 pt header and the tab row, while the Electron screen fills the window, and both center their stack in their own frame. Compare title-to-chip and chip-to-composer offsets.
+- Plugin pill row, from the source (`plugins/buttons/view.tsx` `draftPills`, changed 2026-10-13): `paddingHorizontal` 16, `paddingBottom` 8, gap 4. GPUI had no horizontal padding; `crates/composer/src/plugin_slots.rs` `draft_pill_row` now adds 16 px. The row is a 24 px docked pill and 8 px padding, 32 px, so the composer top sits 32 px lower than the 2026-10-15 build, which draws no pill row because its plugins fail. That 32 px gap is correct per the source.
+- AX press: the `Watchtower` pill (and every action pill) now runs its handler from `AccessibleAction::Click` too, in `plugin_pill`. It already had `Role::Button` and `on_click`; GPUI's default AX press replays a mouse click at the node centre, which the UI check saw do nothing. GitNexus impact on `plugin_pill`: HIGH (4 callers in the composer); the mouse path is unchanged.
+- Tests: `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-app` -> 58 passed, new `the_chip_row_centre_sits_70_px_below_the_title_top`; `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-composer` -> 93 passed, new `the_draft_pill_row_is_32_px_tall`; `./cargo.sh fmt --check -p bachuc-app` and `-p bachuc-composer` -> exit 0.
+- UI check (chip row and composer top against Electron) -> DEFERRED (UI checker).

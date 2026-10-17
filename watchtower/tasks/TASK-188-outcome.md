@@ -73,3 +73,14 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and w
 - A pure `Snapshot` and plain functions let nearly every Electron test port without GPUI. The state methods only call them and run requests.
 - `refresh` returns a oneshot receiver that a caller may drop; a dropped receiver is harmless, but the type is `must_use`, so a caller that ignores it writes `let _ =`.
 - `Styled::flex_grow` takes a number in this GPUI; use `flex_1` for a growing field.
+
+## Fix Round 1
+
+2026-10-17, code tests only. No layout change: the tabs already match the source.
+
+- Pixel scan of `/tmp/wt-ui/gpui-initial.jpg` (2400 x 1600, so px / 2 = pt). Column x 15: the strip border at y 701.5-702, the `1` tab fill from y 708.5 to 734.5 (26 pt), the footer border at 740.5. Row y 715: the `1` tab fill from x 10 to 36 (26 pt), the `+` tab border from x 40 to 66 (26 pt). So the tabs are 26 x 26 at x 10 with a 4 pt gap, and the strip is 1 + 6 + 26 + 6 = 39 pt, as `spaces-strip.tsx` says.
+- The earlier 28 pt and x 8 readings were edge reads of the JPEG ink, about 1 to 2 pt outside the box. GPUI layout puts the 1 px border inside the 26 px box.
+- Change: `plugins/workspace-spaces/src/strip.rs` adds the test `tabs_are_26_px_in_a_39_px_strip`, which pins `TAB_SIZE` 26, `TAB_PADDING` 7, `STRIP_PADDING_X` 10, and the 39 px strip.
+- The Spaces page check needs the `Plugins` row to open; that row now takes an AX press directly (TASK-175 Fix Round 1).
+- Tests: `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-plugin-workspace-spaces` -> 50 passed; `./cargo.sh fmt --check -p bachuc-plugin-workspace-spaces` -> exit 0.
+- UI check (tab sizes) -> DEFERRED (UI checker). UI check (Spaces page with two Spaces) -> DEFERRED (UI checker).

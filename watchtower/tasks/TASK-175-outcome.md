@@ -72,3 +72,13 @@ Checked 2026-10-17 by the UI checker with `open -g`, AX reads, and window screen
 - GPUI runs a list's own scroll handler before a parent's handler, because the list registers its window listener during paint, after the parent. To stop a list from scrolling, put the handler on a row (a child painted after the list registers).
 - `AsyncWindowContext::update` takes `&mut self`. A chain of `FnOnce` steps that each call it needs one clone of the context per step.
 - A gpui-kit `PopupMenuItem::checked` shows on the left by default; set `check_side(Side::Right)` for a trailing check.
+
+## Fix Round 1
+
+2026-10-17, code tests only. The lead re-runs the screen check.
+
+- Cause: the `Add project` label used GPUI's default line height 1.618 (22.7 px at 14 px), so the button grew past its 32 px `minHeight` to about 34.7 px. Electron draws the label at about 1.2, so its button stays 32 px.
+- Change: new `crates/sidebar/src/metrics.rs` holds `LABEL_LINE` 20, `NAV_ROW_MIN` 28, and `ADD_PROJECT_MIN` 32. The button sets `line_height(LABEL_LINE)`, so it is 32 px and the footer is 1 + 12 + 32 + 12 = 57 px (Electron 57). Expected: border y 743 and the label 1.2 pt lower than before, about y 764.2 (Electron 764.5).
+- AX press: Search, the plugin nav rows (`Board`, `Plugins`), `Add project`, `Settings`, the project rows, the workspace rows, the `Pinned` header, and the show-more rows now run their handler from `AccessibleAction::Click` as well as `on_click`, through one `OnPress::on_press` helper in `sidebar.rs`. Each already had `Role::Button` and `on_click`, so GPUI exposed the press, but its default handler replays a mouse click at the node centre; the UI check saw that do nothing. The root cause of the failed replay is not proven (no app run here). The project and workspace kebabs open a gpui-kit menu and are unchanged.
+- Tests: `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-sidebar` -> all pass (2 + 1 + 22 + 24), new `metrics::tests::the_footer_is_57_px_tall` and `nav_rows_are_30_px_apart`; `./cargo.sh fmt --check -p bachuc-sidebar` -> exit 0.
+- UI check (footer height and label) -> DEFERRED (UI checker). UI check (AX press on the sidebar rows, Search, Board, Plugins, Settings) -> DEFERRED (UI checker).
