@@ -350,3 +350,15 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: GPUI calls event subscribers in subscription order, so a shell handler runs before views made later and must use `cx.defer_in` to read their state for the same event.
 - Source: TASK-198 fix round 1, `crates/app/src/shell.rs`.
 - Use next time: defer any shell read of a child view's state that the same event updates.
+
+### 2026-10-18 - Implement ADD TASK-220 to TASK-231
+
+- Learned: in gpui-pre 0.3.9, `.focusable()` alone is not a Tab stop; with `track_focus`, set it on the handle (`cx.focus_handle().tab_stop(true)`). A `Visibility::Hidden` element registers no Tab stop, so hide focusable controls by opacity.
+- Source: TASK-229 fix rounds 1 and 2, `packages/desktop-gpui/plugins/board/src/card.rs`.
+- Use next time: when a check depends on keyboard focus, verify that Tab actually reaches the element before testing its focus style.
+- Learned: a spread `BoxShadow` paints a filled quad under a transparent element, so a focus ring made from it shows as a solid box. `in_focus` means the element is inside the focused element, not that it holds focus.
+- Source: TASK-229 UI checks Run C and Run D.
+- Use next time: draw a focus ring as an absolute child with a border and no fill; test "holds focus" with a focus handle at render.
+- Learned: adding a field to a client struct breaks struct literals in other crates' tests; plan which TASK fixes each literal, and keep `cargo build` (no tests) green in between.
+- Source: TASK-220, TASK-222, TASK-231.
+- Use next time: `rg "StructName \{"` across the workspace before adding a field.
