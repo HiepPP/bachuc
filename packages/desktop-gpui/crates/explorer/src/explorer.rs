@@ -3,27 +3,39 @@
 //!
 //! The view does not open anything itself. A click on a file emits `ExplorerEvent::OpenFile`, a
 //! click on a changed file emits `ExplorerDiffEvent::OpenAllDiffs`, a click on a file of a
-//! commit emits `ExplorerDiffEvent::OpenCommitDiff`, and the app opens the viewer pane.
+//! commit emits `ExplorerDiffEvent::OpenCommitDiff`, and the app opens the viewer pane. A right
+//! click opens the file menu (`file_menu`); its Open to the side and Add to chat items emit
+//! `ExplorerFileEvent`, and the Explorer runs the rest itself.
 
 use crate::branch_switcher::{BranchSwitched, BranchSwitcher};
 use crate::changes::{ChangeRow, CheckoutView};
 use crate::commits::{CommitRow, CommitsState, commit_rows, time_ago};
 use crate::diff_doc::Latest;
 use crate::diff_prefs::DiffPrefs;
+use crate::file_menu::{
+    Confirm, EntryFeatures, EntryKind, FileAction, FileMenuEntry, GitState, absolute_path,
+    child_path, create_parent, delete_confirm, discard_paths, draft_slot, entry_name, menu_entries,
+    parent_path, revert_confirm,
+};
 use crate::tree::{FileTree, RootState, SortBy, Toggled, TreeRow};
 use crate::ui::{
     CHANGE_ROW_HEIGHT, FILE_ROW_HEIGHT, TRAILING_RAIL, TREE_ICON_GAP, centered_text, change_icon,
     chevron, diff_mode_menu, diff_stat, file_icon_element, loading_marker, read_prefs,
     state_message, tree_padding_left, update_prefs,
 };
-use bachuc_client::{Client, ClientEvent, CommitSummary, DiffCompare, DirectoryEvent};
+use bachuc_client::{
+    Client, ClientEvent, CommitSummary, DiffCompare, DirectoryEvent, NewEntryKind,
+};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3, SPACE_4, TAB_BAR_HEIGHT,
 };
 use bachuc_theme::{mono_font_family, tokens, ui_font_size};
+use gpui_kit::component::button::ButtonVariant;
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::theme::Theme;
-use gpui_kit::component::{Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::collections::HashSet;
@@ -49,6 +61,8 @@ const COMMIT_SHA_WIDTH: f32 = 70.;
 const COMMIT_ROW_HEIGHT: f32 = 28.;
 /// The open Commits footer stops growing here and scrolls.
 const COMMITS_MAX_HEIGHT: f32 = 240.;
+/// The file menu width (`ContextMenuContent` min width).
+const FILE_MENU_WIDTH: f32 = 200.;
 
 /// What the Explorer tells its owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,6 +90,14 @@ pub enum ExplorerDiffEvent {
     },
 }
 
+/// The file menu items the app runs, apart from `ExplorerEvent` because the app matches that enum
+/// exhaustively.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExplorerFileEvent {
+    OpenToSide { cwd: String, path: String },
+    AddToChat { cwd: String, path: String },
+}
+
 impl ExplorerDiffEvent {
     /// The request for file `file` of `commit`; none when the commit has no such file.
     pub fn commit_file(cwd: &str, commit: &CommitSummary, file: usize) -> Option<Self> {
@@ -92,6 +114,56 @@ impl ExplorerDiffEvent {
 pub enum ExplorerTab {
     Files,
     Changes,
+}
+
+/// The row a file menu opened on.
+#[derive(Clone, Debug)]
+enum MenuTarget {
+    Entry {
+        path: String,
+        name: String,
+        kind: EntryKind,
+    },
+    Change {
+        path: String,
+        old_path: Option<String>,
+        git: GitState,
+    },
+}
+
+impl MenuTarget {
+    fn path(&self) -> &str {
+        match self {
+            MenuTarget::Entry { path, .. } | MenuTarget::Change { path, .. } => path,
+        }
+    }
+}
+
+struct OpenFileMenu {
+    menu: Entity<PopupMenu>,
+    position: Point<Pixels>,
+    _dismiss: Subscription,
+}
+
+/// What an inline name row does when it commits.
+enum EditKind {
+    Create { parent: String, kind: NewEntryKind },
+    Rename { path: String, name: String },
+}
+
+/// The inline name row of New file, New folder, or Rename.
+struct InlineEdit {
+    kind: EditKind,
+    input: Entity<InputState>,
+    _subscriptions: Vec<Subscription>,
+}
+
+/// What a file operation changes after it succeeds, besides the parent listing.
+enum AfterEntryOp {
+    Created { path: String, open: bool },
+    Renamed { from: String, to: String },
+    Deleted { path: String },
+    Nothing,
 }
 
 enum ChangesState {
@@ -135,12 +207,17 @@ pub struct Explorer {
     open_commits: HashSet<String>,
     /// The branch label of the Changes header, which switches branches.
     branch_switcher: Entity<BranchSwitcher>,
+    file_menu: Option<OpenFileMenu>,
+    inline_edit: Option<InlineEdit>,
+    /// The last failed file operation. The client has no toast host, so it shows inline.
+    action_error: Option<String>,
     watching: bool,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<ExplorerEvent> for Explorer {}
 impl EventEmitter<ExplorerDiffEvent> for Explorer {}
+impl EventEmitter<ExplorerFileEvent> for Explorer {}
 
 impl Explorer {
     pub fn new(
@@ -221,6 +298,9 @@ impl Explorer {
             commits_request: Latest::default(),
             open_commits: HashSet::new(),
             branch_switcher,
+            file_menu: None,
+            inline_edit: None,
+            action_error: None,
             watching: false,
             _subscriptions: subscriptions,
         };
@@ -247,6 +327,9 @@ impl Explorer {
         self.selected_change = None;
         self.commits = CommitsState::Loading;
         self.open_commits.clear();
+        self.file_menu = None;
+        self.inline_edit = None;
+        self.action_error = None;
         self.load_directory(crate::tree::ROOT, cx);
         if self.tab == ExplorerTab::Changes && self.visible {
             self.start_watching(cx);
@@ -631,6 +714,481 @@ impl Explorer {
         cx.notify();
     }
 
+    // ----- file menu -----
+
+    fn entry_features(&self, cx: &App) -> EntryFeatures {
+        let client = self.client.read(cx);
+        EntryFeatures {
+            entry_ops: client.fs_entry_ops_supported(),
+            duplicate: client.fs_entry_duplicate_supported(),
+        }
+    }
+
+    /// Selects Files row `index` and opens its menu at `position`.
+    fn open_entry_menu(
+        &mut self,
+        index: usize,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Explorer>,
+    ) {
+        let Some(row) = self.rows.get(index) else {
+            return;
+        };
+        let target = MenuTarget::Entry {
+            path: row.entry.path.clone(),
+            name: row.entry.name.clone(),
+            kind: if row.entry.is_dir {
+                EntryKind::Directory
+            } else {
+                EntryKind::File
+            },
+        };
+        self.selected_file = Some(row.entry.path.clone());
+        self.open_file_menu(target, position, window, cx);
+    }
+
+    /// Selects the changed file of Changes row `index` and opens its menu at `position`.
+    fn open_change_menu(
+        &mut self,
+        index: usize,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Explorer>,
+    ) {
+        let (Some(ChangeRow::File { index: file, .. }), ChangesState::Ready(view)) =
+            (self.change_rows.get(index), &self.changes)
+        else {
+            return;
+        };
+        let Some(file) = view.files.get(*file) else {
+            return;
+        };
+        let target = MenuTarget::Change {
+            path: file.path.clone(),
+            old_path: file.old_path.clone(),
+            git: GitState {
+                untracked: file.is_new,
+                deleted: file.is_deleted,
+                uncommitted: self.tree_compare.is_none(),
+            },
+        };
+        self.selected_change = Some(file.path.clone());
+        self.open_file_menu(target, position, window, cx);
+    }
+
+    /// Opens the menu of `target`. A second call replaces the open menu.
+    fn open_file_menu(
+        &mut self,
+        target: MenuTarget,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Explorer>,
+    ) {
+        let (kind, git) = match &target {
+            MenuTarget::Entry { kind, .. } => (*kind, None),
+            MenuTarget::Change { git, .. } => (EntryKind::File, Some(*git)),
+        };
+        let entries = menu_entries(kind, git, self.entry_features(cx));
+        if entries.is_empty() {
+            return;
+        }
+        let colors = tokens(cx);
+        let (muted, destructive) = (colors.foreground_muted, colors.destructive);
+        let explorer = cx.entity().downgrade();
+        let menu = PopupMenu::build(window, cx, move |menu, _, _| {
+            let mut menu = menu.min_w(px(FILE_MENU_WIDTH));
+            for entry in &entries {
+                menu = match *entry {
+                    FileMenuEntry::Separator => menu.separator(),
+                    FileMenuEntry::Item(action) => {
+                        let explorer = explorer.clone();
+                        let target = target.clone();
+                        menu.item(file_menu_item(action, muted, destructive).on_click(
+                            move |_, window, cx| {
+                                explorer
+                                    .update(cx, |this, cx| {
+                                        this.run_file_action(action, target.clone(), window, cx)
+                                    })
+                                    .ok();
+                            },
+                        ))
+                    }
+                };
+            }
+            menu
+        });
+        let dismiss = cx.subscribe_in(
+            &menu,
+            window,
+            |this, menu: &Entity<PopupMenu>, _: &DismissEvent, _, cx| {
+                // A right click on another row can open its menu before this one's dismiss lands.
+                if this
+                    .file_menu
+                    .as_ref()
+                    .is_some_and(|open| open.menu == *menu)
+                {
+                    this.file_menu = None;
+                    cx.notify();
+                }
+            },
+        );
+        menu.focus_handle(cx).focus(window, cx);
+        self.file_menu = Some(OpenFileMenu {
+            menu,
+            position,
+            _dismiss: dismiss,
+        });
+        cx.notify();
+    }
+
+    fn run_file_action(
+        &mut self,
+        action: FileAction,
+        target: MenuTarget,
+        window: &mut Window,
+        cx: &mut Context<Explorer>,
+    ) {
+        self.action_error = None;
+        let cwd = self.cwd.clone();
+        let path = target.path().to_string();
+        match (action, target) {
+            (FileAction::NewFile, MenuTarget::Entry { path, kind, .. }) => {
+                let parent = create_parent(kind, &path).to_string();
+                self.start_create(parent, NewEntryKind::File, window, cx);
+            }
+            (FileAction::NewFolder, MenuTarget::Entry { path, kind, .. }) => {
+                let parent = create_parent(kind, &path).to_string();
+                self.start_create(parent, NewEntryKind::Directory, window, cx);
+            }
+            (FileAction::OpenToSide, _) => cx.emit(ExplorerFileEvent::OpenToSide { cwd, path }),
+            (FileAction::AddToChat, _) => cx.emit(ExplorerFileEvent::AddToChat { cwd, path }),
+            (FileAction::CopyPath, _) => {
+                cx.write_to_clipboard(ClipboardItem::new_string(absolute_path(&cwd, &path)));
+            }
+            (FileAction::CopyRelativePath, _) => {
+                cx.write_to_clipboard(ClipboardItem::new_string(path));
+            }
+            (FileAction::Rename, MenuTarget::Entry { path, name, .. }) => {
+                self.start_rename(path, name, window, cx);
+            }
+            (FileAction::Duplicate, MenuTarget::Entry { path, .. }) => {
+                let task = self
+                    .client
+                    .update(cx, |client, cx| client.duplicate_entry(&cwd, &path, cx));
+                let parent = parent_path(&path).to_string();
+                self.finish_entry_op(task, parent, AfterEntryOp::Nothing, cx);
+            }
+            (FileAction::Delete, MenuTarget::Entry { path, name, kind }) => {
+                let explorer = cx.entity().downgrade();
+                open_confirm(delete_confirm(&name, kind), window, cx, move |cx| {
+                    let path = path.clone();
+                    explorer
+                        .update(cx, |this, cx| this.delete_entry(path, cx))
+                        .ok();
+                });
+            }
+            (
+                FileAction::Revert,
+                MenuTarget::Change {
+                    path,
+                    old_path,
+                    git,
+                },
+            ) => {
+                let explorer = cx.entity().downgrade();
+                let paths = discard_paths(&path, old_path.as_deref());
+                open_confirm(
+                    revert_confirm(&path, git.untracked),
+                    window,
+                    cx,
+                    move |cx| {
+                        let paths = paths.clone();
+                        explorer.update(cx, |this, cx| this.discard(paths, cx)).ok();
+                    },
+                );
+            }
+            // The menu offers these only on the row kind above.
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    /// Opens a New file or New folder row first under `parent`, opening `parent` first.
+    fn start_create(
+        &mut self,
+        parent: String,
+        kind: NewEntryKind,
+        window: &mut Window,
+        cx: &mut Context<Explorer>,
+    ) {
+        if parent != crate::tree::ROOT && !self.tree.is_expanded(&parent) {
+            if let Toggled::Expanded { needs_load: true } = self.tree.toggle(&parent) {
+                self.load_directory(&parent, cx);
+            }
+            self.rebuild_rows(cx);
+        }
+        let placeholder = match kind {
+            NewEntryKind::File => "File name",
+            NewEntryKind::Directory => "Folder name",
+        };
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+        let (slot, _) = draft_slot(&self.rows, &parent);
+        self.files_scroll
+            .scroll_to_item(slot, ScrollStrategy::Center);
+        self.begin_edit(EditKind::Create { parent, kind }, input, window, cx);
+    }
+
+    /// Turns the name of Files row `path` into a field holding `name`, selected.
+    fn start_rename(
+        &mut self,
+        path: String,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Explorer>,
+    ) {
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(name.clone()));
+        input.update(cx, |input, cx| input.select_all(window, cx));
+        if let Some(index) = self.rows.iter().position(|row| row.entry.path == path) {
+            self.files_scroll
+                .scroll_to_item(index, ScrollStrategy::Center);
+        }
+        self.begin_edit(EditKind::Rename { path, name }, input, window, cx);
+    }
+
+    /// Enter or a blur commits the field, as `EntryNameInputRow` does; Escape cancels it.
+    fn begin_edit(
+        &mut self,
+        kind: EditKind,
+        input: Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<Explorer>,
+    ) {
+        let weak = cx.weak_entity();
+        let subscriptions = vec![
+            cx.subscribe_in(
+                &input,
+                window,
+                |this: &mut Explorer, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                        this.commit_edit(cx);
+                    }
+                },
+            ),
+            // The input keeps Escape for itself, so the Explorer reads it first.
+            cx.intercept_keystrokes(move |event, window, cx| {
+                if event.keystroke.key != "escape" {
+                    return;
+                }
+                let cancelled = weak
+                    .update(cx, |this, cx| {
+                        let focused = this
+                            .inline_edit
+                            .as_ref()
+                            .is_some_and(|edit| edit.input.focus_handle(cx).is_focused(window));
+                        if focused {
+                            this.inline_edit = None;
+                            cx.notify();
+                        }
+                        focused
+                    })
+                    .unwrap_or(false);
+                if cancelled {
+                    cx.stop_propagation();
+                }
+            }),
+        ];
+        input.update(cx, |input, cx| input.focus(window, cx));
+        self.inline_edit = Some(InlineEdit {
+            kind,
+            input,
+            _subscriptions: subscriptions,
+        });
+        cx.notify();
+    }
+
+    fn commit_edit(&mut self, cx: &mut Context<Explorer>) {
+        let Some(edit) = self.inline_edit.take() else {
+            return;
+        };
+        cx.notify();
+        let Some(name) = entry_name(&edit.input.read(cx).value()) else {
+            return;
+        };
+        let cwd = self.cwd.clone();
+        match edit.kind {
+            EditKind::Create { parent, kind } => {
+                let task = self.client.update(cx, |client, cx| {
+                    client.create_entry(&cwd, &parent, &name, kind, cx)
+                });
+                let after = AfterEntryOp::Created {
+                    path: child_path(&parent, &name),
+                    open: kind == NewEntryKind::File,
+                };
+                self.finish_entry_op(task, parent, after, cx);
+            }
+            EditKind::Rename { path, name: old } => {
+                if name == old {
+                    return;
+                }
+                let task = self
+                    .client
+                    .update(cx, |client, cx| client.rename_entry(&cwd, &path, &name, cx));
+                let parent = parent_path(&path).to_string();
+                let after = AfterEntryOp::Renamed {
+                    from: path,
+                    to: child_path(&parent, &name),
+                };
+                self.finish_entry_op(task, parent, after, cx);
+            }
+        }
+    }
+
+    fn delete_entry(&mut self, path: String, cx: &mut Context<Explorer>) {
+        let cwd = self.cwd.clone();
+        let task = self
+            .client
+            .update(cx, |client, cx| client.delete_entry(&cwd, &path, cx));
+        let parent = parent_path(&path).to_string();
+        self.finish_entry_op(task, parent, AfterEntryOp::Deleted { path }, cx);
+    }
+
+    /// Lists `parent` again after the operation succeeds, as `use-file-explorer-actions.ts`
+    /// does; the calls return no new path, so the new listing shows it.
+    fn finish_entry_op(
+        &mut self,
+        task: Task<anyhow::Result<()>>,
+        parent: String,
+        after: AfterEntryOp,
+        cx: &mut Context<Explorer>,
+    ) {
+        let generation = self.generation;
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                if this.generation != generation {
+                    return;
+                }
+                if let Err(error) = result {
+                    log::warn!("file operation in {parent}: {error:#}");
+                    this.action_error = Some(format!("{error:#}"));
+                    cx.notify();
+                    return;
+                }
+                this.load_directory(&parent, cx);
+                match after {
+                    AfterEntryOp::Created { path, open } => {
+                        this.selected_file = Some(path.clone());
+                        if open {
+                            cx.emit(ExplorerEvent::OpenFile {
+                                cwd: this.cwd.clone(),
+                                path,
+                            });
+                        }
+                    }
+                    AfterEntryOp::Renamed { from, to } => {
+                        if this.selected_file.as_deref() == Some(from.as_str()) {
+                            this.selected_file = Some(to);
+                        }
+                    }
+                    AfterEntryOp::Deleted { path } => {
+                        if this.selected_file.as_deref() == Some(path.as_str()) {
+                            this.selected_file = None;
+                        }
+                    }
+                    AfterEntryOp::Nothing => {}
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Discards the changes of `paths`, then asks for the status again. The Files tree lists a
+    /// shown folder again too, because discarding an untracked file deletes it.
+    fn discard(&mut self, paths: Vec<String>, cx: &mut Context<Explorer>) {
+        let cwd = self.cwd.clone();
+        let folders: Vec<String> = paths
+            .iter()
+            .map(|path| parent_path(path).to_string())
+            .collect();
+        let task = self
+            .client
+            .update(cx, |client, cx| client.discard_changes(&cwd, paths, cx));
+        let generation = self.generation;
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                if this.generation != generation {
+                    return;
+                }
+                match result {
+                    Err(error) => {
+                        log::warn!("discard_changes: {error:#}");
+                        this.action_error = Some(format!("{error:#}"));
+                    }
+                    Ok(()) => {
+                        this.request_status(cx);
+                        for folder in folders {
+                            if !this.tree.needs_load(&folder) {
+                                this.load_directory(&folder, cx);
+                            }
+                        }
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The New file or New folder row: its list slot, depth, kind, and field.
+    fn draft(&self) -> Option<(usize, usize, NewEntryKind, Entity<InputState>)> {
+        let edit = self.inline_edit.as_ref()?;
+        let EditKind::Create { parent, kind } = &edit.kind else {
+            return None;
+        };
+        let (slot, depth) = draft_slot(&self.rows, parent);
+        Some((slot, depth, *kind, edit.input.clone()))
+    }
+
+    /// The failed file operation, under the tab rail. A press clears it.
+    fn render_action_error(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let message = self.action_error.clone()?;
+        let colors = tokens(cx);
+        let dismiss = cx.weak_entity();
+        Some(
+            div()
+                .id("explorer-action-error")
+                .role(Role::Button)
+                .aria_label(format!("Dismiss: {message}"))
+                .flex_shrink_0()
+                .px(px(SPACE_3))
+                .py(px(SPACE_2))
+                .border_b_1()
+                .border_color(colors.border)
+                .cursor_pointer()
+                .text_size(ui_font_size(FONT_SM, cx))
+                .text_color(colors.destructive)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.action_error = None;
+                    cx.notify();
+                }))
+                .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                    dismiss
+                        .update(cx, |this, cx| {
+                            this.action_error = None;
+                            cx.notify();
+                        })
+                        .ok();
+                })
+                .child(message)
+                .into_any_element(),
+        )
+    }
+
     // ----- render -----
 
     fn render_tab(&self, tab: ExplorerTab, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -742,7 +1300,7 @@ impl Explorer {
                         .child(
                             uniform_list(
                                 "explorer-files-rows",
-                                self.rows.len(),
+                                self.rows.len() + usize::from(self.draft().is_some()),
                                 cx.processor(Self::render_file_rows),
                             )
                             .track_scroll(&self.files_scroll)
@@ -784,8 +1342,7 @@ impl Explorer {
     }
 
     /// The Files toolbar (`files-pane-header`): the sort trigger, then the hidden files toggle
-    /// and refresh. New file and New folder need a create request the client does not have, and
-    /// the Modified sort needs a modified time that `FileEntry` does not have.
+    /// and refresh. The Modified sort needs a modified time that `FileEntry` does not have.
     fn render_files_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let colors = tokens(cx);
         let sort_label = self.sort.label();
@@ -895,10 +1452,32 @@ impl Explorer {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let colors = tokens(cx);
+        let draft = self.draft();
+        let renaming = match &self.inline_edit {
+            Some(InlineEdit {
+                kind: EditKind::Rename { path, .. },
+                input,
+                ..
+            }) => Some((path.as_str(), input.clone())),
+            _ => None,
+        };
         range
-            .filter_map(|index| {
+            .filter_map(|position| {
+                // The New file or New folder row takes one list slot; the rows after it move down.
+                let index = match &draft {
+                    Some((slot, depth, kind, input)) if position == *slot => {
+                        return Some(draft_row(*depth, *kind, input, cx));
+                    }
+                    Some((slot, ..)) if position > *slot => position - 1,
+                    _ => position,
+                };
                 let row = self.rows.get(index)?;
                 let selected = self.selected_file.as_deref() == Some(row.entry.path.as_str());
+                let rename = renaming
+                    .as_ref()
+                    .filter(|(path, _)| *path == row.entry.path)
+                    .map(|(_, input)| input.clone());
+                let menu_view = cx.weak_entity();
                 let name = row.entry.name.clone();
                 let lead = if !row.entry.is_dir {
                     file_icon_element(&name).into_any_element()
@@ -927,17 +1506,33 @@ impl Explorer {
                         .when(selected, |this| this.bg(colors.surface_sidebar_hover))
                         .hover(|style| style.bg(colors.surface_sidebar_hover))
                         .on_click(cx.listener(move |this, _, _, cx| this.click_file_row(index, cx)))
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                this.open_entry_menu(index, event.position, window, cx)
+                            }),
+                        )
+                        .on_a11y_action(AccessibleAction::ShowContextMenu, move |_, window, cx| {
+                            let position = window.mouse_position();
+                            menu_view
+                                .update(cx, |this, cx| {
+                                    this.open_entry_menu(index, position, window, cx)
+                                })
+                                .ok();
+                        })
                         .child(lead)
-                        .child(
-                            div()
+                        .child(match rename {
+                            Some(input) => name_field(&input, "Name").into_any_element(),
+                            None => div()
                                 .flex_1()
                                 .min_w_0()
                                 .truncate()
                                 .text_size(ui_font_size(FONT_BASE, cx))
                                 .text_color(colors.foreground.opacity(0.76))
                                 .group_hover(group, |style| style.text_color(colors.foreground))
-                                .child(name),
-                        )
+                                .child(name)
+                                .into_any_element(),
+                        })
                         .into_any_element(),
                 )
             })
@@ -1413,6 +2008,7 @@ impl Explorer {
                         let group = SharedString::from(format!("explorer-change-row-{index}"));
                         let label = view.label(*file_index);
                         let change = view.change(*file_index);
+                        let menu_view = cx.weak_entity();
                         base.id(("explorer-change-row", index))
                             .group(group.clone())
                             .role(Role::TreeItem)
@@ -1423,6 +2019,23 @@ impl Explorer {
                             .hover(|style| style.bg(colors.surface_sidebar_hover))
                             .on_click(
                                 cx.listener(move |this, _, _, cx| this.click_change_row(index, cx)),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                    this.open_change_menu(index, event.position, window, cx)
+                                }),
+                            )
+                            .on_a11y_action(
+                                AccessibleAction::ShowContextMenu,
+                                move |_, window, cx| {
+                                    let position = window.mouse_position();
+                                    menu_view
+                                        .update(cx, |this, cx| {
+                                            this.open_change_menu(index, position, window, cx)
+                                        })
+                                        .ok();
+                                },
                             )
                             .child(
                                 h_flex()
@@ -1464,6 +2077,16 @@ impl Render for Explorer {
             ExplorerTab::Files => self.render_files(cx),
             ExplorerTab::Changes => self.render_changes(cx),
         };
+        let error = self.render_action_error(cx);
+        let menu = self.file_menu.as_ref().map(|open| {
+            deferred(
+                anchored()
+                    .position(open.position)
+                    .snap_to_window_with_margin(px(8.))
+                    .child(open.menu.clone()),
+            )
+            .with_priority(gpui_kit::base::POPUP_PRIORITY)
+        });
         div()
             .id("explorer")
             .role(Role::Pane)
@@ -1474,6 +2097,89 @@ impl Render for Explorer {
             .bg(colors.surface_sidebar)
             .text_color(colors.foreground)
             .child(self.render_tab_rail(cx))
+            .children(error)
             .child(body)
+            .children(menu)
     }
+}
+
+/// One file menu row: a muted icon and a label, both red for a destructive item.
+fn file_menu_item(action: FileAction, muted: Hsla, destructive: Hsla) -> PopupMenuItem {
+    let label = action.label();
+    let glyph = icon(action.icon()).with_size(px(ICON_SM));
+    if action.destructive() {
+        PopupMenuItem::element(move |_, _| div().text_color(destructive).child(label))
+            .icon(glyph.text_color(destructive))
+    } else {
+        PopupMenuItem::new(label).icon(glyph.text_color(muted))
+    }
+}
+
+/// A destructive confirm, as Electron's `confirmDialog` with `destructive: true`.
+fn open_confirm(
+    confirm: Confirm,
+    window: &mut Window,
+    cx: &mut App,
+    on_ok: impl Fn(&mut App) + 'static,
+) {
+    let on_ok = std::rc::Rc::new(on_ok);
+    window.open_alert_dialog(cx, move |dialog, _, _| {
+        let on_ok = on_ok.clone();
+        dialog
+            .title(confirm.title.clone())
+            .description(confirm.message.clone())
+            .confirm()
+            .ok_text(confirm.confirm)
+            .ok_variant(ButtonVariant::Danger)
+            .cancel_text("Cancel")
+            .on_ok(move |_, _, cx| {
+                on_ok(cx);
+                true
+            })
+    });
+}
+
+/// The name field of an inline row.
+fn name_field(input: &Entity<InputState>, label: &'static str) -> impl IntoElement {
+    div()
+        .flex_1()
+        .min_w_0()
+        .child(Input::new(input).small().aria_label(label))
+}
+
+/// The New file or New folder row (`EntryNameInputRow`): a closed chevron or the file icon of
+/// the typed name, then the field.
+fn draft_row(
+    depth: usize,
+    kind: NewEntryKind,
+    input: &Entity<InputState>,
+    cx: &mut Context<Explorer>,
+) -> AnyElement {
+    let colors = tokens(cx);
+    let (lead, label) = match kind {
+        NewEntryKind::Directory => (chevron(false, &colors).into_any_element(), "Folder name"),
+        NewEntryKind::File => {
+            let typed = input.read(cx).value().to_string();
+            let name = if typed.is_empty() {
+                "untitled".to_string()
+            } else {
+                typed
+            };
+            (file_icon_element(&name).into_any_element(), "File name")
+        }
+    };
+    div()
+        .id("explorer-file-draft")
+        .role(Role::TreeItem)
+        .aria_label(label)
+        .w_full()
+        .h(px(FILE_ROW_HEIGHT))
+        .pl(px(tree_padding_left(depth)))
+        .pr(px(TRAILING_RAIL))
+        .flex()
+        .items_center()
+        .gap(px(TREE_ICON_GAP))
+        .child(lead)
+        .child(name_field(input, label))
+        .into_any_element()
 }

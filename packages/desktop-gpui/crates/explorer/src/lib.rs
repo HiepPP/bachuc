@@ -2,7 +2,7 @@
 //! viewer of the GPUI client, drawn as the Electron app draws them.
 //!
 //! `Explorer` emits `ExplorerEvent` and `ExplorerDiffEvent`; the app opens a `FileView` or a
-//! `DiffView` in a workspace pane for them. The models (`tree`, `changes`, `diff`, `diff_doc`,
+//! `DiffView` in a workspace pane for them. Its file menu emits `ExplorerFileEvent`. The models (`tree`, `changes`, `diff`, `diff_doc`,
 //! `commits`) hold no GPUI state and have their own tests.
 
 mod branch_switcher;
@@ -16,6 +16,7 @@ mod diff_view;
 mod explorer;
 mod file_icon_data;
 pub mod file_icons;
+mod file_menu;
 mod file_view;
 pub mod git_actions;
 mod git_actions_ui;
@@ -25,7 +26,7 @@ pub mod tree;
 mod ui;
 
 pub use diff_view::DiffView;
-pub use explorer::{Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerTab};
+pub use explorer::{Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerFileEvent, ExplorerTab};
 pub use file_view::{FileView, format_file_size};
 pub use git_actions::ShipDefault;
 pub use git_actions_ui::{GitActionsButton, GitActionsEvent};
