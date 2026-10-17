@@ -65,6 +65,12 @@ Blocked: BUILT, UNVERIFIED (Q-109). The code and its tests pass; trackpad sidewa
 - Checkpoint 2, at completion, with the whole suite running in parallel: 8.69 ms; source `/tmp/wt-i179-final.txt`; 2026-10-17 02:32.
 - Sideways scroll changes only `DiffView::offsets`. The row model gained one per-file column count, computed in `DiffDoc::new`. The test `sideways_scroll_leaves_the_row_model_unchanged` checks the rows. The tripwire did not trip.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground).
+
+- UI check (mode menu labels, long-line cut with the gutter in place, markdown heading colors against Electron 6770) -> UNVERIFIED (unattended): needs pointer. The Changes tab of a workspace with a long line and a markdown file cannot open: AX press on the GPUI sidebar workspace rows changed nothing (`/tmp/wt-ui/gpui-t144.jpg`, `/tmp/wt-ui/gpui-tsc.jpg`).
+
 ## Lessons
 
 - `App::set_global` and `default_global` always notify observers. A shared global that status answers write should be set only on a real change, or every observing view reloads on each answer.

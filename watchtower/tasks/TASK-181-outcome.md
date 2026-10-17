@@ -51,6 +51,13 @@ Count of `ls packages/desktop-gpui/target/debug/deps/libgpui_kit-*.rlib | wc -l`
 
 The count stays 6. The app does not depend on these crates yet (TASK-191), so the app builds do not rebuild gpui-kit.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows every plugin as `failed` (their directories point to `~/Projects/paseo`), so it draws no plugin UI; for placement the stock Electron rows are the reference. Measures in points (screenshot px / 2) from `/tmp/wt-ui/gpui-initial.jpg` and `/tmp/wt-ui/electron-initial.jpg`.
+
+- UI check (stop-orb: red solving orb in the stop button's place, with an agent running) -> UNVERIFIED (unattended): needs pointer. No running agent view can open (AX press on sidebar rows does nothing: `/tmp/wt-ui/gpui-t144.jpg`), a prompt to start one is not allowed, and the reference has no plugin.
+- UI check (`Plugins` sidebar row with the blocks icon, placed as in Electron 6770) -> FAIL on placement. The row exists with the blocks icon, after `Search` and `Board` (`/tmp/wt-ui/gpui-initial.jpg`). Row centres are y 91, 123.5, 156.75, a pitch of about 33 pt. The Electron nav rows (`New workspace`, `History`, `Search`) sit at y 81, 110, 140, a pitch of 30 pt, and plugin rows use the same rows in the source (`sidebar-nav-rows.tsx`). The GPUI nav rows are about 3 pt taller. The Electron build itself shows no `Plugins` row (plugins-nav `failed` there).
+
 ## Lessons
 
 - `use gpui_kit::*` also imports GPUI's `test` macro, so `#[test]` fails with "recursion limit reached" in any module that does `use super::*` over it. Import gpui-kit items by name in files that hold tests.

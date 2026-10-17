@@ -46,6 +46,12 @@ DONE
 - Checkpoint 2, at completion: the same 3 tests passed; source `/tmp/wt190/test.txt`; 2026-10-17 00:10.
 - Tripwire: not tripped. The pill `state` closure calls only `store.read` and `pill_label`; loads run from the host observer, the page and panel constructors, Refresh, and `Connected`.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows `watchtower-board` as `failed`, so it draws no pill.
+
+- UI check (composer pill and New workspace `board` panel against Electron 6770: pill label, progress strip, waiting card, task list) -> UNVERIFIED (unattended): needs pointer. Seen: the New workspace composer shows a `Watchtower` pill with an icon (AX `Open Watchtower`) next to the branch pill (`/tmp/wt-ui/gpui-sidepanel2.jpg`). AX press on the pill and on `Show side panel` changed nothing (`/tmp/wt-ui/gpui-watchtower-overlay.jpg`, `/tmp/wt-ui/gpui-sidepanel.jpg`), so the progress strip, waiting card, and task list never showed. The project `.claude` may also have no active plan.
+
 ## Lessons
 
 - Safe defaults taken (see questions): `params.task` selection and the opener's group follow Electron; `active_workspace_id` counts as a named workspace, so a stale active id shows "Workspace not found." instead of another workspace; a time without a zone parses as UTC; `copy` cannot fail in GPUI, so the Electron failure notice never shows; `active_ago` no longer reads `lastActivityAt`, which the client does not expose.

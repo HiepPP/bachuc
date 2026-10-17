@@ -43,6 +43,12 @@ DONE
 - Checkpoint 1, at completion, after the build and the test run: 7; same source; 2026-10-17 02:20.
 - Tripwire: not tripped.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Live runs on 6768 with `prompt-translate`, `skill-pins`, and `watchtower-board` `running`. Electron 6770 shows all three as `failed`, so it draws no pill.
+
+- UI check (prompt-translate, skill-pins, and watchtower-board pills on one agent composer, GPUI against Electron 6770) -> UNVERIFIED (unattended): needs pointer. No agent composer can open (AX press on sidebar rows does nothing: `/tmp/wt-ui/gpui-t144.jpg`). Seen instead: the GPUI New workspace draft composer draws all three pills, `Default` (Caveman mode), `Skills`, and `Watchtower`, plus a `main` branch pill (`/tmp/wt-ui/gpui-sidepanel2.jpg`). The reference shows none of them, so no side-by-side match exists.
+
 ## Lessons
 
 - The plugin crates share the app's one gpui-kit feature set, so linking 15 more crates adds no gpui-kit build.

@@ -61,6 +61,12 @@ DONE
 - Checkpoint 3, at completion: name poll tests; value 51 of 51 pass; source `cargo.sh test -p bachuc-plugin-board`; time 2026-10-17 00:29.
 - Tripwire not hit: one store sends at most one `board.snapshot` per `board_poll_interval` from its poll, never two at once. Card actions add one load each, as noted in Contract.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground).
+
+- UI check (GPUI Board Runs view against Electron 6770: lane rail, columns, cards, colors) -> UNVERIFIED (unattended): needs pointer. AX press on the sidebar `Board` button changed nothing: the AX tree and the frame stayed on the New workspace screen (`/tmp/wt-ui/gpui-board.jpg`). The reference also lacks the plugin (`board` is `failed` on 6770).
+
 ## Lessons
 
 - GPUI's `focus_visible` keeps only the last style. A second call for opacity drops the ring, so put both in one call.

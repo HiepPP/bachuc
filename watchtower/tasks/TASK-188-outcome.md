@@ -60,6 +60,13 @@ DONE
 - Checkpoint 3, at completion: 690 us (limit 20 ms); source `/tmp/wt188-t4.txt`; 02:14.
 - Tripwire not hit. The `Snapshot` indexes member keys and catalog projects once when the settings or the catalog change. A view-key lookup then caches its Space, so no JSON parse runs per project per redraw.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows `workspace-spaces` as `failed`, so it draws no strip; the reference for sizes is the source `hiep-plugins/plugins/workspace-spaces/client/spaces-strip.tsx`. Live has one Space (`Workspace 1`), not two. Measures in points (screenshot px / 2) from `/tmp/wt-ui/gpui-initial.jpg`.
+
+- UI check (sidebar strip: tab sizes, selected fill) -> FAIL on tab size. Source: tab `minWidth` 26, `height` 26, 1 px border, gap 4, strip padding 10 horizontal and 6 vertical, strip height 39. GPUI: tabs 28 pt tall (y 707.5-735.5), the `1` tab 28 wide and the `+` tab 26 wide, gap 4, first tab at x 8 (source 10), strip height 39 (border y 701.5 to 740.5). The selected fill (58,114,77) equals the accent of the Electron submit button (60,114,78): match.
+- UI check (Spaces page layout, heading name, with two Spaces) -> UNVERIFIED (unattended): needs pointer. AX press on `Plugins`, `Settings`, and the sidebar rows changed nothing, so the page cannot open. Pressing `Create a Space` would create a Space on live and was not done.
+
 ## Lessons
 
 - A per-project legacy-key scan with a JSON parse per member would cost 500 x 500 parses per redraw. Build the key indexes once in `Snapshot::new` and cache each view key's Space.

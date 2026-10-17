@@ -66,6 +66,12 @@ DONE
 - Checkpoint 2, at completion: one run, and the step took 17.6 us. Source: the same command, 2026-10-16 22:48.
 - Tripwire: not tripped.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground).
+
+- UI check (find ring screenshot against Electron 6770) -> UNVERIFIED (unattended): needs pointer. A thread view cannot open: AX press on the GPUI sidebar rows changed nothing (`/tmp/wt-ui/gpui-t144.jpg`, `/tmp/wt-ui/gpui-tsc.jpg`), and the find bar needs a focused thread. The reference also lacks the plugin: every plugin on 6770 shows `failed`.
+
 ## Lessons
 
 - A gpui-base `TextViewState` emits no selection event, but it notifies on each selection change, with `is_selecting` updated. `cx.observe` on each state is enough to track a settled selection.

@@ -37,6 +37,12 @@ DONE
 - Checkpoint 2, after the snapshot grew: 71 passed, including `an_unchanged_snapshot_causes_no_redraw` (full snapshot), `each_strip_field_counts_for_the_redraw`, and `the_tick_is_off_without_an_active_turn`; source `/tmp/wt-c-171-test1.txt`; 2026-10-16 22:52.
 - Checkpoint 3, at completion: 91 passed with the same tripwire tests; source `/tmp/wt-c-final-test.txt`; 2026-10-16 23:03.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground).
+
+- UI check (strip height, divider, pill gaps, trailing order against Electron 6770) -> UNVERIFIED (unattended): needs pointer. No agent view could open: AX press on the GPUI sidebar workspace rows changed nothing (AX tree and frame identical before and after; `/tmp/wt-ui/gpui-t144.jpg`, `/tmp/wt-ui/gpui-tsc.jpg`), and the live agents need a sidebar click to open. No agent with tasks and a diff stat was created, to keep live untouched.
+
 ## Lessons
 
 - In this gpui, `flex_grow` and `flex_shrink` take a value, and `Icon::with_size` needs `Sizable` in scope.

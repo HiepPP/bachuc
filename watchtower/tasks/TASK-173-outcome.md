@@ -41,6 +41,18 @@ DONE
 - Checkpoint 2, at completion: the same test passed; source `/tmp/wt-d-test2.txt`; 2026-10-16 23:39.
 - Tripwire: not tripped. The guard is taken before the request is built and released on a build error or on the answer.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Both windows drew fresh frames. GPUI reached the screen through the AX press of the home `Agent` launch (project `.claude`, git, `Local`); Electron through its `New workspace` row (project gpui-bench). Measures are in points (screenshot px / 2). The Electron source `new-workspace-screen.tsx` last changed 2026-10-10, before the 2026-10-15 build, so the build is a valid reference.
+
+- UI check (New workspace screen on a git project against Electron 6770: title, chip row, chip height 28, gaps 8, composer top within 2 px) -> FAIL (`/tmp/wt-ui/gpui-new-workspace.jpg`, `/tmp/wt-ui/electron-new-workspace.jpg`).
+  - Title ink: GPUI y 250-268.5, Electron 248.5-267 (1.5 pt, within 2). Left edge 375.5 in both.
+  - Chip gap: ink gap between the first and second chip is 28.5 pt in both (matches). Chip left edge 375.5 (GPUI) and 373.5 (Electron).
+  - Chip row centre: GPUI y 319.5, Electron 313 (+6.5 pt). Title top to chip centre: 69.5 against 64.5 (+5 pt). This is out of the 2 pt limit.
+  - Composer top: GPUI 397.5, Electron 359.5 (+38 pt). Not a fair match: GPUI draws a plugin pill row (`main`, `Watchtower`) between the chips and the composer, and Electron 6770 has no pill row because all its plugins show `failed`. Composer height is 157 pt in both.
+  - Chip height (28 px) is not measurable: the chips have no fill or border at rest, so only icon and text ink show.
+  - The `Chat` launch control at the right of the Electron row is absent in GPUI by the planner call.
+
 ## Lessons
 
 - Safe defaults taken (see questions): the forced-worktree error on a non-git project is the Electron string "Failed to create worktree" (`newWorkspace.errors.createWorktreeFailed`), shown before any request; the project and isolation chips use the `Folder` and `GitBranch` icons, not a project favicon or initial; the base rows leave out the divergence text.

@@ -42,6 +42,12 @@ DONE
 - Checkpoint 2, after the slots landed: 90 passed, including `with_no_active_plugin_the_slots_are_empty` and `a_send_with_no_interceptor_starts_no_task`; source `/tmp/wt-c-172-test1.txt`; 2026-10-16 23:00.
 - Checkpoint 3, at completion: 91 passed with both tripwire tests; source `/tmp/wt-c-final-test.txt`; 2026-10-16 23:03.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Both windows drew fresh frames. Measures are in points (screenshot px / 2) from `/tmp/wt-ui/gpui-new-workspace.jpg` and `/tmp/wt-ui/electron-new-workspace.jpg`.
+
+- UI check (New workspace draft composer against Electron 6770: 5-line height, return icon, pill row) -> PASS. Composer box is 157 pt tall and spans x 366-1154 pt in both. The return icon is 28 pt wide at x 1119-1147 in both. The toolbar row is 28 pt tall and ends 9 pt above the composer bottom in both. The placeholder line sits 15 pt below the composer top in both. The `+` icon is at x 381.5 in both and the first pill at 410 (GPUI) and 409.5 (Electron). The pill content differs by data only: Electron 6770 shows `Select model` and a mic (no provider list, all plugins failed there), GPUI shows `Default`, `Skills`, `Opus 5.5`, `Medium`, `Mode`, and the fast icon.
+
 ## Lessons
 
 - `Contributions::default()` with `add_*` and `ContributionIndex::build` make a fake plugin for pure tests; `StopButton` and interceptor closures can be `unreachable!()` when the test never calls them.

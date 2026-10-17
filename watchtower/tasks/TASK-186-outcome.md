@@ -52,6 +52,13 @@ DONE
 - Checkpoint 1b, same time: `same_signature_no_notify` passes. `State::apply` returns false for an unchanged info and true only for a changed field, and `failed` keeps the last info. Source: `/tmp/tb-test2.txt`; 2026-10-17 01:10.
 - Checkpoint 2, at completion: both tests pass again in the run with 37 tests, plus `a_failed_first_read_waits_for_the_next_tick`; source `/tmp/tb-test4.txt`; 2026-10-17 01:22. The notify call sits in `Branches::load` and runs only when `apply` returns true.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows every plugin as `failed`, so it draws no plugin UI.
+
+- UI check (agent composer in this repo shows the branch pill `feat/bachuc-gpui` in the track) -> UNVERIFIED (unattended): needs pointer. No agent composer can open (AX press on sidebar rows does nothing: `/tmp/wt-ui/gpui-t144.jpg`). Seen instead: the New workspace screen of project `.claude` shows a branch pill `main` (AX `Git branch of the selected project`) left of `Watchtower` (`/tmp/wt-ui/gpui-sidepanel2.jpg`); this is not the agent track and not this repo.
+- UI check (turn diff card with file rows and diffstat bars) -> UNVERIFIED (unattended): needs pointer. No agent thread with a changed turn can open.
+
 ## Lessons
 
 - A pill `state` closure runs on every composer draw and holds only `&App`. A first read that fails would restart on each draw, so a failed first read waits for the next tick (`State.failed`).

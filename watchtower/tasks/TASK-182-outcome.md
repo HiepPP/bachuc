@@ -49,6 +49,13 @@ DONE
 - Checkpoint 1, after the store landed: `read_once_per_agent` passed (100 asks for `a1` -> 1 start; `a2` -> 1 start); source `/tmp/wt-l-test2.txt`; 2026-10-17.
 - Checkpoint 2, at completion: the same test passed in the final run, together with `failed_read_no_loop` (100 asks after a failure -> 0 starts) and `reconnect_clears_store`; source the final `cargo.sh test -p bachuc-plugin-skill-pins`; 2026-10-17.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows every plugin as `failed`, so it draws no plugin UI.
+
+- UI check (Skills pill in the toolbar of an agent composer, with pinned short names, placed and sized as in Electron 6770) -> UNVERIFIED (unattended): needs pointer. No agent composer can open (AX press on sidebar rows does nothing: `/tmp/wt-ui/gpui-t144.jpg`). Seen instead: the New workspace draft composer toolbar shows a `Skills` pill (AX `Pinned skills`) after `Default`, with no pinned names (`/tmp/wt-ui/gpui-sidepanel2.jpg`); the reference has no pill to compare with.
+- UI check (Settings page `Skill pins` with three switch rows) -> UNVERIFIED (unattended): needs pointer. AX press on the sidebar `Settings` button changed nothing (`/tmp/wt-ui/gpui-settings.jpg`).
+
 ## Lessons
 
 - `.when` on a `Stateful` element needs `use gpui_kit::prelude::FluentBuilder as _;`; `use gpui_kit::*` does not bring it in.

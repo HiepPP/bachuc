@@ -48,6 +48,12 @@ DONE
 - Checkpoint 2, at completion: 153 ms for the best of 3 runs of 1,000 derives, in the full crate suite; source `/tmp/wt194/test.txt`; 2026-10-17 00:46. The test takes the best of 3, because other tests and the other builder's cargo share the machine and only add time; one run alone measured 154 ms.
 - Recompute rule: `DerivedCache` rebuilds only when `DerivedKey { revision, live, minute }` changes; `the_derived_cache_rebuilds_only_when_its_key_changes` shows 100 same-key updates build once. The page calls it from `sync` (store change, `Connected`, `AgentsChanged`, the 60 s clock), never from render.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground).
+
+- UI check (Watchtower overlay at width 1,300 and 700 against Electron 6770) -> UNVERIFIED (unattended): needs pointer. AX press on the `Open Watchtower` pill changed nothing (`/tmp/wt-ui/gpui-watchtower-overlay.jpg`), so no overlay drew, and the window cannot be resized without the pointer. The reference lacks the plugin (`watchtower-board` is `failed` on 6770).
+
 ## Lessons
 
 - Safe defaults taken (see questions): Escape closes the modal through the dialog's focus, but the shell's capture listener (`crates/app/src/shell.rs:1537`) closes the whole surface on Escape first, so Escape closes the page with the modal. The error Retry reloads the board too, because the store has no overview-only refresh. Reduced motion is not read; the spinner always turns. `DECISIONS.md` IDs sort by byte compare, which agrees with `localeCompare` on ADR IDs.

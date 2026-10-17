@@ -52,6 +52,13 @@ One lookup per text and cache mode, however many rows render it.
 
 The same text cache-only and live gives 2 lookups; the cache key holds the mode.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Electron 6770 shows every plugin as `failed`, so it draws no plugin UI.
+
+- UI check (right-aligned `EN` note under a Vietnamese prompt bubble) -> UNVERIFIED (unattended): needs pointer. No agent thread can open (AX press on sidebar rows does nothing: `/tmp/wt-ui/gpui-t144.jpg`), and a Vietnamese prompt must not go to a real agent.
+- UI check (Caveman mode pill in the agent composer toolbar, with the mode label) -> UNVERIFIED (unattended): needs pointer. No agent composer can open. Seen instead: the New workspace draft composer toolbar shows the pill (AX `Caveman mode`) right after the `+` button with the label `Default` (`/tmp/wt-ui/gpui-sidepanel2.jpg`); the reference has no pill to compare with.
+
 ## Lessons
 
 - Safe defaults taken:

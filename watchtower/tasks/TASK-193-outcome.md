@@ -52,6 +52,12 @@ DONE
 - Checkpoint 3, at completion: name orb timing rerun; value same range, 91 of 91 pass; source `cargo.sh test -p bachuc-plugin-board -- --nocapture`; time 2026-10-17 00:50.
 - Tripwire not hit.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground).
+
+- UI check (Timeline, running orb, and corner pills against Electron 6770) -> UNVERIFIED (unattended): needs pointer. AX press on the sidebar `Board` button changed nothing (`/tmp/wt-ui/gpui-board.jpg`), so the Board view cannot open. The line also needs a running thread, and the reference lacks the plugin (`board` is `failed` on 6770).
+
 ## Lessons
 
 - A test module that imports `super::*` from a file with `use gpui_kit::*` gets GPUI's own `test` attribute, and the build fails with "recursion limit reached while expanding `#[test]`". Import the tested names one by one.

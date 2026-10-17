@@ -55,6 +55,12 @@ Tripwire: the jobs panel sends at most one `jobs.list` per 5,000 ms per open pan
 - Checkpoint `poll_task_ownership`: `JobsPanel` holds the timer in `_poll`, the request in `_request`, and the cancel in `_cancel` (`jobs_panel.rs` lines 50-52); every send goes through `Poller::begin`, and `send` runs only from `schedule` (after `due`), `received` (a queued request), and `refetch` (after `request_now`). GPUI cancels a dropped `Task`, so dropping the view stops the timer and the request. Source: reading `jobs_panel.rs`; 2026-10-17 01:27.
 - Result: no tripwire hit. The user-initiated Refresh, which the spec did not list, can send inside 5,000 ms of the last poll (see Contract).
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground).
+
+- UI check (Direct route panel and Delegated work panel against Electron 6770) -> UNVERIFIED (unattended): needs pointer. No panel can open (AX press on sidebar rows does nothing: `/tmp/wt-ui/gpui-t144.jpg`). The line also assumes jev-orchestrator runs on live, but `plugin ls` on live shows it `disabled` with the source `~/Projects/paseo/hiep-plugins/plugins/jev-orchestrator`, and it shows `failed` on 6770.
+
 ## Lessons
 
 - A gpui `div` has no disabled state in the accessibility tree (`aria_disabled` does not exist). Use `aria_description("Disabled")` and drop the click handler.

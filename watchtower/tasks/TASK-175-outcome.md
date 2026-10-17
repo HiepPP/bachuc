@@ -60,6 +60,13 @@ Blocked: BUILT, UNVERIFIED (Q-109). The code and its tests pass; the swipe gestu
 - A rebuild with filters that answer the same gives an equal row list (`a_filter_change_that_hides_nothing_new_leaves_the_rows_equal`), so `refresh` skips the splice and the redraw.
 - Tripwire not hit.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, and window screenshots (no pointer, no foreground). Both windows drew fresh frames. Measures in points (screenshot px / 2) from `/tmp/wt-ui/gpui-initial.jpg` and `/tmp/wt-ui/electron-initial.jpg`; both windows are 1200 x 800 pt.
+
+- UI check (sidebar footer `Add project` button against Electron 6770: icon, label, height, colors) -> FAIL on height only. Icon x 16.5-29.5 in both; label x 38 (GPUI) and 38.5 (Electron) to 112.5 in both; settings gear x 290-304 in both; border color (228,227,231) and background (244,244,246) equal. The footer border sits at y 740.5 (GPUI) and 743 (Electron), so the GPUI footer is 2.5 pt taller (59.5 against 57 to the window bottom); the label ink is 1.5 pt higher (763-778.5 against 764.5-780).
+- UI check (plugin rows, after TASK-191) -> see the TASK-181 `Plugins` row result.
+
 ## Lessons
 
 - GPUI runs a list's own scroll handler before a parent's handler, because the list registers its window listener during paint, after the parent. To stop a list from scrolling, put the handler on a row (a child painted after the list registers).

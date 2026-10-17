@@ -38,6 +38,12 @@ DONE. Code tests only; the UI check is DEFERRED (UI checker), after TASK-191 reg
 - Checkpoint 1, model landed: `idle_agent_no_timed_inspect` -> ok, `scope_once_per_workspace` -> ok. Source: the first full crate test run on 2026-10-17, before 01:10 +07; the exact time was not captured.
 - Checkpoint 2, completion: `idle_agent_no_timed_inspect` -> ok, `scope_once_per_workspace` -> ok, `jev_review_polls_every_2500_ms` -> ok. Source: `cargo.sh test -p bachuc-plugin-next-prompt-actions --lib model::tests`, 2026-10-17 01:10:19 +0700.
 
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground).
+
+- UI check (panel with Recap chips and one card per prompt, Edit and Send, against Electron 6770) -> UNVERIFIED (unattended): needs pointer. No agent thread can open (AX press on sidebar rows does nothing: `/tmp/wt-ui/gpui-t144.jpg`). The reference also lacks the plugin (`failed` on 6770).
+
 ## Lessons
 
 - The GPUI client has no `lastActivityAt`, so `Reads` keys an inspect read on the agent status alone, as the spec states. `inspection_activity` is ported and tested, and the model calls it with no activity time.
