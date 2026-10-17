@@ -2,7 +2,7 @@
 
 Local plugins contribute daemon RPCs, native app surfaces, workspace panels, Command Center items,
 client slash commands, timeline items, header buttons, composer pills, app themes, composer attachment sources, and settings screens.
-Paseo executes `index.server.ts` in a subprocess and `index.client.tsx` in every connected app.
+Paseo executes `index.server.ts` in a subprocess. The Electron and web apps execute `index.client.tsx`; the GPUI desktop app links a native Rust crate instead, see [GPUI native clients](#gpui-native-clients).
 
 > **Trust every plugin you add.** `paseo plugin add` and `paseo plugin install` mean “I trust this codebase.” Plugins are unsandboxed: server code and preparation commands run with the daemon user's access on the daemon host, and client contributions run inside Paseo. The repository's dependencies and future updates are part of that trust decision. With `--host`, preparation runs on that remote daemon host.
 
@@ -339,6 +339,17 @@ call it on hover intent or press-in without your own guard
 See the public [navigation fields](../public-docs/plugins/reference.md#surfaces-and-sidebar-items)
 and [external links and workspace browsers](../public-docs/plugins/reference.md#external-links-and-workspace-browsers)
 for the author-facing contract.
+
+## GPUI native clients
+
+The GPUI desktop client does not run `index.client.tsx`. A plugin's server part stays in `hiep-plugins/plugins/<plugin-id>`; its GPUI client is the Rust crate `packages/desktop-gpui/plugins/<plugin-id>`, named `bachuc-plugin-<plugin-id>`. The React client is frozen. A plugin with no client part needs no crate. [ADR-0045](../watchtower/decisions/ADR-0045-native-rust-plugin-clients-over-webview-panes-or-shared-logic.md) has the reasons.
+
+- The crate depends on `bachuc-plugin-host` and never on a view crate, so no dependency cycle forms.
+- The crate declares `gpui-kit` with no `features` key. Another feature set makes a second GPUI build.
+- The crate reaches its server part only through plugin RPCs. Settings use the `settings.<id>.read`, `.write`, and `.reset` RPCs.
+- The client shows a crate only when the active host's `plugin.list` reports the plugin enabled and running.
+- The app registers crates in `packages/desktop-gpui/crates/app/src/plugins.rs`, in plugin id order, which is the daemon catalog order. That order decides each "first wins" rule.
+- `plugin reload` reloads only the server part. A GPUI client change needs a GPUI build.
 
 ## Lifecycle hooks
 

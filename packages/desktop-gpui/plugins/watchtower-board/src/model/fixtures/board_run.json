@@ -1,0 +1,57 @@
+{
+  "title": "Mouse wheel selects a value on composer pills",
+  "tasks": [
+    {
+      "id": "TASK-079",
+      "title": "TASK-079 Wheel step helper and hook",
+      "status": "DONE",
+      "deps": "-",
+      "notes": "auto: manual checks pending. New files only.",
+      "spec": "watchtower/tasks/TASK-079-wheel-step-helper-and-hook.md",
+      "taskClass": "code",
+      "brief": "Goal: add the pure wheel-step logic and the web-only hook that a composer pill can attach to its trigger. No pill change",
+      "blocker": null,
+      "error": null
+    },
+    {
+      "id": "TASK-080",
+      "title": "TASK-080 Wire the toolbar pills",
+      "status": "DONE",
+      "deps": "TASK-079",
+      "notes": "auto: manual checks pending. Mode, thinking, provider, select feature pills.",
+      "spec": "watchtower/tasks/TASK-080-wire-toolbar-pills.md",
+      "taskClass": "risky",
+      "brief": "Goal: let the wheel step the value of the mode, thinking, provider, and select feature pills while the pointer hovers th",
+      "blocker": null,
+      "error": null
+    }
+  ],
+  "message": null,
+  "questions": [],
+  "run": {
+    "runner": "loop",
+    "schedule": null,
+    "profile": null,
+    "started": "2026-10-13 14:07",
+    "finished": "2026-10-13 14:41",
+    "log": [
+      {
+        "start": "14:39",
+        "end": "14:41",
+        "task": "TASK-082",
+        "result": "DONE",
+        "detail": "PR from auto/TASK-082-document-wheel-select"
+      },
+      {
+        "start": "14:28",
+        "end": "14:45",
+        "task": "TASK-081",
+        "result": "DONE",
+        "detail": "#67; Q-033 DEFAULTED"
+      }
+    ],
+    "total": 4
+  },
+  "proposedAdrs": 0,
+  "warnings": []
+}

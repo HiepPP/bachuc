@@ -6,8 +6,8 @@ DONE. TASK-126 to TASK-132 were all DONE, so all are documented.
 
 ## Changed
 
-- `docs/timeline-sync.md`: bounded memory tail, cache windows, FTS5 search (Q-047, Q-048), transcript fingerprint replaces "Stale after external edits", 8-thread stream cap (Q-044).
-- `docs/data-model.md`: SQLite cache line, coalesced record writes (Q-043), `agent-requests/` 7-day expiry, replica budget reads per-host totals.
+- `docs/timeline-sync.md`: bounded memory tail, cache windows, FTS5 search (Q-053, Q-054), transcript fingerprint replaces "Stale after external edits", 8-thread stream cap (Q-050).
+- `docs/data-model.md`: SQLite cache line, coalesced record writes (Q-049), `agent-requests/` 7-day expiry, replica budget reads per-host totals.
 - `docs/architecture.md`: line 388 says memory keeps a bounded tail.
 
 ## Contract

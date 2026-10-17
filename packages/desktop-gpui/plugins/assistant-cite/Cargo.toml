@@ -1,0 +1,14 @@
+[package]
+name = "bachuc-plugin-assistant-cite"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The native client of `hiep-plugins/plugins/assistant-cite` (ADR-0045). Never depends on a view
+# crate.
+[dependencies]
+bachuc-icons = { path = "../../crates/icons" }
+bachuc-plugin-host = { path = "../../crates/plugin-host" }
+form_urlencoded = "1"
+gpui-kit.workspace = true
+log = "0.4"

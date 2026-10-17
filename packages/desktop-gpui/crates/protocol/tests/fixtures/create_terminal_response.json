@@ -1,0 +1,17 @@
+{
+  "type": "session",
+  "message": {
+    "type": "create_terminal_response",
+    "payload": {
+      "terminal": {
+        "id": "1e3e6a46-8b33-4c0c-bf4b-9c66229e8df6",
+        "name": "bachuc-fixture-recorder",
+        "cwd": "/tmp/gpui-bench",
+        "workspaceId": "wks_ff13e1687a325a52",
+        "activity": null
+      },
+      "error": null,
+      "requestId": "rec-3"
+    }
+  }
+}

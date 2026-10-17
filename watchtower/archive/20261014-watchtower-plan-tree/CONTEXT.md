@@ -19,7 +19,7 @@
 
 ## Open Decisions
 
-- [Q-036](watchtower/QUESTIONS.md): what the lead row shows when no lead agent is found.
+- [Q-043](watchtower/QUESTIONS.md): what the lead row shows when no lead agent is found.
 
 ## References
 

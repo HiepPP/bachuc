@@ -1,0 +1,23 @@
+{
+  "type": "session",
+  "message": {
+    "type": "agent_stream",
+    "payload": {
+      "agentId": "ad9b52ad-43b7-4e54-a2ae-8820e72ba034",
+      "event": {
+        "type": "timeline",
+        "provider": "mock",
+        "item": {
+          "type": "user_message",
+          "text": "emit 2 agent stream updates",
+          "messageId": "bc2b4c87-27f1-4a77-afd7-9b93367e2f45",
+          "clientMessageId": "bc2b4c87-27f1-4a77-afd7-9b93367e2f45"
+        },
+        "turnId": "775db017-1ba8-48b7-b192-3cadf779ba9b"
+      },
+      "timestamp": "2026-10-15T09:41:59.569Z",
+      "seq": 570,
+      "epoch": "0c5182c9-4a9f-446e-809f-6597102e14e5"
+    }
+  }
+}

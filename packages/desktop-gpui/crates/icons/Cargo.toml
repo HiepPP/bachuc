@@ -1,0 +1,9 @@
+[package]
+name = "bachuc-icons"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bachuc-theme = { path = "../theme" }
+gpui-kit.workspace = true

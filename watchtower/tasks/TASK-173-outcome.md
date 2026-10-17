@@ -1,0 +1,79 @@
+# TASK-173 Outcome
+
+## Status
+
+DONE
+
+## Changed
+
+- `packages/desktop-gpui/crates/app/src/new_agent.rs`: deleted, with its 3 tests.
+- `packages/desktop-gpui/crates/app/src/new_workspace.rs` (new): the New workspace screen and its pure rules (`visibility`, `default_base_ref`, `branch_name_from_ref`, `worktree_slug`, `project_options`, `default_project`, `base_items`, `base_rows`, `is_empty_submission`, `build_request`, `SubmitGuard`), with 13 tests.
+- `packages/desktop-gpui/crates/app/src/workspace_draft.rs` (new): the workspace draft tab and `draft_agent`, with 2 tests.
+- `packages/desktop-gpui/crates/app/src/shell.rs`: `PaneContent::Draft` holds `WorkspaceDraftPane`; new `PaneContent::NewWorkspace`; `open_draft` opens the screen without a workspace folder and the draft tab in a workspace; `open_new_workspace`, `open_new_workspace_screen`, `open_pending` (opens the created workspace once listed, then the agent tab), and `open_workspace_changes`; the agent composer routes `OpenChanges` and `OpenAgent`.
+- `packages/desktop-gpui/crates/app/src/main.rs`: the new modules.
+- `packages/desktop-gpui/crates/app/src/actions.rs`: the focus-role test lists `new_workspace.rs` and `workspace_draft.rs` instead of `new_agent.rs`.
+- `packages/desktop-gpui/crates/app/Cargo.toml`: `uuid = { version = "1", features = ["v4"] }`.
+- `packages/desktop-gpui/Cargo.lock` (generated): `uuid` on `bachuc-app`.
+
+## Contract
+
+- Produces as specified: `new_workspace::NewWorkspacePreset` (`Default`; `cwd`, `project_id`, `title`), `NewWorkspaceScreen::new(client, key, preset, window, cx)`, `side_panel_target(&self) -> Option<(String, String)>`, `composer(&self) -> Entity<Composer>`, and `Shell::open_new_workspace(&mut self, preset, window, cx)`.
+- Consumes the TASK-169, TASK-171, and TASK-172 names as specified: `CreateWorkspace`, `WorkspaceSource`, `WorktreeAction`, `InitialAgent`, `CreatedWorkspace`, `Client::create_workspace`, `create_agent_with`, `branch_suggestions`, `validate_branch`, `add_project`, `checkout_details`, `composer_dock`, `Composer::new_draft`, `DraftOptions`, `SubmitIcon`, `DraftSubmission`, `draft_submission`, `set_draft_cwd`, `set_submitting`, and `ComposerEvent::{DraftSubmit, OpenChanges, OpenAgent, ReplaceWithDraft}`. `Composer::clear` is not needed: a success replaces the screen or tab.
+- Row: project, isolation (only when a worktree is possible), base (without multiplicity or with a worktree). No host picker and no launch control (planner calls). "Add project" is the last project row: folder dialog, `add_project`, then the result is chosen.
+- One request per submit: empty text with no images or attachments gives `agent: None` and no prompt; text gives `agent: Some(InitialAgent)` and `first_agent_prompt: Some(text)`. `worktreeSlug` is the first 8 hex digits of a v4 UUID, made once per screen.
+- On `Ok` the shell waits for `DirectoryEvent::ProjectsChanged` until the client lists the workspace, opens it, puts a new tab in place of the spent screen, and opens or focuses the agent tab (in place of the workspace's empty new tab).
+- The workspace draft tab is a bottom `composer_dock` with a 1-line draft composer (arrow icon, no empty submit) and creates through `create_agent_with`.
+
+## Verified
+
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-app` -> exit 0; 56 passed, 0 failed (`/tmp/wt-d-test2.txt`, 23:39). All 28 baseline tests besides the 3 `new_agent.rs` tests pass by name (`comm` against the HEAD test list), including `every_focus_target_in_this_crate_has_a_role` with the new file list. New tests: empty Local -> `directory` with no agent and no prompt; text, New worktree, base `main` -> `worktree`, `BranchOff`, `refs/heads/main`, slug `a1b2c3d4`, first agent with config, features, and env; images alone create the agent; non-git -> no isolation or base chip and a `directory` request; the visibility rule for Local and worktree; multiplicity false -> base chip and a `worktree` request; empty text on a non-git project with a forced worktree -> `Err("Failed to create worktree")`; no project -> "Choose a project"; text without a config -> "Select a model"; the in-flight guard; the base default and ref names; the 8-hex slug; the project default; base rows with a typed branch only when it exists; the draft tab request with mode, thinking, features, env, images, and attachments.
+- `packages/desktop-gpui/cargo.sh fmt --check -p bachuc-app` -> exit 0.
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh build -p bachuc-app` -> exit 0 (`/tmp/wt-d-build5.txt`); one warning, `next_theme` unused in `state.rs` (see TASK-174).
+- `test ! -e packages/desktop-gpui/crates/app/src/new_agent.rs` -> exit 0.
+- `rg -n "create_agent_request|create_agent\(" packages/desktop-gpui/crates/app/src/new_workspace.rs` -> no match (exit 1).
+- UI check (New workspace screen against Electron 6770: title, chip row, 28 px chips, 8 px gaps, composer top) -> DEFERRED (UI checker).
+- The view wiring (error text under the composer, unlock on `Err` with the text kept, pickers, folder dialog, opening the created workspace) needs a window: UNVERIFIED (unattended): code tests only. Live daemon down: no live check.
+- GitNexus `impact open_draft` -> HIGH, 8 impacted, all inside `crates/app/src/shell.rs` (`launch`, `run_action`, the `ReplaceWithDraft` route); `PaneContent`, `DraftPane`, `render_header` -> ambiguous or UNKNOWN; `rg` confirmed every caller is in `crates/app`.
+
+## Anti-goal
+
+- Checkpoint 1, when the submit path landed: `the_guard_sends_one_request_for_two_submits_and_again_after_the_first_resolves` passed (1 request for 2 submits, 2 after `finish`); source `/tmp/wt-d-test1.txt`; 2026-10-16 23:26.
+- Checkpoint 2, at completion: the same test passed; source `/tmp/wt-d-test2.txt`; 2026-10-16 23:39.
+- Tripwire: not tripped. The guard is taken before the request is built and released on a build error or on the answer.
+
+## UI Checks
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). Both windows drew fresh frames. GPUI reached the screen through the AX press of the home `Agent` launch (project `.claude`, git, `Local`); Electron through its `New workspace` row (project gpui-bench). Measures are in points (screenshot px / 2). The Electron source `new-workspace-screen.tsx` last changed 2026-10-10, before the 2026-10-15 build, so the build is a valid reference.
+
+- UI check (New workspace screen on a git project against Electron 6770: title, chip row, chip height 28, gaps 8, composer top within 2 px) -> FAIL (`/tmp/wt-ui/gpui-new-workspace.jpg`, `/tmp/wt-ui/electron-new-workspace.jpg`).
+  - Title ink: GPUI y 250-268.5, Electron 248.5-267 (1.5 pt, within 2). Left edge 375.5 in both.
+  - Chip gap: ink gap between the first and second chip is 28.5 pt in both (matches). Chip left edge 375.5 (GPUI) and 373.5 (Electron).
+  - Chip row centre: GPUI y 319.5, Electron 313 (+6.5 pt). Title top to chip centre: 69.5 against 64.5 (+5 pt). This is out of the 2 pt limit.
+  - Composer top: GPUI 397.5, Electron 359.5 (+38 pt). Not a fair match: GPUI draws a plugin pill row (`main`, `Watchtower`) between the chips and the composer, and Electron 6770 has no pill row because all its plugins show `failed`. Composer height is 157 pt in both.
+  - Chip height (28 px) is not measurable: the chips have no fill or border at rest, so only icon and text ink show.
+  - The `Chat` launch control at the right of the Electron row is absent in GPUI by the planner call.
+
+## Lessons
+
+- Safe defaults taken (see questions): the forced-worktree error on a non-git project is the Electron string "Failed to create worktree" (`newWorkspace.errors.createWorktreeFailed`), shown before any request; the project and isolation chips use the `Folder` and `GitBranch` icons, not a project favicon or initial; the base rows leave out the divergence text.
+- The client gets no upstream ref, so the base default is always `refs/heads/<current branch>`.
+- Builds failed twice only inside other groups' crates (`crates/sidebar`, `crates/timeline`, and a half-created `plugins/edit-diffs`); a retry after 4 to 7 minutes passed.
+
+## Fix Round 1
+
+2026-10-17, code tests only. The lead re-runs the screen check.
+
+- Cause of the chip row offset: the title set no line height, so GPUI drew the 20 px title at its default 1.618 (32.4 px). Electron `composerTitle` sets none either and draws it at about 1.2 (24 px). The title line was 8.4 px too tall, and the centered dock spread that around the stack.
+- Change: `crates/app/src/new_workspace.rs` adds `TITLE_LINE_HEIGHT` 24 and sets it on the title. Expected effect: title top to chip centre 69.5 -> about 65.3 (Electron 64.5); the title ink stays at y 250 (Electron 248.5), because the stack shrinks by the same amount the line does.
+- Absolute y is not a fair compare: the GPUI screen sits under the 60 pt header and the tab row, while the Electron screen fills the window, and both center their stack in their own frame. Compare title-to-chip and chip-to-composer offsets.
+- Plugin pill row, from the source (`plugins/buttons/view.tsx` `draftPills`, changed 2026-10-13): `paddingHorizontal` 16, `paddingBottom` 8, gap 4. GPUI had no horizontal padding; `crates/composer/src/plugin_slots.rs` `draft_pill_row` now adds 16 px. The row is a 24 px docked pill and 8 px padding, 32 px, so the composer top sits 32 px lower than the 2026-10-15 build, which draws no pill row because its plugins fail. That 32 px gap is correct per the source.
+- AX press: the `Watchtower` pill (and every action pill) now runs its handler from `AccessibleAction::Click` too, in `plugin_pill`. It already had `Role::Button` and `on_click`; GPUI's default AX press replays a mouse click at the node centre, which the UI check saw do nothing. GitNexus impact on `plugin_pill`: HIGH (4 callers in the composer); the mouse path is unchanged.
+- Tests: `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-app` -> 58 passed, new `the_chip_row_centre_sits_70_px_below_the_title_top`; `CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-composer` -> 93 passed, new `the_draft_pill_row_is_32_px_tall`; `./cargo.sh fmt --check -p bachuc-app` and `-p bachuc-composer` -> exit 0.
+- UI check (chip row and composer top against Electron) -> DEFERRED (UI checker).
+
+## UI Checks, round 2
+
+Checked 2026-10-17 by the UI checker with `open -g`, AX reads, AX presses, and window screenshots (no pointer, no foreground). GPUI screen: project `.claude`, git, `Local`, reached by AX press on `New workspace in wt-long-thread` and then the project chip menu. Electron reference: the round-1 screenshot `/tmp/wt-ui/electron-new-workspace.jpg` (same 2026-10-15 build, source unchanged). Measures in points from `/tmp/wt-ui2/gpui-nw-claude.jpg` (pixel scan).
+
+- UI check (New workspace screen on a git project against Electron 6770: title, chip row, composer top) -> PASS, offsets only. Title top to chip centre: GPUI 65.25 (title ink 250, chip centre 315.25), Electron 64.5 (249, 313.5); 0.75 pt apart, round 1 was 5 pt. Chip centre to composer top: GPUI 78.25 (composer top 393.5), Electron 46 (359.5); the 32.25 pt difference equals the 32 pt plugin pill row (24 + 8 padding) that Electron 6770 cannot draw because its plugins fail. After removing it, 46.25 against 46. The pill row is the source value from `draftPills`, not measured on Electron. Composer height 157 in both (393.5-550.5 and 359.5-516.5). Evidence: `/tmp/wt-ui2/gpui-nw-claude.jpg`.
+- UI check (plugin pill row `Watchtower` AX press) -> PASS. AX press on `Open Watchtower` opened the Watchtower side panel on a draft composer (`/tmp/wt-ui2/watchtower-bachuc.jpg`); round 1 saw nothing.

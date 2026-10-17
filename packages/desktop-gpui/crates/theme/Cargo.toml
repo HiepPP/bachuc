@@ -1,0 +1,13 @@
+[package]
+name = "bachuc-theme"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+gpui-kit.workspace = true
+
+[dev-dependencies]
+# Only the tokens example draws icons. bachuc-icons depends on this crate for ICON_MD; a
+# dev-dependency cycle is allowed.
+bachuc-icons = { path = "../icons" }

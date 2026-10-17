@@ -1,0 +1,28 @@
+{
+  "type": "session",
+  "message": {
+    "type": "agent_stream",
+    "payload": {
+      "agentId": "ad9b52ad-43b7-4e54-a2ae-8820e72ba034",
+      "event": {
+        "type": "timeline",
+        "provider": "mock",
+        "item": {
+          "type": "tool_call",
+          "callId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0:read:1",
+          "name": "read",
+          "detail": {
+            "type": "read",
+            "filePath": "packages/app/src/components/conversation-list.tsx"
+          },
+          "status": "running",
+          "error": null
+        },
+        "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0"
+      },
+      "timestamp": "2026-10-15T09:41:04.811Z",
+      "seq": 103,
+      "epoch": "0c5182c9-4a9f-446e-809f-6597102e14e5"
+    }
+  }
+}

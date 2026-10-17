@@ -1,0 +1,14 @@
+[package]
+name = "bachuc-plugin-idle-runtime-closer"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The native client of `hiep-plugins/plugins/idle-runtime-closer` (ADR-0045). Never depends on a
+# view crate.
+[dependencies]
+anyhow = "1"
+bachuc-client = { path = "../../crates/client" }
+bachuc-icons = { path = "../../crates/icons" }
+bachuc-plugin-host = { path = "../../crates/plugin-host" }
+gpui-kit.workspace = true

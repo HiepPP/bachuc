@@ -1,0 +1,18 @@
+[package]
+name = "bachuc-client"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bachuc-protocol = { path = "../protocol" }
+gpui-kit.workspace = true
+anyhow = "1"
+base64 = "0.22"
+futures = "0.3"
+log = "0.4"
+polling = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tungstenite = "0.24"
+uuid = { version = "1", features = ["v4"] }

@@ -1,0 +1,18 @@
+[package]
+name = "bachuc-plugin-host"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Plugin crates and view crates depend on this crate, so it never depends on a view crate.
+[dependencies]
+anyhow = "1"
+bachuc-client = { path = "../client" }
+bachuc-icons = { path = "../icons" }
+bachuc-theme = { path = "../theme" }
+# Only for the oneshot of `PluginSettings::save`; bachuc-client already builds it.
+futures = "0.3"
+gpui-kit.workspace = true
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

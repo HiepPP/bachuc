@@ -1,0 +1,103 @@
+{
+  "plan": {
+    "title": "GPUI parity follow-ups: client fields, explorer diffs, fonts, composer, New workspace, and native plugins",
+    "slug": "20261016-gpui-parity-follow-ups",
+    "status": "ACTIVE",
+    "updated": "2026-10-16"
+  },
+  "tasks": [
+    {
+      "id": "TASK-157",
+      "title": "TASK-157 Client fields and requests for the follow-ups",
+      "status": "DONE",
+      "deps": "-",
+      "notes": "Add-only API; Q-074, Q-075, Q-077, Q-078, Q-079, Q-081.",
+      "spec": "watchtower/tasks/TASK-157-client-fields-and-requests.md",
+      "taskClass": "risky",
+      "blocker": null,
+      "error": null,
+      "depIds": [],
+      "group": "A"
+    },
+    {
+      "id": "TASK-158",
+      "title": "TASK-158 Provider logos in bachuc-icons",
+      "status": "DONE",
+      "deps": "-",
+      "notes": "Replaces the composer's local claude.svg.",
+      "spec": "watchtower/tasks/TASK-158-provider-logos.md",
+      "taskClass": "code",
+      "blocker": null,
+      "error": null,
+      "depIds": [],
+      "group": "B"
+    },
+    {
+      "id": "TASK-159",
+      "title": "TASK-159 Theme font and syntax API",
+      "status": "DONE",
+      "deps": "-",
+      "notes": "Q-083.",
+      "spec": "watchtower/tasks/TASK-159-theme-font-and-syntax-api.md",
+      "taskClass": "code",
+      "blocker": null,
+      "error": null,
+      "depIds": [],
+      "group": "C"
+    }
+  ],
+  "planVerify": [
+    "CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test --workspace -> all crates pass",
+    "CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh build --release -p bachuc-app -> exit 0"
+  ],
+  "manualChecks": [],
+  "run": null,
+  "questions": [
+    {
+      "id": "Q-089",
+      "tasks": ["TASK-166"],
+      "blocks": [],
+      "question": "ADR-0044 and the spec Change line say \"role and label\" for input-state; the Boundaries planner call says no label. Which?",
+      "default": "Role::Group with no label, so the outer TextInput frame keeps the only label",
+      "status": "DEFAULTED"
+    },
+    {
+      "id": "Q-090",
+      "tasks": ["TASK-157"],
+      "blocks": [],
+      "question": "What does checkout_diff return for a folder that is not a git repo?",
+      "default": "An empty list, as checkout_status does; other checkout errors fail",
+      "status": "DEFAULTED"
+    }
+  ],
+  "decisions": [
+    {
+      "id": "ADR-0001",
+      "date": "2026-09-30",
+      "title": "Active host over sidebar host filters",
+      "status": "accepted"
+    },
+    {
+      "id": "ADR-0002",
+      "date": "2026-10-06",
+      "title": "Networked HTML replies over offline-only frames",
+      "status": "accepted"
+    }
+  ],
+  "history": [
+    {
+      "slug": "20261016-gpui-electron-parity",
+      "date": "2026-10-16",
+      "title": "GPUI client daily-use parity with the Electron UI",
+      "hasLearn": true
+    },
+    {
+      "slug": "20261015-sqlite-ram-cpu-cuts",
+      "date": "2026-10-15",
+      "title": "SQLite-backed RAM and CPU cuts",
+      "hasLearn": true
+    }
+  ],
+  "message": null,
+  "warnings": []
+}

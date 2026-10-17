@@ -1,0 +1,7 @@
+{
+  "id": "ADR-0045",
+  "title": "Native Rust plugin clients over WebView panes or shared server logic",
+  "status": "accepted",
+  "file": "watchtower/decisions/ADR-0045-native-rust-plugin-clients-over-webview-panes-or-shared-logic.md",
+  "markdown": "# ADR-0045 Native Rust plugin clients over WebView panes or shared server logic\n\nStatus: accepted\nDate: 2026-10-16\nSupersedes: ADR-0038\nScope: `packages/desktop-gpui/**`, `hiep-plugins/plugins/**`, `packages/plugin/src/client/**`\n\n## Context\n\n- The GPUI client has no plugin host: no crate in `packages/desktop-gpui/crates` holds plugin code, so the composer pills of prompt-translate (\"Ultra\"), skill-pins (\"Skills\"), and watchtower-board (\"Watchtower 11/11\") do not show (owner screenshot, 2026-10-16).\n- 20 plugins live in `hiep-plugins/plugins`. 14 have a server part that runs in the daemon; their React client parts call it through `rpc(...)` ([docs/plugins.md](../../docs/plugins.md) line 539).\n- The owner wants plugins native in GPUI, with no emulation, the lightest runtime, and smooth behavior, and does not weigh effort (planning interview, 2026-10-16)."
+}

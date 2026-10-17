@@ -53,6 +53,15 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid `glm-acp-agent` as the main GLM path, a config-entry-only GLM setup, and a GLM provider that shares `~/.claude`, while the Claude path passed the live probe and the owner's hooks and plugins live in `~/.claude`. Reason: [ADR-0030](watchtower/decisions/ADR-0030-built-in-glm-on-claude-client-over-acp-and-config.md).
 - Avoid memory-only timelines, unbounded in-memory timelines for live agents, JSONL timeline files, better-sqlite3, Drizzle, and a database for agent records, while `node:sqlite` with FTS5 runs in the Electron daemon runtime and agent listing stays fast in memory. Reason: [ADR-0032](watchtower/decisions/ADR-0032-sqlite-served-old-pages-over-memory-only-serving.md).
 - Avoid pixel widths computed from `onLayout` for cells that must share a row on Board, while react-native-web reports a rounded `offsetWidth`. Reason: [ADR-0033](watchtower/decisions/ADR-0033-percent-cells-over-measured-pixel-cells-on-board.md).
+- Avoid a Swift or SwiftUI desktop client, and new long-term work on the Electron renderer UI, while the GPUI client measured 6.5% CPU against 24% for Swift and 1.2 GB or more for Electron on the same stream. Reason: [ADR-0034](watchtower/decisions/ADR-0034-rust-gpui-client-over-swift-and-electron.md).
+- Avoid hand-written Rust protocol structs while the zod schemas can export JSON Schema for code generation. Reason: [ADR-0035](watchtower/decisions/ADR-0035-generated-protocol-types-over-hand-written-rust-types.md).
+- Avoid a live WebView inside each timeline row, and SVG export of diagrams, while `gpui-wry` views do not clip inside GPUI scroll lists and GPUI's usvg drops `foreignObject` labels and KaTeX HTML. Reason: [ADR-0037](watchtower/decisions/ADR-0037-hidden-webview-png-snapshots-over-svg-and-inline-webviews.md).
+- Avoid WebView panes, a hidden WebView or embedded JS engine for plugin clients, declarative plugin widgets, and moving plugin client logic into server parts, while the owner wants native Rust plugin clients and freezes Electron. Reason: [ADR-0045](watchtower/decisions/ADR-0045-native-rust-plugin-clients-over-webview-panes-or-shared-logic.md).
+- Avoid a higher GPUI CPU budget, a slower timeline redraw while a turn streams, and folding or capping old steps, while incremental sync keeps a 15-minute turn under 10%. Reason: [ADR-0039](watchtower/decisions/ADR-0039-incremental-timeline-sync-over-throttle-or-budget.md).
+- Avoid a merged "All machines" view, `wss`, the relay, and built-in SSH in the GPUI client while the owner reaches hosts through a tunnel and needs one host on screen. Reason: [ADR-0040](watchtower/decisions/ADR-0040-one-host-plain-ws-over-merged-hosts-and-relay.md).
+- Avoid daemon start, stop, updates, CLI install, and deep links in the GPUI client while Electron and the CLI own them. Reason: [ADR-0041](watchtower/decisions/ADR-0041-gpui-client-connects-only-over-daemon-management.md).
+- Avoid terminal restore mode `"full-snapshot"` (`0x05` ANSI bytes) in the GPUI client while the daemon sends the `0x04` JSON grid without a restore mode. Reason: [ADR-0042](watchtower/decisions/ADR-0042-json-grid-terminal-restore-over-ansi-snapshot.md).
+- Avoid gpui-kit default themes and the gpui-kit `IconName` set in the GPUI client, and porting every dark theme variant now, while the owner wants the exact Electron look in `light` and `claude` dark. Reason: [ADR-0043](watchtower/decisions/ADR-0043-electron-tokens-and-lucide-icons-over-gpui-kit-defaults.md).
 
 ## Learnings
 
@@ -184,10 +193,10 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 ### 2026-10-14 - Plan 20261014-watchtower-plan-tree
 
 - Learned: in agent shells, `npm run lint` in a plugin folder can exit 2 with "ESLint output (JSON parse failed)", because an rtk ESLint wrapper intercepts it. The oxlint run itself is clean.
-- Source: TASK-096, TASK-097, and TASK-098 outcomes; lead re-check.
+- Source: TASK-109, TASK-110, and TASK-111 outcomes; lead re-check.
 - Use next time: run `rtk proxy npm run lint` and trust its exit code.
 - Learned: the plugin agent snapshot has no `parentAgentId` or `lastActivityAt`; the parent comes from the label `paseo.parent-agent-id`, and activity from `updatedAt`. An agent that waits for a permission still reports `running`.
-- Source: TASK-096 outcome.
+- Source: TASK-109 outcome.
 - Use next time: read `attentionReason` before `status` when you show who waits for the owner.
 - Use next time: read the built output before a plan promises lazy loading.
 
@@ -212,14 +221,114 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Source: TASK-126 outcome.
 - Use next time: import runtime values from `row-store-schema.ts`, and list `host-runtime.test.ts` in `Files:` when the row store interface changes.
 - Learned: FTS5 `unicode61 remove_diacritics 2` does not fold `đ`, and it matches only whole words or word prefixes.
-- Source: TASK-128 outcome; Q-048.
+- Source: TASK-128 outcome; Q-054.
 - Use next time: fold `đ` to `d` on both sides, and do not promise a mid-word match from the cache path.
 - Learned: a coalesced write whose promise waits for the file commit makes every awaited persist slower, and it hangs fake-timer tests that await a persist before they advance the clock.
-- Source: TASK-131 outcome; Q-043.
+- Source: TASK-131 outcome; Q-049.
 - Use next time: when a spec debounces a write, say whether callers await the commit or only the cache update, and list the tests that await it.
 - Learned: the formatter ignores `docs/`, so `npm run format:check:files -- docs/<file>` exits 2 with "Expected at least one target file".
 - Source: TASK-133 outcome.
 - Use next time: do not put a format check for `docs/` files in a Verify line.
 - Learned: many source rows can project to few items: a 3,701-row mock thread gave 88 items, which fit in the first app page, so a UI scroll sent no older-page request. Page it through `fetch_agent_timeline` with the CLI client (`connectToDaemon` from `packages/cli/src/utils/client.ts`) to test SQL pages on live. The mock `five-minute-stream` model gives about 3,700 source rows.
-- Source: Q-046 check on 2026-10-15.
+- Source: Q-052 check on 2026-10-15.
 - Use next time: plan a live paging check as an RPC script, not a UI scroll.
+
+### 2026-10-15 - Plan 20261015-gpui-desktop-client
+
+- Learned: `typify` 0.8 silently merges JSON Schema types that share a name, so `packages/desktop-gpui/crates/protocol/build.rs` gives each type a unique title and fails the build when typify names a type itself. Generated names come from message tags, for example `AgentStreamPayloadEvent` and `TimelineItem`; read them in `target/debug/build/bachuc-protocol-*/out/protocol.rs`.
+- Source: TASK-135 outcome.
+- Use next time: name generated Rust protocol types in specs only after you read the generated file.
+- Learned: `git diff --exit-code` on a new untracked file always passes. Compare `shasum` of two runs instead.
+- Source: TASK-135 outcome.
+- Use next time: do not use `git diff` as an idempotence check for a file the TASK creates.
+- Learned: GPUI holds a `cx.subscribe` emitter weakly. Dropping the last `Entity<Client>` stops the `bachuc-client` socket thread at once.
+- Source: TASK-136 outcome.
+- Use next time: keep a strong `Entity<Client>` in the view or app state that owns it.
+- Learned: GPUI stops drawing while its window is covered, so `cua_repl` screenshots show stale frames, scroll events land only on a raised window, and `measure.sh` reads come out low. A 60 fps GPUI scroll costs about 9.6% CPU with no content.
+- Source: TASK-137 outcome; Q-058.
+- Use next time: raise the window before each screenshot or read, and set scroll CPU limits against a no-content control run.
+- Learned: one `cua_repl` `getApp` call right after a bundle launch hung for 54 minutes and held the shared screen lock for 3 hours. A raise alone often left a GPUI window unpainted; a raise plus a title-bar click painted it.
+- Source: TASK-139 and TASK-138 outcomes.
+- Use next time: wrap each `cua_repl` step in `Promise.race` with a timeout, wait a few seconds after launch, and click the title bar after a raise.
+- Learned: a GPUI list item that holds a whole 50-step turn cost about 74% CPU on the mock stream; one item per header and per step cost about 4%.
+- Source: TASK-138 outcome.
+- Use next time: keep GPUI list items small, one per visual row group.
+- Learned: the gpui-kit `test-support` dev feature and the tree-sitter `css`, `html`, `toml`, and `yaml` features break workspace resolution on `cocoa` (=0.26.0 against the locked 0.26.1).
+- Source: TASK-139 and TASK-138 outcomes; Q-063.
+- Use next time: test GPUI view crates through plain functions, and do not enable those features.
+- Learned: repeated title-bar clicks count as double-clicks and zoom a GPUI window, which then draws a clipped area. This replaces the title-bar click advice above. Running `open <bundle>` in a loop kept the window in front during a read.
+- Source: TASK-141 outcome.
+- Use next time: keep a GPUI bundle in front with an `open` loop, and read `getAXState` twice.
+- Learned: GPUI cached views (`Entity::cached`) save about 2 CPU points but drop out of the accessibility tree, and a `Role::ComboBox` div did not run its click handler through `cua_repl`.
+- Source: TASK-141 outcome.
+- Use next time: keep labeled chrome views uncached, and give click targets `Role::Button`.
+- Learned: in zsh, `F="a.md b.md"; npm run format:files -- $F` passes one argument, so oxfmt prints "Expected at least one target file" and formats nothing. Two builders reported a passing format check this way, and the lead found 3 unformatted files.
+- Source: TASK-142 and TASK-143 lead re-check, 2026-10-16.
+- Use next time: pass file lists as separate arguments or with `${=F}`, and treat "Expected at least one target file" as a failed check.
+- Learned: Paseo `create_agent` on release failed with "Too many orchestrator sessions; reload the plugin". The `jev-orchestrator` bridge keeps bound leases across reloads (`hiep-plugins/plugins/jev-orchestrator/server/bridge.ts`), so a reload did not help. The run used native builder subagents instead.
+- Source: implement run of 2026-10-15.
+- Use next time: check that `create_agent` works before a run that needs Paseo builders.
+- Learned: `bachuc-timeline` sync was O(entries) per 50 ms flush (full regroup, full hash, header fingerprint over every step), so app CPU grew with the turn: 11.3% at 15 minutes. `grouping::TurnGrouper` regroups only changed turns and gave 8.9%. A GPUI window can also get stuck drawing only part of its area (Q-069).
+- Source: TASK-144 outcome.
+- Use next time: keep per-flush work in proportion to the change, and check a screenshot for a cut window before each CPU read.
+
+### 2026-10-16 - Implement run memory limit
+
+- Learned: 6 Claude Code builders plus a UI checker, each with cargo builds on one shared `target`, used all 24 GB of RAM and the swap. macOS then hit a watchdog panic and rebooted. The reboot also cleared the builder rules files in `/tmp`. GitNexus `detect-changes` peaked at 730 MB, so it was not the main load.
+- Source: owner crash report and the `gpui-electron-parity` run.
+- Use next time: on this machine, run at most 2 builders with `CARGO_BUILD_JOBS=4`. Keep run files that must survive a reboot outside `/tmp`.
+
+### 2026-10-16 - GPUI hover display panic
+
+- Learned: an element that toggles `display` (hidden or flex) from hover or `group_hover` panics with "must call prepaint before paint". Prepaint tests hover against the previous frame and skips a hidden child, but paint tests fresh hover and paints that child. GPUI also logs "has no accessibility node" for a focused element that has an id but no role.
+- Source: TASK-149 and TASK-155 outcomes.
+- Use next time: swap hover content by visibility or stacked layers, never by display. Give every `track_focus` element a role and a label.
+
+### 2026-10-16 - Plan 20261016-gpui-parity-follow-ups
+
+- Learned: GPUI view crates have no headless test context here, so builders put each rule (fallback, clamp, in-flight guard, redraw check) in a pure function and test that. Code that needs `App` or `Context` is checked only by reading it.
+- Source: TASK-159, TASK-160, TASK-161, and TASK-163 outcomes.
+- Use next time: write GPUI Verify lines against pure model functions, and plan any window check as a separate owner step.
+- Learned: the lefthook format hook checks staged `*.md` and `*.json` everywhere, so the vendored `packages/desktop-gpui/vendor/gpui-base` needed an `ignorePatterns` entry in `.oxfmtrc.json`.
+- Source: TASK-166 commit, 2026-10-16.
+- Use next time: add a vendored folder to `.oxfmtrc.json` before its first commit.
+
+### 2026-10-17 - Plan 20261016-gpui-parity-follow-ups, plugin ports
+
+- Learned: in a file with `use gpui_kit::*`, a test module with `use super::*` picks up GPUI's test macro, which shadows `#[test]` and hits the recursion limit.
+- Source: TASK-181 and TASK-184 outcomes.
+- Use next time: in those files, import test helpers by name instead of `use super::*`.
+- Learned: a Verify grep for forbidden crate names in a plugin `Cargo.toml` also matches the crate's own `bachuc-plugin-<id>` name, so three builders marked it UNSATISFIABLE.
+- Source: TASK-189, TASK-190, and TASK-194 outcomes.
+- Use next time: scope that grep to the `[dependencies]` section.
+- Learned: in a debug build, a small `HashMap` costs about 18 us per build-and-lookup pass; a sorted `Vec` costs 3 us. One 40-task overview derive went from 643 ms to 153 ms per 1,000 runs after the switch.
+- Source: TASK-194 outcome.
+- Use next time: prefer sorted vectors for small per-frame or per-derive maps in GPUI crates.
+- Learned: each crate tested alone with `-p` gets its own gpui-kit build, because cargo unifies features per package selection; `target/debug` held 6 gpui-kit variants.
+- Source: TASK-170 and TASK-181 outcomes.
+- Use next time: watch free disk during a long run, and clean the dev profile only when no builder runs.
+
+### 2026-10-17 - GPUI timeline scroll lag
+
+- Learned: the GPUI timeline scrolled jerky and slow on long release threads. `bachuc_theme::mono_font_family` called `cx.text_system().all_font_names()` on every call, and that builds a CoreText collection of every installed family (`gpui-pre-apple-0.3.9/src/text_system.rs:108`). The timeline calls it on every draw of a tool row and a code row (`crates/timeline/src/tool_view.rs`, `crates/timeline/src/lib.rs`), and the plugin crates call it per row too, so each scroll frame enumerated the fonts many times.
+- Fix: `mono_font_family` picks the family once per process in a `OnceLock` (commit `c1887709e`); the pure `pick_mono_family` holds the rule and has a test. The owner confirmed the scroll is smooth after the fix (2026-10-17).
+- Source: owner report and hand test, 2026-10-17; `packages/desktop-gpui/crates/theme/src/lib.rs`.
+- Use next time: never call `all_font_names`, or anything that queries the system, from a render or row path; compute it once and cache it. `installed_font_families` still enumerates on each call, so only a picker may call it, never a row.
+- Learned: `sample <pid>` taken while the owner scrolled showed the GPUI main thread idle four times, and `cua_repl` `scroll` moved neither the timeline nor the sidebar, so neither proves a GPUI scroll bug or its absence.
+- Source: profiles `/tmp/gpui-scroll-sample*.txt` and the cua scroll control test, 2026-10-17.
+- Use next time: for a GPUI scroll or lag report, read the per-row render path for system queries first, and confirm with the owner's own scroll on an A/B pair of bundles (for example a `Bachuc GPUI Before.app` built from the base commit).
+
+### 2026-10-17 - How the 15 plugin clients were ported to native GPUI
+
+- Learned: porting the React plugin clients of `hiep-plugins` to Rust GPUI crates (TASK-168 to TASK-195, [ADR-0045](watchtower/decisions/ADR-0045-native-rust-plugin-clients-over-webview-panes-or-shared-logic.md)) gave UI and behavior the owner called identical to Electron, with about 45,800 Rust lines and no JS in the client. The method that worked:
+  - Keep the server part. Each plugin's `index.server.ts` stays in the daemon; the Rust client calls the same plugin RPCs (`plugin.rpc.invoke`, `settings.<id>.read/write/reset`), so data and rules match Electron by construction. Only the client is rewritten.
+  - Build the foundation first and freeze its names. The client channel (TASK-168: list, RPC, settings, events) and one host crate, `bachuc-plugin-host` (TASK-170), cover every client API the plugins use: one typed contribution kind per `add*` call, a `PluginContext` for the host capabilities, a `ui` kit for settings rows, and gating by the host's `plugin.list`. Every later spec copied these `Produces` lines word for word.
+  - Inventory before specs. One read-only agent listed each plugin's contributions, client state, RPC names and shapes, host APIs, and line counts; one more mapped the host renderers in `packages/app/src/plugins`. Specs then cited Electron `path:line` for every measure, label, icon, and rule.
+  - One crate per plugin in `packages/desktop-gpui/plugins/<id>`, a workspace member on the one shared `gpui-kit`. A plugin crate depends only on `bachuc-plugin-host`, `bachuc-client`, `bachuc-theme`, and `bachuc-icons`, never on a view crate or another plugin, so builds run in parallel and no cycle forms. Each exposes only `pub fn plugin()`; the app registers all of them last (TASK-191).
+  - Host views draw the contributions natively, one host TASK per surface: composer slots, sidebar, Command Center, settings, timeline transformers and renderers, themes (TASK-171 to TASK-180).
+  - Port JS semantics exactly: UTF-16 lengths, the JS trim set, `split(/\r?\n/)`, one-pass replace, regex `$` handling. Pin them with goldens produced by Node from the plugin's own code.
+  - Put every rule in a pure function with a test, because GPUI views have no headless test context; read-check the view code; then run screen checks with a UI checker.
+  - Split any plugin over about 3,000 client lines into two stages with a crate-private store as the seam (board, watchtower-board).
+  - Run a Builder Check of every spec against the code before building; it found missing Deps, wrong line refs, and items no producer gave, which the lead fixed in the specs.
+- Source: TASK-168 to TASK-195 specs and outcomes; owner review, 2026-10-17.
+- Use next time: for a new plugin, write its server part in `hiep-plugins/plugins/<id>`, then add a GPUI client crate in `packages/desktop-gpui/plugins/<id>` that uses only `bachuc_plugin_host` kinds and calls the server through RPC. If it needs a contribution kind the host lacks, add the kind to `bachuc-plugin-host` first, and draw it in the owning host view. Avoid in plugin and view code: reading a `ListState` inside a row callback, system queries such as `all_font_names` in a render path, and small `HashMap`s on per-frame paths; give every pressable element an explicit `AccessibleAction::Click` handler.

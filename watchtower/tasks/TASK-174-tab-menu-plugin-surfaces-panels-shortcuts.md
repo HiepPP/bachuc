@@ -1,0 +1,85 @@
+# TASK-174 Tab menu stubs, plugin surfaces and panels, shortcuts
+
+Group: D (writes `crates/app`; runs after TASK-173 in the same group)
+Class: risky
+
+## Brief
+
+Goal: Replace the three "not available yet" tab menu stubs of TASK-167 with working actions, and host every app-level plugin contribution of TASK-170: surfaces, workspace panels, New workspace panels, shortcuts, the workspace header subtitle, corner pills, and the host's UI requests.
+
+Change: Copy resume command, Reload agent, and terminal Rename show a notice, and the app starts no plugin host -> the three actions work, and the app starts the plugin host, keeps it on the active host and tab, and draws and routes its contributions.
+
+Design:
+
+- Tab menu: [packages/app/src/screens/workspace/workspace-screen.tsx](packages/app/src/screens/workspace/workspace-screen.tsx) (`handleCopyResumeCommand` 2730-2760, `handleReloadAgent` 2762-2790); texts in [packages/app/src/i18n/resources/en.ts](packages/app/src/i18n/resources/en.ts) lines 675-686 ("Resume ID not available", "Resume command not available", "Reloading agent...", "Reloaded agent", "Failed to reload agent"). The GPUI stubs are at `crates/app/src/shell.rs:951-968`.
+- Surfaces: [packages/app/src/plugins/surface-screen.tsx](packages/app/src/plugins/surface-screen.tsx) (header with icon badge, title, and close button, lines 276-325; page 355; overlay card 104-151 and styles 372-394: backdrop `rgba(0,0,0,0.35)`, card 92 percent wide up to 1180, 88 percent high, surface0, 1 px border, radius lg, shadow lg, Escape closes); the title rule `pluginSurfaceHeading` in [packages/app/src/plugins/surface-contribution.ts](packages/app/src/plugins/surface-contribution.ts) lines 30-41.
+- Workspace panels: [packages/app/src/plugins/actions.ts](packages/app/src/plugins/actions.ts) (`openPanel` 107-117 and 134-141) and the location rule in [packages/app/src/plugins/workspace-panels/locations.ts](packages/app/src/plugins/workspace-panels/locations.ts) lines 11-36.
+- New workspace panels: [packages/app/src/plugins/new-workspace-side-panel/side-panel.tsx](packages/app/src/plugins/new-workspace-side-panel/side-panel.tsx) (width 360, line 33; availability 67-76; the header toggle with `PanelRight` 95-130; the panel 132-145; left border and surface0, 192-199).
+- Shortcuts: [packages/app/src/plugins/shortcuts.ts](packages/app/src/plugins/shortcuts.ts) lines 26-58: a plugin key fires only when no host shortcut uses it; an unassigned host shortcut takes no keys; the first plugin with the combo wins; with its surface open, the key closes it.
+- Header subtitle: [packages/app/src/plugins/workspace-header-subtitle.tsx](packages/app/src/plugins/workspace-header-subtitle.tsx) lines 30-66: the first contribution replaces the project name, and the project name stays without a project id. The GPUI header draws the subtitle at `crates/app/src/chrome.rs:247-380`.
+- Corner pills: [packages/app/src/plugins/buttons/view.tsx](packages/app/src/plugins/buttons/view.tsx) lines 814-844.
+
+Boundaries:
+
+- Follows [ADR-0045](watchtower/decisions/ADR-0045-native-rust-plugin-clients-over-webview-panes-or-shared-logic.md): the app hosts native plugin views from `bachuc_plugin_host` only.
+- Plugin host start: `main.rs` calls `bachuc_plugin_host::init(plugins::registered_plugins(), cx)` after `bachuc_theme::init`. The new `plugins.rs` returns an empty list here; TASK-191 fills it. The shell calls `set_client` at start and on each host switch (`shell.rs:425-440`), and `set_active` when the selected workspace or the focused agent tab changes.
+- Copy resume command: no `agent_provider_session_id` -> "Resume ID not available"; no `resume_command` -> "Resume command not available"; else copy it with the notice "Resume command copied".
+- Reload agent: show "Reloading agent...", call `refresh_agent`, then `view_agent` again so the timeline loads the new epoch. `Ok` shows "Reloaded agent"; `Err` shows its text, or "Failed to reload agent" when it is empty.
+- Theme cycle (lead, from TASK-180, Q-103): the `theme.cycle` action (`shell.rs:1607`) calls `bachuc_theme::cycle_builtin_theme(cx)`, which also clears a stored plugin theme; read [TASK-180-outcome.md](watchtower/tasks/TASK-180-outcome.md).
+- Terminal Rename: the same dialog as `rename_agent` (`shell.rs:1372`), titled "Rename terminal". `Ok` retitles the tab with `retitle`; `Err` shows its text. A terminal that is not open yet keeps the notice "The terminal is not open yet". Rename on a file, diff, or new tab keeps the notice "This tab cannot be renamed" (the stub at `shell.rs:959`), and a test covers it (lead, from the spec check).
+- Surfaces: `OpenSurface` with `Page` replaces the main area, as Settings does, with a header (icon, title, close). `Overlay` draws the centered card over the shell. Escape and the close button close either one. A missing surface shows "This plugin surface is unavailable." in statusDanger. Cache the surface view by plugin id, surface id, and params.
+- Workspace panels: `OpenPanel` finds the panel in `workspace_panels()`. The location is the requested one, else `Workspace` when listed, else the first. An unsupported location shows an error notice. The panel opens as a workspace tab with the identity `plugin:<plugin_id>/<panel_id>`, plus `/<agent_id>` for an `Agent` panel; an open tab with that identity is focused, not duplicated.
+- Planner call: the `Explorer` location also opens a workspace tab, because the explorer crate has no slot for plugin panels. Report it in the outcome.
+- New workspace panels: the New workspace screen header gets the `PanelRight` toggle ("Show side panel" and "Hide side panel") when a project is chosen and a panel exists. The panel is 360 px wide, with a left border on surface0. It shows the panel that `ShowNewWorkspacePanel` named, else the first. Planner call: it starts closed, and the toggle state lasts for the session.
+- Shortcuts: keep the rule in a pure function. `Mod` means `Cmd` on macOS. Compare against every host shortcut chord from `load_shortcuts`; an empty or unassigned chord takes no key. A press calls `on_press` with the active workspace id; with `surface` open, it closes that surface.
+- Header subtitle: the first `header_subtitles()` entry replaces the project name in the header when the selected workspace has a project id; otherwise the name stays.
+- Corner pills: the agent pane draws `CornerPills` over the top-right of the timeline.
+- Route the host events: `OpenNewWorkspace` -> `open_new_workspace` with its `cwd`, `project_id`, and `name` as the title; `OpenAgent` -> the agent tab in its workspace; `OpenWorkspace` -> `open_workspace`; `OpenSettings` and `OpenPluginsPage` -> `open_settings`. The composer handles `SetComposerText` and `AddComposerAttachment` (TASK-172), and the timeline owns `RevealTimelinePassage`; the app only opens the agent tab for the passage.
+- Planner call: Settings has no plugin page and no Plugins page yet, so both requests open Settings on its current page (reported to the lead; TASK-177 owns plugin settings screens).
+- Plugin views are built once per contribution and input and kept, so the shell does not rebuild them on each render. Do not redraw the shell on `TimelineTransformsChanged`.
+- Keep each rule in a pure function and test it: the stub messages, the panel location and identity, the shortcut match, the surface title, the subtitle choice, and the side panel availability.
+
+Files:
+
+- [packages/desktop-gpui/crates/app](packages/desktop-gpui/crates/app) (`Cargo.toml` adds `bachuc-plugin-host`, `src/main.rs`, `src/shell.rs`, `src/chrome.rs`, `src/panes.rs`, `src/new_workspace.rs`, new `src/plugins.rs`, new `src/plugin_views.rs` for the surface page, overlay, and panel host)
+- [packages/desktop-gpui/Cargo.lock](packages/desktop-gpui/Cargo.lock) (generated)
+
+Interfaces:
+
+- Consumes: `Client::refresh_agent(&mut self, agent_id: &str, cx) -> Task<anyhow::Result<()>>`, `Client::agent_provider_session_id(&self, agent_id: &str) -> Option<String>`, `bachuc_client::resume_command(provider: &str, session_id: &str) -> Option<String>`, and `Client::rename_terminal(&mut self, terminal_id: &str, title: &str, cx) -> Task<anyhow::Result<()>>` from TASK-169
+- Consumes: `bachuc_plugin_host::NativePlugin` (object-safe trait: `fn id(&self) -> &'static str`, `fn contribute(&self, ctx: PluginContext, contributions: &mut Contributions, cx: &mut App)`), `bachuc_plugin_host::Contributions` (`Default`; methods `add_composer_pill(ComposerPill)`, `add_composer_interceptor(ComposerInterceptor)`, `add_stop_button(StopButton)`, `add_attachment_source(AttachmentSource)`, `add_sidebar_item(SidebarItem)`, `add_sidebar_section(SidebarSection)`, `add_project_filter(ProjectFilter)`, `add_project_menu(ProjectMenu)`, `add_command_item(CommandCenterItem)`, `add_slash_command(PluginSlashCommand)`, `add_settings_screen(SettingsScreen)`, `add_surface(Surface)`, `add_workspace_panel(WorkspacePanel)`, `add_new_workspace_panel(NewWorkspacePanel)`, `add_shortcut(Shortcut)`, `add_header_subtitle(HeaderSubtitle)`, `add_timeline_transformer(TimelineTransformer)`, `add_timeline_renderer(TimelineRenderer)`, `add_selection_action(SelectionAction)`, `add_theme(ThemeContribution)`), the type aliases `Handler<I>`, `ViewFactory<I>`, and `PopoverClose`, and the crate rule that each plugin crate exports `pub fn plugin() -> Box<dyn bachuc_plugin_host::NativePlugin>` from TASK-170
+- Consumes: `bachuc_plugin_host::init(plugins: Vec<Box<dyn NativePlugin>>, cx: &mut App) -> Entity<PluginHost>` (stores the host as a GPUI global), `bachuc_plugin_host::host(cx: &App) -> Option<Entity<PluginHost>>`, `PluginHost::set_client(&mut self, client: Entity<Client>, cx: &mut Context<PluginHost>)`, `PluginHost::set_active(&mut self, workspace_id: Option<String>, agent_id: Option<String>, cx: &mut Context<PluginHost>)`, `PluginHost::is_active(&self, plugin_id: &str) -> bool`, `PluginHost::index(&self) -> &ContributionIndex`, `PluginHost::timeline_revision(&self) -> u64`, and `bachuc_plugin_host::active_plugin_ids(listed: &[PluginListItem], registered: &[&'static str]) -> Vec<&'static str>` from TASK-170
+- Consumes: `bachuc_plugin_host::PluginHostEvent` (`#[non_exhaustive]` enum, emitted by `PluginHost`: `ContributionsChanged`, `PluginStateChanged { plugin_id: &'static str }`, `TimelineTransformsChanged`, `SidebarFilterChanged { direction: Option<SwipeDirection> }`, `OpenSurface { plugin_id: String, surface_id: String, presentation: SurfacePresentation, params: std::collections::BTreeMap<String, String> }`, `OpenPanel { plugin_id: &'static str, panel_id: String, target: PanelTarget }`, `OpenSettings { plugin_id: &'static str, settings_id: String }`, `SetComposerText { agent_id: String, text: String }`, `AddComposerAttachment(ComposerAttachment)`, `RevealTimelinePassage(TimelinePassage)`, `OpenNewWorkspace(NewWorkspaceRequest)`, `OpenPluginsPage`, `OpenAgent { agent_id: String }`, `OpenWorkspace { workspace_id: String }`), `bachuc_plugin_host::PanelTarget` (`workspace_id: String`, `agent_id: Option<String>`, `location: Option<PanelLocation>`), `bachuc_plugin_host::TimelinePassage` (`agent_id: String`, `message_id: String`, `text: Option<String>`), and `bachuc_plugin_host::NewWorkspaceRequest` (`cwd: String`, `project_id: Option<String>`, `name: Option<String>`) from TASK-170
+- Consumes: `bachuc_plugin_host::Contributed<T>` (`plugin_id: &'static str`, `value: T`) and `bachuc_plugin_host::ContributionIndex` (getters that each return `&[Contributed<T>]`: `composer_pills`, `composer_interceptors`, `stop_buttons`, `attachment_sources`, `sidebar_items`, `sidebar_sections`, `project_filters`, `project_menus`, `command_items`, `slash_commands`, `settings_screens`, `surfaces`, `workspace_panels`, `new_workspace_panels`, `shortcuts`, `header_subtitles`, `selection_actions`, `themes`; plus `transformers_for(&self, item_type: &str) -> &[Contributed<TimelineTransformer>]`, `renderer_for(&self, kind: &str, version: u32) -> Option<&Contributed<TimelineRenderer>>`, and `surface(&self, plugin_id: &str, surface_id: &str) -> Option<&Contributed<Surface>>`) from TASK-170
+- Consumes: page and panel kinds `bachuc_plugin_host::SettingsScreen` (`id`, `title`, `icon`, `view: ViewFactory<()>`), `Surface` (`id`, `title: Option<SharedString>`, `icon: Option<IconName>`, `view: ViewFactory<SurfaceInput>`), `SurfaceInput` (`params: std::collections::BTreeMap<String, String>`), `SurfacePresentation` (enum `Page`, `Overlay`, default `Page`), `WorkspacePanel` (`id`, `title`, `icon`, `context: PanelContext`, `locations: Vec<PanelLocation>`, `view: ViewFactory<PanelInput>`), `PanelContext` (enum `Workspace`, `Agent`), `PanelLocation` (enum `Workspace`, `Explorer`), `PanelInput` (`workspace_id: String`, `agent_id: Option<String>`), `NewWorkspacePanel` (`id`, `title`, `icon`, `view: ViewFactory<NewWorkspacePanelInput>`), `NewWorkspacePanelInput` (`project_id: String`, `cwd: String`), `Shortcut` (`id`, `combo: &'static str` in host syntax such as `Mod+G`, `surface: Option<&'static str>`, `on_press: Handler<Option<String>>` with the active workspace id), `HeaderSubtitle` (`id`, `view: ViewFactory<HeaderSubtitleInput>`), and `HeaderSubtitleInput` (`workspace_id: String`, `project_id: String`, `project_display_name: String`, `project_root_path: Option<String>`) from TASK-170
+- Consumes: `ComposerEvent::DraftSubmit` (a draft submit press; the text may be empty) and `ComposerEvent::ShowNewWorkspacePanel { plugin_id: &'static str, panel_id: &'static str }` from TASK-172
+- Consumes: `bachuc_composer::CornerPills` (view; `CornerPills::new(client: Entity<Client>, agent_id: String, cx: &mut Context<CornerPills>) -> CornerPills`, stacked top 12 and right 12, gap 8, right aligned) from TASK-172
+- Consumes (crate-internal): `new_workspace::NewWorkspacePreset` (`Default`; `cwd: Option<String>`, `project_id: Option<String>`, `title: Option<String>`), `new_workspace::NewWorkspaceScreen` (view; `NewWorkspaceScreen::new(client: Entity<Client>, key: String, preset: NewWorkspacePreset, window: &mut Window, cx: &mut Context<NewWorkspaceScreen>) -> NewWorkspaceScreen`, `side_panel_target(&self) -> Option<(String, String)>` as project id and folder, and `composer(&self) -> Entity<Composer>`), and `Shell::open_new_workspace(&mut self, preset: NewWorkspacePreset, window: &mut Window, cx: &mut Context<Shell>)` from TASK-173
+- Produces (crate-internal): `plugins::registered_plugins() -> Vec<Box<dyn bachuc_plugin_host::NativePlugin>>` in [packages/desktop-gpui/crates/app/src/plugins.rs](packages/desktop-gpui/crates/app/src/plugins.rs), empty here, and passed to `bachuc_plugin_host::init` in `main.rs` for TASK-191
+- Produces: the app hosts for TASK-186 to TASK-190: workspace panels as tabs, surface pages and overlays, New workspace side panels, plugin shortcuts, the header subtitle, corner pills, and the routes for `OpenNewWorkspace`, `OpenAgent`, `OpenWorkspace`, `OpenSettings`, and `OpenPluginsPage`
+
+Expected result:
+
+- Copy resume command on a Claude tab with a session copies `claude --resume <id>`; Reload agent reloads and shows "Reloaded agent"; Rename on a terminal tab renames it on the daemon and in the tab.
+- With a fake plugin, `open_surface` with `Overlay` shows the card, Escape closes it, and its shortcut opens and then closes it.
+- With no plugin registered, the app looks and behaves as before, and no plugin view is built.
+- Cases:
+  - An agent with no session id -> "Resume ID not available"; a provider with no template -> "Resume command not available".
+  - `refresh_agent` answers `Err("not connected")` -> "not connected".
+  - `rename_terminal` answers `Err` -> its text, and the tab keeps its title.
+  - A plugin shortcut `Mod+K` while the host binds `Cmd+K` -> the host action runs, the plugin's does not.
+  - A host shortcut set to unassigned on `Cmd+G` -> a plugin `Mod+G` fires.
+  - `OpenPanel` twice for the same agent panel -> one tab, focused.
+  - A panel with only `Explorer` and no requested location -> a workspace tab (Planner call).
+  - A panel asked for at `Explorer` that lists only `Workspace` -> an error notice and no tab.
+  - A workspace with no project id -> the header keeps the project name.
+  - `OpenSurface` for an unknown surface id -> "This plugin surface is unavailable."
+
+Anti-goal: a plugin shortcut never takes a host key; tripwire: a test runs the pure match for every default host chord of `bachuc_command` against a plugin that registers the same combo, and no plugin hit results; read when the shortcut rule lands and at completion.
+
+## Verify
+
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-app` -> pass, including every existing test plus tests for each Expected result case through the pure functions, the surface title order (surface title, else plugin id), the side panel availability, `Mod` mapped to `Cmd`, and the anti-goal test
+- `packages/desktop-gpui/cargo.sh fmt --check -p bachuc-app` -> exit 0
+- `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh build -p bachuc-app` -> exit 0
+- `rg -n "not available yet" packages/desktop-gpui/crates/app/src` -> no match

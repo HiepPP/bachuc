@@ -1,0 +1,396 @@
+{
+  "type": "session",
+  "message": {
+    "type": "fetch_agent_timeline_response",
+    "payload": {
+      "requestId": "rec-2",
+      "agentId": "ad9b52ad-43b7-4e54-a2ae-8820e72ba034",
+      "agent": {
+        "id": "ad9b52ad-43b7-4e54-a2ae-8820e72ba034",
+        "provider": "mock",
+        "cwd": "/tmp/gpui-bench",
+        "workspaceId": "wks_ff13e1687a325a52",
+        "model": "thirty-minute-stream",
+        "thinkingOptionId": null,
+        "effectiveThinkingOptionId": null,
+        "runtimeInfo": {
+          "provider": "mock",
+          "sessionId": "40f0efdc-0d52-47ea-8255-8eacbafca8d9",
+          "model": "thirty-minute-stream",
+          "modeId": "load-test"
+        },
+        "createdAt": "2026-10-15T09:40:54.245Z",
+        "updatedAt": "2026-10-15T09:41:51.583Z",
+        "lastUserMessageAt": "2026-10-15T09:40:54.765Z",
+        "status": "idle",
+        "activeTurn": null,
+        "capabilities": {
+          "supportsStreaming": true,
+          "supportsSessionPersistence": true,
+          "supportsSessionListing": true,
+          "supportsDynamicModes": false,
+          "supportsMcpServers": false,
+          "supportsReasoningStream": true,
+          "supportsToolInvocations": true,
+          "supportsRewindConversation": true,
+          "supportsRewindFiles": true,
+          "supportsRewindBoth": true
+        },
+        "currentModeId": "load-test",
+        "availableModes": [
+          {
+            "id": "load-test",
+            "label": "Load Test",
+            "description": "Streams repeated markdown, reasoning, and tool calls for app stress testing",
+            "icon": "ShieldOff",
+            "colorTier": "dangerous"
+          },
+          {
+            "id": "approval-test",
+            "label": "Approval Test",
+            "description": "Alternate development-only permission mode for preference tests",
+            "icon": "ShieldCheck",
+            "colorTier": "safe"
+          }
+        ],
+        "features": [],
+        "pendingPermissions": [],
+        "persistence": {
+          "provider": "mock",
+          "sessionId": "40f0efdc-0d52-47ea-8255-8eacbafca8d9",
+          "metadata": {
+            "model": "thirty-minute-stream",
+            "modeId": "load-test",
+            "cwd": "/tmp/gpui-bench"
+          }
+        },
+        "title": "start bench",
+        "labels": {},
+        "lastUsage": {
+          "inputTokens": 32,
+          "outputTokens": 590,
+          "contextWindowMaxTokens": 128000,
+          "contextWindowUsedTokens": 1180
+        },
+        "requiresAttention": true,
+        "attentionReason": "finished",
+        "attentionTimestamp": "2026-10-15T09:41:51.582Z",
+        "archivedAt": null
+      },
+      "direction": "tail",
+      "projection": "projected",
+      "epoch": "0c5182c9-4a9f-446e-809f-6597102e14e5",
+      "reset": false,
+      "staleCursor": false,
+      "gap": false,
+      "window": { "minSeq": 1, "maxSeq": 569, "nextSeq": 570 },
+      "startCursor": { "epoch": "0c5182c9-4a9f-446e-809f-6597102e14e5", "seq": 1 },
+      "endCursor": { "epoch": "0c5182c9-4a9f-446e-809f-6597102e14e5", "seq": 569 },
+      "hasOlder": false,
+      "hasNewer": false,
+      "entries": [
+        {
+          "provider": "mock",
+          "item": {
+            "type": "user_message",
+            "text": "start bench",
+            "messageId": "7e617531-920a-4a82-b7c3-203896e6dcc3"
+          },
+          "timestamp": "2026-10-15T09:40:54.764Z",
+          "seqStart": 1,
+          "seqEnd": 1,
+          "sourceSeqRanges": [{ "startSeq": 1, "endSeq": 1 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": []
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "assistant_message",
+            "text": "## Cycle 1\n\nI'll take a look at the scroll anchor behavior you described. Let me start by walking through how the conversation list currently handles streaming updates and where the auto-scroll logic actually lives. My instinct is that the anchor is supposed to pin to the bottom only when the user is already there, but I want to confirm that against the code rather than guess. This kind of behavior is usually a thin layout effect over a ref, and the bugs tend to come from event ordering rather than the math itself, so the first useful step is to read the relevant files.",
+            "messageId": "90df33e6-bfc9-4daf-8365-84ebc827e3fc"
+          },
+          "timestamp": "2026-10-15T09:41:02.073Z",
+          "seqStart": 2,
+          "seqEnd": 74,
+          "sourceSeqRanges": [{ "startSeq": 2, "endSeq": 74 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": ["assistant_merge"]
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "reasoning",
+            "text": "Need to find the scroll container, the layout effect that watches for new messages, and any gesture handler that might fight with programmatic scrolling. Probably a ref on the FlatList plus a near-bottom threshold."
+          },
+          "timestamp": "2026-10-15T09:41:04.811Z",
+          "seqStart": 75,
+          "seqEnd": 102,
+          "sourceSeqRanges": [{ "startSeq": 75, "endSeq": 102 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": []
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "tool_call",
+            "callId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0:read:1",
+            "name": "read",
+            "status": "completed",
+            "error": null,
+            "detail": {
+              "type": "read",
+              "filePath": "packages/app/src/components/conversation-list.tsx",
+              "content": "export function ConversationList() {\n  const ref = useRef<FlatList>(null);\n  // ...\n}"
+            }
+          },
+          "timestamp": "2026-10-15T09:41:04.851Z",
+          "seqStart": 103,
+          "seqEnd": 104,
+          "sourceSeqRanges": [{ "startSeq": 103, "endSeq": 104 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": ["tool_lifecycle"]
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "tool_call",
+            "callId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0:grep:1",
+            "name": "grep",
+            "status": "completed",
+            "error": null,
+            "detail": {
+              "type": "search",
+              "query": "scrollToEnd",
+              "toolName": "grep",
+              "mode": "files_with_matches",
+              "filePaths": [
+                "packages/app/src/components/conversation-list.tsx",
+                "packages/app/src/hooks/use-scroll-anchor.ts"
+              ],
+              "numFiles": 2,
+              "numMatches": 5
+            }
+          },
+          "timestamp": "2026-10-15T09:41:04.952Z",
+          "seqStart": 105,
+          "seqEnd": 105,
+          "sourceSeqRanges": [{ "startSeq": 105, "endSeq": 105 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": []
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "assistant_message",
+            "text": "Now I have a clearer picture. The auto-scroll uses a ref on the FlatList and tracks whether the user has scrolled away from the bottom by comparing the offset against the content size. There are a few subtle issues worth flagging before we change anything:\n\n- The threshold for 'near the bottom' is hardcoded at 80px, which feels too tight on dense content where headers and tool calls take up a lot of vertical space.\n- We rely on `onContentSizeChange` to detect new content, but that fires after layout, not as the streaming delta arrives, so we end up scrolling one frame late on fast streams.\n- The gesture handler does not pause scroll-to-bottom while the user is actively dragging, which means a drag in progress can be visually overridden mid-frame.\n- Coalescing happens upstream, so the FlatList sees fewer updates than the wire — but each batch can still cause a relayout.\n\nLet me make a small adjustment to the threshold and add a flag for active gestures, then run a quick command to confirm the order of events when streaming is fast.",
+            "messageId": "90df33e6-bfc9-4daf-8365-84ebc827e3fc"
+          },
+          "timestamp": "2026-10-15T09:41:18.329Z",
+          "seqStart": 106,
+          "seqEnd": 237,
+          "sourceSeqRanges": [{ "startSeq": 106, "endSeq": 237 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": ["assistant_merge"]
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "tool_call",
+            "callId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0:edit:1",
+            "name": "edit",
+            "status": "completed",
+            "error": null,
+            "detail": {
+              "type": "edit",
+              "filePath": "packages/app/src/hooks/use-scroll-anchor.ts",
+              "oldString": "const NEAR_BOTTOM_PX = 80;",
+              "newString": "const NEAR_BOTTOM_PX = 160;",
+              "unifiedDiff": "diff --git a/packages/app/src/hooks/use-scroll-anchor.ts b/packages/app/src/hooks/use-scroll-anchor.ts\n--- a/packages/app/src/hooks/use-scroll-anchor.ts\n+++ b/packages/app/src/hooks/use-scroll-anchor.ts\n@@ -42,7 +42,9 @@\n   const ref = useRef<FlatList>(null);\n   const [userIsAtBottom, setUserIsAtBottom] = useState(true);\n-  const NEAR_BOTTOM_PX = 80;\n+  const NEAR_BOTTOM_PX = 160;\n+  const isDraggingRef = useRef(false);\n\n-  if (userIsAtBottom) ref.current?.scrollToEnd({ animated: true });\n+  if (userIsAtBottom && !isDraggingRef.current) {\n+    ref.current?.scrollToEnd({ animated: true });\n+  }"
+            }
+          },
+          "timestamp": "2026-10-15T09:41:18.369Z",
+          "seqStart": 238,
+          "seqEnd": 239,
+          "sourceSeqRanges": [{ "startSeq": 238, "endSeq": 239 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": ["tool_lifecycle"]
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "tool_call",
+            "callId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0:bash:1",
+            "name": "bash",
+            "status": "completed",
+            "error": null,
+            "detail": {
+              "type": "shell",
+              "command": "node scripts/simulate-stream-burst.mjs",
+              "cwd": "/tmp/paseo-mock-load",
+              "output": "[burst] tick 1 userIsAtBottom=true\n[burst] tick 2 userIsAtBottom=true\n[burst] drag-start isDragging=true\n[burst] tick 3 suppressed\n[burst] drag-end isDragging=false\n",
+              "exitCode": 0
+            }
+          },
+          "timestamp": "2026-10-15T09:41:18.470Z",
+          "seqStart": 240,
+          "seqEnd": 240,
+          "sourceSeqRanges": [{ "startSeq": 240, "endSeq": 240 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": []
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "assistant_message",
+            "text": "The change should keep scroll-to-bottom working when the user is at the bottom while not yanking the viewport when they are reading earlier messages. The bash output confirms the `userIsAtBottom` flag flips correctly during a simulated streaming burst, and the gesture flag suppresses scroll while a drag is active. If you want, I can follow up with a regression test that drives the FlatList with synthetic deltas at high frequency to lock in the behavior. For now, I'll stop here so you can take a look.## Cycle 2\n\nI'll take a look at the scroll anchor behavior you described. Let me start by walking through how the conversation list currently handles streaming updates and where the auto-scroll logic actually lives. My instinct is that the anchor is supposed to pin to the bottom only when the user is already there, but I want to confirm that against the code rather than guess. This kind of behavior is usually a thin layout effect over a ref, and the bugs tend to come from event ordering rather than the math itself, so the first useful step is to read the relevant files.",
+            "messageId": "90df33e6-bfc9-4daf-8365-84ebc827e3fc"
+          },
+          "timestamp": "2026-10-15T09:41:32.355Z",
+          "seqStart": 241,
+          "seqEnd": 377,
+          "sourceSeqRanges": [{ "startSeq": 241, "endSeq": 377 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": ["assistant_merge"]
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "reasoning",
+            "text": "Need to find the scroll container, the layout effect that watches for new messages, and any gesture handler that might fight with programmatic scrolling. Probably a ref on the FlatList plus a near-bottom threshold."
+          },
+          "timestamp": "2026-10-15T09:41:35.087Z",
+          "seqStart": 378,
+          "seqEnd": 404,
+          "sourceSeqRanges": [{ "startSeq": 378, "endSeq": 404 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": []
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "tool_call",
+            "callId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0:read:2",
+            "name": "read",
+            "status": "completed",
+            "error": null,
+            "detail": {
+              "type": "read",
+              "filePath": "packages/app/src/components/conversation-list.tsx",
+              "content": "export function ConversationList() {\n  const ref = useRef<FlatList>(null);\n  // ...\n}"
+            }
+          },
+          "timestamp": "2026-10-15T09:41:35.177Z",
+          "seqStart": 405,
+          "seqEnd": 405,
+          "sourceSeqRanges": [{ "startSeq": 405, "endSeq": 405 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": []
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "tool_call",
+            "callId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0:grep:2",
+            "name": "grep",
+            "status": "completed",
+            "error": null,
+            "detail": {
+              "type": "search",
+              "query": "scrollToEnd",
+              "toolName": "grep",
+              "mode": "files_with_matches",
+              "filePaths": [
+                "packages/app/src/components/conversation-list.tsx",
+                "packages/app/src/hooks/use-scroll-anchor.ts"
+              ],
+              "numFiles": 2,
+              "numMatches": 5
+            }
+          },
+          "timestamp": "2026-10-15T09:41:35.280Z",
+          "seqStart": 406,
+          "seqEnd": 406,
+          "sourceSeqRanges": [{ "startSeq": 406, "endSeq": 406 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": []
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "assistant_message",
+            "text": "Now I have a clearer picture. The auto-scroll uses a ref on the FlatList and tracks whether the user has scrolled away from the bottom by comparing the offset against the content size. There are a few subtle issues worth flagging before we change anything:\n\n- The threshold for 'near the bottom' is hardcoded at 80px, which feels too tight on dense content where headers and tool calls take up a lot of vertical space.\n- We rely on `onContentSizeChange` to detect new content, but that fires after layout, not as the streaming delta arrives, so we end up scrolling one frame late on fast streams.\n- The gesture handler does not pause scroll-to-bottom while the user is actively dragging, which means a drag in progress can be visually overridden mid-frame.\n- Coalescing happens upstream, so the FlatList sees fewer updates than the wire — but each batch can still cause a relayout.\n\nLet me make a small adjustment to the threshold and add a flag for active gestures, then run a quick command to confirm the order of events when streaming is fast.",
+            "messageId": "90df33e6-bfc9-4daf-8365-84ebc827e3fc"
+          },
+          "timestamp": "2026-10-15T09:41:48.644Z",
+          "seqStart": 407,
+          "seqEnd": 538,
+          "sourceSeqRanges": [{ "startSeq": 407, "endSeq": 538 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": ["assistant_merge"]
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "tool_call",
+            "callId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0:edit:2",
+            "name": "edit",
+            "status": "completed",
+            "error": null,
+            "detail": {
+              "type": "edit",
+              "filePath": "packages/app/src/hooks/use-scroll-anchor.ts",
+              "oldString": "const NEAR_BOTTOM_PX = 80;",
+              "newString": "const NEAR_BOTTOM_PX = 160;",
+              "unifiedDiff": "diff --git a/packages/app/src/hooks/use-scroll-anchor.ts b/packages/app/src/hooks/use-scroll-anchor.ts\n--- a/packages/app/src/hooks/use-scroll-anchor.ts\n+++ b/packages/app/src/hooks/use-scroll-anchor.ts\n@@ -42,7 +42,9 @@\n   const ref = useRef<FlatList>(null);\n   const [userIsAtBottom, setUserIsAtBottom] = useState(true);\n-  const NEAR_BOTTOM_PX = 80;\n+  const NEAR_BOTTOM_PX = 160;\n+  const isDraggingRef = useRef(false);\n\n-  if (userIsAtBottom) ref.current?.scrollToEnd({ animated: true });\n+  if (userIsAtBottom && !isDraggingRef.current) {\n+    ref.current?.scrollToEnd({ animated: true });\n+  }"
+            }
+          },
+          "timestamp": "2026-10-15T09:41:48.684Z",
+          "seqStart": 539,
+          "seqEnd": 540,
+          "sourceSeqRanges": [{ "startSeq": 539, "endSeq": 540 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": ["tool_lifecycle"]
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "tool_call",
+            "callId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0:bash:2",
+            "name": "bash",
+            "status": "completed",
+            "error": null,
+            "detail": {
+              "type": "shell",
+              "command": "node scripts/simulate-stream-burst.mjs",
+              "cwd": "/tmp/paseo-mock-load",
+              "output": "[burst] tick 1 userIsAtBottom=true\n[burst] tick 2 userIsAtBottom=true\n[burst] drag-start isDragging=true\n[burst] tick 3 suppressed\n[burst] drag-end isDragging=false\n",
+              "exitCode": 0
+            }
+          },
+          "timestamp": "2026-10-15T09:41:48.786Z",
+          "seqStart": 541,
+          "seqEnd": 541,
+          "sourceSeqRanges": [{ "startSeq": 541, "endSeq": 541 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": []
+        },
+        {
+          "provider": "mock",
+          "item": {
+            "type": "assistant_message",
+            "text": "The change should keep scroll-to-bottom working when the user is at the bottom while not yanking the viewport when they are reading earlier messages. The bash output confirms the `userIsAtBottom` flag flips correctly during",
+            "messageId": "90df33e6-bfc9-4daf-8365-84ebc827e3fc"
+          },
+          "timestamp": "2026-10-15T09:41:51.582Z",
+          "seqStart": 542,
+          "seqEnd": 569,
+          "sourceSeqRanges": [{ "startSeq": 542, "endSeq": 569 }],
+          "turnId": "3d0a56a4-e024-4eb0-ba04-af2e5cf202d0",
+          "collapsed": ["assistant_merge"]
+        }
+      ],
+      "error": null
+    }
+  }
+}

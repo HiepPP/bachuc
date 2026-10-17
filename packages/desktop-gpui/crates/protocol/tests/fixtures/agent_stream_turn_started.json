@@ -1,0 +1,15 @@
+{
+  "type": "session",
+  "message": {
+    "type": "agent_stream",
+    "payload": {
+      "agentId": "ad9b52ad-43b7-4e54-a2ae-8820e72ba034",
+      "event": {
+        "type": "turn_started",
+        "provider": "mock",
+        "turnId": "775db017-1ba8-48b7-b192-3cadf779ba9b"
+      },
+      "timestamp": "2026-10-15T09:41:59.568Z"
+    }
+  }
+}

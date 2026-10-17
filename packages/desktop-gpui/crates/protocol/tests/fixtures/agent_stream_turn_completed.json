@@ -1,0 +1,21 @@
+{
+  "type": "session",
+  "message": {
+    "type": "agent_stream",
+    "payload": {
+      "agentId": "ad9b52ad-43b7-4e54-a2ae-8820e72ba034",
+      "event": {
+        "type": "turn_completed",
+        "provider": "mock",
+        "turnId": "775db017-1ba8-48b7-b192-3cadf779ba9b",
+        "usage": {
+          "inputTokens": 1,
+          "outputTokens": 2,
+          "contextWindowMaxTokens": 128000,
+          "contextWindowUsedTokens": 2
+        }
+      },
+      "timestamp": "2026-10-15T09:41:59.575Z"
+    }
+  }
+}

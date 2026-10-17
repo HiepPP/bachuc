@@ -1,0 +1,42 @@
+{
+  "type": "session",
+  "message": {
+    "type": "agent_stream",
+    "payload": {
+      "agentId": "ad9b52ad-43b7-4e54-a2ae-8820e72ba034",
+      "event": {
+        "type": "permission_requested",
+        "provider": "mock",
+        "request": {
+          "id": "mock-plan-0337c176-4c5c-4ec3-9373-da2c8018e071",
+          "provider": "mock",
+          "name": "MockPlanApproval",
+          "kind": "plan",
+          "title": "Plan",
+          "description": "Review the proposed plan before implementation starts.",
+          "input": {
+            "plan": "1. Add the (c) README note.\n2. Run --name=\"my repo\".\n3. Verify ---buzz in the diff."
+          },
+          "actions": [
+            {
+              "id": "implement",
+              "label": "Implement",
+              "behavior": "allow",
+              "variant": "primary",
+              "intent": "implement"
+            },
+            {
+              "id": "dismiss",
+              "label": "Dismiss",
+              "behavior": "deny",
+              "variant": "secondary",
+              "intent": "dismiss"
+            }
+          ],
+          "metadata": { "source": "mock_plan_approval" }
+        }
+      },
+      "timestamp": "2026-10-15T09:42:04.515Z"
+    }
+  }
+}

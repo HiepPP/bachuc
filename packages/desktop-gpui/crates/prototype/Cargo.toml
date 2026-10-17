@@ -1,0 +1,15 @@
+[package]
+name = "bachuc-gpui"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# gpui-kit enables runtime_shaders, so the build needs no Xcode Metal compiler.
+gpui-kit.workspace = true
+gpui-wry = "=0.7.3"
+wry = { version = "0.53.3", package = "lb-wry" }
+raw-window-handle = { version = "0.6", features = ["std"] }
+alacritty_terminal = "0.26"
+tungstenite = "0.24"
+serde_json = "1"

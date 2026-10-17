@@ -21,9 +21,9 @@ header_pattern: ^(feat|fix|docs|refactor|test|chore|perf)(\([a-z0-9-]+\))?: .+
 - Run GitNexus `impact` before you edit a symbol. Run `detect_changes` before each commit, per the root `CLAUDE.md`.
 - The gate has no `formatter` line. Format `watchtower/` markdown with `npm run format:files -- <files>` from the repo root before you stage; the lefthook pre-commit hook checks every staged `*.md` file.
 - Builders run Claude with `bypassPermissions`, because nobody answers a permission. They still obey every rule in this file.
-- Builders carry the label `watchtower.task=<first TASK ID of the group>` (Q-037).
+- Builders carry the label `watchtower.task=<first TASK ID of the group>` (Q-044).
 - Never push and never open a PR.
-- No TASK waits on a question. Q-036 takes its default.
+- No TASK waits on a question. Q-043 takes its default.
 - Skip: none.
 
 ## Verify Extras
