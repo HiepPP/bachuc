@@ -6,7 +6,7 @@
 use crate::actions::{
     BindingSpec, JumpToTab, RunAction, SHELL_CONTEXT, binding_specs, rebind, settings_key_context,
 };
-use crate::chrome::{ExplorerResize, HANDLE_WIDTH, NoPreview};
+use crate::chrome::{ExplorerResize, HANDLE_WIDTH, HeaderMenu, NoPreview};
 use crate::dock;
 use crate::new_workspace::{self, NewWorkspacePreset, NewWorkspaceScreen, SidePanelChanged};
 use crate::panes::{
@@ -19,22 +19,25 @@ use crate::plugins::{
     keystroke_text, panel_identity, panel_location, plugin_shortcut, surface_heading,
 };
 use crate::state::{
-    Connection, LayoutPrefs, LogoFill, absolute_path, agent_icon, agent_key, agent_of_key,
-    agent_title, all_diffs_key, badge_count, badge_label, command_items, commit_diff_key,
-    commit_diff_title, diff_key, explorer_width, file_key, file_name, file_of_key, find_workspace,
-    initial_host, next_mode, notification_for, step_index, step_workspace, workspace_agents,
-    workspace_order,
+    Connection, EditorTarget, LayoutPrefs, LogoFill, absolute_path, agent_icon, agent_key,
+    agent_of_key, agent_title, all_diffs_key, badge_count, badge_label, command_items,
+    commit_diff_key, commit_diff_title, diff_key, editor_targets, explorer_width, file_key,
+    file_name, file_of_key, find_workspace, initial_host, load_ship_default, next_mode,
+    notification_for, pull_request_key, save_ship_default, step_index, step_workspace,
+    workspace_agents, workspace_order,
 };
+use crate::toast::{TOAST_DURATION, ToastStack, render_toasts};
 use crate::workspace_draft::{self, WorkspaceDraftPane};
 use bachuc_client::{
-    AgentSummary, Client, ClientEvent, CreatedWorkspace, DirectoryEvent, HostConfig, ProjectNode,
-    TimelineState, load_hosts, resume_command,
+    AgentSummary, Client, ClientEvent, CreatedWorkspace, DirectoryEvent, GitStatusEvent,
+    HostConfig, PrStatus, ProjectNode, TimelineState, load_hosts, resume_command,
 };
 use bachuc_command::{CommandCenter, CommandEvent, Shortcut, data_dir, load_shortcuts};
 use bachuc_composer::ComposerEvent;
 use bachuc_diagram::DiagramRenderer;
 use bachuc_explorer::{
-    DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerTab, FileView,
+    DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerTab, FileView, GitActionsButton,
+    GitActionsEvent, PullRequestEvent, PullRequestView,
 };
 use bachuc_history::{HistoryEvent, HistoryScreen};
 use bachuc_icons::{IconName, provider_logo};
@@ -62,7 +65,7 @@ use gpui_kit::*;
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The old client lives this long after a host switch, so a queued terminal kill reaches the
 /// old daemon before its socket closes.
@@ -73,6 +76,10 @@ const HOME: &str = "";
 
 /// The identity of the History tab in the home view, so a second open shows the same tab.
 const HISTORY: &str = "history";
+
+/// A git status change checks the PR of a workspace at most this often, so a busy agent's
+/// edits do not ask the daemon for the PR on every file write.
+const PR_RECHECK: Duration = Duration::from_secs(10);
 
 /// What a tab shows. Dropping an agent pane stops its timeline sync.
 pub(crate) enum PaneContent {
@@ -86,6 +93,9 @@ pub(crate) enum PaneContent {
     /// The History screen, in a tab of the home view. It has no focus handle, so it gets a
     /// `PaneFrame`.
     History(Entity<HistoryScreen>),
+    /// The Pull request tab of a workspace folder. It has no focus handle, so it gets a
+    /// `PaneFrame`.
+    PullRequest(Entity<PullRequestView>),
     NewTab(Entity<NewTabPane>),
     Terminal(Entity<TerminalView>),
     File(Entity<FileView>),
@@ -102,6 +112,7 @@ impl PaneContent {
             PaneContent::Draft(view) => view.clone().into(),
             PaneContent::NewWorkspace(view) => view.clone().into(),
             PaneContent::History(view) => view.clone().into(),
+            PaneContent::PullRequest(view) => view.clone().into(),
             PaneContent::NewTab(view) => view.clone().into(),
             PaneContent::Terminal(view) => view.clone().into(),
             PaneContent::File(view) => view.clone().into(),
@@ -111,7 +122,7 @@ impl PaneContent {
     }
 
     /// Whether the pane has its own focusable element with a role: a composer, a prompt, or a
-    /// terminal. Other panes get a `PaneFrame`.
+    /// terminal. Other panes, such as History and Pull request, get a `PaneFrame`.
     fn owns_focus(&self) -> bool {
         matches!(
             self,
@@ -137,6 +148,7 @@ impl PaneContent {
                     .unwrap_or_default(),
             },
             PaneContent::File(_) => TabKind::File,
+            // History, Pull request, and the other panes have no tab menu of their own.
             _ => TabKind::Other,
         }
     }
@@ -175,6 +187,8 @@ struct PendingOpen {
 pub(crate) struct OpenWorkspace {
     cwd: Option<String>,
     view: Entity<Workspace>,
+    /// The header's git split button, made on the first open of a workspace with a folder.
+    git_actions: Option<Entity<GitActionsButton>>,
     panes: HashMap<String, Pane>,
     _subscriptions: Vec<Subscription>,
 }
@@ -217,6 +231,22 @@ pub struct Shell {
     plugin_views: PluginViews,
     /// The New workspace side panel choice, kept for the session.
     side_panel_open: bool,
+    toasts: ToastStack,
+    /// Workspaces whose PR was found once this session; their PR tab never opens by itself
+    /// again, so a closed one stays closed.
+    pr_tab_opened: HashSet<String>,
+    /// Workspaces with a PR request in flight, and when each was last asked.
+    pr_inflight: HashSet<String>,
+    pr_checked: HashMap<String, Instant>,
+    /// The header menu that shows, if any.
+    pub(crate) header_menu: Option<HeaderMenu>,
+    /// The Open in editor apps, read once at start, and the last pick of the session.
+    pub(crate) editor_targets: Vec<EditorTarget>,
+    pub(crate) editor_choice: Option<EditorTarget>,
+    /// The GitHub page of a folder, read when the Open in editor menu opens: (cwd, url).
+    pub(crate) editor_github: Option<(String, String)>,
+    /// Scripts with a start or stop in flight, as `workspace_id/name`.
+    pub(crate) scripts_busy: HashSet<String>,
     focus: FocusHandle,
     /// Subscriptions to the client and the views that hold it; a host switch replaces them.
     host_subscriptions: Vec<Subscription>,
@@ -283,6 +313,15 @@ impl Shell {
             pending_prompt: None,
             plugin_views: PluginViews::default(),
             side_panel_open: false,
+            toasts: ToastStack::default(),
+            pr_tab_opened: HashSet::new(),
+            pr_inflight: HashSet::new(),
+            pr_checked: HashMap::new(),
+            header_menu: None,
+            editor_targets: editor_targets(|path| std::path::Path::new(path).exists()),
+            editor_choice: None,
+            editor_github: None,
+            scripts_busy: HashSet::new(),
             focus,
             host_subscriptions: Vec::new(),
             _subscriptions: subscriptions,
@@ -303,6 +342,18 @@ impl Shell {
                         this.on_projects_changed(window, cx);
                         this.open_pending(window, cx);
                     }
+                },
+            ),
+            cx.subscribe_in(
+                &self.client,
+                window,
+                |this: &mut Shell, _, event: &GitStatusEvent, window, cx| match event {
+                    GitStatusEvent::ScriptsChanged { workspace_id } => {
+                        if *workspace_id == this.selected {
+                            cx.notify();
+                        }
+                    }
+                    GitStatusEvent::Changed { cwd } => this.on_git_changed(cwd, window, cx),
                 },
             ),
             cx.subscribe_in(
@@ -402,6 +453,11 @@ impl Shell {
         match event {
             ClientEvent::Connected => {
                 self.known_agents = self.agent_ids(cx);
+                // A PR request sent while the client connected failed; ask again.
+                let open: Vec<String> = self.workspaces.keys().cloned().collect();
+                for workspace_id in open {
+                    self.check_pull_request(&workspace_id, window, cx);
+                }
             }
             ClientEvent::AgentsChanged => self.on_agents_changed(window, cx),
             _ => {}
@@ -540,6 +596,12 @@ impl Shell {
         self.command = None;
         self.pending_open = None;
         self.pending_prompt = None;
+        self.pr_tab_opened.clear();
+        self.pr_inflight.clear();
+        self.pr_checked.clear();
+        self.header_menu = None;
+        self.editor_github = None;
+        self.scripts_busy.clear();
         self.connection = Connection::Connecting;
         let client = Client::connect(self.hosts[self.host_index].clone(), cx);
         self.retired = Some(std::mem::replace(&mut self.client, client.clone()));
@@ -588,6 +650,11 @@ impl Shell {
 
     // ----- workspaces -----
 
+    /// The header's git split button of an open workspace.
+    pub(crate) fn git_actions(&self, workspace_id: &str) -> Option<Entity<GitActionsButton>> {
+        self.workspaces.get(workspace_id)?.git_actions.clone()
+    }
+
     pub(crate) fn selected_cwd(&self) -> Option<&str> {
         self.workspaces.get(&self.selected)?.cwd.as_deref()
     }
@@ -630,6 +697,7 @@ impl Shell {
             OpenWorkspace {
                 cwd,
                 view,
+                git_actions: None,
                 panes: HashMap::new(),
                 _subscriptions: subscriptions,
             },
@@ -661,6 +729,8 @@ impl Shell {
         let first_open = !self.workspaces.contains_key(&id);
         if first_open {
             self.create_workspace(id.clone(), Some(cwd), window, cx);
+            self.attach_git_actions(&id, window, cx);
+            self.check_pull_request(&id, window, cx);
         }
         let active = self.workspace_active_key(&id, cx);
         let mut opened = false;
@@ -1491,6 +1561,191 @@ impl Shell {
         self.open_all_diffs(&cwd, None, window, cx);
     }
 
+    // ----- toasts, git actions, and the Pull request tab -----
+
+    /// Shows a success or error note at the bottom right for `TOAST_DURATION`.
+    pub(crate) fn show_toast(&mut self, ok: bool, message: String, cx: &mut Context<Self>) {
+        let Some(id) = self.toasts.push(ok, message) else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(TOAST_DURATION).await;
+            let _ = this.update(cx, |shell, cx| {
+                if shell.toasts.dismiss(id) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Makes the header's git split button of a workspace with a folder, with the repo's saved
+    /// ship default (Q-111).
+    fn attach_git_actions(
+        &mut self,
+        workspace_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(cwd) = self
+            .workspaces
+            .get(workspace_id)
+            .and_then(|open| open.cwd.clone())
+        else {
+            return;
+        };
+        let saved = load_ship_default(&data_dir(), &cwd);
+        let client = self.client.clone();
+        let button = cx.new(|cx| {
+            let mut button = GitActionsButton::new(client, cwd, cx);
+            button.set_ship_default(saved, cx);
+            button
+        });
+        let id = workspace_id.to_string();
+        let subscription = cx.subscribe_in(
+            &button,
+            window,
+            move |this: &mut Shell, _, event: &GitActionsEvent, window, cx| {
+                this.on_git_actions_event(&id, event, window, cx)
+            },
+        );
+        if let Some(open) = self.workspaces.get_mut(workspace_id) {
+            open.git_actions = Some(button);
+            open._subscriptions.push(subscription);
+        }
+    }
+
+    fn on_git_actions_event(
+        &mut self,
+        workspace_id: &str,
+        event: &GitActionsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            GitActionsEvent::Finished { ok, message } => {
+                self.show_toast(*ok, message.clone(), cx);
+                // Create PR finds the PR at once, without waiting for the status throttle.
+                if *ok {
+                    self.check_pull_request(workspace_id, window, cx);
+                }
+            }
+            GitActionsEvent::OpenUrl { url } => cx.open_url(url),
+            GitActionsEvent::ArchiveWorkspace => {
+                self.archive_workspace_id(workspace_id, window, cx)
+            }
+            GitActionsEvent::ShipDefaultChanged { cwd, default } => {
+                if let Err(error) = save_ship_default(&data_dir(), cwd, *default) {
+                    log::warn!("cannot save the git ship default: {error}");
+                }
+            }
+        }
+    }
+
+    /// A git status change may come with a new PR; checks each open workspace on that folder
+    /// whose PR was not found yet, at most once per `PR_RECHECK`.
+    fn on_git_changed(&mut self, cwd: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        let due: Vec<String> = self
+            .workspaces
+            .iter()
+            .filter(|(id, open)| {
+                open.cwd.as_deref() == Some(cwd)
+                    && !self.pr_tab_opened.contains(*id)
+                    && self
+                        .pr_checked
+                        .get(*id)
+                        .is_none_or(|last| now.duration_since(*last) >= PR_RECHECK)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for workspace_id in due {
+            self.check_pull_request(&workspace_id, window, cx);
+        }
+    }
+
+    /// Asks for the workspace's PR, then opens its Pull request tab once by itself when the
+    /// rule allows, as `usePullRequestAutoAdd` does.
+    fn check_pull_request(
+        &mut self,
+        workspace_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(cwd) = self
+            .workspaces
+            .get(workspace_id)
+            .and_then(|open| open.cwd.clone())
+        else {
+            return;
+        };
+        if self.pr_tab_opened.contains(workspace_id)
+            || !self.client.read(cx).is_connected()
+            || !self.pr_inflight.insert(workspace_id.to_string())
+        {
+            return;
+        }
+        self.pr_checked
+            .insert(workspace_id.to_string(), Instant::now());
+        let task = self
+            .client
+            .update(cx, |client, cx| client.pr_status(&cwd, cx));
+        let id = workspace_id.to_string();
+        cx.spawn_in(window, async move |this, cx| {
+            let status = task.await.ok().and_then(|reply| reply.status);
+            let _ = this.update_in(cx, |shell, window, cx| {
+                shell.pr_inflight.remove(&id);
+                let has_tab = shell.find_identity(&id, &pull_request_key(&cwd)).is_some();
+                let opened = shell.pr_tab_opened.contains(&id);
+                if has_pull_request(status.as_ref()) {
+                    shell.pr_tab_opened.insert(id.clone());
+                }
+                if auto_opens_pr_tab(status.as_ref(), opened, has_tab) {
+                    shell.open_pull_request(&id, &cwd, window, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Opens the Pull request tab of a folder behind the active tab, as Electron's background
+    /// open does.
+    fn open_pull_request(
+        &mut self,
+        workspace_id: &str,
+        cwd: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous = self.workspace_active_key(workspace_id, cx);
+        let client = self.client.clone();
+        let folder = cwd.to_string();
+        let view = cx.new(|cx| PullRequestView::new(client, folder, cx));
+        let subscription =
+            cx.subscribe(
+                &view,
+                |_: &mut Shell, _, event: &PullRequestEvent, cx| match event {
+                    PullRequestEvent::OpenUrl { url } => cx.open_url(url),
+                },
+            );
+        let key = self.next_key();
+        self.put_pane(
+            workspace_id,
+            key,
+            Some(pull_request_key(cwd)),
+            "Pull request".into(),
+            IconName::GitPullRequest,
+            PaneContent::PullRequest(view),
+            vec![subscription],
+            window,
+            cx,
+        );
+        if let Some(previous) = previous {
+            self.activate_key(workspace_id, &previous, window, cx);
+        }
+    }
+
     // ----- plugins -----
 
     /// Routes the plugin host's UI requests. The composer handles `SetComposerText` and
@@ -2288,9 +2543,20 @@ impl Shell {
 
     /// `workspace.archive`: the sidebar's archive flow, with a confirm when files changed.
     fn archive_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self.selected.clone();
+        self.archive_workspace_id(&selected, window, cx);
+    }
+
+    /// The archive flow for one workspace, also run by the git split button.
+    fn archive_workspace_id(
+        &mut self,
+        workspace_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some((id, name, cwd)) = ({
             let client = self.client.read(cx);
-            find_workspace(client.projects(), &self.selected)
+            find_workspace(client.projects(), workspace_id)
                 .map(|(_, w)| (w.id.clone(), w.name.clone(), w.cwd.clone()))
         }) else {
             return;
@@ -2849,6 +3115,7 @@ impl Render for Shell {
             .when_some(self.command.as_ref(), |root, (center, _)| {
                 root.child(center.clone())
             })
+            .children(render_toasts(&self.toasts, cx))
             .into_any_element()
     }
 }
@@ -2935,6 +3202,21 @@ pub(crate) fn agent_target(projects: &[ProjectNode], workspace_id: Option<&str>)
     find_workspace(projects, workspace_id).map(|_| workspace_id.to_string())
 }
 
+/// `getPullRequestIdentity`: a status with a URL or a number is a PR.
+pub(crate) fn has_pull_request(status: Option<&PrStatus>) -> bool {
+    status.is_some_and(|status| !status.url.trim().is_empty() || status.number.is_some())
+}
+
+/// The Pull request tab opens by itself only for the first PR found in a workspace this
+/// session, and only when no PR tab is open there. A closed tab does not come back.
+pub(crate) fn auto_opens_pr_tab(
+    status: Option<&PrStatus>,
+    found_before: bool,
+    has_tab: bool,
+) -> bool {
+    has_pull_request(status) && !found_before && !has_tab
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PromptReveal {
     /// The timeline has no entries yet; try again on its next change.
@@ -2967,9 +3249,45 @@ mod tests {
     use super::{
         CANNOT_RENAME, PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE,
         RESUME_ID_UNAVAILABLE, RenameTarget, TERMINAL_NOT_OPEN, agent_target, agent_workspace,
-        closes_surface_on_open, latest_prompt_reveal, reload_error, rename_target, resume_text,
+        auto_opens_pr_tab, closes_surface_on_open, has_pull_request, latest_prompt_reveal,
+        reload_error, rename_target, resume_text,
     };
-    use bachuc_client::{AgentSummary, ProjectNode, TimelineState, WorkspaceNode};
+    use bachuc_client::{
+        AgentSummary, PrMergeCapability, PrStatus, ProjectNode, TimelineState, WorkspaceNode,
+    };
+
+    fn pr(url: &str, number: Option<u64>) -> PrStatus {
+        PrStatus {
+            number,
+            url: url.into(),
+            title: "t".into(),
+            state: "open".into(),
+            is_merged: false,
+            is_draft: false,
+            mergeable: None,
+            checks: Vec::new(),
+            review_decision: None,
+            repo_owner: "o".into(),
+            repo_name: "r".into(),
+            merge: PrMergeCapability::default(),
+        }
+    }
+
+    #[test]
+    fn the_pr_tab_opens_once_for_the_first_pr_found() {
+        let found = pr("https://github.com/o/r/pull/1", Some(1));
+        assert!(auto_opens_pr_tab(Some(&found), false, false));
+        // Found before this session: a closed tab stays closed.
+        assert!(!auto_opens_pr_tab(Some(&found), true, false));
+        // A PR tab is already open in the workspace.
+        assert!(!auto_opens_pr_tab(Some(&found), false, true));
+        assert!(!auto_opens_pr_tab(None, false, false));
+        // A URL or a number alone names a PR; neither is no PR.
+        assert!(has_pull_request(Some(&pr("", Some(3)))));
+        assert!(has_pull_request(Some(&pr("https://x/pull/3", None))));
+        assert!(!has_pull_request(Some(&pr("  ", None))));
+        assert!(!auto_opens_pr_tab(Some(&pr("", None)), false, false));
+    }
     use bachuc_plugin_host::SurfacePresentation;
     use serde_json::json;
 

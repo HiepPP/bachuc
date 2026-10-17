@@ -15,6 +15,7 @@ mod plugin_views;
 mod plugins;
 mod shell;
 mod state;
+mod toast;
 mod workspace_draft;
 
 use gpui_kit::*;

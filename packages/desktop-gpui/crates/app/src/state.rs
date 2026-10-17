@@ -2,8 +2,11 @@
 //! pane keys, workspace order, panel widths, the stored layout, and the command center items.
 //! The views in `shell` read these.
 
-use bachuc_client::{AgentSummary, ClientEvent, HostConfig, ProjectNode, WorkspaceNode};
+use bachuc_client::{
+    AgentSummary, ClientEvent, HostConfig, ProjectNode, WorkspaceNode, WorkspaceScript,
+};
 use bachuc_command::{CommandItem, Shortcut};
+use bachuc_explorer::ShipDefault;
 use bachuc_icons::IconName;
 use bachuc_theme::ThemeChoice;
 use gpui_kit::Hsla;
@@ -89,6 +92,11 @@ pub fn diff_key(cwd: &str, path: &str) -> String {
 /// One all-files diff tab per folder: a second Changes click shows the open tab.
 pub fn all_diffs_key(cwd: &str) -> String {
     format!("diffs:{}", cwd.trim_end_matches('/'))
+}
+
+/// One Pull request tab per folder.
+pub fn pull_request_key(cwd: &str) -> String {
+    format!("pr:{}", cwd.trim_end_matches('/'))
 }
 
 /// One diff tab per file of a commit.
@@ -266,6 +274,150 @@ impl LayoutPrefs {
         std::fs::write(&temp, self.to_json())?;
         std::fs::rename(temp, dir.join(LAYOUT_FILE))
     }
+}
+
+// ----- git ship default -----
+
+/// The git ship default of each repo, by cwd (Q-111), as Electron keeps it per repo.
+const SHIP_DEFAULTS_FILE: &str = "git-ship-defaults.json";
+
+fn ship_defaults(dir: &Path) -> serde_json::Map<String, serde_json::Value> {
+    std::fs::read_to_string(dir.join(SHIP_DEFAULTS_FILE))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default()
+}
+
+/// The saved ship default of a repo. A missing file, entry, or bad value gives `Pr`.
+pub fn load_ship_default(dir: &Path, cwd: &str) -> ShipDefault {
+    match ship_defaults(dir).get(cwd).and_then(|value| value.as_str()) {
+        Some("merge") => ShipDefault::Merge,
+        _ => ShipDefault::Pr,
+    }
+}
+
+/// Saves a repo's ship default and keeps the other repos' entries. Writes through a temp file
+/// and a rename, as `LayoutPrefs::save_to` does.
+pub fn save_ship_default(dir: &Path, cwd: &str, default: ShipDefault) -> std::io::Result<()> {
+    let mut all = ship_defaults(dir);
+    let value = match default {
+        ShipDefault::Pr => "pr",
+        ShipDefault::Merge => "merge",
+    };
+    all.insert(cwd.to_string(), value.into());
+    std::fs::create_dir_all(dir)?;
+    let temp = dir.join(format!("{SHIP_DEFAULTS_FILE}.tmp"));
+    std::fs::write(&temp, serde_json::Value::Object(all).to_string())?;
+    std::fs::rename(temp, dir.join(SHIP_DEFAULTS_FILE))
+}
+
+// ----- workspace scripts -----
+
+/// The state text of a script row: `running` (with its health when known), `exit N` after an
+/// exit, else `stopped`.
+pub fn script_state(script: &WorkspaceScript) -> String {
+    if script.lifecycle == "running" {
+        return match script.health.as_deref() {
+            Some(health) => format!("running, {health}"),
+            None => "running".into(),
+        };
+    }
+    match script.exit_code {
+        Some(code) => format!("exit {code}"),
+        None => "stopped".into(),
+    }
+}
+
+// ----- open in editor -----
+
+/// An app the header's Open in editor button can open the workspace folder in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditorTarget {
+    VsCode,
+    Cursor,
+    Zed,
+    Finder,
+    Terminal,
+}
+
+impl EditorTarget {
+    pub fn label(self) -> &'static str {
+        match self {
+            EditorTarget::VsCode => "VS Code",
+            EditorTarget::Cursor => "Cursor",
+            EditorTarget::Zed => "Zed",
+            EditorTarget::Finder => "Finder",
+            EditorTarget::Terminal => "Terminal",
+        }
+    }
+
+    pub fn icon(self) -> IconName {
+        match self {
+            EditorTarget::VsCode | EditorTarget::Cursor | EditorTarget::Zed => IconName::Code,
+            EditorTarget::Finder => IconName::FolderOpen,
+            EditorTarget::Terminal => IconName::SquareTerminal,
+        }
+    }
+
+    /// The bundle under `/Applications`; Finder and Terminal are system apps that always exist.
+    fn bundle(self) -> Option<&'static str> {
+        match self {
+            EditorTarget::VsCode => Some("/Applications/Visual Studio Code.app"),
+            EditorTarget::Cursor => Some("/Applications/Cursor.app"),
+            EditorTarget::Zed => Some("/Applications/Zed.app"),
+            EditorTarget::Finder | EditorTarget::Terminal => None,
+        }
+    }
+}
+
+/// The targets to list: each editor whose bundle `exists`, then Finder and Terminal.
+pub fn editor_targets(exists: impl Fn(&str) -> bool) -> Vec<EditorTarget> {
+    [
+        EditorTarget::VsCode,
+        EditorTarget::Cursor,
+        EditorTarget::Zed,
+        EditorTarget::Finder,
+        EditorTarget::Terminal,
+    ]
+    .into_iter()
+    .filter(|target| target.bundle().is_none_or(&exists))
+    .collect()
+}
+
+/// The arguments of the macOS `open` command that opens `cwd` in `target`.
+pub fn open_args(target: EditorTarget, cwd: &str) -> Vec<String> {
+    let app = match target {
+        EditorTarget::Finder => return vec![cwd.to_string()],
+        EditorTarget::VsCode => "Visual Studio Code",
+        EditorTarget::Cursor => "Cursor",
+        EditorTarget::Zed => "Zed",
+        EditorTarget::Terminal => "Terminal",
+    };
+    vec!["-a".into(), app.into(), cwd.to_string()]
+}
+
+/// The GitHub page of a remote (`git@github.com:o/r.git`, `https://github.com/o/r`,
+/// `ssh://git@github.com/o/r.git`), at `branch` when known. Other forges give `None`.
+pub fn github_url(remote: &str, branch: Option<&str>) -> Option<String> {
+    let remote = remote.trim();
+    let path = remote
+        .strip_prefix("git@github.com:")
+        .or_else(|| remote.strip_prefix("ssh://git@github.com/"))
+        .or_else(|| remote.strip_prefix("https://github.com/"))
+        .or_else(|| remote.strip_prefix("http://github.com/"))?;
+    let path = path.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let mut parts = path.split('/');
+    let (owner, repo) = (parts.next()?, parts.next()?);
+    if owner.is_empty() || repo.is_empty() || parts.next().is_some() {
+        return None;
+    }
+    let base = format!("https://github.com/{owner}/{repo}");
+    Some(match branch.filter(|branch| !branch.is_empty()) {
+        Some(branch) => format!("{base}/tree/{branch}"),
+        None => base,
+    })
 }
 
 /// `theme.cycle`: Light, then Claude dark, then System.
@@ -628,6 +780,86 @@ mod tests {
             LayoutPrefs::load_from(&dir.join("missing")),
             LayoutPrefs::default()
         );
+    }
+
+    #[test]
+    fn the_ship_default_saves_per_repo_and_a_missing_value_is_pr() {
+        let dir = std::env::temp_dir().join(format!("bachuc-ship-{}", std::process::id()));
+        let _ = std::fs::remove_file(dir.join(SHIP_DEFAULTS_FILE));
+        assert_eq!(load_ship_default(&dir, "/repo/a"), ShipDefault::Pr);
+        save_ship_default(&dir, "/repo/a", ShipDefault::Merge).expect("saves");
+        save_ship_default(&dir, "/repo/b", ShipDefault::Pr).expect("saves");
+        assert_eq!(load_ship_default(&dir, "/repo/a"), ShipDefault::Merge);
+        assert_eq!(load_ship_default(&dir, "/repo/b"), ShipDefault::Pr);
+        assert_eq!(load_ship_default(&dir, "/repo/c"), ShipDefault::Pr);
+        // An unreadable file or a bad value gives the default.
+        std::fs::write(dir.join(SHIP_DEFAULTS_FILE), "not json").expect("writes");
+        assert_eq!(load_ship_default(&dir, "/repo/a"), ShipDefault::Pr);
+        std::fs::write(dir.join(SHIP_DEFAULTS_FILE), r#"{"/repo/a":7}"#).expect("writes");
+        assert_eq!(load_ship_default(&dir, "/repo/a"), ShipDefault::Pr);
+        assert_eq!(
+            load_ship_default(&dir.join("missing"), "/repo/a"),
+            ShipDefault::Pr
+        );
+    }
+
+    #[test]
+    fn a_script_row_shows_its_lifecycle() {
+        let mut script = WorkspaceScript {
+            name: "dev".into(),
+            kind: "service".into(),
+            lifecycle: "stopped".into(),
+            health: None,
+            terminal_id: None,
+            exit_code: None,
+        };
+        assert_eq!(script_state(&script), "stopped");
+        script.exit_code = Some(1);
+        assert_eq!(script_state(&script), "exit 1");
+        script.lifecycle = "running".into();
+        assert_eq!(script_state(&script), "running");
+        script.health = Some("healthy".into());
+        assert_eq!(script_state(&script), "running, healthy");
+    }
+
+    #[test]
+    fn open_in_editor_lists_installed_editors_and_builds_open_args() {
+        let only_zed = editor_targets(|path| path == "/Applications/Zed.app");
+        assert_eq!(
+            only_zed,
+            [
+                EditorTarget::Zed,
+                EditorTarget::Finder,
+                EditorTarget::Terminal
+            ]
+        );
+        assert_eq!(editor_targets(|_| true).len(), 5);
+        assert_eq!(open_args(EditorTarget::Finder, "/w"), ["/w"]);
+        assert_eq!(
+            open_args(EditorTarget::VsCode, "/w"),
+            ["-a", "Visual Studio Code", "/w"]
+        );
+        assert_eq!(
+            open_args(EditorTarget::Terminal, "/w"),
+            ["-a", "Terminal", "/w"]
+        );
+    }
+
+    #[test]
+    fn a_github_remote_gives_its_branch_page() {
+        let tree = Some("https://github.com/o/r/tree/main".to_string());
+        assert_eq!(github_url("git@github.com:o/r.git", Some("main")), tree);
+        assert_eq!(github_url("https://github.com/o/r/", Some("main")), tree);
+        assert_eq!(
+            github_url("ssh://git@github.com/o/r.git", Some("main")),
+            tree
+        );
+        assert_eq!(
+            github_url("https://github.com/o/r.git", None).as_deref(),
+            Some("https://github.com/o/r")
+        );
+        assert_eq!(github_url("git@gitlab.com:o/r.git", Some("main")), None);
+        assert_eq!(github_url("https://github.com/o", None), None);
     }
 
     #[test]
