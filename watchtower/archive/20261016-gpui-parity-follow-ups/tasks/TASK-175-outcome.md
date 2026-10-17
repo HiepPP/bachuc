@@ -2,9 +2,9 @@
 
 ## Status
 
-BLOCKED
+DONE
 
-Blocked: BUILT, UNVERIFIED (Q-109). The code and its tests pass; the swipe gesture and the slide need the owner's hand check on screen.
+The owner checked the Space swipe with a trackpad on 2026-10-17: it passes (Q-109).
 
 ## Changed
 
