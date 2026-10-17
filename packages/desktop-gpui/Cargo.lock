@@ -658,6 +658,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bachuc-history"
+version = "0.1.0"
+dependencies = [
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-theme",
+ "chrono",
+ "gpui-kit",
+]
+
+[[package]]
 name = "bachuc-icons"
 version = "0.1.0"
 dependencies = [
