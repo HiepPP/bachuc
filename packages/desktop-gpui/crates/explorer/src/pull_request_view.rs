@@ -1,7 +1,7 @@
 //! The Pull request pane, as the Electron PR panel draws it (`git/pull-request-panel/pane.tsx`):
 //! a toolbar with View and Refresh, the header with the title, number, state, and repo, the
 //! collapsible Checks section, and the collapsible Activity section with its count pills and the
-//! reviews and comments of the timeline.
+//! reviews and comments of the timeline. Item bodies are Markdown, through gpui-kit's text view.
 //!
 //! The view never polls. It fetches the PR status on creation, on each connection, on Refresh,
 //! and once per 500 ms burst of `GitStatusEvent::Changed` for its folder. The timeline loads only
@@ -18,6 +18,7 @@ use bachuc_theme::metrics::{
     SPACE_0_5, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
 use bachuc_theme::{ShadowSize, Tokens, mono_font_family, shadow, tokens, ui_font_size};
+use gpui_kit::component::text::TextView;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -191,39 +192,61 @@ fn timeline_target(reply: &PrStatusReply) -> Option<TimelineTarget> {
     })
 }
 
-/// `CheckPresentation` of `check-presentation.ts`, without the trait kinds: the client's
-/// `PrCheck` carries no traits.
+/// `CheckPresentation` of `check-presentation.ts`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CheckKind {
+    ActionRequired,
+    Warning,
     Failure,
     Pending,
+    Manual,
     Success,
     Ignored,
 }
 
 /// `PRESENTATION_ORDER`: what the user can act on, then what is running, then the rest.
-const CHECK_ORDER: [CheckKind; 4] = [
+const CHECK_ORDER: [CheckKind; 7] = [
+    CheckKind::ActionRequired,
+    CheckKind::Warning,
     CheckKind::Failure,
     CheckKind::Pending,
+    CheckKind::Manual,
     CheckKind::Success,
     CheckKind::Ignored,
 ];
 
-/// `mapCheckStatus` then `classifyCheck`: an unknown status is pending.
-fn classify_check(status: &str) -> CheckKind {
-    match status {
-        "success" => CheckKind::Success,
-        "failure" => CheckKind::Failure,
-        "skipped" | "cancelled" => CheckKind::Ignored,
-        _ => CheckKind::Pending,
+/// `mapCheckStatus`: a status outside the five known ones is pending.
+fn is_pending_status(status: &str) -> bool {
+    !matches!(status, "success" | "failure" | "skipped" | "cancelled")
+}
+
+/// `classifyCheck`: a known trait wins over the status.
+fn classify_check(check: &PrCheck) -> CheckKind {
+    let has = |name: &str| check.traits.iter().any(|t| t == name);
+    if has("action_required") {
+        CheckKind::ActionRequired
+    } else if has("warning") {
+        CheckKind::Warning
+    } else if has("manual") {
+        CheckKind::Manual
+    } else {
+        match check.status.as_str() {
+            "success" => CheckKind::Success,
+            "failure" => CheckKind::Failure,
+            "skipped" | "cancelled" => CheckKind::Ignored,
+            _ => CheckKind::Pending,
+        }
     }
 }
 
 /// `PRESENTATION_NOUN`.
 fn check_noun(kind: CheckKind) -> &'static str {
     match kind {
+        CheckKind::ActionRequired => "needs action",
+        CheckKind::Warning => "warning",
         CheckKind::Failure => "failing",
         CheckKind::Pending => "in progress",
+        CheckKind::Manual => "manual",
         CheckKind::Success => "successful",
         CheckKind::Ignored => "skipped",
     }
@@ -231,6 +254,16 @@ fn check_noun(kind: CheckKind) -> &'static str {
 
 fn count_noun(count: usize) -> &'static str {
     if count == 1 { "check" } else { "checks" }
+}
+
+/// `formatCheckTiming`: a running check says so, and no duration shows nothing.
+fn check_timing(duration: Option<&str>, status: &str) -> Option<String> {
+    let duration = duration.filter(|duration| !duration.is_empty())?;
+    Some(if is_pending_status(status) {
+        format!("running {duration}")
+    } else {
+        duration.to_string()
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -244,7 +277,7 @@ struct ChecksGroup {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ChecksSummary {
-    /// `None` when there are no checks.
+    /// `None` when there are no checks. `Failure` also stands for a warning.
     outcome: Option<CheckKind>,
     headline: &'static str,
     /// For example "2 failing, 1 successful checks"; empty with no checks.
@@ -254,10 +287,7 @@ struct ChecksSummary {
 
 /// `summarizeChecks`: the headline names the worst outcome, and the groups follow `CHECK_ORDER`.
 fn summarize_checks(checks: &[PrCheck]) -> ChecksSummary {
-    let kinds: Vec<CheckKind> = checks
-        .iter()
-        .map(|check| classify_check(&check.status))
-        .collect();
+    let kinds: Vec<CheckKind> = checks.iter().map(classify_check).collect();
     let mut groups = Vec::new();
     let mut parts = Vec::new();
     for kind in CHECK_ORDER {
@@ -273,17 +303,21 @@ fn summarize_checks(checks: &[PrCheck]) -> ChecksSummary {
             checks: matching,
         });
     }
+    // `selectOutcome`: a failure outranks anything still running.
     let outcome = if kinds.is_empty() {
         None
-    } else if kinds.contains(&CheckKind::Failure) {
+    } else if kinds.contains(&CheckKind::ActionRequired) {
+        Some(CheckKind::ActionRequired)
+    } else if kinds.contains(&CheckKind::Failure) || kinds.contains(&CheckKind::Warning) {
         Some(CheckKind::Failure)
-    } else if kinds.contains(&CheckKind::Pending) {
+    } else if checks.iter().any(|check| is_pending_status(&check.status)) {
         Some(CheckKind::Pending)
     } else {
         Some(CheckKind::Success)
     };
     let headline = match outcome {
         None => "No checks",
+        Some(CheckKind::ActionRequired) => "Some checks need your attention",
         Some(CheckKind::Failure) => "Some checks were not successful",
         Some(CheckKind::Pending) => "Some checks haven't completed yet",
         Some(_) => "All checks have passed",
@@ -298,6 +332,64 @@ fn summarize_checks(checks: &[PrCheck]) -> ChecksSummary {
         headline,
         detail,
         groups,
+    }
+}
+
+/// The ring geometry of `checks-ring.tsx`, in a 20-unit box scaled to the drawn size.
+const RING_VIEW_BOX: f32 = 20.;
+const RING_STROKE: f32 = 3.;
+const RING_RADIUS: f32 = (RING_VIEW_BOX - RING_STROKE) / 2.;
+const RING_CIRCUMFERENCE: f32 = 2. * std::f32::consts::PI * RING_RADIUS;
+/// The blank arc between two segments.
+const RING_SEGMENT_GAP: f32 = 2.;
+/// The shortest segment, so one failure among twenty checks still shows.
+const RING_MIN_SEGMENT: f32 = 1.5;
+/// Line pieces per full circle of a drawn arc.
+const RING_ARC_STEPS: f32 = 64.;
+
+/// One painted arc of the ring, in view-box units along the circle from twelve o'clock.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RingSegment {
+    kind: CheckKind,
+    dash: f32,
+    offset: f32,
+}
+
+/// `buildSegments`: each group gets a share of the circle, clockwise from twelve. The gap comes
+/// out of the painted arc, so the shares still fill the circle; a single group owns all of it.
+fn ring_segments(groups: &[ChecksGroup]) -> Vec<RingSegment> {
+    let total: usize = groups.iter().map(|group| group.checks.len()).sum();
+    let mut offset = 0.;
+    groups
+        .iter()
+        .map(|group| {
+            let arc = group.checks.len() as f32 / total as f32 * RING_CIRCUMFERENCE;
+            let dash = if groups.len() == 1 {
+                RING_CIRCUMFERENCE
+            } else {
+                (arc - RING_SEGMENT_GAP).max(RING_MIN_SEGMENT)
+            };
+            let segment = RingSegment {
+                kind: group.kind,
+                dash,
+                offset,
+            };
+            offset += arc;
+            segment
+        })
+        .collect()
+}
+
+/// The ring palette of `checks-ring.tsx`.
+fn ring_color(kind: CheckKind, colors: &Tokens) -> Hsla {
+    match kind {
+        CheckKind::ActionRequired | CheckKind::Warning | CheckKind::Pending => {
+            colors.status_warning
+        }
+        CheckKind::Failure => colors.status_danger,
+        CheckKind::Manual => colors.foreground_muted,
+        CheckKind::Success => colors.status_success,
+        CheckKind::Ignored => colors.foreground_extra_muted,
     }
 }
 
@@ -808,13 +900,7 @@ impl PullRequestView {
         } else {
             format!("{}. {}", summary.headline, summary.detail)
         };
-        let outcome_icon = match summary.outcome {
-            Some(kind) => check_icon(kind, ICON_LG, &colors),
-            None => icon(IconName::CircleSlash)
-                .with_size(px(ICON_LG))
-                .text_color(colors.foreground_extra_muted)
-                .into_any_element(),
-        };
+        let ring = checks_ring(&summary.groups, ICON_LG, &colors);
         let header = self
             .pressable("pr-view-checks-header", label, cx, |this, cx| {
                 this.checks_open = !this.checks_open;
@@ -825,7 +911,7 @@ impl PullRequestView {
             .gap(px(SPACE_2))
             .p(px(SPACE_3))
             .hover(move |style| style.bg(colors.surface_sidebar_hover))
-            .child(outcome_icon)
+            .child(ring)
             .child(
                 v_flex()
                     .flex_1()
@@ -950,6 +1036,17 @@ impl PullRequestView {
                     .child(workflow),
             )
         })
+        .when_some(
+            check_timing(check.duration.as_deref(), &check.status),
+            |this, timing| {
+                this.child(
+                    self.text(FONT_SM, colors.foreground_muted, cx)
+                        .ml_auto()
+                        .flex_shrink_0()
+                        .child(timing),
+                )
+            },
+        )
         .into_any_element()
     }
 
@@ -1168,6 +1265,7 @@ impl PullRequestView {
             return card.mb(px(SPACE_2)).child(header).into_any_element();
         }
         let text_size = ui_font_size(FONT_BASE, cx);
+        let view = cx.weak_entity();
         card.mb(px(SPACE_3))
             .border_1()
             .border_color(colors.border)
@@ -1195,8 +1293,21 @@ impl PullRequestView {
                                 .text_size(text_size)
                                 .line_height(text_size * TEXT_LINE_FACTOR)
                                 .text_color(colors.foreground)
-                                .whitespace_normal()
-                                .child(body.clone()),
+                                .child(
+                                    TextView::markdown(
+                                        ElementId::Name(
+                                            format!("pr-view-item-body-{index}").into(),
+                                        ),
+                                        body.clone(),
+                                    )
+                                    .text_size(text_size)
+                                    .on_link_click(
+                                        move |href, _, _, cx| {
+                                            let url = href.to_string();
+                                            view.update(cx, |this, cx| this.open_url(url, cx)).ok();
+                                        },
+                                    ),
+                                ),
                         ),
                 )
             })
@@ -1397,11 +1508,15 @@ fn disclosure(open: bool, size: f32, colors: &Tokens) -> AnyElement {
     .into_any_element()
 }
 
-/// `CHECK_PRESENTATION_VIEW_POLICY`.
+/// `CHECK_PRESENTATION_VIEW_POLICY`. The manual kinds draw the Settings gear, because the icon
+/// set has no `ManualStatusIcon`.
 fn check_icon(kind: CheckKind, size: f32, colors: &Tokens) -> AnyElement {
     let (glyph, color) = match kind {
         CheckKind::Success => (IconName::CircleCheck, colors.status_success),
         CheckKind::Failure => (IconName::CircleX, colors.status_danger),
+        CheckKind::Warning => (IconName::CircleX, colors.status_warning),
+        CheckKind::ActionRequired => (IconName::Settings, colors.status_warning),
+        CheckKind::Manual => (IconName::Settings, colors.foreground_muted),
         CheckKind::Pending => (IconName::CircleDot, colors.status_warning),
         CheckKind::Ignored => (IconName::CircleSlash, colors.foreground_muted),
     };
@@ -1409,6 +1524,62 @@ fn check_icon(kind: CheckKind, size: f32, colors: &Tokens) -> AnyElement {
         .flex_shrink_0()
         .child(icon(glyph).with_size(px(size)).text_color(color))
         .into_any_element()
+}
+
+/// `ChecksRing`: the track, then one arc per check group in `CHECK_ORDER`, clockwise from
+/// twelve. With no checks only the track shows.
+fn checks_ring(groups: &[ChecksGroup], size: f32, colors: &Tokens) -> AnyElement {
+    let track = colors.surface3;
+    let arcs: Vec<(Hsla, f32, f32)> = ring_segments(groups)
+        .into_iter()
+        .map(|segment| {
+            let turn = 2. * std::f32::consts::PI / RING_CIRCUMFERENCE;
+            (
+                ring_color(segment.kind, colors),
+                -std::f32::consts::FRAC_PI_2 + segment.offset * turn,
+                segment.dash * turn,
+            )
+        })
+        .collect();
+    let scale = size / RING_VIEW_BOX;
+    let ring = canvas(
+        |_, _, _| (),
+        move |bounds, (), window, _| {
+            let center = bounds.center();
+            window.paint_quad(quad(
+                Bounds::centered_at(center, gpui_kit::size(px(size), px(size))),
+                Corners::all(px(size / 2.)),
+                transparent_black(),
+                Edges::all(px(RING_STROKE * scale)),
+                track,
+                BorderStyle::Solid,
+            ));
+            let radius = RING_RADIUS * scale;
+            for &(color, start, sweep) in &arcs {
+                let steps = (RING_ARC_STEPS * sweep / (2. * std::f32::consts::PI))
+                    .ceil()
+                    .max(1.) as usize;
+                let mut path = PathBuilder::stroke(px(RING_STROKE * scale));
+                for step in 0..=steps {
+                    let angle = start + sweep * step as f32 / steps as f32;
+                    let at = point(
+                        center.x + px(radius * angle.cos()),
+                        center.y + px(radius * angle.sin()),
+                    );
+                    if step == 0 {
+                        path.move_to(at);
+                    } else {
+                        path.line_to(at);
+                    }
+                }
+                if let Ok(path) = path.build() {
+                    window.paint_path(path, color);
+                }
+            }
+        },
+    )
+    .size(px(size));
+    div().flex_shrink_0().child(ring).into_any_element()
 }
 
 fn skeleton_bar(width: impl Into<Length> + Clone, height: f32, colors: &Tokens) -> Div {
@@ -1528,10 +1699,13 @@ impl Render for PullRequestView {
 mod tests {
     // Not `use super::*`: the glob of `gpui_kit::*` brings GPUI's `test` macro.
     use super::{
-        CheckKind, CountPills, PrState, RefreshGate, TimelineTarget, comment_location, count_pills,
-        format_age, pr_state, state_label, summarize_checks, timeline_target, visible_activity,
+        CheckKind, CountPills, PrState, RING_CIRCUMFERENCE, RING_MIN_SEGMENT, RING_SEGMENT_GAP,
+        RefreshGate, TimelineTarget, check_timing, comment_location, count_pills, format_age,
+        pr_state, ring_color, ring_segments, state_label, summarize_checks, timeline_target,
+        visible_activity,
     };
     use bachuc_client::{PrCheck, PrMergeCapability, PrStatus, PrStatusReply, PrTimelineItem};
+    use bachuc_theme::Tokens;
 
     fn status() -> PrStatus {
         PrStatus {
@@ -1738,6 +1912,120 @@ mod tests {
         assert_eq!(passed.headline, "All checks have passed");
         let running = summarize_checks(&[check("success"), check("pending")]);
         assert_eq!(running.headline, "Some checks haven't completed yet");
+    }
+
+    fn with_traits(status: &str, traits: &[&str]) -> PrCheck {
+        PrCheck {
+            traits: traits.iter().map(|t| t.to_string()).collect(),
+            ..check(status)
+        }
+    }
+
+    #[test]
+    fn pull_request_checks_traits_win_over_the_status() {
+        let checks = vec![
+            with_traits("success", &["manual"]),
+            with_traits("failure", &["warning"]),
+            with_traits("pending", &["action_required"]),
+            with_traits("success", &["unknown"]),
+        ];
+        let summary = summarize_checks(&checks);
+        let kinds: Vec<CheckKind> = summary.groups.iter().map(|group| group.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                CheckKind::ActionRequired,
+                CheckKind::Warning,
+                CheckKind::Manual,
+                CheckKind::Success
+            ]
+        );
+        assert_eq!(summary.outcome, Some(CheckKind::ActionRequired));
+        assert_eq!(summary.headline, "Some checks need your attention");
+        assert_eq!(
+            summary.detail,
+            "1 needs action, 1 warning, 1 manual, 1 successful checks"
+        );
+        let warned = summarize_checks(&[with_traits("success", &["warning"]), check("pending")]);
+        assert_eq!(warned.headline, "Some checks were not successful");
+        // A manual check that is still pending keeps the run in progress, as `selectOutcome`.
+        let manual = summarize_checks(&[with_traits("pending", &["manual"])]);
+        assert_eq!(manual.headline, "Some checks haven't completed yet");
+    }
+
+    #[test]
+    fn pull_request_ring_segments_follow_the_groups() {
+        let checks = vec![
+            check("success"),
+            check("success"),
+            check("failure"),
+            check("success"),
+            check("pending"),
+        ];
+        let segments = ring_segments(&summarize_checks(&checks).groups);
+        let kinds: Vec<CheckKind> = segments.iter().map(|segment| segment.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![CheckKind::Failure, CheckKind::Pending, CheckKind::Success]
+        );
+        let share = RING_CIRCUMFERENCE / 5.;
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-3;
+        assert!(close(segments[0].offset, 0.));
+        assert!(close(segments[0].dash, share - RING_SEGMENT_GAP));
+        assert!(close(segments[1].offset, share));
+        assert!(close(segments[2].offset, 2. * share));
+        assert!(close(segments[2].dash, 3. * share - RING_SEGMENT_GAP));
+
+        let colors = Tokens::light();
+        let painted: Vec<_> = segments
+            .iter()
+            .map(|segment| ring_color(segment.kind, &colors))
+            .collect();
+        assert_eq!(
+            painted,
+            vec![
+                colors.status_danger,
+                colors.status_warning,
+                colors.status_success
+            ]
+        );
+        assert_eq!(
+            ring_color(CheckKind::Ignored, &colors),
+            colors.foreground_extra_muted
+        );
+        assert_eq!(
+            ring_color(CheckKind::Manual, &colors),
+            colors.foreground_muted
+        );
+
+        // One group owns the whole circle with no gap; a tiny share keeps the minimum arc.
+        let single = ring_segments(&summarize_checks(&[check("success")]).groups);
+        assert_eq!(single.len(), 1);
+        assert!(close(single[0].dash, RING_CIRCUMFERENCE));
+        let mut many: Vec<PrCheck> = (0..40).map(|_| check("success")).collect();
+        many.push(check("failure"));
+        let tiny = ring_segments(&summarize_checks(&many).groups);
+        assert!(close(tiny[0].dash, RING_MIN_SEGMENT));
+        assert!(ring_segments(&[]).is_empty());
+    }
+
+    #[test]
+    fn pull_request_check_duration() {
+        assert_eq!(
+            check_timing(Some("2m 5s"), "success").as_deref(),
+            Some("2m 5s")
+        );
+        assert_eq!(check_timing(Some("40s"), "failure").as_deref(), Some("40s"));
+        assert_eq!(
+            check_timing(Some("1m"), "pending").as_deref(),
+            Some("running 1m")
+        );
+        assert_eq!(
+            check_timing(Some("1m"), "queued").as_deref(),
+            Some("running 1m")
+        );
+        assert_eq!(check_timing(None, "success"), None);
+        assert_eq!(check_timing(Some(""), "pending"), None);
     }
 
     #[test]
