@@ -78,7 +78,7 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Electron draws the stop button with `palette.red[600]` in every theme. The theme crate carries
 /// that value only as the light terminal red (`ansi[1]`), which is a different role.
@@ -100,6 +100,13 @@ const FOOTER_HEIGHT: f32 = 75.;
 const LOCKED_OPACITY: f32 = 0.6;
 /// The stop glyph the plugin face gets: the toolbar glyph size.
 const TOOLBAR_GLYPH: f32 = 14.;
+/// `FileDropBackdrop`: the overlay fades in and out over 150 ms.
+const DROP_FADE: Duration = Duration::from_millis(150);
+/// `FileDropBackdrop`: `surface0` at 0.7 behind a 32 px Upload glyph and the text.
+const DROP_BACKDROP_OPACITY: f32 = 0.7;
+const DROP_GLYPH: f32 = 32.;
+/// `composer.attachments.dropFilesHere` in `packages/app/src/i18n/resources/en.ts`.
+const DROP_FILES_HERE: &str = "Drop files here";
 
 /// What a `Composer` tells its owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -276,6 +283,50 @@ impl DraftState {
     }
 }
 
+/// The "Drop files here" overlay: on while a Finder drag is over the composer, faded by opacity.
+/// GPUI has no per-element leave event, so the composer sets it from each drag move, and clears
+/// it on a drop and in render once the drag has ended.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct DropOverlay {
+    over: bool,
+    /// The opacity when `over` last changed.
+    from: f32,
+    /// When `over` last changed; `None` once the fade is done.
+    since: Option<Instant>,
+}
+
+impl DropOverlay {
+    /// Sets the drag state. Returns true when it changed, so the view renders only then.
+    fn set_over(&mut self, over: bool, now: Instant) -> bool {
+        if over == self.over {
+            return false;
+        }
+        self.from = self.opacity(now);
+        self.over = over;
+        self.since = Some(now);
+        true
+    }
+
+    fn opacity(&self, now: Instant) -> f32 {
+        let target = if self.over { 1. } else { 0. };
+        let Some(since) = self.since else {
+            return target;
+        };
+        let t = now.saturating_duration_since(since).as_secs_f32() / DROP_FADE.as_secs_f32();
+        self.from + (target - self.from) * t.min(1.)
+    }
+
+    fn fading(&self, now: Instant) -> bool {
+        self.since
+            .is_some_and(|since| now.saturating_duration_since(since) < DROP_FADE)
+    }
+}
+
+/// A drag move is over the composer when it is inside the drop zone and a drop would attach.
+fn drag_over(bounds: Bounds<Pixels>, position: Point<Pixels>, accepts: bool) -> bool {
+    accepts && bounds.contains(&position)
+}
+
 /// An attachment the composer sends as given, such as a fork's chat history.
 struct RawAttachment {
     label: String,
@@ -339,6 +390,7 @@ pub struct Composer {
     processing: bool,
     /// A stop press waits for the agent to leave the running status.
     cancelling: bool,
+    drop: DropOverlay,
     picker: Option<Picker>,
     popovers: PopoverViews,
     _subscriptions: Vec<Subscription>,
@@ -513,6 +565,7 @@ impl Composer {
             plugin_chips: Vec::new(),
             processing: false,
             cancelling: false,
+            drop: DropOverlay::default(),
             picker: None,
             popovers: PopoverViews::default(),
             _subscriptions: subscriptions,
@@ -1271,6 +1324,72 @@ impl Composer {
             });
         })
         .detach();
+    }
+
+    /// A Finder drag moved somewhere in the window: the overlay shows while it is over the
+    /// composer and a drop would attach.
+    fn drag_move(&mut self, event: &DragMoveEvent<ExternalPaths>, cx: &mut Context<Self>) {
+        let accepts = !self.processing && !self.locked();
+        let over = drag_over(event.bounds, event.event.position, accepts);
+        if self.drop.set_over(over, Instant::now()) {
+            cx.notify();
+        }
+    }
+
+    /// `FileDropBackdrop`, faded by opacity. It has no listeners, so it takes no hitbox and the
+    /// root `on_drop` still gets the drop. `None` once it has faded out.
+    fn drop_backdrop(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Div> {
+        if self.drop.since.is_none() && !self.drop.over {
+            return None;
+        }
+        let now = Instant::now();
+        // A drag that left the window or ended clears the active drag and refreshes.
+        if !cx.has_active_drag() {
+            self.drop.set_over(false, now);
+        }
+        if self.drop.fading(now) {
+            window.request_animation_frame();
+        } else {
+            self.drop.since = None;
+            if !self.drop.over {
+                return None;
+            }
+        }
+        let t = tokens(cx);
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .opacity(self.drop.opacity(now))
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(t.surface0)
+                        .opacity(DROP_BACKDROP_OPACITY),
+                )
+                .child(
+                    v_flex()
+                        .items_center()
+                        .gap(px(SPACE_2))
+                        .child(
+                            icon(IconName::Upload)
+                                .with_size(px(DROP_GLYPH))
+                                .text_color(t.foreground),
+                        )
+                        .child(
+                            div()
+                                .text_size(ui_font_size(FONT_BASE, cx))
+                                .line_height(relative(1.2))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(t.foreground)
+                                .child(DROP_FILES_HERE),
+                        ),
+                ),
+        )
     }
 
     /// Enter picks a menu row, or sends. Cmd+Enter (`secondary`) queues during a run. The
@@ -2906,6 +3025,7 @@ impl Render for Composer {
             .primary(self.primary_button(&index, window, cx));
         let picker = self.picker_list(cx);
         let mention_menu = self.mention_menu(cx);
+        let drop_backdrop = self.drop_backdrop(window, cx);
 
         // `inputAreaContainer`: 16 px at the sides and bottom, the content centered at 820 px.
         div()
@@ -2915,8 +3035,15 @@ impl Render for Composer {
             .justify_center()
             .px(px(SPACE_4))
             .pb(px(SPACE_4))
+            .relative()
             .when(self.locked(), |area| area.opacity(LOCKED_OPACITY))
+            .on_drag_move::<ExternalPaths>(
+                cx.listener(|this, event, _, cx| this.drag_move(event, cx)),
+            )
             .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                if this.drop.set_over(false, Instant::now()) {
+                    cx.notify();
+                }
                 this.drop_paths(paths.paths(), window, cx)
             }))
             .child(
@@ -2937,6 +3064,7 @@ impl Render for Composer {
                             .child(card),
                     ),
             )
+            .children(drop_backdrop)
     }
 }
 
@@ -2944,8 +3072,9 @@ impl Render for Composer {
 mod tests {
     // Named imports: `use super::*` would bring in GPUI's `test` macro over `#[test]`.
     use super::{
-        DraftPrimary, FOCUS_ACTION, LOCKED_OPACITY, Watched, draft_primary, focus_hint,
-        outgoing_text, restore_after_error, send_error_text, snapshot_changed,
+        DROP_FADE, DraftPrimary, DropOverlay, FOCUS_ACTION, LOCKED_OPACITY, Watched, draft_primary,
+        drag_over, focus_hint, outgoing_text, restore_after_error, send_error_text,
+        snapshot_changed,
     };
     use crate::draft::{DraftOptions, SubmitIcon};
     use bachuc_client::{
@@ -2953,6 +3082,8 @@ mod tests {
         SubagentKind, SubagentRow, TaskEntry, TaskStatus, TurnMetrics,
     };
     use bachuc_command::default_shortcuts;
+    use gpui_kit::{Bounds, point, px, size};
+    use std::time::{Duration, Instant};
 
     fn fast_mode(value: bool) -> AgentFeature {
         AgentFeature {
@@ -3128,5 +3259,45 @@ mod tests {
         };
         assert_eq!(draft_primary(&strict, false, false), DraftPrimary::None);
         assert_eq!(LOCKED_OPACITY, 0.6);
+    }
+
+    #[test]
+    fn the_drop_overlay_fades_in_over_the_composer_and_out_on_leave_or_drop() {
+        let zone = Bounds::new(point(px(0.), px(500.)), size(px(800.), px(120.)));
+        let inside = point(px(400.), px(560.));
+        let outside = point(px(400.), px(200.));
+        assert!(drag_over(zone, inside, true));
+        assert!(!drag_over(zone, outside, true));
+        // A drop while the composer submits is ignored, so no overlay.
+        assert!(!drag_over(zone, inside, false));
+
+        let start = Instant::now();
+        let half = start + DROP_FADE / 2;
+        let done = start + DROP_FADE;
+        let mut overlay = DropOverlay::default();
+        assert_eq!(overlay.opacity(start), 0.);
+        // Inside: it fades in over 150 ms. Further moves inside change nothing, so no render.
+        assert!(overlay.set_over(drag_over(zone, inside, true), start));
+        assert!(!overlay.set_over(drag_over(zone, inside, true), half));
+        assert_eq!(overlay.opacity(start), 0.);
+        assert!((overlay.opacity(half) - 0.5).abs() < 0.01);
+        assert!(overlay.fading(half));
+        assert_eq!(overlay.opacity(done), 1.);
+        assert!(!overlay.fading(done));
+
+        // Outside: it fades out from where it is.
+        let left = done + Duration::from_millis(10);
+        assert!(overlay.set_over(drag_over(zone, outside, true), left));
+        assert_eq!(overlay.opacity(left), 1.);
+        assert_eq!(overlay.opacity(left + DROP_FADE), 0.);
+
+        // Back inside, then a drop halfway through the fade in: it fades out from 0.5.
+        let back = left + DROP_FADE * 2;
+        assert!(overlay.set_over(true, back));
+        let dropped = back + DROP_FADE / 2;
+        assert!(overlay.set_over(false, dropped));
+        assert!((overlay.opacity(dropped) - 0.5).abs() < 0.01);
+        assert_eq!(overlay.opacity(dropped + DROP_FADE), 0.);
+        assert!(!overlay.fading(dropped + DROP_FADE));
     }
 }
