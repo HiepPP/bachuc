@@ -13,6 +13,7 @@ pub mod grouping;
 mod image_view;
 pub mod links;
 pub mod markdown;
+pub mod outline;
 mod plugin_view;
 pub mod plugins;
 mod tool_view;
@@ -57,6 +58,7 @@ use grouping::{
 };
 use image_view::ImageLoad;
 use markdown::{Block, Segment};
+use outline::{JumpPlan, OutlineEvent, OutlineRail};
 use plugin_view::{PendingReveal, Selection};
 use plugins::{Part, ProjectInput, Projector, StepPart};
 
@@ -337,6 +339,20 @@ pub struct TimelineView {
     fork_menu_dismissed: Option<(u64, Instant)>,
     /// A fork runs: the app set it, and every fork trigger is disabled.
     fork_pending: bool,
+    /// The Chat outline rail, a view of its own so a hover or a scroll redraws it alone.
+    outline: Entity<OutlineRail>,
+    /// Whether the timeline was wide enough for the rail at the last paint.
+    outline_wide: Rc<Cell<bool>>,
+    /// Whether the prompt index is wanted: the host lists prompts and the setting is on.
+    prompts_enabled: bool,
+    /// The timeline epoch and the latest prompt seq the index was last requested for.
+    prompt_key: Option<(Option<String>, Option<u64>)>,
+    prompt_request: u64,
+    prompt_fetch: Option<Task<()>>,
+    /// Entries scanned for the latest prompt, and that prompt's seq.
+    prompt_scan: (usize, Option<u64>),
+    /// A prompt the reader picked that waits for older pages to load.
+    pending_jump: Option<u64>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -364,10 +380,16 @@ impl TimelineView {
         list.set_follow_mode(FollowMode::Tail);
         let view = cx.entity().downgrade();
         list.set_scroll_handler(move |event, _, cx| {
-            if event.visible_range.start < LOAD_OLDER_WITHIN {
-                let _ = view.update(cx, |this, cx| this.load_older(cx));
-            }
+            let top = event.visible_range.start;
+            let _ = view.update(cx, |this, cx| {
+                if top < LOAD_OLDER_WITHIN {
+                    this.load_older(cx);
+                }
+                this.report_reading_position(top, cx);
+            });
         });
+        let bounds = Rc::new(Cell::new(Bounds::default()));
+        let outline = cx.new(|_| OutlineRail::new(bounds.clone()));
 
         let host = bachuc_plugin_host::host(cx);
         let mut subscriptions = vec![
@@ -402,6 +424,9 @@ impl TimelineView {
                 this.markdown_style.borrow_mut().take();
                 this.list.remeasure();
                 cx.notify();
+            }),
+            cx.subscribe(&outline, |this, _, event: &OutlineEvent, cx| match event {
+                OutlineEvent::Jump(seq) => this.jump_to_prompt(*seq, cx),
             }),
             cx.on_release(|this, cx| {
                 let agent_id = this.agent_id.clone();
@@ -463,7 +488,7 @@ impl TimelineView {
             workspace_id: None,
             plugin_views: HashMap::new(),
             selection: None,
-            bounds: Rc::new(Cell::new(Bounds::default())),
+            bounds,
             corner_reserve: px(0.),
             toolbar_size: Rc::new(Cell::new(Size::default())),
             pending_reveal: None,
@@ -471,6 +496,14 @@ impl TimelineView {
             fork_menu: None,
             fork_menu_dismissed: None,
             fork_pending: false,
+            outline,
+            outline_wide: Rc::new(Cell::new(false)),
+            prompts_enabled: false,
+            prompt_key: None,
+            prompt_request: 0,
+            prompt_fetch: None,
+            prompt_scan: (0, None),
+            pending_jump: None,
             _subscriptions: subscriptions,
         };
         this.sync(cx);
@@ -569,6 +602,139 @@ impl TimelineView {
         let agent_id = self.agent_id.clone();
         self.client
             .update(cx, |client, cx| client.load_older(&agent_id, cx));
+    }
+
+    /// Tells the rail which seq the reader is at, from the list row at `top`.
+    fn report_reading_position(&mut self, top: usize, cx: &mut Context<Self>) {
+        let rows = &self.rows;
+        let anchor = outline::reading_anchor(top, rows.len(), |index| rows[index].anchor);
+        self.outline
+            .update(cx, |rail, cx| rail.set_anchor(anchor, cx));
+    }
+
+    /// `report_reading_position` for the row at the top of the list now. A list that follows the
+    /// tail shows the end.
+    fn report_current_position(&mut self, cx: &mut Context<Self>) {
+        let top = if self.list.is_following_tail() {
+            self.rows.len()
+        } else {
+            self.list.logical_scroll_top().item_ix
+        };
+        self.report_reading_position(top, cx);
+    }
+
+    /// Whether the rail's prompt index is wanted: the host lists prompts and Settings keep the
+    /// outline on.
+    fn outline_enabled(&self, cx: &App) -> bool {
+        bachuc_theme::chat_outline(cx) && self.client.read(cx).prompt_index_supported()
+    }
+
+    /// The seq of the latest user prompt among the entries. Only entries added since the last
+    /// call are read, unless the entries shifted.
+    fn latest_prompt_seq(&mut self) -> Option<u64> {
+        let (scanned, latest) = self.prompt_scan;
+        let (from, mut latest) = if self.grouper.shifted() || scanned > self.entries.len() {
+            (0, None)
+        } else {
+            (scanned, latest)
+        };
+        for index in from..self.entries.len() {
+            if self.grouper.is_user(index) {
+                latest = Some(entry_key(&self.entries[index]));
+            }
+        }
+        self.prompt_scan = (self.entries.len(), latest);
+        latest
+    }
+
+    /// Requests the prompt index when the timeline epoch or the latest prompt changed, and clears
+    /// it when the outline is off.
+    fn refresh_prompts(&mut self, cx: &mut Context<Self>) {
+        if !self.outline_enabled(cx) {
+            if self.prompts_enabled || self.prompt_key.is_some() {
+                self.prompts_enabled = false;
+                self.prompt_key = None;
+                self.prompt_fetch = None;
+                self.prompt_request += 1;
+                self.outline
+                    .update(cx, |rail, cx| rail.set_prompts(Vec::new(), cx));
+            }
+            return;
+        }
+        self.prompts_enabled = true;
+        let epoch = self
+            .client
+            .read(cx)
+            .timeline_epoch(&self.agent_id)
+            .map(str::to_string);
+        let key = (epoch, self.latest_prompt_seq());
+        if self.prompt_key.as_ref() == Some(&key) {
+            return;
+        }
+        if self.prompt_key.as_ref().is_some_and(|old| old.0 != key.0) {
+            self.outline
+                .update(cx, |rail, cx| rail.set_prompts(Vec::new(), cx));
+        }
+        self.prompt_key = Some(key);
+        self.prompt_request += 1;
+        let request = self.prompt_request;
+        let agent_id = self.agent_id.clone();
+        let reply = self
+            .client
+            .update(cx, |client, cx| client.list_prompts(&agent_id, cx));
+        self.prompt_fetch = Some(cx.spawn(async move |this, cx| {
+            let result = reply.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.prompt_request != request {
+                    return;
+                }
+                match result {
+                    Ok(index) => {
+                        let epoch = this.client.read(cx).timeline_epoch(&this.agent_id);
+                        if outline::accept_prompt_index_epoch(epoch, &index.epoch) {
+                            this.outline
+                                .update(cx, |rail, cx| rail.set_prompts(index.prompts, cx));
+                        }
+                    }
+                    Err(error) => log::warn!("Failed to list the prompts: {error}"),
+                }
+            });
+        }));
+    }
+
+    /// A pick on the rail. A prompt older than the loaded window loads older pages, one per
+    /// sync, until its entry is loaded; then the list scrolls to it.
+    fn jump_to_prompt(&mut self, seq: u64, cx: &mut Context<Self>) {
+        self.pending_jump = Some(seq);
+        self.advance_jump(cx);
+    }
+
+    fn advance_jump(&mut self, cx: &mut Context<Self>) {
+        let Some(seq) = self.pending_jump else {
+            return;
+        };
+        let is_loaded = self
+            .entries
+            .iter()
+            .any(|entry| entry_key(entry) == seq && item_type(entry) == "user_message");
+        match outline::plan_prompt_jump(is_loaded, self.has_older) {
+            JumpPlan::Scroll => {
+                self.pending_jump = None;
+                let row = self.rows.iter().position(|row| {
+                    matches!(row.kind, RowKind::Entry(_)) && row.anchor == Some(seq)
+                });
+                if let Some(row) = row {
+                    self.list.scroll_to(ListOffset {
+                        item_ix: row,
+                        offset_in_item: px(0.),
+                    });
+                    self.report_reading_position(row, cx);
+                    cx.notify();
+                }
+            }
+            JumpPlan::LoadOlder => self.load_older(cx),
+            JumpPlan::Abandon => self.pending_jump = None,
+        }
     }
 
     /// Reads the client's timeline and updates the rows that changed.
@@ -729,6 +895,9 @@ impl TimelineView {
             }
         }
         self.apply_rows(rows);
+        self.advance_jump(cx);
+        self.report_current_position(cx);
+        self.refresh_prompts(cx);
         self.update_clock(cx);
         self.synced_at = Some(Instant::now());
         self.run_pending_reveal(cx);
@@ -2317,12 +2486,36 @@ impl Render for TimelineView {
         };
         let lightbox = self.render_lightbox(cx);
         let bounds = self.bounds.clone();
-        // Records where the timeline is, so the selection toolbar can stay inside it.
-        let measure = canvas(move |area, _, _| bounds.set(area), |_, _, _, _| {})
-            .absolute()
-            .size_full();
+        let outline_wide = self.outline_wide.clone();
+        let outline = self.outline.downgrade();
+        // Records where the timeline is, so the selection toolbar can stay inside it, and
+        // redraws the rail when the timeline crosses the width the rail needs.
+        let measure = canvas(
+            move |area, _, cx| {
+                bounds.set(area);
+                let wide =
+                    f32::from(area.size.width) >= f32::from(zoomed(outline::MIN_PANEL_WIDTH, cx));
+                if outline_wide.replace(wide) != wide {
+                    let outline = outline.clone();
+                    cx.defer(move |cx| {
+                        outline.update(cx, |_, cx| cx.notify()).ok();
+                    });
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full();
+        // The setting changed, or the host's features arrived: fetch or drop the prompt index.
+        if self.outline_enabled(cx) != self.prompts_enabled {
+            let view = cx.weak_entity();
+            cx.defer(move |cx| {
+                view.update(cx, |this, cx| this.refresh_prompts(cx)).ok();
+            });
+        }
         base.child(measure)
             .child(body)
+            .child(self.outline.clone())
             .children(self.render_selection_toolbar(cx))
             .children(self.render_find_bar(window, cx))
             .children(lightbox)

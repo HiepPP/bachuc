@@ -53,6 +53,8 @@ struct State {
     /// The whole-UI zoom factor, 1.0 at 100%.
     zoom: f32,
     tab_close: TabClosePosition,
+    /// The Chat outline rail beside the thread (`chatOutlineEnabled` in Electron).
+    chat_outline: bool,
     /// Installed families only; `None` is the default family.
     ui_family: Option<SharedString>,
     code_family: Option<SharedString>,
@@ -98,6 +100,7 @@ fn state(cx: &mut App) -> &mut State {
             code_scale: 1.,
             zoom: 1.,
             tab_close: TabClosePosition::Left,
+            chat_outline: true,
             ui_family: None,
             code_family: None,
             content_size: DEFAULT_CONTENT_FONT_SIZE,
@@ -271,6 +274,21 @@ pub fn set_tab_close_position(position: TabClosePosition, cx: &mut App) {
 pub fn tab_close_position(cx: &App) -> TabClosePosition {
     cx.try_global::<State>()
         .map_or_else(TabClosePosition::default, |state| state.tab_close)
+}
+
+/// Turns the Chat outline rail on or off and redraws the windows when it changed. Nothing is
+/// persisted.
+pub fn set_chat_outline(enabled: bool, cx: &mut App) {
+    if state(cx).chat_outline != enabled {
+        state(cx).chat_outline = enabled;
+        cx.refresh_windows();
+    }
+}
+
+/// Whether the Chat outline rail shows; on until [`set_chat_outline`] runs.
+pub fn chat_outline(cx: &App) -> bool {
+    cx.try_global::<State>()
+        .is_none_or(|state| state.chat_outline)
 }
 
 /// The monospace family: SF Mono when it is installed, else Menlo. Views call this on every

@@ -21,6 +21,7 @@ use bachuc_theme::{
 };
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Side, Sizable as _, h_flex, v_flex};
 use gpui_kit::*;
@@ -152,6 +153,14 @@ impl AppearancePane {
         if self.current.syntax_theme != syntax_theme {
             let mut next = self.current.clone();
             next.syntax_theme = syntax_theme;
+            self.persist(next, cx);
+        }
+    }
+
+    fn set_chat_outline(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.current.chat_outline != enabled {
+            let mut next = self.current.clone();
+            next.chat_outline = enabled;
             self.persist(next, cx);
         }
     }
@@ -553,6 +562,27 @@ impl Render for AppearancePane {
                             cx,
                         ))
                         .child(self.tab_close_dropdown(cx)),
+                ),
+                cx,
+            ))
+            .child(section(
+                "Chat",
+                None,
+                card(cx).child(
+                    row(true, cx)
+                        .child(row_text(
+                            "Chat outline",
+                            Some("Show an outline for jumping between prompts".into()),
+                            cx,
+                        ))
+                        .child(
+                            Switch::new("chat-outline-switch")
+                                .checked(self.current.chat_outline)
+                                .accessibility_label("Chat outline")
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                    this.set_chat_outline(*checked, cx)
+                                })),
+                        ),
                 ),
                 cx,
             ))

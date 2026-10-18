@@ -2297,6 +2297,58 @@ fn fork_context_keeps_the_raw_attachment_and_gates_the_cursor() {
     assert_eq!(request["boundaryCursor"], json!({"epoch": "e1", "seq": 5}));
 }
 
+fn prompts_reply(error: Value) -> Value {
+    json!({"agentId": "a1", "epoch": "e1", "error": error, "prompts": [
+        {"seq": 2, "timestamp": "2026-10-19T00:00:00.000Z", "preview": "first"},
+        {"seq": 9, "timestamp": "2026-10-19T00:01:00.000Z", "preview": "second"}]})
+}
+
+#[test]
+fn list_prompts_is_gated_and_parses_the_index() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    assert!(!harness.core.prompt_index_supported());
+    let reply = harness.core.list_prompts("a1");
+    assert!(harness.wait(reply, WAIT).is_err());
+    assert!(
+        server
+            .requests_of("agent.timeline.list_prompts.request")
+            .is_empty()
+    );
+
+    with_features(&server, &["agentTimelinePromptIndex"]);
+    server.reply(
+        "agent.timeline.list_prompts.request",
+        "agent.timeline.list_prompts.response",
+        prompts_reply(Value::Null),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.core.prompt_index_supported());
+    let reply = harness.core.list_prompts("a1");
+    let index = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(index.epoch, "e1");
+    let seqs: Vec<(u64, &str)> = index
+        .prompts
+        .iter()
+        .map(|prompt| (prompt.seq, prompt.preview.as_str()))
+        .collect();
+    assert_eq!(seqs, vec![(2, "first"), (9, "second")]);
+    let request = &server.requests_of("agent.timeline.list_prompts.request")[0];
+    assert_eq!(request["agentId"], json!("a1"));
+
+    server.reply(
+        "agent.timeline.list_prompts.request",
+        "agent.timeline.list_prompts.response",
+        prompts_reply(json!("Agent not found")),
+    );
+    let failed = harness.core.list_prompts("a1");
+    assert_eq!(
+        harness.wait(failed, WAIT).unwrap_err().to_string(),
+        "Agent not found"
+    );
+}
+
 #[test]
 fn timeline_epoch_follows_the_page_and_a_reset_page() {
     let server = FakeServer::start();

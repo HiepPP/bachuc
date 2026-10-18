@@ -22,6 +22,7 @@ use crate::model::{
     GitAction, GitActionReply, GitStatus, GitStatusEvent, PrStatus, PrStatusReply, PrTimelineItem,
     StashEntry, WorkspaceScript,
 };
+use crate::model::{PromptEntry, PromptIndex};
 use crate::plugins::{self, PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite};
 use crate::terminal::{self, TerminalFrame, TerminalHandle};
 use crate::timeline::{FetchPlan, LiveRow, TimelineState, TimelineSync};
@@ -152,6 +153,7 @@ enum Pending {
     History(Reply<HistoryPage>),
     FetchAgent(Reply<()>),
     ForkContext(Reply<ForkContext>),
+    Prompts(Reply<PromptIndex>),
     DirectorySuggestions(Reply<Vec<DirectorySuggestion>>),
     /// An `fs.entry.*` answer with `success` and a string `error`.
     FsEntry(Reply<()>),
@@ -208,6 +210,7 @@ impl Pending {
             Pending::History(reply) => send(reply, error),
             Pending::FetchAgent(reply) => send(reply, error),
             Pending::ForkContext(reply) => send(reply, error),
+            Pending::Prompts(reply) => send(reply, error),
             Pending::DirectorySuggestions(reply) => send(reply, error),
             Pending::FsEntry(reply) => send(reply, error),
             _ => {}
@@ -1280,6 +1283,25 @@ impl ClientCore {
             message["search"] = json!(search);
         }
         self.request_reply(message, Pending::History)
+    }
+
+    /// Whether the host lists the prompts of a timeline (`features.agentTimelinePromptIndex`).
+    pub fn prompt_index_supported(&self) -> bool {
+        self.server_feature("agentTimelinePromptIndex")
+    }
+
+    /// Every user prompt of the agent's timeline, including the ones outside the loaded window.
+    pub fn list_prompts(
+        &mut self,
+        agent_id: &str,
+    ) -> oneshot::Receiver<anyhow::Result<PromptIndex>> {
+        if !self.prompt_index_supported() {
+            return failed("Update the host to use this.");
+        }
+        self.request_reply(
+            json!({"type": "agent.timeline.list_prompts.request", "agentId": agent_id}),
+            Pending::Prompts,
+        )
     }
 
     /// Whether the host builds fork contexts (`features.agentForkContext`).
@@ -3024,6 +3046,23 @@ impl ClientCore {
                     attachment: attachment.clone(),
                     title: attachment["title"].as_str().map(str::to_string),
                     item_count: payload["itemCount"].as_u64().unwrap_or_default() as u32,
+                })
+            }),
+            Pending::Prompts(sender) => reply(sender, error, || {
+                let prompts = payload["prompts"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|prompt| {
+                        Some(PromptEntry {
+                            seq: prompt["seq"].as_u64()?,
+                            preview: prompt["preview"].as_str()?.to_string(),
+                        })
+                    })
+                    .collect();
+                Ok(PromptIndex {
+                    epoch: payload["epoch"].as_str().unwrap_or_default().to_string(),
+                    prompts,
                 })
             }),
             Pending::DirectorySuggestions(sender) => reply(sender, error, || {
