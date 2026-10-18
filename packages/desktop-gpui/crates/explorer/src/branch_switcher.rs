@@ -10,7 +10,8 @@ use crate::explorer::ExplorerNoticeEvent;
 use bachuc_client::{Client, StashEntry};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_SM, ICON_SM, ICON_XS, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3,
+    FONT_BASE, FONT_SM, ICON_SM, ICON_XS, POPUP_GAP, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2,
+    SPACE_3,
 };
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -804,7 +805,7 @@ fn popup(content: impl IntoElement) -> AnyElement {
         .absolute()
         .top_full()
         .left_0()
-        .mt(px(SPACE_1))
+        .mt(px(POPUP_GAP))
         .child(
             deferred(
                 anchored()

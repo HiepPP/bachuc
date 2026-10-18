@@ -177,3 +177,36 @@ fn unusable_values_keep_the_default() {
     );
     assert_eq!(load_shortcuts_from(&dir), default_shortcuts());
 }
+
+#[test]
+fn zoom_has_default_chords_and_an_empty_override_unassigns_it() {
+    let defaults = default_shortcuts();
+    assert_eq!(chord(&defaults, "view.zoom.in").as_deref(), Some("Cmd+="));
+    assert_eq!(chord(&defaults, "view.zoom.out").as_deref(), Some("Cmd+-"));
+    assert_eq!(
+        chord(&defaults, "view.zoom.reset").as_deref(),
+        Some("Cmd+0")
+    );
+    assert_eq!(gpui_keystrokes("Cmd+="), vec!["cmd-=".to_string()]);
+    assert_eq!(gpui_keystrokes("Cmd+-"), vec!["cmd--".to_string()]);
+
+    // Release stores unassigned shortcuts with an empty chord; they bind no key.
+    let dir = folder("zoom-empty");
+    write(
+        &dir,
+        r#"{ "view.zoom.in": "", "view.zoom.out": "  ", "view.zoom.reset": null }"#,
+    );
+    let loaded = load_shortcuts_from(&dir);
+    for action in ["view.zoom.in", "view.zoom.out", "view.zoom.reset"] {
+        assert_eq!(chord(&loaded, action), None, "{action}");
+    }
+    let binds: Vec<String> = loaded
+        .iter()
+        .filter_map(|s| s.chord.as_deref())
+        .flat_map(gpui_keystrokes)
+        .collect();
+    assert!(binds.iter().all(|keys| !keys.is_empty()));
+    for keys in ["cmd-=", "cmd--", "cmd-0"] {
+        assert!(!binds.contains(&keys.to_string()), "{keys}");
+    }
+}

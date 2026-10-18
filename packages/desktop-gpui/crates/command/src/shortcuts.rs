@@ -77,6 +77,11 @@ const DEFAULTS: &[(ShortcutSection, &str, &str, &str)] = &[
     (General, "settings.toggle", "Toggle settings", "Cmd+,"),
     (General, "theme.cycle", "Cycle theme", "Cmd+Alt+T"),
     (General, "host.cycle", "Switch to next host", "Cmd+`"),
+    // The View menu zoom of the Electron desktop app (`features/menu.ts`), not in
+    // `DEFAULT_BINDINGS`. The app also binds Cmd++ to zoom in while it has Cmd+=.
+    (General, "view.zoom.in", "Zoom in", "Cmd+="),
+    (General, "view.zoom.out", "Zoom out", "Cmd+-"),
+    (General, "view.zoom.reset", "Actual size", "Cmd+0"),
     (Workspaces, "agent.new", "Open project", "Cmd+O"),
     (Workspaces, "workspace.new", "New workspace", "Cmd+N"),
     (

@@ -39,8 +39,8 @@ use bachuc_theme::metrics::{
     SPACE_3, SPACE_4, SPACE_6, SPACE_8,
 };
 use bachuc_theme::{
-    ShadowSize, TurnLabel, code_font_size, content_font_size, mono_font_family, scheme, shadow,
-    syntax_colors, tokens, turn_label_colors, ui_font_size,
+    ShadowSize, TurnLabel, code_font_size, content_font_size, mono_font_family, popup_offset,
+    rem_size, scheme, shadow, syntax_colors, tokens, turn_label_colors, ui_font_size, zoomed,
 };
 use gpui_kit::base::text::{CodeBlock, TextView as RichText, TextViewStyle as RichTextStyle};
 use gpui_kit::component::text::{TextView, TextViewState};
@@ -119,8 +119,6 @@ const STEP_LIST_TOP: f32 = 16.;
 const LIVE_LINE_HEIGHT: f32 = 19.;
 const RULE_TOP: f32 = 22.;
 const RULE_BOTTOM: f32 = 18.;
-/// The user bubble's line height, as `fontSize.content * 1.4`.
-const USER_LINE_HEIGHT: f32 = 1.4;
 /// The web stream's empty slot above the first row, where older history loads
 /// (`HISTORY_START_SLOT_HEIGHT_PX`), under the 16 px content padding.
 const HISTORY_START_SLOT: f32 = 32.;
@@ -130,7 +128,7 @@ const USER_TRAILING_ROW: f32 = SPACE_2 + 24.;
 /// The space between two markdown blocks: the paragraph's `marginBottom: 12` and the block
 /// container's 12.
 const BLOCK_GAP: f32 = SPACE_6;
-/// The prose line height over the font size, as the markdown `body`:
+/// The prose line height over the font size, as the markdown `body` and the user bubble:
 /// `Math.round(fontSize.content * 1.4)`, a line box of 21 at the content size.
 const BODY_LINE_HEIGHT: f32 = 1.4;
 /// The gap under a paragraph in the text view. Both line boxes are whole pixels, so the gap is
@@ -152,6 +150,8 @@ const FOOTER_HEIGHT: f32 = 24.;
 /// The fork menu of `assistant-fork-menu.tsx`: `minWidth={220}`, with the item size of the
 /// other GPUI dropdowns.
 const FORK_MENU_WIDTH: f32 = 220.;
+/// The fork button: the icon with `SPACE_1` of padding on each side.
+const FORK_TRIGGER_HEIGHT: f32 = ICON_SM + SPACE_1 * 2.;
 const MENU_ITEM_HEIGHT: f32 = 28.;
 const MENU_LINE_HEIGHT: f32 = 1.5;
 /// `theme.opacity[50]`, the fork trigger while a fork runs.
@@ -186,6 +186,25 @@ enum RowKind {
         end: usize,
     },
     Permission(Value),
+}
+
+/// The space under a message row for the row below it. A user message gets
+/// `getGapBetweenStreamItems`. An assistant message also keeps its last block's
+/// `marginBottom: 12` and its own `paddingBottom: 12`, which it drops above a footer.
+fn message_gap(is_user: bool, below: Below) -> f32 {
+    if is_user {
+        return match below {
+            Below::Nothing | Below::Assistant => 0.,
+            Below::User => SPACE_1,
+            _ => SPACE_4,
+        };
+    }
+    match below {
+        Below::Footer => SPACE_3,
+        Below::Nothing => SPACE_3 * 2.,
+        Below::Tools => SPACE_3 * 2. + SPACE_1,
+        _ => SPACE_3 * 2. + SPACE_4,
+    }
 }
 
 /// The row under a message row, for the space between them.
@@ -1182,18 +1201,21 @@ impl TimelineView {
             RowKind::Permission(request) => this.render_permission(request, cx),
         };
         let space = this.space_below(row, this.rows.get(index + 1));
-        // `streamItemWrapper`: the content column, at most 820 wide, centered.
+        // `streamItemWrapper`: the content column, at most 820 wide, centered. Its width follows
+        // `content_column_width`. `min_w_0` stops the min-content probe: GPUI text answers it
+        // with its unwrapped width, which would hold the column wider than a narrow row.
         div()
             .id(("row", index))
             .w_full()
             .flex()
             .justify_center()
-            .px(px(SPACE_4))
+            .px(px(ROW_PADDING))
             .child(
                 div()
                     .w_full()
+                    .min_w_0()
                     .max_w(px(MAX_CONTENT_WIDTH))
-                    .px(px(SPACE_2))
+                    .px(px(COLUMN_PADDING))
                     .when_some(space, |column, space| column.pb(px(space)))
                     .child(content),
             )
@@ -1231,19 +1253,7 @@ impl TimelineView {
             Some(RowKind::TurnHeader(_)) => Below::Tools,
             Some(_) => Below::Other,
         };
-        if is_user {
-            return Some(match below {
-                Below::Nothing | Below::Assistant => 0.,
-                Below::User => SPACE_1,
-                _ => SPACE_4,
-            });
-        }
-        Some(match below {
-            Below::Footer => SPACE_3,
-            Below::Nothing => SPACE_3 * 2.,
-            Below::Tools => SPACE_3 * 2. + SPACE_1,
-            _ => SPACE_3 * 2. + SPACE_4,
-        })
+        Some(message_gap(is_user, below))
     }
 
     fn render_entry(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -1303,7 +1313,7 @@ impl TimelineView {
                             .bg(t.surface3)
                             .text_color(t.foreground)
                             .text_size(size)
-                            .line_height(size * USER_LINE_HEIGHT)
+                            .line_height(px(body_line_height(size / px(1.))))
                             .child(StyledText::new(text).with_highlights(highlights)),
                     )
                     .into_any_element()
@@ -1367,6 +1377,7 @@ impl TimelineView {
                             )
                             .child(
                                 div()
+                                    .min_w_0()
                                     .text_color(if completed {
                                         t.foreground_muted
                                     } else {
@@ -1585,7 +1596,7 @@ impl TimelineView {
             .with_selection(theme.selection)
             .with_code_background(t.surface2)
             .with_border(theme.border)
-            .with_paragraph_gap(rems(PARAGRAPH_GAP / FONT_BASE))
+            .with_paragraph_gap(window_rems(zoomed(PARAGRAPH_GAP, cx), rem_size(cx)))
             .with_code_block(code_block)
             .with_table(corners)
             .with_table_head(table_head)
@@ -1754,32 +1765,36 @@ impl TimelineView {
                             .child(label),
                     )
             });
-            div().absolute().top(px(FOOTER_HEIGHT)).left_0().child(
-                deferred(
-                    anchored()
-                        .anchor(Anchor::TopLeft)
-                        .snap_to_window_with_margin(px(8.))
-                        .child(
-                            v_flex()
-                                .id(("fork-menu", key))
-                                .role(Role::Menu)
-                                .aria_label(FORK_MENU_LABEL)
-                                .min_w(px(FORK_MENU_WIDTH))
-                                .py(px(SPACE_1))
-                                .bg(t.popover)
-                                .border_1()
-                                .border_color(t.border_accent)
-                                .rounded(px(RADIUS_LG))
-                                .shadow(vec![shadow(ShadowSize::Md, cx)])
-                                .occlude()
-                                .on_mouse_down_out(
-                                    cx.listener(|this, _, _, cx| this.dismiss_fork_menu(cx)),
-                                )
-                                .children(items),
-                        ),
+            div()
+                .absolute()
+                .top(px(popup_offset(FORK_TRIGGER_HEIGHT)))
+                .left_0()
+                .child(
+                    deferred(
+                        anchored()
+                            .anchor(Anchor::TopLeft)
+                            .snap_to_window_with_margin(px(8.))
+                            .child(
+                                v_flex()
+                                    .id(("fork-menu", key))
+                                    .role(Role::Menu)
+                                    .aria_label(FORK_MENU_LABEL)
+                                    .min_w(px(FORK_MENU_WIDTH))
+                                    .py(px(SPACE_1))
+                                    .bg(t.popover)
+                                    .border_1()
+                                    .border_color(t.border_accent)
+                                    .rounded(px(RADIUS_LG))
+                                    .shadow(vec![shadow(ShadowSize::Md, cx)])
+                                    .occlude()
+                                    .on_mouse_down_out(
+                                        cx.listener(|this, _, _, cx| this.dismiss_fork_menu(cx)),
+                                    )
+                                    .children(items),
+                            ),
+                    )
+                    .with_priority(gpui_kit::base::POPUP_PRIORITY),
                 )
-                .with_priority(gpui_kit::base::POPUP_PRIORITY),
-            )
         });
         div()
             .relative()
@@ -2259,6 +2274,18 @@ impl Render for TimelineView {
     }
 }
 
+/// The row's side padding and the content column's own padding, as `streamItemWrapper`.
+const ROW_PADDING: f32 = SPACE_4;
+const COLUMN_PADDING: f32 = SPACE_2;
+
+/// The width text gets in a timeline row `row_width` wide: the row padding comes off both sides,
+/// the column stops at `MAX_CONTENT_WIDTH`, and its own padding comes off inside. It never goes
+/// below 0 and never past the row, so text wraps inside the row on a narrow window.
+pub fn content_column_width(row_width: f32) -> f32 {
+    let column = (row_width - 2. * ROW_PADDING).clamp(0., MAX_CONTENT_WIDTH);
+    (column - 2. * COLUMN_PADDING).max(0.)
+}
+
 /// `Notification`: an icon and the message on a tinted box.
 fn notification(
     id: impl Into<ElementId>,
@@ -2290,7 +2317,7 @@ fn notification(
                 .items_center()
                 .child(icon(name).with_size(px(ICON_MD)).text_color(color)),
         )
-        .child(div().flex_1().child(message))
+        .child(div().flex_1().min_w_0().child(message))
         .into_any_element()
 }
 
@@ -2375,6 +2402,12 @@ fn format_duration(ms: i64) -> String {
 /// view needs the same number the paragraph pitch is built from.
 fn body_line_height(content: f32) -> f32 {
     (content * BODY_LINE_HEIGHT).round()
+}
+
+/// `gap` in rems of the window. The window's rem size is GPUI's 16 with the zoom, not
+/// `FONT_BASE`: `rems(24 / FONT_BASE)` drew the paragraph gap 27.4 px high.
+fn window_rems(gap: Pixels, rem_size: Pixels) -> Rems {
+    rems(gap / rem_size)
 }
 
 /// Distance between the tops of two paragraphs of one line: the line box and the gap under it.
@@ -2501,11 +2534,12 @@ fn preview(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob brings its own `test` attribute.
+    use super::Below;
     use super::tool_view::{code_styles, fence_language};
     use super::{
         BLOCK_GAP, PARAGRAPH_GAP, StepCounts, body_line_height, counts_text, fence_spacing,
         fork_boundary, format_clock, format_duration, format_elapsed, heading_style,
-        latest_assistant, paragraph_pitch, toggle,
+        latest_assistant, message_gap, paragraph_pitch, toggle, window_rems,
     };
     use bachuc_client::{ForkBoundary, ForkCursor};
     use bachuc_theme::metrics::FONT_CONTENT;
@@ -2585,6 +2619,34 @@ mod tests {
         assert_eq!(body_line_height(FONT_CONTENT), 21.);
         assert_eq!(PARAGRAPH_GAP, BLOCK_GAP);
         assert_eq!(paragraph_pitch(FONT_CONTENT), 45.);
+    }
+
+    /// The text view resolves the paragraph gap at the window's rem size, 16 with the zoom, so
+    /// the gap draws as `PARAGRAPH_GAP` at every zoom.
+    #[test]
+    fn paragraph_gap_draws_at_the_window_rem_size() {
+        for zoom in [1., 1.25] {
+            let rem = px(16. * zoom);
+            let gap = px(PARAGRAPH_GAP * zoom);
+            assert_eq!(window_rems(gap, rem).to_pixels(rem), gap);
+        }
+    }
+
+    /// `getGapBetweenStreamItems` plus the assistant's `marginBottom: 12` and
+    /// `paddingVertical: 12` (`compactBottom` above a footer).
+    #[test]
+    fn message_gaps_match_the_web_stream() {
+        assert_eq!(message_gap(true, Below::User), 4.);
+        assert_eq!(message_gap(true, Below::Assistant), 0.);
+        assert_eq!(message_gap(true, Below::Tools), 16.);
+        assert_eq!(message_gap(true, Below::Other), 16.);
+        assert_eq!(message_gap(true, Below::Nothing), 0.);
+        assert_eq!(message_gap(false, Below::Footer), 12.);
+        assert_eq!(message_gap(false, Below::Nothing), 24.);
+        assert_eq!(message_gap(false, Below::Tools), 28.);
+        assert_eq!(message_gap(false, Below::Assistant), 40.);
+        assert_eq!(message_gap(false, Below::User), 40.);
+        assert_eq!(message_gap(false, Below::Other), 40.);
     }
 
     #[test]

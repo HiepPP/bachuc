@@ -270,6 +270,8 @@ pub struct ThinkingControls {
 pub struct SlashCommand {
     pub name: String,
     pub description: String,
+    /// The wire `kind` is "skill".
+    pub skill: bool,
 }
 
 /// What a prompt sent during a running turn does to that turn.

@@ -36,8 +36,8 @@ use crate::plugin_slots::{
 };
 use crate::queue::{QueueAction, move_target, queue_track};
 use crate::slash::{
-    ClientCommand, SlashItem, arrow_delta, filter_items, insert_text, merge_items,
-    resolve_client_command, resolve_plugin_command, slash_query, step,
+    ClientCommand, DaemonCommand, SlashItem, SlashRange, arrow_delta, find_active_slash,
+    insert_text, menu_matches, replace_slash, resolve_client_command, resolve_plugin_command, step,
 };
 use crate::subagents_track::{
     ArchiveFinished, SubagentActions, finished_paseo_ids, subagents_pill,
@@ -50,8 +50,8 @@ use crate::turn_metrics_pill::{
 };
 use bachuc_client::{
     ActiveTurn, AgentControls, AgentFeature, AgentUsage, Client, ClientEvent, DiffStat,
-    OutgoingMessage, ProviderSummary, QueuedPrompt, SlashCommand, SubagentRow, TaskEntry,
-    ThinkingControls, TurnMetrics,
+    OutgoingMessage, ProviderSummary, QueuedPrompt, SubagentRow, TaskEntry, ThinkingControls,
+    TurnMetrics,
 };
 use bachuc_command::{Shortcut, display_combos, load_shortcuts};
 use bachuc_icons::{IconName, icon};
@@ -61,8 +61,8 @@ use bachuc_plugin_host::{
     SendKey, SlashInput, StopButtonProps, decode_attachment_search,
 };
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, RADIUS_LG, RADIUS_MD, SPACE_1,
-    SPACE_2, SPACE_3, SPACE_4,
+    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, POPUP_GAP, RADIUS_LG, RADIUS_MD,
+    SPACE_1, SPACE_2, SPACE_3, SPACE_4,
 };
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
 use gpui_kit::component::input::{
@@ -357,8 +357,10 @@ pub struct Composer {
     attachments: Vec<Attachment>,
     pasted: u32,
     watched: Watched,
-    commands: Vec<SlashCommand>,
+    commands: Vec<DaemonCommand>,
     commands_state: CommandsState,
+    /// The draft config `commands` was listed for.
+    commands_config: Option<bachuc_client::DraftConfig>,
     /// The highlighted row of the slash menu.
     slash_active: usize,
     /// Escape closed the menu for the text being typed.
@@ -546,6 +548,7 @@ impl Composer {
             watched,
             commands: Vec::new(),
             commands_state: CommandsState::NotLoaded,
+            commands_config: None,
             slash_active: 0,
             slash_dismissed: false,
             slash_scroll: ScrollHandle::new(),
@@ -985,10 +988,19 @@ impl Composer {
 
     fn text_changed(&mut self, cx: &mut Context<Self>) {
         self.request_mentions(cx);
+        self.refresh_slash(cx);
+        cx.notify();
+    }
+
+    /// Loads the commands once a `/` is in the text and resets the menu to its best match.
+    /// Runs on a change event, and after a code edit, which emits none.
+    fn refresh_slash(&mut self, cx: &mut Context<Self>) {
         let value = self.value(cx);
-        if slash_query(&value).is_some() {
+        // Any `/` loads the list once, so the menu opens with it ready when the caret moves in.
+        if value.contains('/') {
             self.load_commands(cx);
-        } else {
+        }
+        if self.active_slash(cx).is_none() {
             self.slash_dismissed = false;
             if self.commands_state == CommandsState::Failed {
                 self.commands_state = CommandsState::NotLoaded;
@@ -997,30 +1009,42 @@ impl Composer {
         // The best match sits at the bottom, next to the input, as Electron pins the list there.
         self.slash_active = 0;
         self.slash_scroll.scroll_to_bottom();
-        cx.notify();
     }
 
-    /// Asks the daemon for the agent's commands the first time a `/` is typed.
+    /// Asks the daemon for the commands and skills the first time a `/` is typed. A draft asks
+    /// again only when its provider, folder, model, or mode changes, because the daemon reads
+    /// project skills from the folder.
     fn load_commands(&mut self, cx: &mut Context<Self>) {
-        if self.commands_state != CommandsState::NotLoaded {
-            return;
-        }
-        if self.is_draft() {
-            // A draft has no agent to ask.
-            self.commands_state = CommandsState::Loaded;
+        let draft_config = match &self.draft {
+            Some(draft) => match draft.config() {
+                Some(config) => Some(config),
+                // A draft with no provider or folder has no commands to list.
+                None => return,
+            },
+            None => None,
+        };
+        let stale = draft_config.is_some() && draft_config != self.commands_config;
+        if self.commands_state != CommandsState::NotLoaded && !stale {
             return;
         }
         self.commands_state = CommandsState::Loading;
+        self.commands_config = draft_config.clone();
         let agent_id = self.agent_id.clone();
-        let task = self
-            .client
-            .update(cx, |client, cx| client.list_commands(&agent_id, cx));
+        let task = self.client.update(cx, |client, cx| match &draft_config {
+            Some(config) => client.list_draft_commands(&agent_id, config, cx),
+            None => client.list_commands(&agent_id, cx),
+        });
+        let requested = draft_config;
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
+                // A newer draft config started its own request.
+                if this.commands_config != requested {
+                    return;
+                }
                 match result {
                     Ok(commands) => {
-                        this.commands = commands;
+                        this.commands = commands.iter().map(DaemonCommand::from).collect();
                         this.commands_state = CommandsState::Loaded;
                         // The menu opened with the client commands only; pin the full list
                         // to the bottom with the best match selected, as a query change does.
@@ -1056,8 +1080,15 @@ impl Composer {
         if self.slash_dismissed || self.mention_open(cx) {
             return Vec::new();
         }
-        let value = self.value(cx);
-        let Some(query) = slash_query(&value) else {
+        // A draft with no provider or folder yet has no commands to list.
+        if self
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.config().is_none())
+        {
+            return Vec::new();
+        }
+        let Some(range) = self.active_slash(cx) else {
             return Vec::new();
         };
         let plugins: Vec<(String, String)> = self
@@ -1070,8 +1101,12 @@ impl Composer {
                 )
             })
             .collect();
-        let items = merge_items(&self.commands, &plugins);
-        filter_items(&items, query).into_iter().cloned().collect()
+        menu_matches(&self.commands, &plugins, &range, self.is_draft())
+    }
+
+    /// The `/name` the caret is in.
+    fn active_slash(&self, cx: &App) -> Option<SlashRange> {
+        find_active_slash(&self.value(cx), self.input.read(cx).cursor())
     }
 
     /// Up, Down, Tab, and Escape while the menu is open. Returns whether it took the key.
@@ -1117,11 +1152,24 @@ impl Composer {
         self.request_mentions(cx);
     }
 
-    /// Puts the command in the input and puts the caret after it.
+    /// Puts the command where the typed `/name` is, with the caret after it.
     fn pick(&mut self, item: &SlashItem, window: &mut Window, cx: &mut Context<Self>) {
-        self.set_text(insert_text(item), window, cx);
+        let (text, caret) = self.picked_text(item, cx);
+        self.set_text_at(text, caret, window, cx);
         self.slash_active = 0;
         cx.notify();
+    }
+
+    /// The input after picking `item`, and the caret in it.
+    fn picked_text(&self, item: &SlashItem, cx: &App) -> (String, usize) {
+        match self.active_slash(cx) {
+            Some(range) => replace_slash(&self.value(cx), &range, item),
+            None => {
+                let text = insert_text(item);
+                let caret = text.len();
+                (text, caret)
+            }
+        }
     }
 
     /// The folder file mentions resolve in: the draft's, or the agent's.
@@ -1279,6 +1327,21 @@ impl Composer {
         self.insert_mentions_at_caret(&[path], window, cx);
     }
 
+    /// Types `text` at the caret and focuses the input, for keys typed while focus is
+    /// elsewhere in the thread.
+    pub fn insert_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Composer>) {
+        let value = self.value(cx);
+        let mut at = self.input.read(cx).cursor().min(value.len());
+        while !value.is_char_boundary(at) {
+            at -= 1;
+        }
+        let mut next = value;
+        next.insert_str(at, text);
+        self.set_text_at(next, at + text.len(), window, cx);
+        // `set_value` emits no change event, so a typed `/` opens the menu here.
+        self.refresh_slash(cx);
+    }
+
     fn insert_mentions_at_caret(
         &mut self,
         paths: &[String],
@@ -1405,7 +1468,7 @@ impl Composer {
         if !matches.is_empty() {
             let item = &matches[self.slash_active.min(matches.len() - 1)];
             // A client command that is already complete sends; picking it again would loop.
-            if self.value(cx) != insert_text(item) {
+            if self.value(cx) != self.picked_text(item, cx).0 {
                 self.pick(item, window, cx);
                 return;
             }
@@ -2655,6 +2718,7 @@ impl Composer {
         let weak = cx.weak_entity();
         Popover::new("composer-attach-menu")
             .anchor(Anchor::BottomLeft)
+            .offset(px(POPUP_GAP))
             .p_1()
             .trigger(AttachTrigger { open: false })
             .content(move |_, _, cx| {

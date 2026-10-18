@@ -1,7 +1,7 @@
 //! The cases of `packages/app/src/tool-calls/detail-level/turn/model.test.ts`, rewritten as
 //! projected-entry fixtures. The app's edit-diffs plugin rows become plain edit calls, because
-//! the client does not ask for plugin timeline items. The case that needs the edit-diffs plugin
-//! presentation ("joins plugin edit rows through the stream presentation") is skipped, and the
+//! the GPUI edit-diffs plugin projects edit calls on the client. The case that needs the
+//! edit-diffs plugin presentation ("joins plugin edit rows through the stream presentation") is skipped, and the
 //! compact-screen half of "regroups history when the turn ends" has no GPUI counterpart.
 
 use bachuc_theme::TurnLabel;

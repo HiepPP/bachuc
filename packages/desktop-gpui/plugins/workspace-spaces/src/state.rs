@@ -42,6 +42,8 @@ pub(crate) struct SpacesState {
     settings_error: String,
     catalog_error: String,
     selected: Option<String>,
+    /// Sidebar swipes that arrived during a save, in order; they run when it ends.
+    queued_swipes: Vec<SwipeDirection>,
     refreshing: bool,
     last_refresh: Option<Instant>,
     waiters: Vec<oneshot::Sender<()>>,
@@ -108,6 +110,7 @@ impl SpacesState {
             settings_error: String::new(),
             catalog_error: String::new(),
             selected: None,
+            queued_swipes: Vec::new(),
             refreshing: false,
             last_refresh: None,
             waiters: Vec::new(),
@@ -244,15 +247,27 @@ impl SpacesState {
         self.changed(direction, cx);
     }
 
-    /// A trackpad swipe moves to the adjacent Space without wrapping, and waits out a save.
+    /// A trackpad swipe moves to the adjacent Space without wrapping. A swipe during a save
+    /// waits in a queue and runs when the save ends.
     pub(crate) fn swipe(&mut self, direction: SwipeDirection, cx: &mut Context<Self>) {
-        if let Some(to) = swipe_target(
-            self.snapshot.as_ref(),
-            self.busy,
-            self.selected.as_deref(),
-            direction,
-        ) {
+        if self.busy {
+            self.queued_swipes.push(direction);
+            return;
+        }
+        self.run_swipes(vec![direction], cx);
+    }
+
+    fn run_swipes(&mut self, swipes: Vec<SwipeDirection>, cx: &mut Context<Self>) {
+        if let Some(to) = swipe_target(self.snapshot.as_ref(), self.selected.as_deref(), &swipes) {
             self.select(&to, cx);
+        }
+    }
+
+    /// Runs the swipes queued during a save, once it ends.
+    fn run_queued_swipes(&mut self, cx: &mut Context<Self>) {
+        if !self.busy && !self.queued_swipes.is_empty() {
+            let swipes = std::mem::take(&mut self.queued_swipes);
+            self.run_swipes(swipes, cx);
         }
     }
 
@@ -389,6 +404,7 @@ impl SpacesState {
     fn fail_save(&mut self, message: &str, cx: &mut Context<Self>) -> Task<bool> {
         self.save_error = message.to_string();
         self.changed(None, cx);
+        self.run_queued_swipes(cx);
         Task::ready(false)
     }
 
@@ -425,6 +441,7 @@ impl SpacesState {
         if next == prefs {
             self.busy = false;
             self.changed(None, cx);
+            self.run_queued_swipes(cx);
             return Task::ready(true);
         }
         let saving = self.settings.update(cx, |settings, cx| {
@@ -449,6 +466,7 @@ impl SpacesState {
             self.save_error = text_or(reason, SAVE_FAILED);
         }
         self.changed(None, cx);
+        self.run_queued_swipes(cx);
     }
 
     /// Adds a Space and selects it once the save lands.

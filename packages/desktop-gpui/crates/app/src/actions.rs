@@ -31,6 +31,11 @@ pub const AGENT_CONTEXT: &str = "BachucAgent";
 /// Added to the root view while Settings shows, so Escape leaves Settings as in Electron.
 pub const SETTINGS_CONTEXT: &str = "BachucSettings";
 
+/// The whole-UI zoom actions: one step in, one step out, and back to 100%.
+pub const ZOOM_IN: &str = "view.zoom.in";
+pub const ZOOM_OUT: &str = "view.zoom.out";
+pub const ZOOM_RESET: &str = "view.zoom.reset";
+
 /// Actions bound in the agent pane only. Escape and Shift+Tab mean something else in a
 /// terminal or a text field, so they never bind on the whole window.
 const AGENT_ACTIONS: [&str; 2] = ["agent.interrupt", "message-input.mode-cycle"];
@@ -41,7 +46,8 @@ const OUTSIDE_TEXT_ACTIONS: [&str; 1] = ["shortcuts.dialog.toggle"];
 
 /// The key contexts that take typed text: gpui-kit inputs (the composer, the command center,
 /// and settings fields) and the terminal.
-const TEXT_CONTEXTS: [&str; 5] = ["Input", "Terminal", "NumberInput", "TimeField", "Combobox"];
+pub(crate) const TEXT_CONTEXTS: [&str; 5] =
+    ["Input", "Terminal", "NumberInput", "TimeField", "Combobox"];
 
 /// The shell context with no text field or terminal focused, as a binding predicate. GPUI's
 /// `!` tests every context of the focus path, so a focused composer in the shell fails it.
@@ -131,14 +137,40 @@ pub fn binding_specs(shortcuts: &[Shortcut]) -> Vec<BindingSpec> {
         }
         let context = binding_context(&shortcut.action);
         for keys in keystrokes {
+            let alias = (shortcut.action == ZOOM_IN)
+                .then(|| plus_alias(&keys))
+                .flatten();
             specs.push(BindingSpec {
                 keys,
                 action: Bound::Run(shortcut.action.clone()),
                 context,
             });
+            if let Some(keys) = alias {
+                specs.push(BindingSpec {
+                    keys,
+                    action: Bound::Run(shortcut.action.clone()),
+                    context,
+                });
+            }
         }
     }
     specs
+}
+
+/// The `+` form of a binding whose last key is `=` without Shift, for example `cmd-+` for
+/// `cmd-=`. macOS reports Cmd+Shift+= to GPUI as `cmd-+`, so zoom in answers both, as in
+/// browsers.
+fn plus_alias(keys: &str) -> Option<String> {
+    let (prefix, last) = keys.rsplit_once(' ').unwrap_or(("", keys));
+    let modifiers = last.strip_suffix('=')?;
+    if modifiers.contains("shift") {
+        return None;
+    }
+    Some(if prefix.is_empty() {
+        format!("{modifiers}+")
+    } else {
+        format!("{prefix} {modifiers}+")
+    })
 }
 
 /// Bindings that never change, as in Electron: Cmd+F finds in an agent pane, and Escape
@@ -180,8 +212,8 @@ mod tests {
     fn every_assigned_shortcut_binds_and_digits_bind_nine_tabs() {
         let shortcuts = default_shortcuts();
         let specs = binding_specs(&shortcuts);
-        // Nine digits and one binding for every other action.
-        assert_eq!(specs.len(), 9 + shortcuts.len() - 1);
+        // Nine digits, one binding for every other action, and Cmd++ for zoom in.
+        assert_eq!(specs.len(), 9 + shortcuts.len() - 1 + 1);
         assert!(specs.contains(&BindingSpec {
             keys: "alt-cmd-1".into(),
             action: Bound::Jump(0),
@@ -330,6 +362,44 @@ mod tests {
         // Every other shortcut keeps its context.
         assert_eq!(binding_context("command-center.toggle"), SHELL_CONTEXT);
         assert_eq!(binding_context("agent.interrupt"), AGENT_CONTEXT);
+    }
+
+    #[test]
+    fn zoom_in_binds_cmd_equal_and_cmd_plus() {
+        let specs = binding_specs(&default_shortcuts());
+        let keys = |action: &str| -> Vec<String> {
+            specs
+                .iter()
+                .filter(|spec| spec.action == Bound::Run(action.into()))
+                .map(|spec| spec.keys.clone())
+                .collect()
+        };
+        assert_eq!(keys(ZOOM_IN), ["cmd-=", "cmd-+"]);
+        assert_eq!(keys(ZOOM_OUT), ["cmd--"]);
+        assert_eq!(keys(ZOOM_RESET), ["cmd-0"]);
+        for spec in &specs {
+            spec.binding();
+        }
+        assert_eq!(plus_alias("cmd-k cmd-="), Some("cmd-k cmd-+".into()));
+        assert_eq!(plus_alias("shift-cmd-="), None);
+        assert_eq!(plus_alias("cmd-p"), None);
+    }
+
+    #[test]
+    fn an_empty_zoom_override_binds_no_key() {
+        let mut shortcuts = default_shortcuts();
+        for shortcut in &mut shortcuts {
+            if [ZOOM_IN, ZOOM_OUT, ZOOM_RESET].contains(&shortcut.action.as_str()) {
+                shortcut.chord = Some(String::new());
+            }
+        }
+        let specs = binding_specs(&shortcuts);
+        assert!(specs.iter().all(|spec| !spec.keys.is_empty()));
+        assert!(specs.iter().all(|spec| {
+            ![ZOOM_IN, ZOOM_OUT, ZOOM_RESET]
+                .iter()
+                .any(|id| spec.action == Bound::Run((*id).into()))
+        }));
     }
 
     #[test]

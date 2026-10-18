@@ -6,21 +6,22 @@
 use crate::panes::chrome_button;
 use crate::shell::Shell;
 use crate::state::{
-    EditorTarget, agent_of_key, find_workspace, github_url, host_gate, host_option_label,
-    open_args, script_state,
+    EditorGlyph, EditorTarget, agent_of_key, editor_glyph, find_workspace, github_url, host_gate,
+    host_option_label, open_args, script_state,
 };
 use bachuc_client::WorkspaceScript;
-use bachuc_icons::{IconName, icon};
+use bachuc_icons::{IconName, github_mark, icon};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, HEADER_HEIGHT, ICON_SM, RADIUS_LG, RADIUS_MD, SETTINGS_SIDEBAR_WIDTH,
     SPACE_1, SPACE_2, SPACE_3, SPACE_6, TRAFFIC_LIGHT_WIDTH, WEIGHT_MEDIUM,
 };
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
-use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
-use gpui_kit::component::{Selectable, Sizable as _, h_flex, v_flex};
+use bachuc_theme::{ShadowSize, popup_offset, shadow, tokens, ui_font_size, zoomed};
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
+use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// The header menu that shows: the Scripts list or the Open in editor targets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,47 +51,6 @@ fn pressable(base: Stateful<Div>, run: ShellAction, cx: &mut Context<Shell>) -> 
         .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
             weak.update(cx, |this, cx| run(this, window, cx)).ok();
         })
-}
-
-/// An icon button that anchors a gpui-kit dropdown menu and keeps its fill while the menu is
-/// open, as the sidebar kebab does.
-#[derive(IntoElement)]
-pub struct MenuButton {
-    base: Stateful<Div>,
-    open: bool,
-    fill: Hsla,
-}
-
-impl Selectable for MenuButton {
-    fn selected(mut self, selected: bool) -> Self {
-        self.open = selected;
-        self
-    }
-
-    fn is_selected(&self) -> bool {
-        self.open
-    }
-}
-
-impl Styled for MenuButton {
-    fn style(&mut self) -> &mut StyleRefinement {
-        self.base.style()
-    }
-}
-
-impl InteractiveElement for MenuButton {
-    fn interactivity(&mut self) -> &mut Interactivity {
-        self.base.interactivity()
-    }
-}
-
-impl DropdownMenu for MenuButton {}
-
-impl RenderOnce for MenuButton {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        let fill = self.fill;
-        self.base.when(self.open, |button| button.bg(fill))
-    }
 }
 
 /// What follows the pointer while a divider is dragged: nothing.
@@ -202,7 +162,7 @@ impl Shell {
             .id("sidebar-chrome")
             .relative()
             .flex_shrink_0()
-            .h(px(HEADER_HEIGHT))
+            .h(zoomed(HEADER_HEIGHT, cx))
             .bg(t.surface_sidebar)
             .border_r_1()
             .border_color(t.border)
@@ -324,67 +284,7 @@ impl Shell {
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_side_panel(cx)))
             });
         let has_workspace = self.selected_cwd().is_some();
-        let active_agent = self
-            .active_key(cx)
-            .and_then(|key| self.pane_identity(&key))
-            .and_then(|identity| agent_of_key(&identity).map(str::to_string));
-        let weak = cx.weak_entity();
-        let menu = MenuButton {
-            base: chrome_button(
-                "header-menu",
-                "Workspace actions",
-                IconName::MoreHorizontal,
-                cx,
-            ),
-            open: false,
-            fill: t.surface2,
-        }
-        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu: PopupMenu, _, _| {
-            let mut menu = menu.min_w(px(220.));
-            if let Some(agent_id) = active_agent.clone() {
-                let rename_id = agent_id.clone();
-                menu = menu
-                    .item(menu_item(
-                        "Rename agent",
-                        IconName::Pencil,
-                        weak.clone(),
-                        move |shell, window, cx| shell.rename_agent(rename_id.clone(), window, cx),
-                    ))
-                    .item(menu_item(
-                        "Archive agent",
-                        IconName::Archive,
-                        weak.clone(),
-                        move |shell, _, cx| shell.archive_agent(&agent_id, cx),
-                    ))
-                    .separator();
-            }
-            menu.item(menu_item(
-                "New tab",
-                IconName::Plus,
-                weak.clone(),
-                |shell, window, cx| shell.run_action("workspace.tab.menu.open", window, cx),
-            ))
-            .item(menu_item(
-                "Split pane right",
-                IconName::Columns2,
-                weak.clone(),
-                |shell, window, cx| shell.run_action("workspace.pane.split.right", window, cx),
-            ))
-            .item(menu_item(
-                "Split pane down",
-                IconName::Rows2,
-                weak.clone(),
-                |shell, window, cx| shell.run_action("workspace.pane.split.down", window, cx),
-            ))
-            .when(has_workspace, |menu| {
-                menu.item(menu_item(
-                    "Copy path",
-                    IconName::Copy,
-                    weak.clone(),
-                    |shell, window, cx| shell.copy_workspace_path(window, cx),
-                ))
-            })
-        });
+        let menu = self.render_header_actions(cx);
         let explorer_open = self.layout.explorer_open;
         // Electron's order: Scripts, Open in editor, git actions, then the Explorer toggle.
         let header_buttons = if has_workspace {
@@ -398,7 +298,7 @@ impl Shell {
             .aria_label("Workspace header")
             .relative()
             .flex_shrink_0()
-            .h(px(HEADER_HEIGHT))
+            .h(zoomed(HEADER_HEIGHT, cx))
             .px(px(SPACE_3))
             .when(!self.layout.sidebar_open, |row| {
                 row.pl(px(TRAFFIC_LIGHT_WIDTH + SPACE_3))
@@ -491,6 +391,128 @@ impl Shell {
                     }),
             )
             .into_any_element()
+    }
+
+    /// The Workspace actions button and, while it shows, its menu under the button's right
+    /// edge. The menu is owned by the shell, not by a gpui-kit `DropdownMenu`: the button
+    /// stops the left press so the title bar under it does not drag the window, and that stop
+    /// kept the dropdown's own press listener from running.
+    fn render_header_actions(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let t = tokens(cx);
+        let menu = self.header_actions.as_ref().map(|(menu, _)| menu.clone());
+        let open = menu.is_some();
+        let button = chrome_button(
+            "header-menu",
+            "Workspace actions",
+            IconName::MoreHorizontal,
+            cx,
+        )
+        .aria_expanded(open)
+        .when(open, |button| button.bg(t.surface2))
+        // The capture phase runs before the open menu's press-outside listener, so a second
+        // press closes the menu instead of closing and opening it again.
+        .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, window, cx| {
+            if event.button == MouseButton::Left {
+                cx.stop_propagation();
+                this.toggle_header_actions(window, cx);
+            }
+        }))
+        .on_a11y_action(AccessibleAction::Click, {
+            let weak = cx.weak_entity();
+            move |_, window, cx| {
+                weak.update(cx, |this, cx| this.toggle_header_actions(window, cx))
+                    .ok();
+            }
+        });
+        div()
+            .relative()
+            .flex_shrink_0()
+            .child(button)
+            .when_some(menu, |slot, menu| {
+                slot.child(
+                    div().absolute().top(px(popup_offset(28.))).right_0().child(
+                        deferred(
+                            anchored()
+                                .anchor(Anchor::TopRight)
+                                .snap_to_window_with_margin(px(8.))
+                                .child(menu),
+                        )
+                        .with_priority(gpui_kit::base::POPUP_PRIORITY),
+                    ),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// Opens the Workspace actions menu, or closes it when it shows. The rows are read now, so
+    /// they match the active tab when the menu opens.
+    pub(crate) fn toggle_header_actions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.header_actions.take().is_some() {
+            cx.notify();
+            return;
+        }
+        self.header_menu = None;
+        let has_workspace = self.selected_cwd().is_some();
+        let active_agent = self
+            .active_key(cx)
+            .and_then(|key| self.pane_identity(&key))
+            .and_then(|identity| agent_of_key(&identity).map(str::to_string));
+        let weak = cx.weak_entity();
+        // The menu returns the focus here when it closes without moving it.
+        let restore = window.focused(cx).unwrap_or_else(|| self.focus.clone());
+        let menu = PopupMenu::build(window, cx, move |menu: PopupMenu, _, _| {
+            let mut menu = menu.action_context(restore.clone()).min_w(px(220.));
+            if let Some(agent_id) = active_agent.clone() {
+                let rename_id = agent_id.clone();
+                menu = menu
+                    .item(menu_item(
+                        "Rename agent",
+                        IconName::Pencil,
+                        weak.clone(),
+                        move |shell, window, cx| shell.rename_agent(rename_id.clone(), window, cx),
+                    ))
+                    .item(menu_item(
+                        "Archive agent",
+                        IconName::Archive,
+                        weak.clone(),
+                        move |shell, _, cx| shell.archive_agent(&agent_id, cx),
+                    ))
+                    .separator();
+            }
+            menu.item(menu_item(
+                "New tab",
+                IconName::Plus,
+                weak.clone(),
+                |shell, window, cx| shell.run_action("workspace.tab.menu.open", window, cx),
+            ))
+            .item(menu_item(
+                "Split pane right",
+                IconName::Columns2,
+                weak.clone(),
+                |shell, window, cx| shell.run_action("workspace.pane.split.right", window, cx),
+            ))
+            .item(menu_item(
+                "Split pane down",
+                IconName::Rows2,
+                weak.clone(),
+                |shell, window, cx| shell.run_action("workspace.pane.split.down", window, cx),
+            ))
+            .when(has_workspace, |menu| {
+                menu.item(menu_item(
+                    "Copy path",
+                    IconName::Copy,
+                    weak.clone(),
+                    |shell, window, cx| shell.copy_workspace_path(window, cx),
+                ))
+            })
+        });
+        let dismiss = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, _, cx| {
+            this.header_actions = None;
+            cx.notify();
+        });
+        menu.focus_handle(cx).focus(window, cx);
+        self.header_actions = Some((menu, dismiss));
+        cx.notify();
     }
 
     /// Electron's host gate (`WorkspaceUnreachable`): who is offline, the status, the reason,
@@ -592,7 +614,7 @@ impl Shell {
                     .id("settings-chrome")
                     .relative()
                     .flex_shrink_0()
-                    .h(px(HEADER_HEIGHT))
+                    .h(zoomed(HEADER_HEIGHT, cx))
                     .bg(t.surface0)
                     .child(
                         div()
@@ -685,7 +707,7 @@ impl Shell {
                 .enumerate()
                 .map(|(ix, script)| self.script_row(workspace_id, ix, script, cx))
                 .collect();
-            header_popover("scripts-menu", "Workspace scripts", rows, cx)
+            header_popover("scripts-menu", "Workspace scripts", 28., rows, cx)
         });
         div()
             .relative()
@@ -864,7 +886,10 @@ impl Shell {
             .text_color(t.foreground_muted)
             .hover(|style| style.bg(t.surface2).text_color(t.foreground))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(icon(preferred.icon()).with_size(px(ICON_SM)));
+            .child(editor_glyph_element(
+                editor_glyph(preferred, &self.editor_icons),
+                t.foreground_muted,
+            ));
         let primary = pressable(
             primary,
             act(move |this: &mut Shell, cx: &mut Context<Shell>| {
@@ -908,7 +933,7 @@ impl Shell {
                     let row = menu_row(
                         ("editor-target", ix),
                         target.label().into(),
-                        target.icon(),
+                        editor_glyph(target, &self.editor_icons),
                         target == preferred,
                         cx,
                     );
@@ -931,7 +956,7 @@ impl Shell {
                 let row = menu_row(
                     "editor-github",
                     "Open on GitHub".into(),
-                    IconName::Github,
+                    EditorGlyph::App(github_mark(t.foreground)),
                     false,
                     cx,
                 );
@@ -948,7 +973,13 @@ impl Shell {
                     .into_any_element(),
                 );
             }
-            header_popover("open-in-editor-menu", "Choose editor", rows, cx)
+            header_popover(
+                "open-in-editor-menu",
+                "Choose editor",
+                HEADER_CONTROL_HEIGHT,
+                rows,
+                cx,
+            )
         });
         div()
             .relative()
@@ -979,6 +1010,7 @@ impl Shell {
     fn toggle_header_menu(&mut self, menu: HeaderMenu, cx: &mut Context<Self>) {
         let opens = self.header_menu != Some(menu);
         self.header_menu = opens.then_some(menu);
+        self.header_actions = None;
         if opens && menu == HeaderMenu::Editor {
             self.load_editor_github(cx);
         }
@@ -1175,10 +1207,96 @@ fn script_action(
 }
 
 /// One menu row with a leading icon and a check on the selected item.
+impl Shell {
+    /// Reads the icon of each listed app once, on the first idle turn after start, so the
+    /// first frame does not wait on AppKit and no render path asks the system.
+    pub(crate) fn load_editor_icons(&mut self, cx: &mut Context<Self>) {
+        let targets = self.editor_targets.clone();
+        cx.spawn(async move |this, cx| {
+            let _ = this.update(cx, |shell, cx| {
+                shell.editor_icons = targets
+                    .iter()
+                    .filter_map(|target| {
+                        let id = target.bundle_id();
+                        app_icon(id).map(|image| (id, image))
+                    })
+                    .collect();
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+}
+
+/// The app icon is drawn at this many pixels: `ICON_SM` at 2x, with room for a 3x display.
+#[cfg(target_os = "macos")]
+const APP_ICON_PIXELS: isize = 48;
+
+/// The icon of the app with `bundle_id`, drawn from its bundle into a PNG, or `None` when no app
+/// has the id. Call it on the main thread, and only once per app.
+#[cfg(target_os = "macos")]
+fn app_icon(bundle_id: &str) -> Option<Arc<Image>> {
+    use objc2::AnyThread as _;
+    use objc2_app_kit::{
+        NSBitmapImageFileType, NSBitmapImageRep, NSDeviceRGBColorSpace, NSGraphicsContext,
+        NSWorkspace,
+    };
+    use objc2_foundation::{NSDictionary, NSPoint, NSRect, NSSize, NSString};
+
+    let workspace = NSWorkspace::sharedWorkspace();
+    let url = workspace.URLForApplicationWithBundleIdentifier(&NSString::from_str(bundle_id))?;
+    let path = url.path()?;
+    let icon = workspace.iconForFile(&path);
+    // SAFETY: null planes make AppKit allocate the pixels; the color space is AppKit's own.
+    let bitmap = unsafe {
+        NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+            NSBitmapImageRep::alloc(),
+            std::ptr::null_mut(),
+            APP_ICON_PIXELS,
+            APP_ICON_PIXELS,
+            8,
+            4,
+            true,
+            false,
+            NSDeviceRGBColorSpace,
+            0,
+            0,
+        )
+    }?;
+    let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&bitmap)?;
+    NSGraphicsContext::saveGraphicsState_class();
+    NSGraphicsContext::setCurrentContext(Some(&context));
+    let side = APP_ICON_PIXELS as f64;
+    icon.drawInRect(NSRect::new(NSPoint::new(0., 0.), NSSize::new(side, side)));
+    context.flushGraphics();
+    NSGraphicsContext::restoreGraphicsState_class();
+    // SAFETY: an empty property dictionary is valid for PNG.
+    let png = unsafe {
+        bitmap.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())
+    }?;
+    Some(Arc::new(Image::from_bytes(ImageFormat::Png, png.to_vec())))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn app_icon(_bundle_id: &str) -> Option<Arc<Image>> {
+    None
+}
+
+/// An Open in editor glyph: the app's own icon, else its lucide icon in `color`.
+fn editor_glyph_element(glyph: EditorGlyph, color: Hsla) -> AnyElement {
+    match glyph {
+        EditorGlyph::App(image) => img(image).flex_none().size(px(ICON_SM)).into_any_element(),
+        EditorGlyph::Lucide(name) => icon(name)
+            .with_size(px(ICON_SM))
+            .text_color(color)
+            .into_any_element(),
+    }
+}
+
 fn menu_row(
     id: impl Into<ElementId>,
     label: SharedString,
-    glyph: IconName,
+    glyph: EditorGlyph,
     selected: bool,
     cx: &mut Context<Shell>,
 ) -> Stateful<Div> {
@@ -1199,11 +1317,7 @@ fn menu_row(
         .line_height(relative(1.3))
         .text_color(t.foreground)
         .hover(|style| style.bg(t.surface2))
-        .child(
-            icon(glyph)
-                .with_size(px(ICON_SM))
-                .text_color(t.foreground_muted),
-        )
+        .child(editor_glyph_element(glyph, t.foreground_muted))
         .child(div().flex_1().min_w_0().truncate().child(label))
         .child(div().w(px(ICON_SM)).flex_shrink_0().when(selected, |slot| {
             slot.child(
@@ -1214,17 +1328,19 @@ fn menu_row(
         }))
 }
 
-/// A header menu under its trigger, right-aligned, closed by a press outside it.
+/// A header menu under its trigger of `trigger_height`, right-aligned, closed by a press
+/// outside it.
 fn header_popover(
     id: &'static str,
     label: &'static str,
+    trigger_height: f32,
     rows: Vec<AnyElement>,
     cx: &mut Context<Shell>,
 ) -> AnyElement {
     let t = tokens(cx);
     div()
         .absolute()
-        .top(px(28. + SPACE_1))
+        .top(px(popup_offset(trigger_height)))
         .right_0()
         .child(
             deferred(

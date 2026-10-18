@@ -10,7 +10,7 @@ use crate::git_actions::{
 use bachuc_client::{Client, ClientEvent, GitStatus, GitStatusEvent, PrStatusReply};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{FONT_BASE, ICON_MD, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2};
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, popup_offset, shadow, tokens, ui_font_size};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -435,7 +435,7 @@ impl GitActionsButton {
             .collect();
         div()
             .absolute()
-            .top(px(HEADER_CONTROL_HEIGHT + SPACE_1))
+            .top(px(popup_offset(HEADER_CONTROL_HEIGHT)))
             .right_0()
             .child(
                 deferred(

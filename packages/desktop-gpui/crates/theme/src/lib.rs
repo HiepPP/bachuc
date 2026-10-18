@@ -37,10 +37,22 @@ pub enum ThemeChoice {
     System,
 }
 
+/// Which end of a tab chip shows its close button. `Left` shows it in place of the tab icon
+/// on hover; `Right` shows it on an overlay with a scrim at the right end.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TabClosePosition {
+    #[default]
+    Left,
+    Right,
+}
+
 struct State {
     choice: ThemeChoice,
     interface_scale: f32,
     code_scale: f32,
+    /// The whole-UI zoom factor, 1.0 at 100%.
+    zoom: f32,
+    tab_close: TabClosePosition,
     /// Installed families only; `None` is the default family.
     ui_family: Option<SharedString>,
     code_family: Option<SharedString>,
@@ -60,6 +72,8 @@ fn state(cx: &mut App) -> &mut State {
             choice: ThemeChoice::System,
             interface_scale: 1.,
             code_scale: 1.,
+            zoom: 1.,
+            tab_close: TabClosePosition::Left,
             ui_family: None,
             code_family: None,
             content_size: DEFAULT_CONTENT_FONT_SIZE,
@@ -151,18 +165,72 @@ pub fn set_font_scale(interface: f32, code: f32, cx: &mut App) {
     apply(cx);
 }
 
-/// A `metrics::FONT_*` interface size with the Interface size setting applied.
+/// A `metrics::FONT_*` interface size with the Interface size setting and the zoom applied.
 pub fn ui_font_size(base: f32, cx: &App) -> Pixels {
     px(base
         * cx.try_global::<State>()
-            .map_or(1., |state| state.interface_scale))
+            .map_or(1., |state| state.interface_scale * state.zoom))
 }
 
-/// A `metrics::FONT_CODE` code size with the Code size setting applied.
+/// A `metrics::FONT_CODE` code size with the Code size setting and the zoom applied.
 pub fn code_font_size(base: f32, cx: &App) -> Pixels {
     px(base
         * cx.try_global::<State>()
-            .map_or(1., |state| state.code_scale))
+            .map_or(1., |state| state.code_scale * state.zoom))
+}
+
+/// GPUI's default rem size, which gpui-kit sizes (`h_8`, `text_sm`, paddings) are made of.
+const BASE_REM_SIZE: f32 = 16.;
+
+/// Sets the whole-UI zoom factor, 1.0 at 100%. Text from [`ui_font_size`], [`code_font_size`],
+/// and [`content_font_size`], sizes from [`zoomed`], and the rem size from [`rem_size`] follow
+/// it. A factor that is not finite or not above 0 selects 1.0. Nothing is persisted.
+pub fn set_zoom(factor: f32, cx: &mut App) {
+    let factor = if factor.is_finite() && factor > 0. {
+        factor
+    } else {
+        1.
+    };
+    state(cx).zoom = factor;
+    apply(cx);
+    cx.refresh_windows();
+}
+
+/// The whole-UI zoom factor, 1.0 at 100%.
+pub fn zoom(cx: &App) -> f32 {
+    cx.try_global::<State>().map_or(1., |state| state.zoom)
+}
+
+/// A fixed `metrics` size (a padding, a height, an icon) with the zoom applied.
+pub fn zoomed(base: f32, cx: &App) -> Pixels {
+    px(base * zoom(cx))
+}
+
+/// The distance from the top of a trigger to the top of the menu under it: the trigger height
+/// plus [`metrics::POPUP_GAP`]. Place the menu there and add no margin of its own, or the gap
+/// doubles.
+pub fn popup_offset(trigger_height: f32) -> f32 {
+    trigger_height + metrics::POPUP_GAP
+}
+
+/// The rem size for the window, with the zoom applied. The root view sets it on each draw
+/// with `Window::set_rem_size`, which only stores the value.
+pub fn rem_size(cx: &App) -> Pixels {
+    zoomed(BASE_REM_SIZE, cx)
+}
+
+/// Sets the side of the tab close button. Nothing is persisted.
+pub fn set_tab_close_position(position: TabClosePosition, cx: &mut App) {
+    if state(cx).tab_close != position {
+        state(cx).tab_close = position;
+        cx.refresh_windows();
+    }
+}
+
+/// The side of the tab close button; `Left` until [`set_tab_close_position`] runs.
+pub fn tab_close_position(cx: &App) -> TabClosePosition {
+    cx.try_global::<State>()
+        .map_or_else(TabClosePosition::default, |state| state.tab_close)
 }
 
 /// The monospace family: SF Mono when it is installed, else Menlo. Views call this on every
@@ -236,11 +304,14 @@ pub fn set_content_font_size(px: f32, cx: &mut App) {
     apply(cx);
 }
 
-/// The content font size for message bodies, the composer input, and Markdown.
+/// The content font size for message bodies, the composer input, and Markdown, with the zoom
+/// applied.
 pub fn content_font_size(cx: &App) -> Pixels {
     px(cx
         .try_global::<State>()
-        .map_or(DEFAULT_CONTENT_FONT_SIZE, |state| state.content_size))
+        .map_or(DEFAULT_CONTENT_FONT_SIZE, |state| {
+            state.content_size * state.zoom
+        }))
 }
 
 fn clamp_content_font_size(size: f32) -> f32 {
@@ -363,17 +434,19 @@ fn resync(window: Option<&mut Window>, cx: &mut App) {
     apply(cx);
 }
 
-/// Writes the tokens, radii, and font sizes into the gpui-kit theme.
+/// Writes the tokens, radii, and font sizes, all with the zoom applied, into the gpui-kit theme.
 fn apply(cx: &mut App) {
     let t = tokens(cx);
     let interface = ui_font_size(metrics::FONT_BASE, cx);
     let code = code_font_size(metrics::FONT_CODE, cx);
     let ui_family = ui_font_family(cx);
     let code_family = code_font_family(cx);
+    let radius = zoomed(metrics::RADIUS_MD, cx);
+    let radius_lg = zoomed(metrics::RADIUS_LG, cx);
     let clear = gpui_kit::transparent_black();
     Theme::update(cx, |theme| {
-        theme.radius = px(metrics::RADIUS_MD);
-        theme.radius_lg = px(metrics::RADIUS_LG);
+        theme.radius = radius;
+        theme.radius_lg = radius_lg;
         theme.font_size = interface;
         theme.font_family = ui_family;
         theme.mono_font_size = code;
@@ -561,6 +634,20 @@ pub fn turn_label_colors(label: TurnLabel, scheme: Scheme) -> TurnLabelColors {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn popup_offset_is_the_trigger_height_plus_one_gap() {
+        assert_eq!(metrics::POPUP_GAP, 4.);
+        assert_eq!(popup_offset(28.), 32.);
+        assert_eq!(popup_offset(0.), metrics::POPUP_GAP);
+    }
+
+    /// gpui-kit `dropdown_menu` takes no offset: its `Popover` places the menu `rem / 4` from
+    /// the trigger. That must stay the theme gap.
+    #[test]
+    fn gpui_kit_dropdown_gap_is_the_popup_gap() {
+        assert_eq!(BASE_REM_SIZE * 0.25, metrics::POPUP_GAP);
+    }
 
     #[test]
     fn mono_family_prefers_sf_mono_and_falls_back_to_menlo() {

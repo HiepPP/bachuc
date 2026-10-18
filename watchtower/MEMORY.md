@@ -62,6 +62,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid daemon start, stop, updates, CLI install, and deep links in the GPUI client while Electron and the CLI own them. Reason: [ADR-0041](watchtower/decisions/ADR-0041-gpui-client-connects-only-over-daemon-management.md).
 - Avoid terminal restore mode `"full-snapshot"` (`0x05` ANSI bytes) in the GPUI client while the daemon sends the `0x04` JSON grid without a restore mode. Reason: [ADR-0042](watchtower/decisions/ADR-0042-json-grid-terminal-restore-over-ansi-snapshot.md).
 - Avoid gpui-kit default themes and the gpui-kit `IconName` set in the GPUI client, and porting every dark theme variant now, while the owner wants the exact Electron look in `light` and `claude` dark. Reason: [ADR-0043](watchtower/decisions/ADR-0043-electron-tokens-and-lucide-icons-over-gpui-kit-defaults.md).
+- Avoid generic lucide icons in the GPUI Open-in menu while the owner wants each app to show its own icon. Reason: [ADR-0046](watchtower/decisions/ADR-0046-real-app-icons-in-open-in-menu-over-lucide.md).
 
 ## Learnings
 
@@ -362,3 +363,15 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: adding a field to a client struct breaks struct literals in other crates' tests; plan which TASK fixes each literal, and keep `cargo build` (no tests) green in between.
 - Source: TASK-220, TASK-222, TASK-231.
 - Use next time: `rg "StructName \{"` across the workspace before adding a field.
+
+### 2026-10-18 - Implement 20261018-gpui-polish-and-fixes
+
+- Learned: the GPUI window rem size is 16 x zoom, not the 14 px body font. A gap converted with `FONT_BASE` drew 27.4 px instead of 24.
+- Source: TASK-233 fix round 1, `packages/desktop-gpui/crates/timeline/src/lib.rs` (`window_rems`).
+- Use next time: convert px to rems with `bachuc_theme::rem_size(cx)`; when a source read and a screenshot disagree, model every measured gap before you trust the source table.
+- Learned: a daemon plugin timeline item reaches a client only when its hello lists `plugin_timeline_items`.
+- Source: TASK-241, `packages/desktop-gpui/crates/client/src/connection.rs`, `packages/server/src/server/session.ts` (`supportsTimelineItem`).
+- Use next time: when a daemon item is missing in GPUI, compare the hello capabilities first.
+- Learned: text answers a taffy min-content probe with its unwrapped width, so a flex item that holds text needs `min_w_0` or a definite width. Measure a menu gap from the trigger's own bounds, not from its row.
+- Source: TASK-232 and TASK-242 outcomes.
+- Use next time: add `min_w_0` to every flex text column; read popup gaps against the button.

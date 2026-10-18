@@ -60,7 +60,7 @@ impl ConnectionConfig {
 
 /// The capabilities this client sends in `hello`. Names come from
 /// `packages/protocol/src/client-capabilities.ts`.
-pub const CAPABILITIES: [&str; 8] = [
+pub const CAPABILITIES: [&str; 9] = [
     "hello_rejection",
     "all_providers",
     "selective_agent_timeline",
@@ -69,6 +69,7 @@ pub const CAPABILITIES: [&str; 8] = [
     "timeline_replacement_invalidation",
     "reasoning_merge_enum",
     "custom_mode_icons",
+    "plugin_timeline_items",
 ];
 
 /// Builds the `hello` frame.
@@ -440,6 +441,8 @@ mod tests {
         for name in CAPABILITIES {
             assert_eq!(hello["capabilities"][name], true, "{name}");
         }
+        // Without it the daemon withholds plugin items, such as the turn diff card.
+        assert!(CAPABILITIES.contains(&"plugin_timeline_items"));
         let without: Value = serde_json::from_str(&hello_frame("id-1", None)).unwrap();
         assert!(without.get("auth").is_none());
     }

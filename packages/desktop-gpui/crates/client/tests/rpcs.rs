@@ -322,9 +322,40 @@ fn list_commands_parses_the_commands() {
     assert_eq!(commands.len(), 2);
     assert_eq!(commands[0].name, "review");
     assert_eq!(commands[0].description, "Review the diff");
+    assert!(!commands[0].skill);
+    assert!(commands[1].skill);
+    let request = &server.requests_of("list_commands_request")[0];
+    assert_eq!(request["agentId"], "a1");
+    assert!(request.get("draftConfig").is_none());
+}
+
+#[test]
+fn list_draft_commands_sends_the_draft_config() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "list_commands_request",
+        "list_commands_response",
+        json!({"agentId": "draft", "error": null, "commands": [
+            {"name": "deploy", "description": "Deploy", "argumentHint": "", "kind": "skill"}
+        ]}),
+    );
+    let mut harness = connect(&server);
+    let config = bachuc_client::DraftConfig {
+        provider: "claude".to_string(),
+        cwd: "/repo".to_string(),
+        model: Some("opus".to_string()),
+        ..Default::default()
+    };
+    let reply = harness.core.list_draft_commands("draft", &config);
+    let commands = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(commands.len(), 1);
+    assert!(commands[0].skill);
+    let request = &server.requests_of("list_commands_request")[0];
+    assert_eq!(request["agentId"], "draft");
     assert_eq!(
-        server.requests_of("list_commands_request")[0]["agentId"],
-        "a1"
+        request["draftConfig"],
+        json!({"provider": "claude", "cwd": "/repo", "model": "opus"})
     );
 }
 

@@ -3,7 +3,7 @@
 
 use crate::appearance::{
     Appearance, CODE_RANGE, CONTENT_RANGE, DEFAULT_FAMILY, INTERFACE_RANGE, apply, family_choice,
-    family_label, load_from, parse_size, save_to, theme_label, with_builtin_theme,
+    family_label, load_from, parse_size, save_to, tab_close_label, theme_label, with_builtin_theme,
     with_plugin_theme,
 };
 use crate::appearance_preview::preview;
@@ -15,7 +15,9 @@ use crate::ui::{
 use bachuc_icons::{IconName, icon};
 use bachuc_plugin_host::PluginHostEvent;
 use bachuc_theme::metrics::{FONT_BASE, ICON_MD, RADIUS_MD, SPACE_2, SPACE_3, SPACE_4};
-use bachuc_theme::{SyntaxThemeId, ThemeChoice, installed_font_families, tokens, ui_font_size};
+use bachuc_theme::{
+    SyntaxThemeId, TabClosePosition, ThemeChoice, installed_font_families, tokens, ui_font_size,
+};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::theme::Theme;
@@ -120,6 +122,11 @@ impl AppearancePane {
     }
 
     fn persist(&mut self, next: Appearance, cx: &mut Context<Self>) {
+        // The zoom shortcuts change the zoom while the pane shows; keep the level on screen.
+        let next = Appearance {
+            zoom: bachuc_theme::zoom(cx),
+            ..next
+        };
         apply(&next, cx);
         self.error = save_to(&self.dir, &next)
             .err()
@@ -146,6 +153,42 @@ impl AppearancePane {
             next.syntax_theme = syntax_theme;
             self.persist(next, cx);
         }
+    }
+
+    fn set_tab_close_position(&mut self, position: TabClosePosition, cx: &mut Context<Self>) {
+        if self.current.tab_close_position != position {
+            let mut next = self.current.clone();
+            next.tab_close_position = position;
+            self.persist(next, cx);
+        }
+    }
+
+    /// The tab close button side: Left or Right.
+    fn tab_close_dropdown(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let current = self.current.tab_close_position;
+        let weak = cx.weak_entity();
+        select_trigger(
+            "tab-close-trigger",
+            None,
+            tab_close_label(current),
+            format!("Tab close button: {}", tab_close_label(current)),
+            cx,
+        )
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+            [TabClosePosition::Left, TabClosePosition::Right]
+                .into_iter()
+                .fold(
+                    menu.min_w(px(200.)).check_side(Side::Right),
+                    |menu, position| {
+                        menu.item(Self::text_item(
+                            tab_close_label(position).into(),
+                            position == current,
+                            move |this, cx| this.set_tab_close_position(position, cx),
+                            weak.clone(),
+                        ))
+                    },
+                )
+        })
     }
 
     /// `None` picks the default family.
@@ -492,6 +535,20 @@ impl Render for AppearancePane {
                         "Readable content and code preview",
                         cx,
                     )),
+                cx,
+            ))
+            .child(section(
+                "Tabs",
+                None,
+                card(cx).child(
+                    row(true, cx)
+                        .child(row_text(
+                            "Close button",
+                            Some("Left shows it in place of the tab icon on hover".into()),
+                            cx,
+                        ))
+                        .child(self.tab_close_dropdown(cx)),
+                ),
                 cx,
             ))
             .children(self.error.clone().map(|error| error_text(error, cx)));

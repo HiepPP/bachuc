@@ -445,6 +445,7 @@ impl Render for SpacesPage {
             .child(
                 v_flex()
                     .flex_1()
+                    .min_w_0()
                     .child(
                         div()
                             .id("spaces-title")

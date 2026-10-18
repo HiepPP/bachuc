@@ -217,6 +217,7 @@ impl BoardPage {
                 .child(
                     div()
                         .flex_1()
+                        .min_w_0()
                         .text_size(s(12.5))
                         .line_height(s(17.))
                         .text_color(t.foreground_muted)

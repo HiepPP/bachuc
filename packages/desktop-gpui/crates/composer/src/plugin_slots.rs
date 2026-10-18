@@ -12,7 +12,9 @@ use bachuc_plugin_host::{
     Contributed, ContributionIndex, InterceptOutcome, PillBehavior, PillPlacement, PillState,
     PluginHostEvent, PluginSlashCommand, StopButton, host,
 };
-use bachuc_theme::metrics::{FONT_SM, ICON_SM, RADIUS_2XL, SPACE_1, SPACE_2, SPACE_3, SPACE_4};
+use bachuc_theme::metrics::{
+    FONT_SM, ICON_SM, POPUP_GAP, RADIUS_2XL, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
+};
 use bachuc_theme::{tokens, ui_font_size};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::tooltip::Tooltip;
@@ -358,6 +360,7 @@ pub fn plugin_pill(
             on_select,
         } => Popover::new(id.clone())
             .anchor(Anchor::BottomLeft)
+            .offset(px(POPUP_GAP))
             .p_1()
             .trigger(PluginPillTrigger {
                 id: ElementId::Name(format!("plugin-pill-trigger-{key}").into()),
@@ -403,6 +406,7 @@ pub fn plugin_pill(
             let closed_key = key.clone();
             Popover::new(id.clone())
                 .anchor(Anchor::BottomLeft)
+                .offset(px(POPUP_GAP))
                 .map(|popover| if flush { popover.p_0() } else { popover.p_3() })
                 .trigger(PluginPillTrigger {
                     id: ElementId::Name(format!("plugin-pill-trigger-{key}").into()),

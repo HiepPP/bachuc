@@ -54,6 +54,29 @@ pub fn provider_logo(provider: &str, fill: Hsla) -> Option<Arc<Image>> {
     )
 }
 
+/// The GitHub mark (Simple Icons, as `packages/website/src/components/brand-icons.tsx`), for the
+/// "Open on GitHub" row (ADR-0046). Lucide's `github` icon is an outline, not the mark.
+const GITHUB_MARK: &str = include_str!("../assets/brands/github.svg");
+
+/// The GitHub mark filled with `fill`, cached per color like [`provider_logo`].
+pub fn github_mark(fill: Hsla) -> Arc<Image> {
+    static CACHE: OnceLock<Mutex<HashMap<[u32; 4], Arc<Image>>>> = OnceLock::new();
+    let key = [fill.h, fill.s, fill.l, fill.a].map(f32::to_bits);
+    let mut cache = CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache
+        .entry(key)
+        .or_insert_with(|| {
+            Arc::new(Image::from_bytes(
+                ImageFormat::Svg,
+                filled(GITHUB_MARK, fill).into_bytes(),
+            ))
+        })
+        .clone()
+}
+
 /// The icon to draw when `provider_logo` gives `None`: `kiro` draws `PackagePlus` in Electron, and
 /// every other id draws `Bot`.
 pub fn provider_fallback_icon(provider: &str) -> IconName {
@@ -91,6 +114,14 @@ mod tests {
 
     fn white() -> Hsla {
         hsla(0., 0., 1., 1.)
+    }
+
+    #[test]
+    fn the_github_mark_is_filled_and_cached() {
+        let text = filled(GITHUB_MARK, white());
+        assert!(text.contains("fill=\"#ffffff\""), "{text}");
+        assert!(!text.contains('{'), "{text}");
+        assert!(Arc::ptr_eq(&github_mark(white()), &github_mark(white())));
     }
 
     #[test]
