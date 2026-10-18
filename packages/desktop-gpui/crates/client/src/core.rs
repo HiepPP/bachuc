@@ -1558,6 +1558,22 @@ impl ClientCore {
         )
     }
 
+    /// The commands of a draft that has no agent yet, with the project skills of its folder.
+    pub fn list_draft_commands(
+        &mut self,
+        agent_id: &str,
+        config: &DraftConfig,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<SlashCommand>>> {
+        self.request_reply(
+            json!({
+                "type": "list_commands_request",
+                "agentId": agent_id,
+                "draftConfig": composer_data::draft_config(config),
+            }),
+            Pending::Commands,
+        )
+    }
+
     pub fn list_directory(
         &mut self,
         cwd: &str,
@@ -2795,6 +2811,7 @@ impl ClientCore {
                                     .as_str()
                                     .unwrap_or_default()
                                     .to_string(),
+                                skill: command["kind"].as_str() == Some("skill"),
                             })
                         })
                         .collect()),

@@ -444,6 +444,18 @@ impl Client {
         reply_task(receiver, cx)
     }
 
+    /// The commands and skills of a draft: the daemon reads the project skills from its folder.
+    pub fn list_draft_commands(
+        &mut self,
+        agent_id: &str,
+        config: &DraftConfig,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<SlashCommand>>> {
+        let receiver = self.core.list_draft_commands(agent_id, config);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
     /// Sends a prompt; `behavior` says what it does to a running turn. The app sends `Steer`.
     pub fn send_prompt_with(
         &mut self,
