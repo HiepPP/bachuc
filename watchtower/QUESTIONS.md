@@ -1,0 +1,12 @@
+# Questions
+
+Owner questions of the active plan. One row per question. Specs and outcomes cite the ID instead of repeating the text.
+
+| ID    | TASK     | Blocks | Question                                                                                                                                                                   | Default                                                                | Status    | Answer |
+| ----- | -------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------- | ------ |
+| Q-155 | TASK-243 | -      | A list inside a blockquote is still depth 0, so the builder added `NodeRenderOptions.in_blockquote` in `vendor/gpui-base/src/text/document.rs`, outside `Files:`. Keep it? | Keep the field; it is the only way to tell the two lists apart.        | DEFAULTED | -      |
+| Q-156 | TASK-244 | -      | The pure show rule `plugins::shown_parts` is public in `crates/timeline/src/plugins.rs`, outside `Files:`, so the test crate can reach it. Keep it?                        | Keep it public.                                                        | DEFAULTED | -      |
+| Q-157 | TASK-245 | -      | `draft_pill_row` in `plugin_slots.rs` keeps `px` paddings, because it has no `cx` and its caller in `composer.rs` belonged to another group. Convert it in a follow-up?    | Leave it at `px` for this plan.                                        | DEFAULTED | -      |
+| Q-158 | TASK-251 | -      | The stop-orb dot geometry follows `StopButtonProps` `size` and `icon_size`. The orb scales only if the composer passes them zoomed.                                        | No change in this plan; the UI checker reports whether the orb scales. | DEFAULTED | -      |
+| Q-159 | TASK-250 | -      | The 1.5 px Board icon strokes and the 2 px plan spine now zoom; the 2 px focus ring spread stays `px`. Keep this split?                                                    | Keep it.                                                               | DEFAULTED | -      |
+| Q-160 | TASK-248 | -      | Native window geometry in `crates/app/src/main.rs` (window size, traffic lights, min size) keeps `px`. Keep it?                                                            | Keep it; the window exists before the zoom.                            | DEFAULTED | -      |

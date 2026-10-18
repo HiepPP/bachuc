@@ -48,3 +48,4 @@ max_builders: 6
 ## Known Failures
 
 - `bachuc-command` test `search_500_items_stays_under_16_ms_per_keystroke`: a timing test that fails under a high load average. Confirm by: `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-command --test search` alone -> pass.
+- `bachuc-plugin-watchtower-board` test `one_thousand_derives_of_a_40_task_plan_take_under_200_ms`: a timing test that fails under a high load average (209 ms at load 6.5, 2026-10-18). Confirm by: `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-plugin-watchtower-board --lib one_thousand_derives` alone -> pass.
