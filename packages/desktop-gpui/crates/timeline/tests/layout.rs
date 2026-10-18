@@ -61,19 +61,20 @@ fn the_text_stops_left_of_the_pills_plus_the_clearance() {
 }
 
 #[test]
-fn a_row_too_narrow_keeps_the_text_width_at_zero_or_more() {
-    for row in [0., 20., 100., 250., 300., 600.] {
-        let inset = column_right_inset(row, 170., 1.);
-        assert!(inset >= 0.);
-        assert!(
-            content_column_width(row, 1.) - inset >= 0.,
-            "{row} gives {inset}"
-        );
+fn a_row_too_narrow_keeps_a_readable_text_width() {
+    for zoom in [1., 1.5, 2.] {
+        for row in [0., 20., 100., 250., 300., 400., 600.] {
+            let inset = column_right_inset(row, 170. * zoom, zoom);
+            let text = content_column_width(row, zoom);
+            assert!(inset >= 0.);
+            assert!(
+                text - inset >= text.min(320. * zoom),
+                "{row} at {zoom} gives {inset}"
+            );
+        }
     }
-    assert_eq!(
-        column_right_inset(200., 170., 1.),
-        content_column_width(200., 1.)
-    );
+    // Too narrow for a gutter: the pills cover the line ends instead.
+    assert_eq!(column_right_inset(200., 170., 1.), 0.);
 }
 
 #[test]

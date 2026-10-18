@@ -2347,11 +2347,15 @@ fn column_width(row_width: f32, zoom: f32) -> f32 {
 /// message text stops this far before them.
 const CORNER_PILLS_OFFSET: f32 = SPACE_3;
 const CORNER_PILLS_CLEARANCE: f32 = SPACE_3;
+/// The gutter never squeezes the text below this width at 100%. A narrower pane lets the
+/// pills cover the end of the lines, as Electron does, rather than wrap one letter a line.
+const MIN_TEXT_WIDTH: f32 = 320.;
 
 /// The extra right padding a row's column needs so its text stops left of the corner pills,
 /// which are `pills_width` wide (as measured, so already zoomed) and float over the row's
 /// top-right corner. 0 with no pills and when the margin beside the centered column is already
-/// wide enough. The text never goes below 0 wide.
+/// wide enough. The text keeps at least `MIN_TEXT_WIDTH`, or its whole width when it is
+/// narrower than that.
 pub fn column_right_inset(row_width: f32, pills_width: f32, zoom: f32) -> f32 {
     if pills_width <= 0. {
         return 0.;
@@ -2359,9 +2363,8 @@ pub fn column_right_inset(row_width: f32, pills_width: f32, zoom: f32) -> f32 {
     let column = column_width(row_width, zoom);
     let text_right = (row_width + column) / 2. - COLUMN_PADDING * zoom;
     let limit = row_width - (CORNER_PILLS_OFFSET + CORNER_PILLS_CLEARANCE) * zoom - pills_width;
-    (text_right - limit)
-        .max(0.)
-        .min(content_column_width(row_width, zoom))
+    let room = (content_column_width(row_width, zoom) - MIN_TEXT_WIDTH * zoom).max(0.);
+    (text_right - limit).max(0.).min(room)
 }
 
 /// `Notification`: an icon and the message on a tinted box.
