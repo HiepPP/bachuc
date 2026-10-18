@@ -2227,7 +2227,9 @@ fn density_box(
 ) -> AnyElement {
     let measure = canvas(
         move |bounds, _, cx| {
-            let next = resolve_density(f32::from(bounds.size.width), current, &presence);
+            // The density floors are 100% widths, and the controls grow with the zoom.
+            let available = f32::from(bounds.size.width) / bachuc_theme::zoom(cx);
+            let next = resolve_density(available, current, &presence);
             if next != current {
                 cx.defer(move |cx| {
                     weak.update(cx, |this, cx| {
