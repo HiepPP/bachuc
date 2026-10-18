@@ -375,3 +375,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: text answers a taffy min-content probe with its unwrapped width, so a flex item that holds text needs `min_w_0` or a definite width. Measure a menu gap from the trigger's own bounds, not from its row.
 - Source: TASK-232 and TASK-242 outcomes.
 - Use next time: add `min_w_0` to every flex text column; read popup gaps against the button.
+
+### 2026-10-19 GPUI screen checks need a visible window
+
+- Learned: a GPUI window that is covered or in the background stops drawing, so screenshots and the AX tree show a stale frame. Raise the window with the AX `Raise` action, read the AX state, then take the screenshot. Navigate with keys (`cmd+k`, type, `Return`) rather than sidebar clicks. Set the zoom in `~/Library/Application Support/BachucGpui/appearance.json` before launch, and restore the owner's value after.
+- Source: TASK-243 to TASK-251 UI checks, `/tmp/wt-ui/zoom/`.
+- Use next time: a UI checker that cannot raise the window reports `UNVERIFIED (unattended): background frame` instead of guessing.

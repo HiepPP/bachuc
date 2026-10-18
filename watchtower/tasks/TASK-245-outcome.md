@@ -41,4 +41,15 @@ DEFERRED (UI checker): no frame loop, CPU under 1% over 10 s. By reading: the ca
 
 Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (8 s apart), before-key-try.png, before-key-try2.png: the 1200x800 window still shows "Connecting / live" while the app holds an ESTABLISHED socket to 127.0.0.1:6768. GPUI does not redraw a background window (Q-069), so no frame shows thread, composer, or zoom. A Cmd+= and a Cmd+- key reached the app (appearance.json changed 1.25 -> 1.5 -> 1.25) but the window did not redraw. The check bundle was built (exit 0); a baseline copy is at `Bachuc GPUI Zoom Before.app`. The checker did not use the front, the pointer, or AX clicks.
 
-Blocked: BUILT, UNVERIFIED (Q-161)
+## UI Checks
+
+Run 2026-10-19 on live with the check bundle; screenshots in `/tmp/wt-ui/zoom/`.
+
+- 1200x800: pills do not cover text -> PASS (owner).
+- Owner asked the composer to align with the thread text as in Electron. Fixed in `67f2c75`; owner confirmed the edges line up.
+- 1600x900: column centered, not pushed left -> PASS (owner).
+- Running thread (`mock TASK-245 long run`): no pills, inset 0 -> PASS (agent, `/tmp/wt-ui/zoom/after-150-1200-longrun.png`).
+- Run finishes -> pills and gutter appear once -> PASS (owner, `mock TASK-245 running`).
+- Idle CPU with pills, 10 samples over 10 s: 0.4-0.6% -> PASS.
+- Found at 200% in 900x800: the gutter squeezed the text to one letter a line. Fixed in `d6c855e` (text keeps 320 px at 100%; narrower panes let the pills cover the line ends, Q-164).
+- Store offline -> gutter back to 0: UNVERIFIED (unattended): stopping the daemon is forbidden.

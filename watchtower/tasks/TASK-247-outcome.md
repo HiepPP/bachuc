@@ -59,4 +59,12 @@ Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (
 
 By reading only (not a check result): `INPUT_INSET` is a fixed `4.` used as `px(INPUT_INSET)` (`crates/composer/src/composer.rs:94`, `2654`, `2677`), so it assumes the gpui-kit input padding stays 4 px at every zoom. A screenshot is still needed at 150%.
 
-Blocked: BUILT, UNVERIFIED (Q-161)
+## UI Checks
+
+Run 2026-10-19 on live with the check bundle; screenshots in `/tmp/wt-ui/zoom/`.
+
+- Zoom 150%: the toolbar density used 100% floors on zoomed widths and clipped the mode pill. Fixed in `132164b` (`after-150-1200-t244-fix.png`).
+- Slash picker and Command Center at 150% -> PASS (`after-150-1200-slash-fix.png`, `after-150-1200-command.png`).
+- INPUT_INSET at 150%: input text edge lines up with the pill row -> PASS.
+- Q-158: the stop orb grows with the composer at 150% -> PASS (`after-150-1200-longrun.png`).
+- Pre-existing, also at 100%: with the send button the toolbar can overflow up to 12 px before it compacts (Q-162); the "⌘L to focus" hint overlaps the placeholder in a narrow composer (Q-163).

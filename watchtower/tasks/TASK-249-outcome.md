@@ -68,4 +68,9 @@ DEFERRED (UI checker): the 100% screenshot comparison. At zoom 1.0, `zoomed(X, c
 
 Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (8 s apart), before-key-try.png, before-key-try2.png: the 1200x800 window still shows "Connecting / live" while the app holds an ESTABLISHED socket to 127.0.0.1:6768. GPUI does not redraw a background window (Q-069), so no frame shows thread, composer, or zoom. A Cmd+= and a Cmd+- key reached the app (appearance.json changed 1.25 -> 1.5 -> 1.25) but the window did not redraw. The check bundle was built (exit 0); a baseline copy is at `Bachuc GPUI Zoom Before.app`. The checker did not use the front, the pointer, or AX clicks.
 
-Blocked: BUILT, UNVERIFIED (Q-161)
+## UI Checks
+
+Run 2026-10-19 on live with the check bundle; screenshots in `/tmp/wt-ui/zoom/`.
+
+- Zoom 150%: explorer tree, file view, diff, terminal, Appearance and Projects settings -> PASS (`after-150-1200-*.png`).
+- History at 150% clipped titles and the Archived badge. Fixed in `a116b31` (`after-150-1200-history-fix.png`).

@@ -41,4 +41,10 @@ DEFERRED (UI checker): 0 changed pixel rows at zoom 100%. By reading: `zoomed(X,
 
 Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (8 s apart), before-key-try.png, before-key-try2.png: the 1200x800 window still shows "Connecting / live" while the app holds an ESTABLISHED socket to 127.0.0.1:6768. GPUI does not redraw a background window (Q-069), so no frame shows thread, composer, or zoom. A Cmd+= and a Cmd+- key reached the app (appearance.json changed 1.25 -> 1.5 -> 1.25) but the window did not redraw. The check bundle was built (exit 0); a baseline copy is at `Bachuc GPUI Zoom Before.app`. The checker did not use the front, the pointer, or AX clicks.
 
-Blocked: BUILT, UNVERIFIED (Q-161)
+## UI Checks
+
+Run 2026-10-19 on live with the check bundle; screenshots in `/tmp/wt-ui/zoom/`.
+
+- Zoom 150%, 1200x800: thread, steps, cards, pills scale, no clipping -> PASS (`after-150-1200-t244-fix.png`).
+- Zoom 200%, 900x800 without the explorer: text wraps by word, no step or card label clips -> PASS after `d6c855e` (`after-200-900-noexplorer.png`).
+- Zoom 100% before/after (`before-100-1200-t244.png` vs `after-100-1200-t244.png`): sizes match; the only change is the planned TASK-245 gutter -> PASS.

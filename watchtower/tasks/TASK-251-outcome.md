@@ -50,4 +50,9 @@ Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (
 
 By reading only (not a check result): the composer passes `size: zoomed(CONTROL, cx)` and `icon_size: zoomed(TOOLBAR_GLYPH, cx)` to `StopButtonProps` for a plugin stop face (`crates/composer/src/composer.rs:2835`). Both grow with zoom, so a plugin orb should scale. The default red face uses `size_full()` in its slot. Q-158 stays open until a 150% screenshot.
 
-Blocked: BUILT, UNVERIFIED (Q-161)
+## UI Checks
+
+Run 2026-10-19 on live with the check bundle; screenshots in `/tmp/wt-ui/zoom/`.
+
+- Zoom 150%: turn diff card, next-prompt buttons, Space strip -> PASS (`after-150-1200-t244-fix.png`).
+- Space menu and skill pins menu at 150%: UNVERIFIED (unattended): not opened.
