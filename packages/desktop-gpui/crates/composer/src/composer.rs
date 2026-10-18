@@ -75,6 +75,7 @@ use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::json;
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -395,6 +396,10 @@ pub struct Composer {
     drop: DropOverlay,
     picker: Option<Picker>,
     popovers: PopoverViews,
+    /// The corner pills' width, so the column keeps the timeline's right edge.
+    corner_reserve: Pixels,
+    /// The composer's width at the last paint.
+    width: Rc<Cell<Pixels>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -571,6 +576,8 @@ impl Composer {
             drop: DropOverlay::default(),
             picker: None,
             popovers: PopoverViews::default(),
+            corner_reserve: px(0.),
+            width: Rc::new(Cell::new(px(0.))),
             _subscriptions: subscriptions,
         };
         composer.sync_tick(cx);
@@ -579,6 +586,15 @@ impl Composer {
 
     pub fn agent_id(&self) -> &str {
         &self.agent_id
+    }
+
+    /// Sets the width of the corner pills over the timeline. The column takes the same right
+    /// inset as the timeline's column, so the composer and the message text share both edges.
+    pub fn set_corner_reserve(&mut self, width: Pixels, cx: &mut Context<Self>) {
+        if (f32::from(width) - f32::from(self.corner_reserve)).abs() > 0.5 {
+            self.corner_reserve = width;
+            cx.notify();
+        }
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
@@ -3102,6 +3118,21 @@ impl Render for Composer {
         let mention_menu = self.mention_menu(cx);
         let drop_backdrop = self.drop_backdrop(window, cx);
 
+        // The timeline's column math, so the card's right edge follows the message text when
+        // the corner pills push it left. The width is from the last paint, as the timeline's.
+        let inset = bachuc_timeline::column_right_inset(
+            f32::from(self.width.get()),
+            f32::from(self.corner_reserve),
+            bachuc_theme::zoom(cx),
+        );
+        let width = self.width.clone();
+        let measure = canvas(
+            move |area, _, _| width.set(area.size.width),
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full();
+
         // `inputAreaContainer`: 16 px at the sides and bottom, the content centered at 820 px.
         div()
             .w_full()
@@ -3125,6 +3156,7 @@ impl Render for Composer {
                 v_flex()
                     .w_full()
                     .max_w(zoomed(MAX_CONTENT_WIDTH, cx))
+                    .pr(px(inset))
                     .gap(zoomed(SPACE_3, cx))
                     .children(queue)
                     .children(send_error)
@@ -3139,6 +3171,7 @@ impl Render for Composer {
                             .child(card),
                     ),
             )
+            .child(measure)
             .children(drop_backdrop)
     }
 }

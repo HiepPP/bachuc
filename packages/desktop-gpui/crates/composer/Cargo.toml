@@ -12,6 +12,7 @@ bachuc-icons = { path = "../icons" }
 bachuc-plugin-host = { path = "../plugin-host" }
 bachuc-sidebar = { path = "../sidebar" }
 bachuc-theme = { path = "../theme" }
+bachuc-timeline = { path = "../timeline" }
 gpui-kit.workspace = true
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std"] }

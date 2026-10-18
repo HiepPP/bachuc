@@ -102,11 +102,13 @@ impl AgentPane {
         let composer_id = agent_id.clone();
         let composer = cx.new(|cx| Composer::new(composer_client, composer_id, window, cx));
         let subscriptions = vec![
-            // The timeline keeps its text clear of the corner pills.
+            // The timeline keeps its text clear of the corner pills, and the composer keeps its edge.
             cx.observe(&corner_pills, |this: &mut AgentPane, pills, cx| {
                 let width = pills.read(cx).width();
                 this.timeline
                     .update(cx, |timeline, cx| timeline.set_corner_reserve(width, cx));
+                this.composer
+                    .update(cx, |composer, cx| composer.set_corner_reserve(width, cx));
             }),
             cx.subscribe_in(
                 &client,
