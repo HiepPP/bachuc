@@ -10,7 +10,7 @@ use crate::model::{
 use crate::state::SpacesState;
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{FONT_SM, ICON_XS, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_1_5, SPACE_2};
-use bachuc_theme::{ShadowSize, Tokens, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, Tokens, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -294,7 +294,7 @@ impl Render for SpaceMenu {
                     cx.processor(|this, range, _window, cx| this.project_rows(range, cx)),
                 )
                 .w_full()
-                .max_h(px(LIST_MAX_HEIGHT)),
+                .max_h(zoomed(LIST_MAX_HEIGHT, cx)),
             )],
             MenuPage::Target if self.moving.is_some() => vec![lazy_list(
                 "space-menu-targets",
@@ -305,7 +305,7 @@ impl Render for SpaceMenu {
                     cx.processor(|this, range, _window, cx| this.target_rows(range, cx)),
                 )
                 .w_full()
-                .max_h(px(LIST_MAX_HEIGHT)),
+                .max_h(zoomed(LIST_MAX_HEIGHT, cx)),
             )],
             MenuPage::Menu | MenuPage::Target => {
                 vec![
@@ -333,7 +333,7 @@ impl Render for SpaceMenu {
                     .into_any_element(),
                     div()
                         .h(px(1.))
-                        .my(px(SPACE_0_5))
+                        .my(zoomed(SPACE_0_5, cx))
                         .bg(t.border)
                         .into_any_element(),
                     {
@@ -361,25 +361,32 @@ impl Render for SpaceMenu {
                 let disabled = !can_save_name(&draft, busy);
                 vec![
                     v_flex()
-                        .gap(px(SPACE_1_5))
-                        .p(px(SPACE_1))
+                        .gap(zoomed(SPACE_1_5, cx))
+                        .p(zoomed(SPACE_1, cx))
                         .child(Styled::h(
                             Input::new(&self.draft)
                                 .accessibility_id("space-menu-name")
                                 .aria_label("Space name")
-                                .px(px(SPACE_2))
-                                .rounded(px(RADIUS_MD))
+                                .px(zoomed(SPACE_2, cx))
+                                .rounded(zoomed(RADIUS_MD, cx))
                                 .border_color(t.border)
                                 .text_size(size),
-                            px(INPUT_HEIGHT),
+                            zoomed(INPUT_HEIGHT, cx),
                         ))
                         .child(
-                            actions()
+                            actions(cx)
                                 .child(
-                                    action_button("space-menu-cancel", "Cancel", None, false, t)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.show(MenuPage::Menu, window, cx)
-                                        })),
+                                    action_button(
+                                        "space-menu-cancel",
+                                        "Cancel",
+                                        None,
+                                        false,
+                                        t,
+                                        cx,
+                                    )
+                                    .on_click(cx.listener(
+                                        |this, _, window, cx| this.show(MenuPage::Menu, window, cx),
+                                    )),
                                 )
                                 .child(
                                     action_button(
@@ -388,6 +395,7 @@ impl Render for SpaceMenu {
                                         Some(t.accent),
                                         disabled,
                                         t,
+                                        cx,
                                     )
                                     .when(
                                         !disabled,
@@ -405,8 +413,8 @@ impl Render for SpaceMenu {
             MenuPage::Remove => match remove_target.clone() {
                 Some(target) => vec![
                     v_flex()
-                        .gap(px(SPACE_2))
-                        .p(px(SPACE_1))
+                        .gap(zoomed(SPACE_2, cx))
+                        .p(zoomed(SPACE_1, cx))
                         .child(
                             div()
                                 .text_size(size)
@@ -414,9 +422,9 @@ impl Render for SpaceMenu {
                                 .child(remove_prompt(&name, &target)),
                         )
                         .child(
-                            actions()
+                            actions(cx)
                                 .child(
-                                    action_button("space-menu-keep", "Cancel", None, false, t)
+                                    action_button("space-menu-keep", "Cancel", None, false, t, cx)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.show(MenuPage::Menu, window, cx)
                                         })),
@@ -428,6 +436,7 @@ impl Render for SpaceMenu {
                                         Some(t.status_danger),
                                         busy,
                                         t,
+                                        cx,
                                     )
                                     .when(!busy, |button| {
                                         button
@@ -442,19 +451,24 @@ impl Render for SpaceMenu {
         };
 
         let viewport = window.viewport_size();
-        let left = menu_left(f32::from(self.anchor.origin.x), f32::from(viewport.width));
-        let bottom = menu_bottom(f32::from(self.anchor.origin.y));
+        // The placement rules work in 100% units; the layout values are already zoomed.
+        let zoom = bachuc_theme::zoom(cx);
+        let left = menu_left(
+            f32::from(self.anchor.origin.x) / zoom,
+            f32::from(viewport.width) / zoom,
+        ) * zoom;
+        let bottom = menu_bottom(f32::from(self.anchor.origin.y) / zoom) * zoom;
         let frame = v_flex()
             .id("space-menu")
             .role(Role::Menu)
             .aria_label(format!("{name} menu"))
             .track_focus(&self.focus)
-            .w(px(MENU_WIDTH))
-            .p(px(SPACE_1))
-            .gap(px(SPACE_0_5))
+            .w(zoomed(MENU_WIDTH, cx))
+            .p(zoomed(SPACE_1, cx))
+            .gap(zoomed(SPACE_0_5, cx))
             .border_1()
             .border_color(t.border)
-            .rounded(px(MENU_RADIUS))
+            .rounded(zoomed(MENU_RADIUS, cx))
             .bg(t.surface0)
             .shadow(vec![shadow(ShadowSize::Lg, cx)])
             .occlude()
@@ -471,9 +485,9 @@ impl Render for SpaceMenu {
                     .role(Role::Heading)
                     .aria_label(heading.clone())
                     .truncate()
-                    .px(px(SPACE_2))
-                    .pt(px(SPACE_1))
-                    .pb(px(SPACE_0_5))
+                    .px(zoomed(SPACE_2, cx))
+                    .pt(zoomed(SPACE_1, cx))
+                    .pb(zoomed(SPACE_0_5, cx))
                     .text_size(ui_font_size(TRAILING_SIZE, cx))
                     .text_color(t.foreground_muted)
                     .child(heading),
@@ -484,7 +498,7 @@ impl Render for SpaceMenu {
             anchored()
                 .position(point(px(left), px(bottom)))
                 .anchor(Anchor::BottomLeft)
-                .snap_to_window_with_margin(px(MENU_EDGE))
+                .snap_to_window_with_margin(zoomed(MENU_EDGE, cx))
                 .child(frame),
         )
         .with_priority(gpui_kit::base::POPUP_PRIORITY)
@@ -508,11 +522,11 @@ fn menu_row(
         .role(Role::MenuItem)
         .aria_label(label.to_string())
         .aria_selected(checked)
-        .min_h(px(ROW_HEIGHT))
-        .px(px(SPACE_2))
-        .gap(px(SPACE_2))
+        .min_h(zoomed(ROW_HEIGHT, cx))
+        .px(zoomed(SPACE_2, cx))
+        .gap(zoomed(SPACE_2, cx))
         .items_center()
-        .rounded(px(RADIUS_MD))
+        .rounded(zoomed(RADIUS_MD, cx))
         .when(disabled, |row| row.opacity(DISABLED))
         .when(!disabled, |row| {
             row.cursor_pointer()
@@ -533,7 +547,7 @@ fn menu_row(
         )
         .children(trailing.filter(|text| !text.is_empty()).map(|text| {
             div()
-                .max_w(px(TRAILING_MAX_WIDTH))
+                .max_w(zoomed(TRAILING_MAX_WIDTH, cx))
                 .truncate()
                 .text_size(ui_font_size(TRAILING_SIZE, cx))
                 .text_color(t.foreground_muted)
@@ -542,14 +556,14 @@ fn menu_row(
         .when(checked, |row| {
             row.child(
                 icon(IconName::Check)
-                    .with_size(px(ICON_XS))
+                    .with_size(zoomed(ICON_XS, cx))
                     .text_color(t.foreground_muted),
             )
         })
 }
 
-fn actions() -> Div {
-    h_flex().justify_end().gap(px(SPACE_1_5))
+fn actions(cx: &App) -> Div {
+    h_flex().justify_end().gap(zoomed(SPACE_1_5, cx))
 }
 
 /// A 26 px button of the Rename and Remove pages: filled for `fill`, an outline otherwise.
@@ -559,17 +573,18 @@ fn action_button(
     fill: Option<Hsla>,
     disabled: bool,
     t: Tokens,
+    cx: &App,
 ) -> Stateful<Div> {
     div()
         .id(id)
         .role(Role::Button)
         .aria_label(label)
-        .h(px(ACTION_HEIGHT))
-        .px(px(ACTION_PADDING))
+        .h(zoomed(ACTION_HEIGHT, cx))
+        .px(zoomed(ACTION_PADDING, cx))
         .flex()
         .items_center()
-        .rounded(px(RADIUS_MD))
-        .text_size(px(FONT_SM))
+        .rounded(zoomed(RADIUS_MD, cx))
+        .text_size(zoomed(FONT_SM, cx))
         .text_color(if fill.is_some() {
             t.accent_foreground
         } else {

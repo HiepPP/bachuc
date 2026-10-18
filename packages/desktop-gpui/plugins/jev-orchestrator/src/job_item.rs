@@ -3,7 +3,7 @@
 
 use bachuc_plugin_host::TimelineRenderInput;
 use bachuc_theme::metrics::{FONT_BASE, SPACE_3, WEIGHT_SEMIBOLD};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::*;
 use serde::Deserialize;
 use serde_json::Value;
@@ -51,7 +51,7 @@ impl Render for JobItem {
                 .id("jev-job-unavailable")
                 .role(Role::Note)
                 .aria_label(UNAVAILABLE)
-                .p(px(SPACE_3))
+                .p(zoomed(SPACE_3, cx))
                 .text_size(size)
                 .text_color(colors.foreground_muted)
                 .child(UNAVAILABLE)
@@ -64,8 +64,8 @@ impl Render for JobItem {
             .aria_label(title.clone())
             .flex()
             .flex_col()
-            .gap(px(GAP))
-            .p(px(SPACE_3))
+            .gap(zoomed(GAP, cx))
+            .p(zoomed(SPACE_3, cx))
             .text_size(size)
             .line_height(relative(1.2))
             .child(

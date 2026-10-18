@@ -20,7 +20,7 @@ use bachuc_theme::metrics::{
     CONTROL_SM, FONT_CONTENT, FONT_SM, ICON_MD, ICON_SM, ICON_XS, RADIUS_BASE, RADIUS_LG,
     RADIUS_MD, RADIUS_XL, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
-use bachuc_theme::{Tokens, tokens, ui_font_size};
+use bachuc_theme::{Tokens, tokens, ui_font_size, zoomed};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -223,13 +223,15 @@ impl PanelView {
                 .flex_shrink_0()
                 .items_center()
                 .justify_center()
-                .gap(px(SPACE_1_5))
-                .children(name.map(|name| icon(name).with_size(px(ICON_SM)).text_color(ink)))
+                .gap(zoomed(SPACE_1_5, cx))
+                .children(
+                    name.map(|name| icon(name).with_size(zoomed(ICON_SM, cx)).text_color(ink)),
+                )
                 .child(
                     div()
                         .whitespace_nowrap()
                         .text_size(size)
-                        .line_height(px(BUTTON_LINE))
+                        .line_height(zoomed(BUTTON_LINE, cx))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(ink)
                         .child(label),
@@ -239,11 +241,11 @@ impl PanelView {
             // Both faces reserve width; only the current one paints.
             Some(faces) => div()
                 .relative()
-                .h(px(BUTTON_LINE))
+                .h(zoomed(BUTTON_LINE, cx))
                 .child(
                     v_flex()
                         .invisible()
-                        .h(px(BUTTON_LINE))
+                        .h(zoomed(BUTTON_LINE, cx))
                         .overflow_hidden()
                         .items_center()
                         .children(
@@ -275,14 +277,17 @@ impl PanelView {
             .flex_shrink_0()
             .items_center()
             .justify_center()
-            .min_h(px(CONTROL_SM))
-            .when(min_width, |this| this.min_w(px(BUTTON_MIN_WIDTH)))
-            .rounded(px(RADIUS_LG))
-            .px(px(if spec.look == Look::Quiet {
-                SPACE_2
-            } else {
-                SPACE_3
-            }))
+            .min_h(zoomed(CONTROL_SM, cx))
+            .when(min_width, |this| this.min_w(zoomed(BUTTON_MIN_WIDTH, cx)))
+            .rounded(zoomed(RADIUS_LG, cx))
+            .px(zoomed(
+                if spec.look == Look::Quiet {
+                    SPACE_2
+                } else {
+                    SPACE_3
+                },
+                cx,
+            ))
             .border_1()
             .border_color(border)
             .bg(fill)
@@ -297,16 +302,16 @@ impl PanelView {
     fn suggested_badge(cx: &App) -> Div {
         div()
             .self_end()
-            .min_h(px(BADGE_HEIGHT))
+            .min_h(zoomed(BADGE_HEIGHT, cx))
             .flex()
             .items_center()
-            .px(px(SPACE_2))
-            .rounded(px(RADIUS_MD))
+            .px(zoomed(SPACE_2, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .bg(rgb(SUGGESTED_FILL))
             .child(
                 div()
                     .text_size(ui_font_size(BADGE_TEXT, cx))
-                    .line_height(px(BADGE_LINE))
+                    .line_height(zoomed(BADGE_LINE, cx))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(rgb(SUGGESTED_TEXT))
                     .child("Suggested"),
@@ -315,10 +320,10 @@ impl PanelView {
 
     /// The prompt text and its reason; the reason's `**bold**` runs take the foreground.
     fn prompt_text(text: &str, why: &str, colors: &Tokens, cx: &App) -> Div {
-        let mut column = v_flex().min_w_0().gap(px(SPACE_1)).child(
+        let mut column = v_flex().min_w_0().gap(zoomed(SPACE_1, cx)).child(
             div()
                 .text_size(ui_font_size(FONT_CONTENT, cx))
-                .line_height(px(TEXT_LINE))
+                .line_height(zoomed(TEXT_LINE, cx))
                 .text_color(colors.foreground)
                 .child(text.to_string()),
         );
@@ -342,7 +347,7 @@ impl PanelView {
             column = column.child(
                 div()
                     .text_size(ui_font_size(SMALL_TEXT, cx))
-                    .line_height(px(SMALL_LINE))
+                    .line_height(zoomed(SMALL_LINE, cx))
                     .text_color(colors.foreground_muted)
                     .child(StyledText::new(plain).with_highlights(bold)),
             );
@@ -368,9 +373,9 @@ impl PanelView {
             .when(column, |this| this.w_full())
             .when(!column, |this| this.flex_1());
         let content = if column {
-            v_flex().gap(px(CARD_ROW_GAP))
+            v_flex().gap(zoomed(CARD_ROW_GAP, cx))
         } else {
-            h_flex().gap(px(SPACE_6))
+            h_flex().gap(zoomed(SPACE_6, cx))
         }
         .min_w_0()
         .items_end()
@@ -452,19 +457,19 @@ impl PanelView {
                 .self_end()
                 .items_center()
                 .justify_end()
-                .gap(px(SPACE_2))
+                .gap(zoomed(SPACE_2, cx))
                 .children(edit)
                 .child(main)
         });
         // The badge has its own row at the card's top right, so it never covers text or buttons.
         v_flex()
             .min_w_0()
-            .gap(px(SPACE_2))
-            .p(px(SPACE_4))
-            .pl(px(CARD_PAD_LEFT))
+            .gap(zoomed(SPACE_2, cx))
+            .p(zoomed(SPACE_4, cx))
+            .pl(zoomed(CARD_PAD_LEFT, cx))
             .border_1()
             .border_color(colors.border)
-            .rounded(px(RADIUS_LG))
+            .rounded(zoomed(RADIUS_LG, cx))
             .bg(colors.surface0)
             .when(suggested, |this| this.child(Self::suggested_badge(cx)))
             .child(content.children(buttons))
@@ -511,7 +516,7 @@ impl PanelView {
                 .all(|c| c.is_some_and(|c| c.state == CandidateState::Ready))
             && allowed_set
             && !live.busy;
-        let mut body = v_flex().min_w_0().gap(px(SPACE_4));
+        let mut body = v_flex().min_w_0().gap(zoomed(SPACE_4, cx));
         for group in layout(&ids, groups, combos) {
             let radio = matches!(group, Group::Choice { .. });
             let rows = group.ids().iter().enumerate().map(|(row, id)| {
@@ -527,9 +532,9 @@ impl PanelView {
                 let press = id.clone();
                 let mark = div()
                     .flex_shrink_0()
-                    .size(px(MARK_BOX))
-                    .mt(px(MARK_TOP))
-                    .rounded(px(if radio { MARK_BOX / 2. } else { RADIUS_BASE }))
+                    .size(zoomed(MARK_BOX, cx))
+                    .mt(zoomed(MARK_TOP, cx))
+                    .rounded(zoomed(if radio { MARK_BOX / 2. } else { RADIUS_BASE }, cx))
                     .border_1()
                     .border_color(if on { colors.accent } else { colors.border })
                     .flex()
@@ -541,7 +546,11 @@ impl PanelView {
                         } else {
                             IconName::Check
                         };
-                        this.child(icon(name).with_size(px(ICON_XS)).text_color(colors.accent))
+                        this.child(
+                            icon(name)
+                                .with_size(zoomed(ICON_XS, cx))
+                                .text_color(colors.accent),
+                        )
                     });
                 div()
                     .id(SharedString::from(format!("np-pick-{index}-{id}")))
@@ -555,8 +564,8 @@ impl PanelView {
                     .when(suggested, |this| this.aria_description("Suggested"))
                     .flex()
                     .flex_col()
-                    .gap(px(SPACE_2))
-                    .p(px(ROW_PAD))
+                    .gap(zoomed(SPACE_2, cx))
+                    .p(zoomed(ROW_PAD, cx))
                     .min_w_0()
                     .when(row > 0, |this| {
                         this.border_t_1().border_color(colors.border)
@@ -582,7 +591,7 @@ impl PanelView {
                         h_flex()
                             .min_w_0()
                             .items_start()
-                            .gap(px(SPACE_3))
+                            .gap(zoomed(SPACE_3, cx))
                             .child(mark)
                             .child(
                                 Self::prompt_text(&block.prompts[at], &block.whys[at], &colors, cx)
@@ -601,7 +610,7 @@ impl PanelView {
             });
             body = body.child(
                 v_flex()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .child(
                         div()
                             .text_size(ui_font_size(SMALL_TEXT, cx))
@@ -613,7 +622,7 @@ impl PanelView {
                         v_flex()
                             .border_1()
                             .border_color(colors.border)
-                            .rounded(px(RADIUS_LG))
+                            .rounded(zoomed(RADIUS_LG, cx))
                             .overflow_hidden()
                             .children(rows),
                     ),
@@ -674,17 +683,17 @@ impl PanelView {
                 .flex_wrap()
                 .items_center()
                 .justify_between()
-                .gap_x(px(SPACE_4))
-                .gap_y(px(SPACE_3))
-                .py(px(SPACE_3))
-                .px(px(pad))
-                .mx(px(-pad))
+                .gap_x(zoomed(SPACE_4, cx))
+                .gap_y(zoomed(SPACE_3, cx))
+                .py(zoomed(SPACE_3, cx))
+                .px(zoomed(pad, cx))
+                .mx(zoomed(-pad, cx))
                 .border_t_1()
                 .border_color(colors.border)
                 .bg(colors.surface1)
                 .child(
                     v_flex()
-                        .min_w(px(FOOTER_MIN_WIDTH))
+                        .min_w(zoomed(FOOTER_MIN_WIDTH, cx))
                         .child(
                             div()
                                 .text_size(ui_font_size(SMALL_TEXT, cx))
@@ -704,7 +713,7 @@ impl PanelView {
                         .flex_wrap()
                         .items_center()
                         .justify_end()
-                        .gap(px(SPACE_2))
+                        .gap(zoomed(SPACE_2, cx))
                         .child(clear)
                         .child(edit)
                         .child(send),
@@ -737,10 +746,10 @@ impl PanelView {
         let chip_row = h_flex()
             .flex_wrap()
             .items_center()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .child(
                 icon(IconName::History)
-                    .with_size(px(ICON_MD))
+                    .with_size(zoomed(ICON_MD, cx))
                     .text_color(colors.foreground_muted),
             )
             .child(
@@ -762,14 +771,14 @@ impl PanelView {
                             .aria_label(label.unwrap_or_else(|| text.clone()))
                             .max_w_full()
                             .items_center()
-                            .gap(px(CHIP_GAP))
-                            .px(px(SPACE_2))
-                            .py(px(CHIP_PAD_Y))
-                            .rounded(px(RADIUS_MD))
+                            .gap(zoomed(CHIP_GAP, cx))
+                            .px(zoomed(SPACE_2, cx))
+                            .py(zoomed(CHIP_PAD_Y, cx))
+                            .rounded(zoomed(RADIUS_MD, cx))
                             .bg(colors.surface2)
                             .children(name.map(|name| {
                                 icon(name)
-                                    .with_size(px(CHIP_ICON))
+                                    .with_size(zoomed(CHIP_ICON, cx))
                                     .text_color(colors.foreground_muted)
                             }))
                             .child(
@@ -791,9 +800,9 @@ impl PanelView {
             }]
         });
         v_flex()
-            .px(px(WIDE_PAD))
-            .py(px(RECAP_PAD_Y))
-            .gap(px(SPACE_1_5))
+            .px(zoomed(WIDE_PAD, cx))
+            .py(zoomed(RECAP_PAD_Y, cx))
+            .gap(zoomed(SPACE_1_5, cx))
             .border_b_1()
             .border_color(colors.border)
             .bg(colors.surface1)
@@ -809,17 +818,17 @@ impl PanelView {
                 }
                 v_flex()
                     .when(index > 0, |this| {
-                        this.mt(px(SPACE_1))
-                            .pt(px(10.))
+                        this.mt(zoomed(SPACE_1, cx))
+                            .pt(zoomed(10., cx))
                             .border_t_1()
                             .border_color(colors.border)
                     })
-                    .when(index == 0, |this| this.mt(px(2.)))
+                    .when(index == 0, |this| this.mt(zoomed(2., cx)))
                     .child(
                         div()
-                            .mb(px(2.))
+                            .mb(zoomed(2., cx))
                             .text_size(ui_font_size(SECTION_LABEL, cx))
-                            .line_height(px(SECTION_LINE))
+                            .line_height(zoomed(SECTION_LINE, cx))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(colors.foreground)
                             .child(field.label),
@@ -892,7 +901,7 @@ impl Render for PanelView {
                 .id("np-other-work")
                 .role(Role::Group)
                 .aria_label("Other work")
-                .gap(px(SPACE_2))
+                .gap(zoomed(SPACE_2, cx))
                 .child(
                     div()
                         .text_size(ui_font_size(SMALL_TEXT, cx))
@@ -910,10 +919,10 @@ impl Render for PanelView {
         });
         let title = h_flex()
             .items_center()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .child(
                 icon(IconName::CornerDownRight)
-                    .with_size(px(ICON_MD))
+                    .with_size(zoomed(ICON_MD, cx))
                     .text_color(colors.accent),
             )
             .child(
@@ -940,16 +949,23 @@ impl Render for PanelView {
         });
         let body = v_flex()
             .min_w_0()
-            .p(px(if compact { SPACE_4 } else { WIDE_PAD }))
-            .gap(px(SPACE_4))
-            .child(v_flex().gap(px(SPACE_1)).child(title).children(intro))
+            .p(zoomed(if compact { SPACE_4 } else { WIDE_PAD }, cx))
+            .gap(zoomed(SPACE_4, cx))
+            .child(
+                v_flex()
+                    .gap(zoomed(SPACE_1, cx))
+                    .child(title)
+                    .children(intro),
+            )
             .children(cards)
             .children(other_work)
             .children(notices);
         let width = self.width.clone();
+        // The compact threshold is in 100% units, so a zoomed width is scaled back.
+        let zoom = bachuc_theme::zoom(cx);
         let measure = canvas(
             move |bounds, window, _| {
-                let measured = f32::from(bounds.size.width);
+                let measured = f32::from(bounds.size.width) / zoom;
                 let before = width.replace(measured);
                 if is_compact(before) != is_compact(measured) {
                     window.request_animation_frame();
@@ -962,7 +978,7 @@ impl Render for PanelView {
         div()
             .relative()
             .w_full()
-            .py(px(SPACE_1_5))
+            .py(zoomed(SPACE_1_5, cx))
             .child(
                 v_flex()
                     .id("next-prompt-panel")
@@ -971,7 +987,7 @@ impl Render for PanelView {
                     .relative()
                     .w_full()
                     .min_w_0()
-                    .rounded(px(RADIUS_XL))
+                    .rounded(zoomed(RADIUS_XL, cx))
                     .border_1()
                     .border_color(colors.border)
                     .bg(colors.surface0)

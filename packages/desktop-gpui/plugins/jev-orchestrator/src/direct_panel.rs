@@ -12,7 +12,7 @@ use bachuc_plugin_host::{PanelInput, PluginContext};
 use bachuc_theme::metrics::{
     FONT_2XL, FONT_BASE, FONT_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3, WEIGHT_SEMIBOLD,
 };
-use bachuc_theme::{Tokens, tokens, ui_font_size};
+use bachuc_theme::{Tokens, tokens, ui_font_size, zoomed};
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -231,7 +231,7 @@ impl DirectPanel {
         let colors = tokens(cx);
         let last = index + 1 == self.items.len();
         let body = match item {
-            DirectItem::Title => v_stack(CONTENT_GAP)
+            DirectItem::Title => v_stack(CONTENT_GAP, cx)
                 .child(
                     div()
                         .id("jev-direct-title")
@@ -243,25 +243,25 @@ impl DirectPanel {
                 )
                 .child(muted(INTRO, colors, cx))
                 .into_any_element(),
-            DirectItem::Prompt { locked } => v_stack(CONTENT_GAP)
+            DirectItem::Prompt { locked } => v_stack(CONTENT_GAP, cx)
                 .child(heading("Prompt", cx))
                 .child(
                     Textarea::new(&self.prompt)
                         .readonly(locked)
-                        .min_h(px(PROMPT_MIN_HEIGHT))
+                        .min_h(zoomed(PROMPT_MIN_HEIGHT, cx))
                         .bg(colors.surface1)
                         .border_color(colors.border)
-                        .rounded(px(RADIUS_LG))
+                        .rounded(zoomed(RADIUS_LG, cx))
                         .accessibility_id("jev-direct-prompt")
                         .aria_label(PROMPT_LABEL),
                 )
                 .into_any_element(),
-            DirectItem::ProfilesIntro => v_stack(CONTENT_GAP)
+            DirectItem::ProfilesIntro => v_stack(CONTENT_GAP, cx)
                 .child(heading("Allowed profiles", cx))
                 .child(muted(PROFILES_HINT, colors, cx))
                 .into_any_element(),
             DirectItem::ProfilesLoading => muted("Loading profiles…", colors, cx),
-            DirectItem::ProfilesError { fetching } => v_stack(SPACE_2)
+            DirectItem::ProfilesError { fetching } => v_stack(SPACE_2, cx)
                 .child(
                     danger("Could not load profiles.", colors, cx)
                         .id("jev-direct-profiles-error")
@@ -283,7 +283,7 @@ impl DirectPanel {
                 cx,
             ),
             DirectItem::Profile(row) => self.profile_row(row, colors, cx),
-            DirectItem::EffortIntro => v_stack(EFFORT_GAP)
+            DirectItem::EffortIntro => v_stack(EFFORT_GAP, cx)
                 .child(heading("Allowed model efforts", cx))
                 .child(muted(EFFORT_HINT, colors, cx))
                 .into_any_element(),
@@ -296,8 +296,8 @@ impl DirectPanel {
                 .id("jev-direct-route")
                 .role(Role::Button)
                 .aria_label(aria)
-                .p(px(SPACE_3))
-                .rounded(px(RADIUS_MD))
+                .p(zoomed(SPACE_3, cx))
+                .rounded(zoomed(RADIUS_MD, cx))
                 .bg(colors.accent)
                 .text_size(ui_font_size(FONT_BASE, cx))
                 .line_height(relative(1.2))
@@ -317,7 +317,7 @@ impl DirectPanel {
                 .child(label)
                 .into_any_element(),
             DirectItem::RequestId(id) => muted(&format!("Request {id}"), colors, cx),
-            DirectItem::RunError { checking } => v_stack(SPACE_2)
+            DirectItem::RunError { checking } => v_stack(SPACE_2, cx)
                 .child(
                     danger(
                         "The result is uncertain. Check the saved request before retrying or starting another task.",
@@ -369,13 +369,16 @@ impl DirectPanel {
         };
         div()
             .w_full()
-            .px(px(CONTENT_PADDING))
-            .pt(px(if index == 0 { CONTENT_PADDING } else { 0. }))
-            .pb(px(if last {
-                CONTENT_PADDING
-            } else {
-                self.gap_after(index)
-            }))
+            .px(zoomed(CONTENT_PADDING, cx))
+            .pt(zoomed(if index == 0 { CONTENT_PADDING } else { 0. }, cx))
+            .pb(zoomed(
+                if last {
+                    CONTENT_PADDING
+                } else {
+                    self.gap_after(index)
+                },
+                cx,
+            ))
             .line_height(ui_font_size(LINE_HEIGHT, cx))
             .text_size(ui_font_size(FONT_BASE, cx))
             .text_color(colors.foreground)
@@ -397,8 +400,8 @@ impl DirectPanel {
             .id(id)
             .role(Role::Button)
             .aria_label(label)
-            .p(px(BUTTON_PADDING))
-            .rounded(px(RADIUS_MD))
+            .p(zoomed(BUTTON_PADDING, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .bg(colors.surface2)
             .text_size(ui_font_size(FONT_BASE, cx))
             .text_color(colors.foreground)
@@ -424,9 +427,9 @@ impl DirectPanel {
             .aria_toggled(toggled(row.selected))
             .flex()
             .flex_col()
-            .gap(px(SPACE_1))
-            .p(px(SPACE_3))
-            .rounded(px(RADIUS_LG))
+            .gap(zoomed(SPACE_1, cx))
+            .p(zoomed(SPACE_3, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .border_1()
             .border_color(if row.selected {
                 colors.accent
@@ -467,9 +470,9 @@ impl DirectPanel {
                 self.effort_chip(&card.key, *effort, *selected, card.locked, colors, cx)
             })
             .collect();
-        v_stack(SPACE_2)
-            .p(px(SPACE_3))
-            .rounded(px(RADIUS_LG))
+        v_stack(SPACE_2, cx)
+            .p(zoomed(SPACE_3, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .border_1()
             .border_color(colors.border)
             .bg(colors.surface1)
@@ -480,7 +483,7 @@ impl DirectPanel {
                     .flex()
                     .flex_row()
                     .flex_wrap()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .children(chips),
             )
             .into_any_element()
@@ -504,9 +507,9 @@ impl DirectPanel {
             .role(Role::CheckBox)
             .aria_label(label)
             .aria_toggled(toggled(selected))
-            .px(px(SPACE_3))
-            .py(px(SPACE_2))
-            .rounded(px(RADIUS_MD))
+            .px(zoomed(SPACE_3, cx))
+            .py(zoomed(SPACE_2, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .border_1()
             .border_color(if selected {
                 colors.accent
@@ -546,7 +549,7 @@ impl DirectPanel {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let title = format!("Saved request · {}", status.as_str());
-        outcome_card(colors)
+        outcome_card(colors, cx)
             .id("jev-direct-record")
             .role(Role::Group)
             .aria_label(title.clone())
@@ -570,7 +573,7 @@ impl DirectPanel {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let line = created_line(selection);
-        outcome_card(colors)
+        outcome_card(colors, cx)
             .id("jev-direct-created")
             .role(Role::Group)
             .aria_label("Agent created")
@@ -613,8 +616,8 @@ fn toggled(on: bool) -> Toggled {
     if on { Toggled::True } else { Toggled::False }
 }
 
-fn v_stack(gap: f32) -> Div {
-    div().flex().flex_col().gap(px(gap))
+fn v_stack(gap: f32, cx: &App) -> Div {
+    div().flex().flex_col().gap(zoomed(gap, cx))
 }
 
 fn heading(text: &str, cx: &App) -> Div {
@@ -643,10 +646,10 @@ fn danger(text: &str, colors: Tokens, cx: &App) -> Div {
         .child(text.to_string())
 }
 
-fn outcome_card(colors: Tokens) -> Div {
-    v_stack(OUTCOME_GAP)
-        .p(px(SPACE_3))
-        .rounded(px(RADIUS_LG))
+fn outcome_card(colors: Tokens, cx: &App) -> Div {
+    v_stack(OUTCOME_GAP, cx)
+        .p(zoomed(SPACE_3, cx))
+        .rounded(zoomed(RADIUS_LG, cx))
         .border_1()
         .border_color(colors.border)
 }

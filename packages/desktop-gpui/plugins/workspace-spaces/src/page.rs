@@ -12,7 +12,7 @@ use bachuc_plugin_host::{PluginContext, SelectOption};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_XL, RADIUS_LG, SPACE_2, SPACE_3, SPACE_4, SPACE_6, WEIGHT_SEMIBOLD,
 };
-use bachuc_theme::{Tokens, tokens, ui_font_size};
+use bachuc_theme::{Tokens, tokens, ui_font_size, zoomed};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -257,8 +257,8 @@ impl SpacesPage {
                 .into_any_element(),
             PageItem::Failed => alert("spaces-catalog-failed", CATALOG_FAILED, t, cx),
             PageItem::Empty { first } => v_flex()
-                .p(px(SPACE_6))
-                .gap(px(SPACE_3))
+                .p(zoomed(SPACE_6, cx))
+                .gap(zoomed(SPACE_3, cx))
                 .child(
                     div()
                         .text_size(size)
@@ -281,7 +281,7 @@ impl SpacesPage {
         };
         div()
             .w_full()
-            .pb(px(SPACE_3))
+            .pb(zoomed(SPACE_3, cx))
             .child(body)
             .into_any_element()
     }
@@ -313,7 +313,7 @@ impl SpacesPage {
             .id(("space-card-move", index))
             .role(Role::Button)
             .aria_label(format!("Move {} to workspace", project.name))
-            .p(px(MOVE_PADDING))
+            .p(zoomed(MOVE_PADDING, cx))
             .text_size(size)
             .text_color(t.foreground)
             .when(disabled, |button| button.opacity(DISABLED))
@@ -345,15 +345,15 @@ impl SpacesPage {
             .id(("space-card", index))
             .role(Role::Group)
             .aria_label(project.name.clone())
-            .p(px(SPACE_4))
-            .gap(px(SPACE_2))
-            .rounded(px(bachuc_theme::metrics::RADIUS_XL))
+            .p(zoomed(SPACE_4, cx))
+            .gap(zoomed(SPACE_2, cx))
+            .rounded(zoomed(bachuc_theme::metrics::RADIUS_XL, cx))
             .bg(t.surface1)
             .child(
                 h_flex()
                     .flex_wrap()
                     .justify_between()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .child(
                         div()
                             .text_size(ui_font_size(FONT_XL, cx))
@@ -406,7 +406,7 @@ impl SpacesPage {
                     )))
                     .role(Role::Button)
                     .aria_label(label.clone())
-                    .py(px(WORKSPACE_PADDING))
+                    .py(zoomed(WORKSPACE_PADDING, cx))
                     .cursor_pointer()
                     .text_size(size)
                     .text_color(t.foreground)
@@ -441,7 +441,7 @@ impl Render for SpacesPage {
         let header = h_flex()
             .items_center()
             .justify_between()
-            .gap(px(SPACE_3))
+            .gap(zoomed(SPACE_3, cx))
             .child(
                 v_flex()
                     .flex_1()
@@ -474,8 +474,8 @@ impl Render for SpacesPage {
             .aria_label("Spaces")
             .size_full()
             .bg(t.surface0)
-            .p(px(SPACE_6))
-            .gap(px(SPACE_3))
+            .p(zoomed(SPACE_6, cx))
+            .gap(zoomed(SPACE_3, cx))
             .child(header);
         let (Some(spaces), Some(selected)) = (spaces, selected) else {
             let text = if loading {
@@ -493,15 +493,15 @@ impl Render for SpacesPage {
             let save_disabled = !can_save_name(&draft, busy || saving);
             h_flex()
                 .flex_wrap()
-                .gap(px(SPACE_2))
+                .gap(zoomed(SPACE_2, cx))
                 .child(
-                    div().flex_1().min_w(px(RENAME_MIN_WIDTH)).child(
+                    div().flex_1().min_w(zoomed(RENAME_MIN_WIDTH, cx)).child(
                         Input::new(&self.rename_input)
                             .accessibility_id("spaces-rename-input")
                             .aria_label("Workspace name")
                             .disabled(busy)
-                            .px(px(SPACE_3))
-                            .rounded(px(RADIUS_LG))
+                            .px(zoomed(SPACE_3, cx))
+                            .rounded(zoomed(RADIUS_LG, cx))
                             .bg(t.surface1)
                             .text_size(size),
                     ),
@@ -540,7 +540,7 @@ impl Render for SpacesPage {
             .role(Role::List)
             .aria_label("Projects")
             .flex_1()
-            .min_h(px(REGION_MIN_HEIGHT))
+            .min_h(zoomed(REGION_MIN_HEIGHT, cx))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, _, _| {
@@ -565,7 +565,7 @@ impl Render for SpacesPage {
         let tabs = h_flex()
             .id("spaces-tabs")
             .flex_1()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .overflow_x_scroll()
             .children(spaces.spaces.iter().enumerate().map(|(index, space)| {
                 let active = space.id == selected;
@@ -575,11 +575,11 @@ impl Render for SpacesPage {
                     .role(Role::Tab)
                     .aria_label(space.name.clone())
                     .aria_selected(active)
-                    .min_w(px(TAB_MIN_WIDTH))
-                    .p(px(SPACE_3))
+                    .min_w(zoomed(TAB_MIN_WIDTH, cx))
+                    .p(zoomed(SPACE_3, cx))
                     .flex()
                     .justify_center()
-                    .rounded(px(RADIUS_LG))
+                    .rounded(zoomed(RADIUS_LG, cx))
                     .bg(t.surface1)
                     .border_2()
                     .border_color(if active {
@@ -594,13 +594,17 @@ impl Render for SpacesPage {
                     .child((index + 1).to_string())
             }));
         let create_disabled = busy || saving;
-        let footer = h_flex().items_center().gap(px(SPACE_2)).child(tabs).child(
-            page_button("spaces-create", "+ New", create_disabled, t, cx)
-                .aria_label("Create workspace tab")
-                .when(!create_disabled, |button| {
-                    button.on_click(cx.listener(|this, _, _, cx| this.create(cx)))
-                }),
-        );
+        let footer = h_flex()
+            .items_center()
+            .gap(zoomed(SPACE_2, cx))
+            .child(tabs)
+            .child(
+                page_button("spaces-create", "+ New", create_disabled, t, cx)
+                    .aria_label("Create workspace tab")
+                    .when(!create_disabled, |button| {
+                        button.on_click(cx.listener(|this, _, _, cx| this.create(cx)))
+                    }),
+            );
 
         root.when(!save_error.is_empty(), |page| {
             page.child(alert(
@@ -650,8 +654,8 @@ fn page_button(
         .id(id)
         .role(Role::Button)
         .aria_label(label.to_string())
-        .p(px(SPACE_3))
-        .rounded(px(RADIUS_LG))
+        .p(zoomed(SPACE_3, cx))
+        .rounded(zoomed(RADIUS_LG, cx))
         .bg(t.surface1)
         .text_size(ui_font_size(FONT_BASE, cx))
         .text_color(t.foreground)

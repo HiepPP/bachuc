@@ -20,7 +20,7 @@ use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_SM, RADIUS_BASE, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_2, SPACE_3,
     WEIGHT_MEDIUM, WEIGHT_SEMIBOLD,
 };
-use bachuc_theme::{Tokens, code_font_size, mono_font_family, tokens, ui_font_size};
+use bachuc_theme::{Tokens, code_font_size, mono_font_family, tokens, ui_font_size, zoomed};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -314,7 +314,7 @@ impl TurnDiffPanel {
         };
         let look = self.look(cx);
         match diff.parsed.rows.get(index) {
-            Some(row) => diff_row(row, diff.gutter, true, &look),
+            Some(row) => diff_row(row, diff.gutter, true, &look, cx),
             None => div().into_any_element(),
         }
     }
@@ -327,7 +327,7 @@ impl TurnDiffPanel {
         let end = range.end.min(diff.shown());
         diff.parsed.rows[range.start.min(end)..end]
             .iter()
-            .map(|row| diff_row(row, diff.gutter, false, &look))
+            .map(|row| diff_row(row, diff.gutter, false, &look, cx))
             .collect()
     }
 
@@ -351,8 +351,8 @@ impl TurnDiffPanel {
             .child(
                 v_flex()
                     .w_full()
-                    .p(px(SPACE_3))
-                    .gap(px(HISTORY_GAP))
+                    .p(zoomed(SPACE_3, cx))
+                    .gap(zoomed(HISTORY_GAP, cx))
                     .child(
                         div()
                             .font_weight(FontWeight(WEIGHT_SEMIBOLD))
@@ -382,7 +382,7 @@ impl TurnDiffPanel {
                             .role(Role::ListItem)
                             .aria_label(turn_time(&turn.ended_at))
                             .w_full()
-                            .gap(px(SPACE_1 + SPACE_0_5))
+                            .gap(zoomed(SPACE_1 + SPACE_0_5, cx))
                             .child(
                                 div()
                                     .text_size(size)
@@ -424,9 +424,10 @@ impl TurnDiffPanel {
         }
         let rows = diff.as_ref().map_or(0, |diff| diff.shown());
         let message_size = ui_font_size(FONT_BASE, cx);
+        let message_padding = zoomed(SPACE_3, cx);
         let message = move |text: String, color: Hsla| {
             div()
-                .p(px(SPACE_3))
+                .p(message_padding)
                 .text_size(message_size)
                 .text_color(color)
                 .child(text)
@@ -480,7 +481,7 @@ impl TurnDiffPanel {
                             cx.processor(|this, index, _window, cx| this.render_wrapped(index, cx)),
                         )
                         .size_full()
-                        .py(px(SPACE_1)),
+                        .py(zoomed(SPACE_1, cx)),
                     )
                     .into_any_element()
             } else {
@@ -502,7 +503,7 @@ impl TurnDiffPanel {
                         )
                         .with_width_from_item(Some(diff.widest))
                         .size_full()
-                        .py(px(SPACE_1)),
+                        .py(zoomed(SPACE_1, cx)),
                     )
                     .into_any_element()
             };
@@ -547,8 +548,8 @@ impl TurnDiffPanel {
             .aria_label("Show all turns")
             .flex_none()
             .items_center()
-            .gap(px(SPACE_0_5))
-            .pr(px(SPACE_1))
+            .gap(zoomed(SPACE_0_5, cx))
+            .pr(zoomed(SPACE_1, cx))
             .cursor_pointer()
             .on_click(cx.listener(|this, _, _window, cx| {
                 let selection = this.selection.clone();
@@ -556,7 +557,7 @@ impl TurnDiffPanel {
             }))
             .child(
                 icon(IconName::ChevronLeft)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(t.accent),
             )
             .child(
@@ -575,10 +576,10 @@ impl TurnDiffPanel {
                 .aria_toggled(if wrap { Toggled::True } else { Toggled::False })
                 .flex_none()
                 .items_center()
-                .gap(px(SPACE_1))
-                .px(px(SPACE_2))
-                .py(px(SWITCH_PADDING_Y))
-                .rounded(px(RADIUS_MD))
+                .gap(zoomed(SPACE_1, cx))
+                .px(zoomed(SPACE_2, cx))
+                .py(zoomed(SWITCH_PADDING_Y, cx))
+                .rounded(zoomed(RADIUS_MD, cx))
                 .border_1()
                 .border_color(t.border)
                 .cursor_pointer()
@@ -589,7 +590,7 @@ impl TurnDiffPanel {
                 }))
                 .child(
                     icon(IconName::WrapText)
-                        .with_size(px(WRAP_ICON))
+                        .with_size(zoomed(WRAP_ICON, cx))
                         .text_color(if wrap { t.accent } else { t.foreground_muted }),
                 )
                 .child(
@@ -608,9 +609,9 @@ impl TurnDiffPanel {
             .w_full()
             .flex_none()
             .items_center()
-            .gap(px(SPACE_2))
-            .px(px(SPACE_3))
-            .py(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
+            .px(zoomed(SPACE_3, cx))
+            .py(zoomed(SPACE_2, cx))
             .border_b_1()
             .border_color(t.border)
             .bg(t.surface1)
@@ -633,14 +634,14 @@ impl TurnDiffPanel {
                     .text_color(t.foreground_muted)
                     .border_1()
                     .border_color(t.border)
-                    .rounded(px(RADIUS_BASE))
-                    .px(px(BADGE_PADDING))
+                    .rounded(zoomed(RADIUS_BASE, cx))
+                    .px(zoomed(BADGE_PADDING, cx))
                     .child(badge)
             }))
             .children(counts.map(|parsed| {
                 h_flex()
                     .flex_none()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .font_family(mono)
                     .text_size(code)
                     .child(
@@ -664,7 +665,7 @@ impl TurnDiffPanel {
         let size = ui_font_size(FONT_BASE, cx);
         let note = |text: &str, color: Hsla| {
             div()
-                .p(px(SPACE_3))
+                .p(zoomed(SPACE_3, cx))
                 .text_size(size)
                 .text_color(color)
                 .child(text.to_string())
@@ -685,13 +686,13 @@ impl TurnDiffPanel {
         h_flex()
             .w_full()
             .flex_wrap()
-            .gap(px(IMAGE_GAP))
-            .p(px(SPACE_3))
+            .gap(zoomed(IMAGE_GAP, cx))
+            .p(zoomed(SPACE_3, cx))
             .children(shown.into_iter().map(|(label, image)| {
                 v_flex()
                     .flex_1()
-                    .min_w(px(IMAGE_SIDE_WIDTH))
-                    .gap(px(SPACE_1 + SPACE_0_5))
+                    .min_w(zoomed(IMAGE_SIDE_WIDTH, cx))
+                    .gap(zoomed(SPACE_1 + SPACE_0_5, cx))
                     .when(labeled, |side| {
                         side.child(
                             div()
@@ -705,15 +706,15 @@ impl TurnDiffPanel {
                             .id(label)
                             .role(Role::Image)
                             .aria_label(format!("{label}: {}", file.path))
-                            .p(px(SPACE_2))
+                            .p(zoomed(SPACE_2, cx))
                             .border_1()
                             .border_color(t.border)
-                            .rounded(px(RADIUS_MD))
+                            .rounded(zoomed(RADIUS_MD, cx))
                             .bg(t.surface1)
                             .child(
                                 img(image)
                                     .w_full()
-                                    .h(px(IMAGE_HEIGHT))
+                                    .h(zoomed(IMAGE_HEIGHT, cx))
                                     .object_fit(ObjectFit::Contain),
                             ),
                     )
@@ -730,7 +731,7 @@ impl TurnDiffPanel {
 }
 
 /// One diff row: the two line numbers, the marker, and the text, or a hunk or note line.
-fn diff_row(row: &DiffRow, gutter: f32, wrap: bool, look: &Look) -> AnyElement {
+fn diff_row(row: &DiffRow, gutter: f32, wrap: bool, look: &Look, cx: &App) -> AnyElement {
     let t = look.t;
     let (mono, code_size) = (look.mono, look.size);
     let line = || {
@@ -739,8 +740,8 @@ fn diff_row(row: &DiffRow, gutter: f32, wrap: bool, look: &Look) -> AnyElement {
             .items_start()
             .font_family(mono)
             .text_size(code_size)
-            .line_height(px(LINE_HEIGHT))
-            .min_h(px(LINE_HEIGHT))
+            .line_height(zoomed(LINE_HEIGHT, cx))
+            .min_h(zoomed(LINE_HEIGHT, cx))
     };
     let code = |text: &str, color: Hsla| {
         let text = if text.is_empty() { " " } else { text };
@@ -748,12 +749,12 @@ fn diff_row(row: &DiffRow, gutter: f32, wrap: bool, look: &Look) -> AnyElement {
         if wrap {
             cell.flex_1()
                 .min_w_0()
-                .pr(px(SPACE_3))
+                .pr(zoomed(SPACE_3, cx))
                 .whitespace_normal()
                 .child(text.to_string())
         } else {
             cell.flex_none()
-                .pr(px(SPACE_3 + SPACE_1))
+                .pr(zoomed(SPACE_3 + SPACE_1, cx))
                 .whitespace_nowrap()
                 .child(text.to_string())
         }
@@ -761,8 +762,8 @@ fn diff_row(row: &DiffRow, gutter: f32, wrap: bool, look: &Look) -> AnyElement {
     let number = |line: Option<u32>| {
         div()
             .flex_none()
-            .w(px(gutter))
-            .pr(px(GUTTER_PADDING))
+            .w(zoomed(gutter, cx))
+            .pr(zoomed(GUTTER_PADDING, cx))
             .text_right()
             .text_color(t.foreground_muted)
             .child(line.map(|line| line.to_string()).unwrap_or_default())
@@ -770,7 +771,7 @@ fn diff_row(row: &DiffRow, gutter: f32, wrap: bool, look: &Look) -> AnyElement {
     let marker = |text: &'static str, color: Hsla| {
         div()
             .flex_none()
-            .w(px(MARKER_WIDTH))
+            .w(zoomed(MARKER_WIDTH, cx))
             .text_center()
             .text_color(color)
             .child(text)
@@ -778,11 +779,11 @@ fn diff_row(row: &DiffRow, gutter: f32, wrap: bool, look: &Look) -> AnyElement {
     match row {
         DiffRow::Hunk(text) => line()
             .bg(t.surface1)
-            .child(div().flex_none().w(px(gutter * 2. + MARKER_WIDTH)))
+            .child(div().flex_none().w(zoomed(gutter * 2. + MARKER_WIDTH, cx)))
             .child(code(text, t.foreground_muted))
             .into_any_element(),
         DiffRow::Note(text) => line()
-            .child(div().flex_none().w(px(gutter * 2. + MARKER_WIDTH)))
+            .child(div().flex_none().w(zoomed(gutter * 2. + MARKER_WIDTH, cx)))
             .child(code(text, t.foreground_muted))
             .into_any_element(),
         DiffRow::Add { text, new_line } => line()

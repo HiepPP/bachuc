@@ -12,7 +12,7 @@ use bachuc_plugin_host::{PanelInput, PluginContext};
 use bachuc_theme::metrics::{
     FONT_2XL, FONT_BASE, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3, WEIGHT_SEMIBOLD,
 };
-use bachuc_theme::{Tokens, tokens, ui_font_size};
+use bachuc_theme::{Tokens, tokens, ui_font_size, zoomed};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -222,8 +222,8 @@ impl JobsPanel {
                 .id("jev-jobs-refresh")
                 .role(Role::Button)
                 .aria_label("Refresh delegated jobs")
-                .p(px(BUTTON_PADDING))
-                .rounded(px(RADIUS_MD))
+                .p(zoomed(BUTTON_PADDING, cx))
+                .rounded(zoomed(RADIUS_MD, cx))
                 .bg(colors.surface1)
                 .text_size(ui_font_size(FONT_BASE, cx))
                 .text_color(colors.foreground)
@@ -234,9 +234,9 @@ impl JobsPanel {
         };
         div()
             .w_full()
-            .px(px(CONTENT_PADDING))
-            .pt(px(if index == 0 { CONTENT_PADDING } else { 0. }))
-            .pb(px(if last { CONTENT_PADDING } else { CONTENT_GAP }))
+            .px(zoomed(CONTENT_PADDING, cx))
+            .pt(zoomed(if index == 0 { CONTENT_PADDING } else { 0. }, cx))
+            .pb(zoomed(if last { CONTENT_PADDING } else { CONTENT_GAP }, cx))
             .line_height(relative(TEXT_LINE_HEIGHT))
             .child(body)
             .into_any_element()
@@ -253,11 +253,11 @@ impl JobsPanel {
             .aria_label(title.clone())
             .flex()
             .flex_col()
-            .gap(px(SPACE_2))
-            .p(px(SPACE_3))
+            .gap(zoomed(SPACE_2, cx))
+            .p(zoomed(SPACE_3, cx))
             .border_1()
             .border_color(colors.border)
-            .rounded(px(RADIUS_LG))
+            .rounded(zoomed(RADIUS_LG, cx))
             .text_size(size)
             .text_color(colors.foreground)
             .child(div().font_weight(FontWeight(WEIGHT_SEMIBOLD)).child(title))
@@ -266,7 +266,7 @@ impl JobsPanel {
             .children(
                 job.attempts
                     .iter()
-                    .map(|attempt| attempt_card(attempt, colors)),
+                    .map(|attempt| attempt_card(attempt, colors, cx)),
             )
             .when(cancellable(&job.status), |card| {
                 card.child(
@@ -274,8 +274,8 @@ impl JobsPanel {
                         .id(SharedString::from(format!("jev-cancel-{id}")))
                         .role(Role::Button)
                         .aria_label(format!("Cancel {id}"))
-                        .p(px(BUTTON_PADDING))
-                        .rounded(px(RADIUS_MD))
+                        .p(zoomed(BUTTON_PADDING, cx))
+                        .rounded(zoomed(RADIUS_MD, cx))
                         .bg(colors.surface1)
                         .when(disabled, |button| button.aria_description("Disabled"))
                         .when(!disabled, |button| {
@@ -298,7 +298,7 @@ fn plain_text(text: &'static str, colors: Tokens, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn attempt_card(attempt: &AttemptView, colors: Tokens) -> Div {
+fn attempt_card(attempt: &AttemptView, colors: Tokens, cx: &App) -> Div {
     let checks = attempt
         .checks
         .as_deref()
@@ -307,7 +307,7 @@ fn attempt_card(attempt: &AttemptView, colors: Tokens) -> Div {
     div()
         .flex()
         .flex_col()
-        .gap(px(SPACE_1))
+        .gap(zoomed(SPACE_1, cx))
         .child(div().child(attempt_title(attempt)))
         .child(
             div()
