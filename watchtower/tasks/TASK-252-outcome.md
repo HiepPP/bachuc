@@ -42,3 +42,18 @@ DEFERRED (UI checker). By design nothing runs per frame: no animation, one 150 m
 - The width threshold needs the timeline bounds from the last paint. The measure canvas flips a flag and defers a rail notify when the width crosses 918 px.
 - The 140 ms CSS transition of the bars is not ported. Magnification changes at once. A finite animation would need per-bar previous-value state.
 - `window.blur(cx)` takes `&mut App` in gpui-pre 0.3.9.
+
+## UI Checks
+
+Run 2026-10-19 on live, thread `mock TASK-252 outline` (14 prompts), Claude Light, zoom 125%; screenshots in `/tmp/wt-ui/zoom/t252-*.png`.
+
+- 1600x900: the rail shows left of the thread, the last prompt lit -> PASS.
+- Hover: the preview showed one clipped line. Fixed in the TASK-252 fix commit (wrapped block, 2 lines, ellipsis) -> PASS after the fix.
+- Magnification of nearby bars -> PASS (visible bulge around the hovered bar).
+- Click jump to prompts 8, 6, and 1 -> PASS; the lit bar follows.
+- Scrolling lights the bar of the prompt being read; at the end bar 14 is lit -> PASS.
+- Pointer leave hides the preview -> PASS with a real pointer move. A synthetic scroll left it shown, because it sends no mouse move.
+- 1200x800 (pane 880 px): the rail is hidden -> PASS.
+- Settings > Appearance > Chat > Chat outline off hides the rail and persists `chatOutline` -> PASS; restored to on.
+- Idle CPU, 10 samples over 10 s: 0.0% -> PASS.
+- Jump to a prompt that is not loaded: UNVERIFIED (unattended): the 14-prompt thread fits in the first page.
