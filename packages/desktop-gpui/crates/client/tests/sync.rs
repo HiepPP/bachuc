@@ -109,6 +109,7 @@ fn queue_before_hello_holds_session_messages_until_server_info() {
     let hello = hello.unwrap();
     assert_eq!(hello["capabilities"]["owned_subscriptions"], true);
     assert_eq!(hello["capabilities"]["selective_agent_timeline"], true);
+    assert_eq!(hello["capabilities"]["plugin_timeline_items"], true);
 }
 
 #[test]
