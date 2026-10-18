@@ -3,7 +3,7 @@
 
 use bachuc_client::AgentUsage;
 use bachuc_theme::metrics::{FONT_BASE, FONT_SM, SPACE_1_5};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoom, zoomed};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::*;
@@ -98,6 +98,8 @@ pub fn context_window_meter(
 ) -> Option<AnyElement> {
     let t = tokens(cx);
     let track = t.surface3;
+    // The paint closure has no `App`, so it takes the zoom factor.
+    let zoom = zoom(cx);
     let (percent, progress) = match meter(usage.as_ref(), pending) {
         Meter::Hidden => return None,
         Meter::Pending => (None, track),
@@ -115,12 +117,12 @@ pub fn context_window_meter(
         |_, _, _| (),
         move |bounds, (), window, _| {
             let center = bounds.center();
-            let side = px(GLYPH - STROKE);
+            let side = px((GLYPH - STROKE) * zoom);
             window.paint_quad(quad(
-                Bounds::centered_at(center, size(px(GLYPH), px(GLYPH))),
-                Corners::all(px(GLYPH / 2.)),
+                Bounds::centered_at(center, size(px(GLYPH * zoom), px(GLYPH * zoom))),
+                Corners::all(px(GLYPH / 2. * zoom)),
                 transparent_black(),
-                Edges::all(px(STROKE)),
+                Edges::all(px(STROKE * zoom)),
                 track,
                 BorderStyle::Solid,
             ));
@@ -134,7 +136,7 @@ pub fn context_window_meter(
             // The SVG turns -90 degrees, so the arc starts at the top and runs clockwise.
             let radius = f32::from(side) / 2.;
             let steps = ((ARC_STEPS as f32 * sweep / (2. * PI)).ceil() as usize).max(1);
-            let mut path = PathBuilder::stroke(px(STROKE));
+            let mut path = PathBuilder::stroke(px(STROKE * zoom));
             for step in 0..=steps {
                 let angle = -PI / 2. + sweep * step as f32 / steps as f32;
                 let point = point(
@@ -152,7 +154,7 @@ pub fn context_window_meter(
             }
         },
     )
-    .size(px(GLYPH));
+    .size(zoomed(GLYPH, cx));
     let Some(percent) = percent else {
         return Some(ring.into_any_element());
     };
@@ -166,7 +168,7 @@ pub fn context_window_meter(
             .id("context-window-meter")
             .role(Role::Image)
             .aria_label(format!("Context window {rounded}% used"))
-            .size(px(SLOT))
+            .size(zoomed(SLOT, cx))
             .flex()
             .items_center()
             .justify_center()
@@ -178,8 +180,8 @@ pub fn context_window_meter(
                     let base = ui_font_size(FONT_BASE, cx);
                     let small = ui_font_size(FONT_SM, cx);
                     v_flex()
-                        .gap(px(SPACE_1_5))
-                        .min_w(px(200.))
+                        .gap(zoomed(SPACE_1_5, cx))
+                        .min_w(zoomed(200., cx))
                         .child(
                             div()
                                 .text_size(base)

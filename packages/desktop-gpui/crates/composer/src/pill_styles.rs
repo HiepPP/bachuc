@@ -2,7 +2,7 @@
 //! dock into the track strip.
 
 use bachuc_theme::metrics::{FONT_SM, RADIUS_MD, SPACE_1_5, SPACE_2, SPACE_3};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -27,10 +27,10 @@ pub fn docked_pill(id: impl Into<ElementId>, open: bool, cx: &App) -> Stateful<D
         .flex()
         .flex_none()
         .items_center()
-        .gap(px(DOCKED_PILL_GAP))
-        .min_h(px(DOCKED_PILL_HEIGHT))
-        .px(px(DOCKED_PILL_PADDING))
-        .rounded(px(DOCKED_PILL_RADIUS))
+        .gap(zoomed(DOCKED_PILL_GAP, cx))
+        .min_h(zoomed(DOCKED_PILL_HEIGHT, cx))
+        .px(zoomed(DOCKED_PILL_PADDING, cx))
+        .rounded(zoomed(DOCKED_PILL_RADIUS, cx))
         .text_size(ui_font_size(FONT_SM, cx))
         .text_color(if open {
             t.foreground

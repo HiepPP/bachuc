@@ -26,7 +26,7 @@ use bachuc_theme::metrics::{
     BORDER_WIDTH_1, FONT_BASE, FONT_SM, ICON_MD, ICON_SM, ICON_XS, RADIUS_LG, RADIUS_MD, SPACE_0_5,
     SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size, zoom, zoomed};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -657,12 +657,12 @@ impl CommandCenter {
                 title,
                 divider,
                 height,
-            }) => v_section(*height)
+            }) => v_section(*height, cx)
                 .when(*divider, |this| {
                     this.child(
                         div()
                             .h(px(1.))
-                            .my(px(SPACE_2))
+                            .my(zoomed(SPACE_2, cx))
                             .bg(colors.border)
                             .flex_shrink_0(),
                     )
@@ -670,8 +670,8 @@ impl CommandCenter {
                 .when_some(title.clone(), |this, title| {
                     this.child(
                         div()
-                            .px(px(SPACE_4))
-                            .pb(px(SPACE_2))
+                            .px(zoomed(SPACE_4, cx))
+                            .pb(zoomed(SPACE_2, cx))
                             .text_size(ui_font_size(FONT_SM, cx))
                             .text_color(colors.foreground_muted)
                             .child(title),
@@ -700,12 +700,12 @@ impl CommandCenter {
             .role(Role::Button)
             .aria_label(SharedString::from(file.path.clone()))
             .w_full()
-            .h(px(crate::search::ROW_HEIGHT))
-            .px(px(SPACE_4))
+            .h(zoomed(crate::search::ROW_HEIGHT, cx))
+            .px(zoomed(SPACE_4, cx))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(SPACE_3))
+            .gap(zoomed(SPACE_3, cx))
             .cursor_pointer()
             .when(active, |this| this.bg(colors.surface1))
             .hover(|style| style.bg(colors.surface1))
@@ -725,18 +725,18 @@ impl CommandCenter {
             })
             .child(
                 div()
-                    .w(px(ICON_MD))
-                    .h(px(20.))
+                    .w(zoomed(ICON_MD, cx))
+                    .h(zoomed(20., cx))
                     .flex()
                     .items_center()
                     .justify_center()
                     .flex_shrink_0()
                     .map(|slot| match &file.icon {
                         // `MaterialFileIcon` at size 16.
-                        Some(image) => slot.child(img(image.clone()).size(px(ICON_MD))),
+                        Some(image) => slot.child(img(image.clone()).size(zoomed(ICON_MD, cx))),
                         None => slot.child(
                             icon(IconName::File)
-                                .with_size(px(ICON_MD))
+                                .with_size(zoomed(ICON_MD, cx))
                                 .text_color(colors.foreground_muted),
                         ),
                     }),
@@ -746,9 +746,9 @@ impl CommandCenter {
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
-                    .gap(px(SPACE_1))
+                    .gap(zoomed(SPACE_1, cx))
                     .text_size(ui_font_size(FONT_BASE, cx))
-                    .line_height(px(20.))
+                    .line_height(zoomed(20., cx))
                     .child(
                         div()
                             .flex_shrink_0()
@@ -781,10 +781,10 @@ impl CommandCenter {
             .flex_shrink_0()
             .h_full()
             .items_center()
-            .gap(px(SPACE_1_5))
-            .mr(px(SPACE_1))
-            .px(px(SPACE_2))
-            .rounded(px(RADIUS_MD))
+            .gap(zoomed(SPACE_1_5, cx))
+            .mr(zoomed(SPACE_1, cx))
+            .px(zoomed(SPACE_2, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .border_1()
             .border_color(colors.border_accent)
             .bg(colors.surface2)
@@ -799,20 +799,20 @@ impl CommandCenter {
             })
             .child(
                 icon(IconName::Folder)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(colors.foreground),
             )
             .child(
                 div()
                     .text_size(ui_font_size(FONT_BASE, cx))
-                    .line_height(px(17.))
+                    .line_height(zoomed(17., cx))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(colors.foreground)
                     .child(FILES),
             )
             .child(
                 icon(IconName::X)
-                    .with_size(px(ICON_XS))
+                    .with_size(zoomed(ICON_XS, cx))
                     .text_color(colors.foreground),
             )
             .into_any_element()
@@ -833,13 +833,13 @@ impl CommandCenter {
             .role(Role::Button)
             .aria_label(entry.title.clone())
             .w_full()
-            .h(px(crate::search::ROW_HEIGHT))
-            .px(px(SPACE_4))
+            .h(zoomed(crate::search::ROW_HEIGHT, cx))
+            .px(zoomed(SPACE_4, cx))
             .flex()
             .flex_row()
             .items_center()
             .justify_between()
-            .gap(px(SPACE_3))
+            .gap(zoomed(SPACE_3, cx))
             .cursor_pointer()
             .when(active, |this| this.bg(colors.surface1))
             .hover(|style| style.bg(colors.surface1))
@@ -852,39 +852,39 @@ impl CommandCenter {
                 h_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap(px(SPACE_3))
+                    .gap(zoomed(SPACE_3, cx))
                     // The slot stays without an icon, so every title starts on the same rail.
                     .child(
                         div()
-                            .w(px(ICON_MD))
-                            .h(px(20.))
+                            .w(zoomed(ICON_MD, cx))
+                            .h(zoomed(20., cx))
                             .flex()
                             .items_center()
                             .justify_center()
                             .flex_shrink_0()
-                            .children(
-                                entry
-                                    .icon
-                                    .map(|name| icon(name).text_color(colors.foreground_muted)),
-                            ),
+                            .children(entry.icon.map(|name| {
+                                icon(name)
+                                    .with_size(zoomed(ICON_MD, cx))
+                                    .text_color(colors.foreground_muted)
+                            })),
                     )
                     .child(
                         div()
                             .min_w_0()
                             .text_size(ui_font_size(FONT_BASE, cx))
-                            .line_height(px(18.))
+                            .line_height(zoomed(18., cx))
                             .text_color(colors.foreground)
                             .truncate()
                             .child(entry.title.clone()),
                     ),
             )
             .when(!hints.is_empty(), |this| {
-                this.child(h_flex().flex_shrink_0().gap(px(SPACE_1)).children(
+                this.child(h_flex().flex_shrink_0().gap(zoomed(SPACE_1, cx)).children(
                     hints.into_iter().map(|text| {
                         div()
-                            .px(px(SPACE_1))
-                            .py(px(SPACE_0_5))
-                            .rounded(px(RADIUS_MD))
+                            .px(zoomed(SPACE_1, cx))
+                            .py(zoomed(SPACE_0_5, cx))
+                            .rounded(zoomed(RADIUS_MD, cx))
                             .bg(colors.surface3.opacity(0.5))
                             .text_size(ui_font_size(FONT_SM, cx))
                             .text_color(colors.foreground_muted)
@@ -902,20 +902,21 @@ fn input_line_height(font_size: f32) -> f32 {
     (font_size * INPUT_LINE_HEIGHT).round()
 }
 
-/// The search input: one line with SPACE_1 above and below, as `styles.input`.
-fn input_height(font_size: f32) -> f32 {
-    input_line_height(font_size) + SPACE_1 * 2.
+/// The search input: one line with SPACE_1 above and below, as `styles.input`. `font_size` is
+/// already zoomed; `zoom` scales the paddings.
+fn input_height(font_size: f32, zoom: f32) -> f32 {
+    input_line_height(font_size) + SPACE_1 * 2. * zoom
 }
 
 /// The header: SPACE_3 above and below the input and a bottom border, as `styles.header`.
-fn header_height(font_size: f32) -> f32 {
-    SPACE_3 * 2. + input_height(font_size) + BORDER_WIDTH_1
+fn header_height(font_size: f32, zoom: f32) -> f32 {
+    SPACE_3 * 2. * zoom + input_height(font_size, zoom) + BORDER_WIDTH_1
 }
 
-fn v_section(height: f32) -> Div {
+fn v_section(height: f32, cx: &App) -> Div {
     div()
         .w_full()
-        .h(px(height))
+        .h(zoomed(height, cx))
         .flex()
         .flex_col()
         .justify_end()
@@ -926,6 +927,7 @@ impl Render for CommandCenter {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = tokens(cx);
         let input_font = ui_font_size(FONT_BASE, cx).as_f32();
+        let zoom = zoom(cx);
         let files = self.scope == Scope::Files;
         let body =
             if self.layout.rows.is_empty() && (self.file_loading || self.file_error.is_some()) {
@@ -936,8 +938,8 @@ impl Render for CommandCenter {
                     .id("command-center-empty")
                     .role(Role::Status)
                     .aria_label("No matches")
-                    .px(px(SPACE_4))
-                    .py(px(SPACE_6))
+                    .px(zoomed(SPACE_4, cx))
+                    .py(zoomed(SPACE_6, cx))
                     .text_center()
                     .text_size(ui_font_size(FONT_BASE, cx))
                     .text_color(colors.foreground_muted)
@@ -962,7 +964,7 @@ impl Render for CommandCenter {
             .flex()
             .flex_col()
             .items_center()
-            .pt(px(SPACE_6 * 2.))
+            .pt(zoomed(SPACE_6 * 2., cx))
             .child(
                 div()
                     .id("command-center-backdrop")
@@ -984,30 +986,30 @@ impl Render for CommandCenter {
                     .occlude()
                     .flex()
                     .flex_col()
-                    .w(px(PANEL_WIDTH))
-                    .h(px(PANEL_HEIGHT))
+                    .w(zoomed(PANEL_WIDTH, cx))
+                    .h(zoomed(PANEL_HEIGHT, cx))
                     .max_w(relative(PANEL_MAX_WIDTH))
                     .max_h(relative(PANEL_MAX_HEIGHT))
                     .overflow_hidden()
                     .border_1()
                     .border_color(colors.border)
-                    .rounded(px(RADIUS_LG))
+                    .rounded(zoomed(RADIUS_LG, cx))
                     .bg(colors.surface0)
                     .text_color(colors.foreground)
                     .shadow(vec![shadow(ShadowSize::Lg, cx)])
                     .child(
                         div()
                             .flex_shrink_0()
-                            .h(px(header_height(input_font)))
-                            .px(px(SPACE_4))
-                            .py(px(SPACE_3))
+                            .h(px(header_height(input_font, zoom)))
+                            .px(zoomed(SPACE_4, cx))
+                            .py(zoomed(SPACE_3, cx))
                             .border_b_1()
                             .border_color(colors.border)
                             .text_size(ui_font_size(FONT_BASE, cx))
                             .flex()
                             .flex_row()
                             .items_center()
-                            .gap(px(SPACE_2))
+                            .gap(zoomed(SPACE_2, cx))
                             .when(files, |this| this.child(self.render_scope_chip(cx)))
                             .child(
                                 div().flex_1().min_w_0().child(
@@ -1019,11 +1021,13 @@ impl Render for CommandCenter {
                                         // with the Electron input: SPACE_1 above and below one
                                         // line of FONT_BASE, no side inset.
                                         .px_0()
-                                        .py(px(SPACE_1))
+                                        .py(zoomed(SPACE_1, cx))
                                         // `Input::h` sets only a multi-line height and shadows
                                         // `Styled::h`; without this the frame keeps the Medium
                                         // `h_8` (2 rem, 28 px) and the header is 53 px.
-                                        .map(|input| Styled::h(input, px(input_height(input_font))))
+                                        .map(|input| {
+                                            Styled::h(input, px(input_height(input_font, zoom)))
+                                        })
                                         .line_height(px(input_line_height(input_font)))
                                         .text_size(ui_font_size(FONT_BASE, cx))
                                         .accessibility_id("command-center-input")
@@ -1038,8 +1042,8 @@ impl Render for CommandCenter {
                             .child(
                                 div()
                                     .id("command-center-file-search-status")
-                                    .w(px(ICON_SM))
-                                    .h(px(ICON_SM))
+                                    .w(zoomed(ICON_SM, cx))
+                                    .h(zoomed(ICON_SM, cx))
                                     .flex_shrink_0()
                                     .flex()
                                     .items_center()
@@ -1049,7 +1053,7 @@ impl Render for CommandCenter {
                                             .aria_label("Searching files...")
                                             .child(
                                                 icon(IconName::LoaderCircle)
-                                                    .with_size(px(ICON_SM))
+                                                    .with_size(zoomed(ICON_SM, cx))
                                                     .text_color(colors.foreground_muted)
                                                     .with_animation(
                                                         "command-center-file-spin",
@@ -1071,12 +1075,12 @@ impl Render for CommandCenter {
                                 .role(Role::Alert)
                                 .aria_label(SharedString::from(format!("Error: {message}")))
                                 .flex_shrink_0()
-                                .px(px(SPACE_4))
-                                .py(px(SPACE_3))
+                                .px(zoomed(SPACE_4, cx))
+                                .py(zoomed(SPACE_3, cx))
                                 .border_b_1()
                                 .border_color(colors.border)
                                 .text_size(ui_font_size(FONT_BASE, cx))
-                                .line_height(px(20.))
+                                .line_height(zoomed(20., cx))
                                 .text_color(colors.status_danger)
                                 .child(format!("Error: {message}")),
                         )
@@ -1241,7 +1245,7 @@ mod tests {
     fn header_matches_the_electron_50_px_header() {
         // Electron: 12 + (4 + 17 + 4) + 12 + 1 border, measured at y 48 to y 98.
         assert_eq!(input_line_height(FONT_BASE), 17.);
-        assert_eq!(input_height(FONT_BASE), 25.);
-        assert_eq!(header_height(FONT_BASE), 50.);
+        assert_eq!(input_height(FONT_BASE, 1.), 25.);
+        assert_eq!(header_height(FONT_BASE, 1.), 50.);
     }
 }

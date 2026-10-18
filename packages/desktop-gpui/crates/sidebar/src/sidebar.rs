@@ -27,7 +27,7 @@ use bachuc_theme::metrics::{
     SIDEBAR_WIDTH, SPACE_0_5, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
     WEIGHT_MEDIUM,
 };
-use bachuc_theme::{Tokens, tokens, ui_font_size};
+use bachuc_theme::{Tokens, tokens, ui_font_size, zoomed};
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState};
@@ -546,7 +546,7 @@ impl Sidebar {
             let field = input.clone();
             dialog
                 .title("Rename workspace")
-                .w(px(420.))
+                .w(zoomed(420., cx))
                 .child(Input::new(&input).aria_label("Workspace name"))
                 .button_props(
                     DialogButtonProps::default()
@@ -878,8 +878,8 @@ impl Sidebar {
         // The list container pads 8 px at the sides, and 16 px under the last row.
         div()
             .w_full()
-            .px(px(SPACE_2))
-            .pb(px(below + if last { SPACE_4 } else { 0. }))
+            .px(zoomed(SPACE_2, cx))
+            .pb(zoomed(below + if last { SPACE_4 } else { 0. }, cx))
             .child(body)
             .into_any_element()
     }
@@ -906,10 +906,10 @@ impl Sidebar {
             .flex_row()
             .items_center()
             .self_start()
-            .min_h(px(ROW_HEIGHT))
-            .px(px(SPACE_2))
-            .py(px(SPACE_1))
-            .gap(px(SPACE_1))
+            .min_h(zoomed(ROW_HEIGHT, cx))
+            .px(zoomed(SPACE_2, cx))
+            .py(zoomed(SPACE_1, cx))
+            .gap(zoomed(SPACE_1, cx))
             .text_size(ui_font_size(FONT_SM, cx))
             .text_color(muted)
             .cursor_pointer()
@@ -919,7 +919,7 @@ impl Sidebar {
                 div()
                     .invisible()
                     .group_hover("pinned-header", |style| style.visible())
-                    .child(icon(chevron).with_size(px(ICON_XS))),
+                    .child(icon(chevron).with_size(zoomed(ICON_XS, cx))),
             )
             .into_any_element()
     }
@@ -944,8 +944,8 @@ impl Sidebar {
             .then(|| self.ring(format!("p:{}", project.id), Knockout::Sidebar, cx));
         let leading = div()
             .relative()
-            .w(px(ICON_MD))
-            .h(px(LINE_HEIGHT))
+            .w(zoomed(ICON_MD, cx))
+            .h(zoomed(LINE_HEIGHT, cx))
             .flex_shrink_0()
             .flex()
             .items_center()
@@ -976,7 +976,7 @@ impl Sidebar {
                     .group_hover(group.clone(), |style| style.visible())
                     // `#9ca3af` in Electron; the closest token.
                     .text_color(t.foreground_extra_muted)
-                    .child(icon(chevron).with_size(px(ICON_SM))),
+                    .child(icon(chevron).with_size(zoomed(ICON_SM, cx))),
             );
         let toggle_id = id.clone();
         let click = div()
@@ -985,18 +985,19 @@ impl Sidebar {
             .aria_label(project.name.clone())
             .aria_expanded(!project.collapsed)
             .w_full()
-            .min_h(px(ROW_HEIGHT))
-            .p(px(SPACE_2))
+            .min_h(zoomed(ROW_HEIGHT, cx))
+            .p(zoomed(SPACE_2, cx))
             // The "+" and the kebab sit on the right rail: 24 px each pulled 6 px out, then the
             // row gap.
-            .pr(px(
-                SPACE_2 + PROJECT_KEBAB * 2. + PROJECT_ACTION_GAP - 6. + SPACE_2
+            .pr(zoomed(
+                SPACE_2 + PROJECT_KEBAB * 2. + PROJECT_ACTION_GAP - 6. + SPACE_2,
+                cx,
             ))
-            .rounded(px(RADIUS_LG))
+            .rounded(zoomed(RADIUS_LG, cx))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .cursor_pointer()
             .hover(|style| style.bg(t.surface_sidebar_hover))
             .active(|style| style.bg(t.surface2))
@@ -1008,7 +1009,7 @@ impl Sidebar {
                     .min_w_0()
                     .truncate()
                     .text_size(ui_font_size(FONT_BASE, cx))
-                    .line_height(px(LINE_HEIGHT))
+                    .line_height(zoomed(LINE_HEIGHT, cx))
                     .text_color(t.foreground_muted)
                     .child(project.name.clone()),
             );
@@ -1026,14 +1027,19 @@ impl Sidebar {
             RADIUS_MD,
             group.clone(),
             t,
+            cx,
             move |menu, window, cx| {
-                let menu = menu.min_w(px(220.)).check_side(Side::Right).item(menu_item(
-                    "Copy path",
-                    IconName::Copy,
-                    weak.clone(),
-                    root.clone(),
-                    |this, path, window, cx| this.copy_path(path, window, cx),
-                ));
+                let menu = menu
+                    .min_w(zoomed(220., cx))
+                    .check_side(Side::Right)
+                    .item(menu_item(
+                        "Copy path",
+                        IconName::Copy,
+                        weak.clone(),
+                        root.clone(),
+                        cx,
+                        |this, path, window, cx| this.copy_path(path, window, cx),
+                    ));
                 // Plugin items follow "Copy path"; they are read each time the menu opens.
                 let items = plugin_menu_items(&plugin_project, cx);
                 add_plugin_items(menu, items, window, cx)
@@ -1049,12 +1055,12 @@ impl Sidebar {
             .child(
                 div()
                     .absolute()
-                    .top(px((ROW_HEIGHT - PROJECT_KEBAB) / 2.))
-                    .right(px(SPACE_2 - 6.))
+                    .top(zoomed((ROW_HEIGHT - PROJECT_KEBAB) / 2., cx))
+                    .right(zoomed(SPACE_2 - 6., cx))
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(PROJECT_ACTION_GAP))
+                    .gap(zoomed(PROJECT_ACTION_GAP, cx))
                     .child(plus)
                     .child(kebab),
             )
@@ -1078,8 +1084,8 @@ impl Sidebar {
             let ring = (badge == Some(StatusBucket::Running))
                 .then(|| self.ring(format!("w:{}:icon", row.id), Knockout::Sidebar, cx));
             div()
-                .w(px(ICON_MD))
-                .h(px(LINE_HEIGHT))
+                .w(zoomed(ICON_MD, cx))
+                .h(zoomed(LINE_HEIGHT, cx))
                 .flex_shrink_0()
                 .flex()
                 .items_center()
@@ -1110,7 +1116,7 @@ impl Sidebar {
             .min_w_0()
             .truncate()
             .text_size(ui_font_size(FONT_BASE, cx))
-            .line_height(px(LINE_HEIGHT))
+            .line_height(zoomed(LINE_HEIGHT, cx))
             .text_color(t.foreground.opacity(0.76))
             .group_hover(group.clone(), |style| style.text_color(t.foreground))
             .child(row.name.clone());
@@ -1119,8 +1125,8 @@ impl Sidebar {
         let diff = row.diff.map(|(added, removed)| {
             h_flex()
                 .flex_shrink_0()
-                .h(px(LINE_HEIGHT))
-                .gap(px(SPACE_1))
+                .h(zoomed(LINE_HEIGHT, cx))
+                .gap(zoomed(SPACE_1, cx))
                 .text_size(ui_font_size(FONT_SM, cx))
                 .child(
                     div()
@@ -1139,15 +1145,15 @@ impl Sidebar {
             .aria_label(workspace_label(row, pinned_section))
             .aria_selected(selected)
             .w_full()
-            .min_h(px(ROW_HEIGHT))
-            .py(px(SPACE_2))
-            .pl(px(SPACE_2))
-            .pr(px(SPACE_3))
-            .rounded(px(RADIUS_LG))
+            .min_h(zoomed(ROW_HEIGHT, cx))
+            .py(zoomed(SPACE_2, cx))
+            .pl(zoomed(SPACE_2, cx))
+            .pr(zoomed(SPACE_3, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .cursor_pointer()
             .when(selected, |this| this.bg(t.surface_sidebar_selected))
             .when(!selected, |this| {
@@ -1170,15 +1176,16 @@ impl Sidebar {
             RADIUS_BASE,
             group.clone(),
             t,
-            move |menu, _, _| workspace_menu(menu, &weak, &menu_row),
+            cx,
+            move |menu, _, cx| workspace_menu(menu, &weak, &menu_row, cx),
         );
         // The scrim fades the title tail into the row color under the kebab.
         let scrim = div()
             .absolute()
-            .top(px(SPACE_2))
-            .right(px(SPACE_3))
-            .w(px(SCRIM_WIDTH))
-            .h(px(LINE_HEIGHT))
+            .top(zoomed(SPACE_2, cx))
+            .right(zoomed(SPACE_3, cx))
+            .w(zoomed(SCRIM_WIDTH, cx))
+            .h(zoomed(LINE_HEIGHT, cx))
             .bg(linear_gradient(
                 90.,
                 linear_color_stop(rest.opacity(0.), 0.),
@@ -1195,8 +1202,8 @@ impl Sidebar {
                 this.child(scrim).child(
                     div()
                         .absolute()
-                        .top(px(SPACE_2))
-                        .right(px(SPACE_3 - 7.))
+                        .top(zoomed(SPACE_2, cx))
+                        .right(zoomed(SPACE_3 - 7., cx))
                         .child(kebab),
                 )
             })
@@ -1210,7 +1217,7 @@ impl Sidebar {
                         .top_0()
                         .left_0()
                         .size_full()
-                        .rounded(px(RADIUS_LG))
+                        .rounded(zoomed(RADIUS_LG, cx))
                         .bg(t.surface0.opacity(0.8))
                         .flex()
                         .items_center()
@@ -1242,15 +1249,15 @@ impl Sidebar {
             .role(Role::Button)
             .aria_label(label)
             .w_full()
-            .min_h(px(ROW_HEIGHT))
-            .py(px(SPACE_2))
-            .pl(px(SPACE_2))
-            .pr(px(SPACE_3))
-            .rounded(px(RADIUS_LG))
+            .min_h(zoomed(ROW_HEIGHT, cx))
+            .py(zoomed(SPACE_2, cx))
+            .pl(zoomed(SPACE_2, cx))
+            .pr(zoomed(SPACE_3, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .cursor_pointer()
             .text_size(ui_font_size(FONT_BASE, cx))
             .text_color(t.foreground_muted)
@@ -1259,13 +1266,13 @@ impl Sidebar {
             .on_press(cx, move |this, _, cx| this.toggle_group(group.clone(), cx))
             .child(
                 div()
-                    .w(px(ICON_MD))
-                    .h(px(ICON_MD))
+                    .w(zoomed(ICON_MD, cx))
+                    .h(zoomed(ICON_MD, cx))
                     .flex_shrink_0()
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(icon(chevron).with_size(px(ICON_SM))),
+                    .child(icon(chevron).with_size(zoomed(ICON_SM, cx))),
             )
             .child(div().min_w_0().truncate().child(label))
             .into_any_element()
@@ -1280,9 +1287,9 @@ impl Sidebar {
             .flex()
             .flex_col()
             .flex_shrink_0()
-            .gap(px(SPACE_0_5))
-            .pt(px(SPACE_2))
-            .pb(px(SPACE_1_5))
+            .gap(zoomed(SPACE_0_5, cx))
+            .pt(zoomed(SPACE_2, cx))
+            .pb(zoomed(SPACE_1_5, cx))
             .border_b_1()
             .border_color(t.border)
             .child(builtin_nav_row(
@@ -1344,7 +1351,7 @@ impl Sidebar {
         let (plugin_id, id) = (row.plugin_id, row.id);
         let enabled = !row.disabled;
         div()
-            .px(px(SPACE_2))
+            .px(zoomed(SPACE_2, cx))
             .child(
                 div()
                     .id(("sidebar-plugin-nav", ix))
@@ -1353,16 +1360,16 @@ impl Sidebar {
                     .when(row.disabled, |this| {
                         this.aria_description("Disabled: no workspace is open")
                     })
-                    .min_h(px(NAV_ROW_MIN))
-                    .px(px(SPACE_2))
-                    .py(px(SPACE_1))
-                    .rounded(px(RADIUS_LG))
+                    .min_h(zoomed(NAV_ROW_MIN, cx))
+                    .px(zoomed(SPACE_2, cx))
+                    .py(zoomed(SPACE_1, cx))
+                    .rounded(zoomed(RADIUS_LG, cx))
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .text_size(ui_font_size(FONT_BASE, cx))
-                    .line_height(px(LABEL_LINE))
+                    .line_height(zoomed(LABEL_LINE, cx))
                     .text_color(if row.active {
                         foreground
                     } else {
@@ -1377,7 +1384,7 @@ impl Sidebar {
                                 this.press_nav(plugin_id, id, window, cx)
                             })
                     })
-                    .child(icon(row.icon).with_size(px(ICON_SM)))
+                    .child(icon(row.icon).with_size(zoomed(ICON_SM, cx)))
                     .child(div().min_w_0().truncate().child(row.label)),
             )
             .into_any_element()
@@ -1402,17 +1409,17 @@ impl Sidebar {
             .role(Role::Button)
             .aria_label("Add project")
             .min_w_0()
-            .min_h(px(ADD_PROJECT_MIN))
+            .min_h(zoomed(ADD_PROJECT_MIN, cx))
             .flex_1()
-            .px(px(SPACE_2))
-            .py(px(SPACE_1_5))
-            .rounded(px(RADIUS_LG))
+            .px(zoomed(SPACE_2, cx))
+            .py(zoomed(SPACE_1_5, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .text_size(ui_font_size(FONT_BASE, cx))
-            .line_height(px(LABEL_LINE))
+            .line_height(zoomed(LABEL_LINE, cx))
             .text_color(t.foreground_muted)
             .when(self.adding, |this| this.opacity(0.5))
             .when(!self.adding, |this| {
@@ -1420,7 +1427,7 @@ impl Sidebar {
                     .hover(move |style| style.bg(hover).text_color(foreground))
                     .on_press(cx, |this, window, cx| this.add_project(window, cx))
             })
-            .child(icon(IconName::FolderPlus).with_size(px(ICON_SM)))
+            .child(icon(IconName::FolderPlus).with_size(zoomed(ICON_SM, cx)))
             .child(div().min_w_0().truncate().child("Add project"))
     }
 
@@ -1429,9 +1436,9 @@ impl Sidebar {
             .flex_shrink_0()
             .justify_between()
             .items_center()
-            .gap(px(SPACE_2))
-            .px(px(SPACE_2))
-            .py(px(SPACE_3))
+            .gap(zoomed(SPACE_2, cx))
+            .px(zoomed(SPACE_2, cx))
+            .py(zoomed(SPACE_3, cx))
             .border_t_1()
             .border_color(t.border)
             .child(self.render_add_project(t, cx))
@@ -1441,8 +1448,8 @@ impl Sidebar {
                     .role(Role::Button)
                     .aria_label("Settings")
                     .flex_shrink_0()
-                    .w(px(28.))
-                    .h(px(28.))
+                    .w(zoomed(28., cx))
+                    .h(zoomed(28., cx))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1450,11 +1457,11 @@ impl Sidebar {
                     .text_color(t.foreground_muted)
                     .hover(|style| style.text_color(t.foreground))
                     .on_press(cx, |_, _, cx| cx.emit(SidebarEvent::OpenSettings))
-                    .child(icon(IconName::Settings).with_size(px(ICON_MD))),
+                    .child(icon(IconName::Settings).with_size(zoomed(ICON_MD, cx))),
             )
     }
 
-    fn render_resize_handle(&self, t: &Tokens) -> impl IntoElement {
+    fn render_resize_handle(&self, t: &Tokens, cx: &App) -> impl IntoElement {
         div()
             .id("sidebar-resize-handle")
             .role(Role::Splitter)
@@ -1464,8 +1471,8 @@ impl Sidebar {
             .absolute()
             .top_0()
             .bottom_0()
-            .right(px(-HANDLE_WIDTH / 2.))
-            .w(px(HANDLE_WIDTH))
+            .right(zoomed(-HANDLE_WIDTH / 2., cx))
+            .w(zoomed(HANDLE_WIDTH, cx))
             .cursor_col_resize()
             .on_drag(ResizeDrag, |_, _, _, cx| cx.new(|_| NoPreview))
             .child(
@@ -1474,7 +1481,7 @@ impl Sidebar {
                     .absolute()
                     .top_0()
                     .bottom_0()
-                    .left(px(HANDLE_WIDTH / 2.))
+                    .left(zoomed(HANDLE_WIDTH / 2., cx))
                     .w(px(1.))
                     .bg(t.foreground.opacity(0.25))
                     .invisible()
@@ -1517,26 +1524,26 @@ fn builtin_nav_row(
     cx: &mut Context<Sidebar>,
     handler: impl Fn(&mut Sidebar, &mut Window, &mut Context<Sidebar>) + 'static,
 ) -> impl IntoElement {
-    div().px(px(SPACE_2)).child(
+    div().px(zoomed(SPACE_2, cx)).child(
         div()
             .id(id)
             .role(Role::Button)
             .aria_label(label)
-            .min_h(px(NAV_ROW_MIN))
-            .px(px(SPACE_2))
-            .py(px(SPACE_1))
-            .rounded(px(RADIUS_LG))
+            .min_h(zoomed(NAV_ROW_MIN, cx))
+            .px(zoomed(SPACE_2, cx))
+            .py(zoomed(SPACE_1, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .cursor_pointer()
             .text_size(ui_font_size(FONT_BASE, cx))
-            .line_height(px(LABEL_LINE))
+            .line_height(zoomed(LABEL_LINE, cx))
             .text_color(t.foreground_muted)
             .hover(|style| style.bg(t.surface_sidebar_hover).text_color(t.foreground))
             .on_press(cx, handler)
-            .child(icon(glyph).with_size(px(ICON_SM)))
+            .child(icon(glyph).with_size(zoomed(ICON_SM, cx)))
             .child(label),
     )
 }
@@ -1551,10 +1558,10 @@ fn render_section_title(title: SharedString, t: &Tokens, cx: &mut Context<Sideba
         .flex()
         .flex_row()
         .items_center()
-        .min_h(px(SECTION_TITLE_HEIGHT))
-        .pl(px(SPACE_2))
-        .pr(px(SPACE_1))
-        .py(px(SPACE_1))
+        .min_h(zoomed(SECTION_TITLE_HEIGHT, cx))
+        .pl(zoomed(SPACE_2, cx))
+        .pr(zoomed(SPACE_1, cx))
+        .py(zoomed(SPACE_1, cx))
         .text_size(ui_font_size(FONT_SM, cx))
         .text_color(t.foreground_muted)
         .child(div().min_w_0().truncate().child(title))
@@ -1570,17 +1577,17 @@ fn render_empty(t: &Tokens, cx: &mut Context<Sidebar>) -> AnyElement {
         .id("sidebar-empty-state")
         .role(Role::Status)
         .aria_label("No projects yet")
-        .mx(px(SPACE_2))
-        .mt(px(SPACE_4))
-        .pt(px(SPACE_6))
-        .pb(px(SPACE_4))
-        .px(px(SPACE_4))
-        .rounded(px(RADIUS_LG))
+        .mx(zoomed(SPACE_2, cx))
+        .mt(zoomed(SPACE_4, cx))
+        .pt(zoomed(SPACE_6, cx))
+        .pb(zoomed(SPACE_4, cx))
+        .px(zoomed(SPACE_4, cx))
+        .rounded(zoomed(RADIUS_LG, cx))
         .bg(t.surface0)
         .flex()
         .flex_col()
         .items_center()
-        .gap(px(SPACE_3))
+        .gap(zoomed(SPACE_3, cx))
         .text_size(ui_font_size(FONT_SM, cx))
         .text_center()
         .child(
@@ -1598,10 +1605,10 @@ fn render_empty(t: &Tokens, cx: &mut Context<Sidebar>) -> AnyElement {
 }
 
 /// A disc of the alert color with a bang, which Electron draws as a filled `CircleAlert`.
-fn alert_disc(side: f32, t: &Tokens) -> Div {
+fn alert_disc(side: f32, t: &Tokens, cx: &App) -> Div {
     div()
-        .w(px(side))
-        .h(px(side))
+        .w(zoomed(side, cx))
+        .h(zoomed(side, cx))
         .flex_shrink_0()
         .rounded_full()
         .bg(t.dot_warning)
@@ -1609,16 +1616,16 @@ fn alert_disc(side: f32, t: &Tokens) -> Div {
         .items_center()
         .justify_center()
         .text_color(t.surface0)
-        .text_size(px(side * 0.75))
+        .text_size(zoomed(side * 0.75, cx))
         .font_weight(FontWeight::BOLD)
-        .line_height(px(side))
+        .line_height(zoomed(side, cx))
         .child("!")
 }
 
-fn dot(color: Hsla) -> Div {
+fn dot(color: Hsla, cx: &App) -> Div {
     div()
-        .w(px(DOT))
-        .h(px(DOT))
+        .w(zoomed(DOT, cx))
+        .h(zoomed(DOT, cx))
         .flex_shrink_0()
         .rounded_full()
         .bg(color)
@@ -1629,28 +1636,28 @@ fn workspace_status(
     row: &WorkspaceRow,
     ring: Option<AnyElement>,
     t: &Tokens,
-    _cx: &mut Context<Sidebar>,
+    cx: &mut Context<Sidebar>,
 ) -> AnyElement {
     let slot = div()
         .relative()
-        .w(px(ICON_MD))
-        .h(px(LINE_HEIGHT))
+        .w(zoomed(ICON_MD, cx))
+        .h(zoomed(LINE_HEIGHT, cx))
         .flex_shrink_0()
         .flex()
         .items_center()
         .justify_center();
     match row.bucket {
         StatusBucket::Running => slot.children(ring).into_any_element(),
-        StatusBucket::NeedsInput => slot.child(alert_disc(12., t)).into_any_element(),
-        StatusBucket::Attention => slot.child(dot(t.dot_success)).into_any_element(),
+        StatusBucket::NeedsInput => slot.child(alert_disc(12., t, cx)).into_any_element(),
+        StatusBucket::Attention => slot.child(dot(t.dot_success, cx)).into_any_element(),
         // An idle row keeps a muted dot so the rail has an edge to read against.
         StatusBucket::Done => slot
-            .child(dot(t.foreground_extra_muted.opacity(0.3)))
+            .child(dot(t.foreground_extra_muted.opacity(0.3), cx))
             .into_any_element(),
         StatusBucket::Failed => slot
             .child(
                 icon(IconName::Monitor)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(t.foreground_muted),
             )
             .child(
@@ -1658,8 +1665,8 @@ fn workspace_status(
                     .absolute()
                     .right_0()
                     .bottom_0()
-                    .w(px(DOT + 2.))
-                    .h(px(DOT + 2.))
+                    .w(zoomed(DOT + 2., cx))
+                    .h(zoomed(DOT + 2., cx))
                     .rounded_full()
                     .border_1()
                     .border_color(t.surface0)
@@ -1677,32 +1684,36 @@ fn project_icon(
     ring: Option<AnyElement>,
     group: &SharedString,
     t: &Tokens,
-    _cx: &mut Context<Sidebar>,
+    cx: &mut Context<Sidebar>,
 ) -> AnyElement {
     // `key` is the project view key: the daemon `projectKey`, or `[serverId, projectId]`
     // without one. The project id stands in only when the client cannot give a key.
     let color: Rgba = rgb(identity_color(key));
     // `projectIconRadius`: a quarter of the box.
     let radius = (ICON_MD * 0.25).round();
-    let mut icon_box = div().relative().w(px(ICON_MD)).h(px(ICON_MD)).child(
-        div()
-            .size_full()
-            .rounded(px(radius))
-            .bg(color)
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_color(white())
-            .text_size(px(9.))
-            .child(project_initial(name)),
-    );
+    let mut icon_box = div()
+        .relative()
+        .w(zoomed(ICON_MD, cx))
+        .h(zoomed(ICON_MD, cx))
+        .child(
+            div()
+                .size_full()
+                .rounded(zoomed(radius, cx))
+                .bg(color)
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(white())
+                .text_size(zoomed(9., cx))
+                .child(project_initial(name)),
+        );
     if let Some(bucket) = badge {
         icon_box = if bucket == StatusBucket::Running {
             icon_box.child(
                 div()
                     .absolute()
-                    .right(px(RING_OFFSET))
-                    .bottom(px(RING_OFFSET))
+                    .right(zoomed(RING_OFFSET, cx))
+                    .bottom(zoomed(RING_OFFSET, cx))
                     .children(ring),
             )
         } else {
@@ -1711,10 +1722,10 @@ fn project_icon(
                 // The shell is a knockout: it takes the color of the row behind it.
                 div()
                     .absolute()
-                    .right(px(BADGE_OFFSET))
-                    .bottom(px(BADGE_OFFSET))
-                    .w(px(BADGE))
-                    .h(px(BADGE))
+                    .right(zoomed(BADGE_OFFSET, cx))
+                    .bottom(zoomed(BADGE_OFFSET, cx))
+                    .w(zoomed(BADGE, cx))
+                    .h(zoomed(BADGE, cx))
                     .rounded_full()
                     .overflow_hidden()
                     .bg(t.surface_sidebar)
@@ -1723,9 +1734,9 @@ fn project_icon(
                     .items_center()
                     .justify_center()
                     .child(match bucket {
-                        StatusBucket::NeedsInput => alert_disc(BADGE, t),
-                        StatusBucket::Failed => dot(t.dot_danger),
-                        _ => dot(t.dot_success),
+                        StatusBucket::NeedsInput => alert_disc(BADGE, t, cx),
+                        StatusBucket::Failed => dot(t.dot_danger, cx),
+                        _ => dot(t.dot_success, cx),
                     }),
             )
         };
@@ -1739,10 +1750,11 @@ fn menu_item(
     name: IconName,
     weak: WeakEntity<Sidebar>,
     value: String,
+    cx: &App,
     run: impl Fn(&mut Sidebar, String, &mut Window, &mut Context<Sidebar>) + 'static,
 ) -> PopupMenuItem {
     PopupMenuItem::new(label)
-        .icon(icon(name).with_size(px(ICON_SM)))
+        .icon(icon(name).with_size(zoomed(ICON_SM, cx)))
         .on_click(move |_, window, cx| {
             let value = value.clone();
             weak.update(cx, |this, cx| run(this, value, window, cx))
@@ -1839,12 +1851,18 @@ async fn add_project_and_notify(
 }
 
 /// `SidebarWorkspaceMenuItems`, in the Electron order, for the items whose target is in scope.
-fn workspace_menu(menu: PopupMenu, weak: &WeakEntity<Sidebar>, row: &WorkspaceRow) -> PopupMenu {
-    let mut menu = menu.min_w(px(260.)).item(menu_item(
+fn workspace_menu(
+    menu: PopupMenu,
+    weak: &WeakEntity<Sidebar>,
+    row: &WorkspaceRow,
+    cx: &App,
+) -> PopupMenu {
+    let mut menu = menu.min_w(zoomed(260., cx)).item(menu_item(
         "Copy path",
         IconName::Copy,
         weak.clone(),
         row.cwd.clone(),
+        cx,
         |this, path, window, cx| this.copy_path(path, window, cx),
     ));
     menu = menu.item(menu_item(
@@ -1852,6 +1870,7 @@ fn workspace_menu(menu: PopupMenu, weak: &WeakEntity<Sidebar>, row: &WorkspaceRo
         IconName::Pencil,
         weak.clone(),
         row.id.clone(),
+        cx,
         {
             let current = row.name.clone();
             move |this, id, window, cx| this.rename(id, current.clone(), window, cx)
@@ -1864,6 +1883,7 @@ fn workspace_menu(menu: PopupMenu, weak: &WeakEntity<Sidebar>, row: &WorkspaceRo
             IconName::Circle,
             weak.clone(),
             row.id.clone(),
+            cx,
             |this, id, _, cx| this.mark_unread(&id, cx),
         ));
     }
@@ -1877,6 +1897,7 @@ fn workspace_menu(menu: PopupMenu, weak: &WeakEntity<Sidebar>, row: &WorkspaceRo
         },
         weak.clone(),
         row.id.clone(),
+        cx,
         move |this, id, _, cx| this.pin(&id, !pinned, cx),
     ));
     let name = row.name.clone();
@@ -1885,6 +1906,7 @@ fn workspace_menu(menu: PopupMenu, weak: &WeakEntity<Sidebar>, row: &WorkspaceRo
         IconName::Archive,
         weak.clone(),
         row.id.clone(),
+        cx,
         move |this, id, window, cx| this.archive(id, name.clone(), window, cx),
     ))
 }
@@ -1899,16 +1921,16 @@ fn new_workspace_button(
     group: SharedString,
     t: &Tokens,
     cx: &mut Context<Sidebar>,
-) -> impl IntoElement {
+) -> impl IntoElement + use<> {
     let fg = t.foreground;
     div()
         .id(("project-new-workspace", ix))
         .role(Role::Button)
         .aria_label(format!("Create a new workspace for {project_name}"))
-        .w(px(PROJECT_KEBAB))
-        .h(px(PROJECT_KEBAB))
+        .w(zoomed(PROJECT_KEBAB, cx))
+        .h(zoomed(PROJECT_KEBAB, cx))
         .flex_shrink_0()
-        .rounded(px(RADIUS_MD))
+        .rounded(zoomed(RADIUS_MD, cx))
         .flex()
         .items_center()
         .justify_center()
@@ -1922,26 +1944,30 @@ fn new_workspace_button(
                 project_id: Some(project_id.clone()),
             })
         })
-        .child(icon(IconName::Plus).with_size(px(PROJECT_PLUS_GLYPH)))
+        .child(icon(IconName::Plus).with_size(zoomed(PROJECT_PLUS_GLYPH, cx)))
 }
 
-fn kebab(
+fn kebab<B>(
     id: (&'static str, usize),
     label: &'static str,
     side: f32,
     radius: f32,
     group: SharedString,
     t: &Tokens,
-    build: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
-) -> impl IntoElement {
+    cx: &App,
+    build: B,
+) -> impl IntoElement + use<B>
+where
+    B: Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+{
     let fg = t.foreground;
     let base = div()
         .id(id)
         .role(Role::Button)
         .aria_label(label)
-        .w(px(side))
-        .h(px(side))
-        .rounded(px(radius))
+        .w(zoomed(side, cx))
+        .h(zoomed(side, cx))
+        .rounded(zoomed(radius, cx))
         .flex()
         .items_center()
         .justify_center()
@@ -1951,7 +1977,7 @@ fn kebab(
         // No mouse-down listener here: a child's listener runs before the popover wrapper's,
         // so stopping the event here would keep the menu shut. The wrapper stops it itself,
         // which also keeps the row under the kebab from taking the click.
-        .child(icon(IconName::MoreVertical).with_size(px(ICON_SM)));
+        .child(icon(IconName::MoreVertical).with_size(zoomed(ICON_SM, cx)));
     KebabButton {
         base,
         open: false,
@@ -2012,7 +2038,7 @@ impl Render for Sidebar {
             .aria_label("Projects and workspaces")
             .flex_1()
             .min_h_0()
-            .pt(px(SPACE_0_5))
+            .pt(zoomed(SPACE_0_5, cx))
             .overflow_hidden()
             .child(wheel)
             .child(
@@ -2054,6 +2080,6 @@ impl Render for Sidebar {
             .child(self.render_sections())
             .child(self.render_footer(&t, cx))
             // The handle hangs 5 px outside the sidebar, so it paints above its neighbor.
-            .child(deferred(self.render_resize_handle(&t)).with_priority(1))
+            .child(deferred(self.render_resize_handle(&t, cx)).with_priority(1))
     }
 }

@@ -5,7 +5,7 @@
 //! about every 33 ms while it was painted lately and sleeps when it is scrolled out of view or
 //! the window is hidden, so a ring nobody sees costs only a timer.
 
-use bachuc_theme::tokens;
+use bachuc_theme::{tokens, zoomed};
 use gpui_kit::*;
 use std::cell::Cell;
 use std::f32::consts::PI;
@@ -83,7 +83,7 @@ fn phase() -> f32 {
 }
 
 impl Render for RunningRing {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let painted = self.painted.clone();
         let knockout = self.knockout;
         canvas(
@@ -93,11 +93,14 @@ impl Render for RunningRing {
                 let t = tokens(cx);
                 let color = t.dot_running;
                 let center = bounds.center();
-                let square = |side: f32| Bounds::centered_at(center, size(px(side), px(side)));
+                let zoom = bachuc_theme::zoom(cx);
+                let scaled = |length: f32| px(length * zoom);
+                let square =
+                    |side: f32| Bounds::centered_at(center, size(scaled(side), scaled(side)));
                 if knockout == Knockout::Sidebar {
                     window.paint_quad(quad(
                         square(FRAME),
-                        Corners::all(px(FRAME / 2.)),
+                        Corners::all(scaled(FRAME / 2.)),
                         t.surface_sidebar,
                         Edges::all(px(0.)),
                         transparent_black(),
@@ -106,9 +109,9 @@ impl Render for RunningRing {
                 }
                 window.paint_quad(quad(
                     square(RING),
-                    Corners::all(px(RING / 2.)),
+                    Corners::all(scaled(RING / 2.)),
                     transparent_black(),
-                    Edges::all(px(STROKE)),
+                    Edges::all(scaled(STROKE)),
                     color.opacity(TRACK_OPACITY),
                     BorderStyle::Solid,
                 ));
@@ -116,12 +119,12 @@ impl Render for RunningRing {
                 // turned clockwise by the phase.
                 let radius = RING / 2. - STROKE / 2.;
                 let start = -PI * 3. / 4. + phase() * 2. * PI;
-                let mut path = PathBuilder::stroke(px(STROKE));
+                let mut path = PathBuilder::stroke(scaled(STROKE));
                 for step in 0..=ARC_STEPS {
                     let angle = start + (PI / 2.) * step as f32 / ARC_STEPS as f32;
                     let point = point(
-                        center.x + px(radius * angle.cos()),
-                        center.y + px(radius * angle.sin()),
+                        center.x + scaled(radius * angle.cos()),
+                        center.y + scaled(radius * angle.sin()),
                     );
                     if step == 0 {
                         path.move_to(point);
@@ -134,7 +137,7 @@ impl Render for RunningRing {
                 }
                 window.paint_quad(quad(
                     square(DOT),
-                    Corners::all(px(DOT / 2.)),
+                    Corners::all(scaled(DOT / 2.)),
                     color,
                     Edges::all(px(0.)),
                     transparent_black(),
@@ -142,7 +145,7 @@ impl Render for RunningRing {
                 ));
             },
         )
-        .w(px(FRAME))
-        .h(px(FRAME))
+        .w(zoomed(FRAME, cx))
+        .h(zoomed(FRAME, cx))
     }
 }

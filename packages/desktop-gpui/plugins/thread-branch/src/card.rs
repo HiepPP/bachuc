@@ -13,7 +13,7 @@ use bachuc_theme::metrics::{
     BORDER_WIDTH_2, FONT_BASE, FONT_SM, ICON_MD, ICON_SM, RADIUS_BASE, SPACE_1, SPACE_1_5, SPACE_2,
     SPACE_3, WEIGHT_MEDIUM, WEIGHT_SEMIBOLD,
 };
-use bachuc_theme::{Tokens, mono_font_family, tokens, ui_font_size};
+use bachuc_theme::{Tokens, mono_font_family, tokens, ui_font_size, zoomed};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -102,12 +102,12 @@ pub(crate) fn render_card(props: CardProps<'_>, cx: &App) -> AnyElement {
     let header = h_flex()
         .w_full()
         .items_center()
-        .gap(px(SPACE_2))
-        .px(px(SPACE_3))
-        .py(px(HEADER_PADDING_Y))
+        .gap(zoomed(SPACE_2, cx))
+        .px(zoomed(SPACE_3, cx))
+        .py(zoomed(HEADER_PADDING_Y, cx))
         .child(
             icon(IconName::FileDiff)
-                .with_size(px(ICON_MD))
+                .with_size(zoomed(ICON_MD, cx))
                 .text_color(t.foreground_muted),
         )
         .child(
@@ -155,12 +155,12 @@ pub(crate) fn render_card(props: CardProps<'_>, cx: &App) -> AnyElement {
                 section.child(
                     h_flex()
                         .items_center()
-                        .gap(px(SPACE_1_5))
-                        .px(px(SPACE_3))
-                        .py(px(SPACE_1_5))
+                        .gap(zoomed(SPACE_1_5, cx))
+                        .px(zoomed(SPACE_3, cx))
+                        .py(zoomed(SPACE_1_5, cx))
                         .child(
                             icon(IconName::TriangleAlert)
-                                .with_size(px(WARNING_ICON))
+                                .with_size(zoomed(WARNING_ICON, cx))
                                 .text_color(t.status_warning),
                         )
                         .child(
@@ -174,12 +174,12 @@ pub(crate) fn render_card(props: CardProps<'_>, cx: &App) -> AnyElement {
             .children(data.commits.iter().map(|commit| {
                 h_flex()
                     .items_center()
-                    .gap(px(SPACE_2))
-                    .px(px(SPACE_3))
-                    .py(px(SPACE_1))
+                    .gap(zoomed(SPACE_2, cx))
+                    .px(zoomed(SPACE_3, cx))
+                    .py(zoomed(SPACE_1, cx))
                     .child(
                         icon(IconName::GitCommitHorizontal)
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .text_color(t.foreground_muted),
                     )
                     .child(
@@ -218,9 +218,9 @@ pub(crate) fn render_card(props: CardProps<'_>, cx: &App) -> AnyElement {
         h_flex()
             .w_full()
             .items_center()
-            .gap(px(SPACE_1_5))
-            .px(px(SPACE_3))
-            .py(px(SPACE_2))
+            .gap(zoomed(SPACE_1_5, cx))
+            .px(zoomed(SPACE_3, cx))
+            .py(zoomed(SPACE_2, cx))
             .border_t_1()
             .border_color(t.border)
             .text_size(style.text)
@@ -238,7 +238,7 @@ pub(crate) fn render_card(props: CardProps<'_>, cx: &App) -> AnyElement {
         .w_full()
         .border_1()
         .border_color(t.border)
-        .rounded(px(CARD_RADIUS))
+        .rounded(zoomed(CARD_RADIUS, cx))
         .bg(t.surface1)
         .overflow_hidden()
         .child(header)
@@ -295,20 +295,20 @@ fn file_row(
         );
 
     let counts = h_flex()
-        .min_w(px(COUNTS_MIN_WIDTH))
+        .min_w(zoomed(COUNTS_MIN_WIDTH, cx))
         .justify_end()
-        .gap(px(COUNTS_GAP))
+        .gap(zoomed(COUNTS_GAP, cx))
         .map(|counts| match file.added {
             None => counts.child(
                 div()
                     .flex_none()
                     .font_family(style.mono)
-                    .text_size(px(BADGE_TEXT))
+                    .text_size(zoomed(BADGE_TEXT, cx))
                     .text_color(t.foreground_muted)
                     .border_1()
                     .border_color(t.border)
-                    .rounded(px(RADIUS_BASE))
-                    .px(px(SPACE_1))
+                    .rounded(zoomed(RADIUS_BASE, cx))
+                    .px(zoomed(SPACE_1, cx))
                     .child(if file.large {
                         "large, not saved"
                     } else {
@@ -334,19 +334,20 @@ fn file_row(
                 }),
         });
 
-    let blocks = h_flex()
-        .flex_none()
-        .gap(px(BLOCK_GAP))
-        .children(bar(file).into_iter().map(|block| {
-            div()
-                .size(px(BLOCK_SIZE))
-                .rounded(px(BLOCK_RADIUS))
-                .bg(match block {
-                    Block::Add => t.diff_addition,
-                    Block::Remove => t.diff_deletion,
-                    Block::None => t.border,
-                })
-        }));
+    let blocks =
+        h_flex()
+            .flex_none()
+            .gap(zoomed(BLOCK_GAP, cx))
+            .children(bar(file).into_iter().map(|block| {
+                div()
+                    .size(zoomed(BLOCK_SIZE, cx))
+                    .rounded(zoomed(BLOCK_RADIUS, cx))
+                    .bg(match block {
+                        Block::Add => t.diff_addition,
+                        Block::Remove => t.diff_deletion,
+                        Block::None => t.border,
+                    })
+            }));
 
     // Hover changes the background and this color only; the layout never changes.
     let chevron = div()
@@ -357,29 +358,29 @@ fn file_row(
             t.foreground_muted
         })
         .group_hover(group.clone(), move |s| s.text_color(t.accent))
-        .child(icon(IconName::ChevronRight).with_size(px(ICON_SM)));
+        .child(icon(IconName::ChevronRight).with_size(zoomed(ICON_SM, cx)));
 
     let row = h_flex()
         .id(ElementId::Name(group.clone()))
         .group(group)
         .w_full()
         .items_center()
-        .gap(px(SPACE_2))
-        .pr(px(SPACE_3))
-        .py(px(SPACE_1_5))
+        .gap(zoomed(SPACE_2, cx))
+        .pr(zoomed(SPACE_3, cx))
+        .py(zoomed(SPACE_1_5, cx))
         .map(|row| {
             if is_selected {
-                row.pl(px(SELECTED_PADDING))
-                    .border_l(px(BORDER_WIDTH_2))
+                row.pl(zoomed(SELECTED_PADDING, cx))
+                    .border_l(zoomed(BORDER_WIDTH_2, cx))
                     .border_color(t.accent)
                     .bg(t.surface2)
             } else {
-                row.pl(px(SPACE_3))
+                row.pl(zoomed(SPACE_3, cx))
             }
         })
         .child(
             icon(kind)
-                .with_size(px(ICON_SM))
+                .with_size(zoomed(ICON_SM, cx))
                 .text_color(t.foreground_muted),
         )
         .child(path)
@@ -457,7 +458,7 @@ impl Render for TurnCardView {
                 .id("thread-branch-turn-diff-unavailable")
                 .role(Role::Note)
                 .aria_label(UNAVAILABLE)
-                .py(px(SPACE_2))
+                .py(zoomed(SPACE_2, cx))
                 .text_size(ui_font_size(FONT_BASE, cx))
                 .text_color(t.foreground_muted)
                 .child(UNAVAILABLE)

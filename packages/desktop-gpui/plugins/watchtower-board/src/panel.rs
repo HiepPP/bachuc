@@ -100,9 +100,9 @@ impl BoardPanel {
             PanelItem::Rail(item) => (starts_card(item), self.rail.render_item(item, cx)),
         };
         item_frame()
-            .px(px(CARD_GAP))
-            .when(starts, |this| this.pt(px(CARD_GAP)))
-            .when(last, |this| this.pb(px(CARD_GAP)))
+            .px(bachuc_theme::zoomed(CARD_GAP, cx))
+            .when(starts, |this| this.pt(bachuc_theme::zoomed(CARD_GAP, cx)))
+            .when(last, |this| this.pb(bachuc_theme::zoomed(CARD_GAP, cx)))
             .child(body)
             .into_any_element()
     }
@@ -114,7 +114,7 @@ impl BoardPanel {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(SPACE_3))
+            .gap(bachuc_theme::zoomed(SPACE_3, cx))
             .child(
                 div()
                     .flex_1()
@@ -145,11 +145,11 @@ impl BoardPanel {
                     .id("wt-panel-refresh")
                     .role(Role::Button)
                     .aria_label("Refresh Watchtower board")
-                    .px(px(SPACE_3))
-                    .py(px(SPACE_2))
+                    .px(bachuc_theme::zoomed(SPACE_3, cx))
+                    .py(bachuc_theme::zoomed(SPACE_2, cx))
                     .border_1()
                     .border_color(colors.border)
-                    .rounded(px(RADIUS_MD))
+                    .rounded(bachuc_theme::zoomed(RADIUS_MD, cx))
                     .bg(colors.surface2)
                     .text_size(ui_font_size(BUTTON_TEXT, cx))
                     .font_weight(FontWeight(WEIGHT_SEMIBOLD))

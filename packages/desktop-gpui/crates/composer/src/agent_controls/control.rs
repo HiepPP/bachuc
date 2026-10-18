@@ -4,7 +4,7 @@
 use super::layout::CONTROL_SIZE;
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{FONT_SM, ICON_SM, RADIUS_2XL, SPACE_1, SPACE_2};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Selectable, Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -23,13 +23,16 @@ pub enum Glyph {
     Image(Arc<Image>),
 }
 
-pub fn glyph_element(glyph: Glyph, color: Hsla) -> AnyElement {
+pub fn glyph_element(glyph: Glyph, color: Hsla, cx: &App) -> AnyElement {
     match glyph {
         Glyph::Icon(name) => icon(name)
-            .with_size(px(GLYPH))
+            .with_size(zoomed(GLYPH, cx))
             .text_color(color)
             .into_any_element(),
-        Glyph::Image(image) => img(image).flex_none().size(px(GLYPH)).into_any_element(),
+        Glyph::Image(image) => img(image)
+            .flex_none()
+            .size(zoomed(GLYPH, cx))
+            .into_any_element(),
     }
 }
 
@@ -76,17 +79,17 @@ impl RenderOnce for PillTrigger {
             .role(Role::Button)
             .aria_label(format!("{}: {}", self.kind, self.label))
             .aria_expanded(self.open)
-            .h(px(CONTROL_SIZE))
+            .h(zoomed(CONTROL_SIZE, cx))
             .flex_none()
             .items_center()
-            .rounded(px(RADIUS_2XL))
+            .rounded(zoomed(RADIUS_2XL, cx))
             .text_size(size)
             .text_color(t.foreground_muted)
             .map(|pill| {
                 if look.icon_only {
-                    pill.w(px(CONTROL_SIZE)).justify_center()
+                    pill.w(zoomed(CONTROL_SIZE, cx)).justify_center()
                 } else {
-                    pill.px(px(SPACE_2)).gap(px(SPACE_1))
+                    pill.px(zoomed(SPACE_2, cx)).gap(zoomed(SPACE_1, cx))
                 }
             })
             .when(self.open, |pill| pill.bg(t.surface2))
@@ -97,21 +100,21 @@ impl RenderOnce for PillTrigger {
             .when_some(self.tooltip, |pill, text| {
                 pill.tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
             })
-            .child(glyph_element(self.glyph, t.foreground_muted))
+            .child(glyph_element(self.glyph, t.foreground_muted, cx))
             .when(!look.icon_only, |pill| {
                 pill.child(
                     div()
                         .truncate()
-                        .max_w(px(VALUE_MAX_WIDTH))
+                        .max_w(zoomed(VALUE_MAX_WIDTH, cx))
                         .child(self.label),
                 )
             })
             // `ComboboxTrigger` draws a 14 px muted chevron 1 px low after the toolbar value.
             .when(look.show_caret && !look.icon_only, |pill| {
                 pill.child(
-                    div().flex_none().mt(px(1.)).child(
+                    div().flex_none().mt(zoomed(1., cx)).child(
                         icon(IconName::ChevronDown)
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .text_color(t.foreground_muted),
                     ),
                 )

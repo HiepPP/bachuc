@@ -8,7 +8,7 @@ use crate::ui::{
 use bachuc_client::{Client, HostConfig, load_hosts, save_hosts};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{ICON_MD, SPACE_2, SPACE_3, SPACE_4};
-use bachuc_theme::tokens;
+use bachuc_theme::{tokens, zoomed};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::theme::Theme;
@@ -201,7 +201,7 @@ impl HostsPane {
                 row(index == 0, cx)
                     .child(
                         icon(IconName::Server)
-                            .with_size(px(ICON_MD))
+                            .with_size(zoomed(ICON_MD, cx))
                             .text_color(colors.foreground_muted),
                     )
                     .child(row_text(
@@ -248,7 +248,7 @@ impl HostsPane {
                 format!("Remove {name}? The host leaves hosts.json.")
             };
             item = item.child(
-                div().px(px(SPACE_4)).pb(px(SPACE_4)).child(
+                div().px(zoomed(SPACE_4, cx)).pb(zoomed(SPACE_4, cx)).child(
                     callout(cx)
                         .id(("host-remove-confirm", index))
                         .role(Role::AlertDialog)
@@ -256,7 +256,7 @@ impl HostsPane {
                         .child(div().child(message))
                         .child(
                             h_flex()
-                                .gap(px(SPACE_2))
+                                .gap(zoomed(SPACE_2, cx))
                                 .justify_end()
                                 .child(
                                     Button::new("host-remove-cancel")
@@ -294,7 +294,7 @@ impl HostsPane {
         };
         let field = |label: &'static str, input: Input, cx: &App| {
             v_flex()
-                .gap(px(bachuc_theme::metrics::SPACE_1))
+                .gap(zoomed(bachuc_theme::metrics::SPACE_1, cx))
                 .child(field_label(label, cx))
                 .child(input)
         };
@@ -305,8 +305,8 @@ impl HostsPane {
                 .id("host-form")
                 .role(Role::Form)
                 .aria_label(title)
-                .p(px(SPACE_4))
-                .gap(px(SPACE_3))
+                .p(zoomed(SPACE_4, cx))
+                .gap(zoomed(SPACE_3, cx))
                 .child(field(
                     "Name",
                     Input::new(&form.name)
@@ -332,7 +332,7 @@ impl HostsPane {
                 .children(form.error.clone().map(|error| error_text(error, cx)))
                 .child(
                     h_flex()
-                        .gap(px(SPACE_2))
+                        .gap(zoomed(SPACE_2, cx))
                         .justify_end()
                         .child(
                             Button::new("host-form-cancel")
@@ -379,10 +379,10 @@ impl Render for HostsPane {
             .on_click(cx.listener(|this, _, window, cx| this.open_form(None, window, cx)))
             .into_any_element();
 
-        let mut body = column().child(page_title("Hosts", cx));
+        let mut body = column(cx).child(page_title("Hosts", cx));
         if removed_current {
             body = body.child(
-                div().mb(px(SPACE_4)).child(
+                div().mb(zoomed(SPACE_4, cx)).child(
                     callout(cx)
                         .id("host-disconnected")
                         .role(Role::Status)
@@ -405,7 +405,7 @@ impl Render for HostsPane {
             "Hosts",
             Some(add),
             v_flex()
-                .gap(px(SPACE_2))
+                .gap(zoomed(SPACE_2, cx))
                 .children(self.error.clone().map(|error| error_text(error, cx)))
                 .child(
                     card(cx)

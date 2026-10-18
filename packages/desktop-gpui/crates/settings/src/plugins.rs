@@ -146,6 +146,13 @@ pub fn plugin_themes(cx: &App) -> Vec<CustomTheme> {
         .unwrap_or_default()
 }
 
+/// The reading layout of the active plugins; the default with none.
+pub fn plugin_reading_look(cx: &App) -> bachuc_theme::ReadingLook {
+    bachuc_plugin_host::host(cx)
+        .and_then(|host| host.read(cx).index().reading_look())
+        .unwrap_or_default()
+}
+
 /// Hands the plugin themes to `bachuc_theme` now and again on each contribution change. Call it
 /// once after `bachuc_plugin_host::init`. With no host it does nothing.
 pub fn watch_plugin_themes(cx: &mut App) {
@@ -153,9 +160,11 @@ pub fn watch_plugin_themes(cx: &mut App) {
         return;
     };
     bachuc_theme::set_custom_themes(plugin_themes(cx), cx);
+    bachuc_theme::set_reading_look(plugin_reading_look(cx), cx);
     cx.subscribe(&host, |_, event: &PluginHostEvent, cx| {
         if matches!(event, PluginHostEvent::ContributionsChanged) {
             bachuc_theme::set_custom_themes(plugin_themes(cx), cx);
+            bachuc_theme::set_reading_look(plugin_reading_look(cx), cx);
         }
     })
     .detach();

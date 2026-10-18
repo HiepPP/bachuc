@@ -9,7 +9,7 @@ use bachuc_composer::{
     Composer, ComposerEvent, DraftOptions, DraftSeed, DraftSubmission, SubmitIcon, composer_dock,
 };
 use bachuc_theme::metrics::{FONT_BASE, SPACE_2, SPACE_4};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::v_flex;
 use gpui_kit::*;
@@ -159,8 +159,8 @@ impl Render for WorkspaceDraftPane {
         let t = tokens(cx);
         let content = v_flex()
             .w_full()
-            .px(px(SPACE_4))
-            .pb(px(SPACE_2))
+            .px(zoomed(SPACE_4, cx))
+            .pb(zoomed(SPACE_2, cx))
             .children(self.error.clone().map(|message| {
                 div()
                     .id("workspace-draft-error")

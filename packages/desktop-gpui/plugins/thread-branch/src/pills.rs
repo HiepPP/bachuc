@@ -15,7 +15,7 @@ use bachuc_plugin_host::{
     ComposerPill, ComposerTarget, PillBehavior, PillPlacement, PillState, PopoverClose, ShowOnDraft,
 };
 use bachuc_theme::metrics::{FONT_BASE, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::*;
 use std::rc::Rc;
@@ -194,13 +194,13 @@ impl Render for BranchMenu {
             .id("thread-branch-menu")
             .role(Role::Menu)
             .aria_label("Branch")
-            .min_w(px(MENU_MIN_WIDTH))
-            .p(px(SPACE_1))
+            .min_w(zoomed(MENU_MIN_WIDTH, cx))
+            .p(zoomed(SPACE_1, cx))
             .children(entries.into_iter().enumerate().map(|(index, entry)| {
                 let MenuEntry::Row(row) = entry else {
                     return div()
                         .h(px(1.))
-                        .my(px(SPACE_1))
+                        .my(zoomed(SPACE_1, cx))
                         .bg(t.border)
                         .into_any_element();
                 };
@@ -209,11 +209,11 @@ impl Render for BranchMenu {
                     .id(("thread-branch-menu-row", index))
                     .role(Role::MenuItem)
                     .aria_label(row.title.clone())
-                    .h(px(MENU_ROW_HEIGHT))
-                    .px(px(SPACE_2))
-                    .gap(px(SPACE_2))
+                    .h(zoomed(MENU_ROW_HEIGHT, cx))
+                    .px(zoomed(SPACE_2, cx))
+                    .gap(zoomed(SPACE_2, cx))
                     .items_center()
-                    .rounded(px(RADIUS_MD))
+                    .rounded(zoomed(RADIUS_MD, cx))
                     .cursor_pointer()
                     .text_size(ui_font_size(FONT_BASE, cx))
                     .text_color(t.foreground)
@@ -223,7 +223,7 @@ impl Render for BranchMenu {
                     )
                     .child(
                         icon(row.icon)
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .text_color(t.foreground_muted),
                     )
                     .child(div().flex_1().truncate().child(row.title))

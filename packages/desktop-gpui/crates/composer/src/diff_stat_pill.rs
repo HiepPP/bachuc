@@ -4,7 +4,7 @@
 use crate::pill_styles::docked_pill;
 use bachuc_client::DiffStat;
 use bachuc_theme::metrics::SPACE_1;
-use bachuc_theme::tokens;
+use bachuc_theme::{tokens, zoomed};
 use gpui_kit::*;
 
 /// `workspace.git.diff.openChangesTab`.
@@ -49,7 +49,7 @@ pub fn diff_stat_pill(
         docked_pill("composer-diff-stat-pill", false, cx)
             .role(Role::Button)
             .aria_label(OPEN_CHANGES_LABEL)
-            .gap(px(SPACE_1))
+            .gap(zoomed(SPACE_1, cx))
             .cursor_pointer()
             .on_click(move |_, window, cx| on_press(window, cx))
             .child(div().text_color(t.status_success).child(additions))

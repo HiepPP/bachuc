@@ -13,7 +13,7 @@ use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_SM, ICON_XS, POPUP_GAP, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2,
     SPACE_3,
 };
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -580,9 +580,9 @@ impl BranchSwitcher {
             .min_w_0()
             .flex_shrink(1.)
             .items_center()
-            .gap(px(SPACE_1))
-            .p(px(SPACE_1))
-            .rounded(px(RADIUS_MD))
+            .gap(zoomed(SPACE_1, cx))
+            .p(zoomed(SPACE_1, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .cursor_pointer()
             .when(open, |el| el.bg(colors.interaction_highlight))
             .hover(move |style| style.bg(colors.interaction_highlight))
@@ -609,7 +609,7 @@ impl BranchSwitcher {
             .child(
                 div().flex_shrink_0().child(
                     icon(IconName::ChevronDown)
-                        .with_size(px(ICON_XS))
+                        .with_size(zoomed(ICON_XS, cx))
                         .text_color(colors.foreground_extra_muted),
                 ),
             )
@@ -642,12 +642,12 @@ impl BranchSwitcher {
                     .role(Role::MenuItem)
                     .aria_label(name.clone())
                     .aria_selected(highlighted)
-                    .min_h(px(ROW_HEIGHT))
-                    .mx(px(SPACE_1))
-                    .px(px(SPACE_2))
+                    .min_h(zoomed(ROW_HEIGHT, cx))
+                    .mx(zoomed(SPACE_1, cx))
+                    .px(zoomed(SPACE_2, cx))
                     .items_center()
-                    .gap(px(SPACE_2))
-                    .rounded(px(RADIUS_MD))
+                    .gap(zoomed(SPACE_2, cx))
+                    .rounded(zoomed(RADIUS_MD, cx))
                     .cursor_pointer()
                     .when(highlighted, |row| row.bg(colors.surface1))
                     .hover(move |style| style.bg(colors.surface2))
@@ -658,7 +658,7 @@ impl BranchSwitcher {
                     })
                     .child(
                         icon(IconName::GitBranch)
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .text_color(colors.foreground_muted),
                     )
                     .child(
@@ -674,7 +674,7 @@ impl BranchSwitcher {
                     .when(selected, |row| {
                         row.child(
                             icon(IconName::Check)
-                                .with_size(px(ICON_SM))
+                                .with_size(zoomed(ICON_SM, cx))
                                 .text_color(colors.foreground),
                         )
                     })
@@ -686,19 +686,19 @@ impl BranchSwitcher {
                 .id("branch-switcher")
                 .role(Role::Dialog)
                 .aria_label("Switch branch")
-                .min_w(px(LIST_MIN_WIDTH))
-                .max_h(px(LIST_MAX_HEIGHT))
-                .py(px(SPACE_1))
-                .gap(px(SPACE_1))
+                .min_w(zoomed(LIST_MIN_WIDTH, cx))
+                .max_h(zoomed(LIST_MAX_HEIGHT, cx))
+                .py(zoomed(SPACE_1, cx))
+                .gap(zoomed(SPACE_1, cx))
                 .bg(colors.popover)
                 .border_1()
                 .border_color(colors.border_accent)
-                .rounded(px(RADIUS_LG))
+                .rounded(zoomed(RADIUS_LG, cx))
                 .shadow(vec![shadow(ShadowSize::Md, cx)])
                 .occlude()
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| this.close(cx)))
                 .child(
-                    div().px(px(SPACE_2)).child(
+                    div().px(zoomed(SPACE_2, cx)).child(
                         Input::new(&search.query)
                             .small()
                             .aria_label("Filter branches"),
@@ -717,13 +717,14 @@ impl BranchSwitcher {
                 )
                 .children(status.map(|status| {
                     div()
-                        .px(px(SPACE_3))
-                        .py(px(SPACE_2))
+                        .px(zoomed(SPACE_3, cx))
+                        .py(zoomed(SPACE_2, cx))
                         .text_size(small)
                         .line_height(small * TEXT_LINE_FACTOR)
                         .text_color(colors.foreground_muted)
                         .child(status)
                 })),
+            cx,
         )
     }
 
@@ -752,13 +753,13 @@ impl BranchSwitcher {
                 .id("branch-switcher-confirm")
                 .role(Role::AlertDialog)
                 .aria_label(title)
-                .w(px(DIALOG_WIDTH))
-                .p(px(SPACE_3))
-                .gap(px(SPACE_2))
+                .w(zoomed(DIALOG_WIDTH, cx))
+                .p(zoomed(SPACE_3, cx))
+                .gap(zoomed(SPACE_2, cx))
                 .bg(colors.popover)
                 .border_1()
                 .border_color(colors.border_accent)
-                .rounded(px(RADIUS_LG))
+                .rounded(zoomed(RADIUS_LG, cx))
                 .shadow(vec![shadow(ShadowSize::Md, cx)])
                 .occlude()
                 .child(
@@ -779,7 +780,7 @@ impl BranchSwitcher {
                 .child(
                     h_flex()
                         .justify_end()
-                        .gap(px(SPACE_2))
+                        .gap(zoomed(SPACE_2, cx))
                         .child(dialog_button(
                             "branch-switcher-no",
                             no,
@@ -795,22 +796,23 @@ impl BranchSwitcher {
                             |this, cx| this.confirm_yes(cx),
                         )),
                 ),
+            cx,
         )
     }
 }
 
 /// Places `content` under the label, bottom-start, above the rest of the window.
-fn popup(content: impl IntoElement) -> AnyElement {
+fn popup(content: impl IntoElement, cx: &App) -> AnyElement {
     div()
         .absolute()
         .top_full()
         .left_0()
-        .mt(px(POPUP_GAP))
+        .mt(zoomed(POPUP_GAP, cx))
         .child(
             deferred(
                 anchored()
                     .anchor(Anchor::TopLeft)
-                    .snap_to_window_with_margin(px(8.))
+                    .snap_to_window_with_margin(zoomed(8., cx))
                     .child(content),
             )
             .with_priority(gpui_kit::base::POPUP_PRIORITY),
@@ -832,9 +834,9 @@ fn dialog_button(
         .id(id)
         .role(Role::Button)
         .aria_label(label)
-        .px(px(SPACE_3))
-        .py(px(SPACE_1))
-        .rounded(px(RADIUS_MD))
+        .px(zoomed(SPACE_3, cx))
+        .py(zoomed(SPACE_1, cx))
+        .rounded(zoomed(RADIUS_MD, cx))
         .border_1()
         .border_color(colors.border_accent)
         .cursor_pointer()

@@ -912,6 +912,20 @@ pub struct ForkContext {
     pub item_count: u32,
 }
 
+/// One user prompt of the daemon's prompt index (`agent.timeline.list_prompts.response`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PromptEntry {
+    pub seq: u64,
+    pub preview: String,
+}
+
+/// The prompts of one agent timeline in seq order, with the epoch they belong to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PromptIndex {
+    pub epoch: String,
+    pub prompts: Vec<PromptEntry>,
+}
+
 /// How `directory_suggestions_request` matches `query`: `suffix` matches the end of a path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MatchMode {

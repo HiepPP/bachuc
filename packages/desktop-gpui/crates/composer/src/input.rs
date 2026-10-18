@@ -4,10 +4,10 @@
 
 use crate::pill_styles::{SURFACE_PADDING_X, SURFACE_PADDING_Y};
 use bachuc_icons::{IconName, icon};
-use bachuc_theme::metrics::{RADIUS_2XL, SPACE_1, SPACE_1_5};
-use bachuc_theme::tokens;
-use gpui_kit::component::h_flex;
+use bachuc_theme::metrics::{ICON_MD, RADIUS_2XL, SPACE_1, SPACE_1_5};
+use bachuc_theme::{tokens, zoomed};
 use gpui_kit::component::v_flex;
+use gpui_kit::component::{Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -25,6 +25,7 @@ pub fn round_button(
     background: Option<Hsla>,
     foreground: Hsla,
     hover: Hsla,
+    cx: &App,
 ) -> Stateful<Div> {
     div()
         .id(id)
@@ -34,12 +35,16 @@ pub fn round_button(
         .flex_none()
         .items_center()
         .justify_center()
-        .size(px(size))
+        .size(zoomed(size, cx))
         .rounded_full()
         .cursor_pointer()
         .when_some(background, |button, color| button.bg(color))
         .hover(move |button| button.bg(hover))
-        .child(icon(glyph).text_color(foreground))
+        .child(
+            icon(glyph)
+                .with_size(zoomed(ICON_MD, cx))
+                .text_color(foreground),
+        )
 }
 
 /// The card. Each slot is optional except the input.
@@ -114,19 +119,19 @@ impl RenderOnce for MessageInput {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = tokens(cx);
         v_flex()
-            .gap(px(SPACE_1_5))
-            .px(px(SURFACE_PADDING_X))
-            .py(px(SURFACE_PADDING_Y))
+            .gap(zoomed(SPACE_1_5, cx))
+            .px(zoomed(SURFACE_PADDING_X, cx))
+            .py(zoomed(SURFACE_PADDING_Y, cx))
             .bg(t.surface1)
             .border_1()
             .border_color(t.border_accent)
-            .rounded(px(RADIUS_2XL))
+            .rounded(zoomed(RADIUS_2XL, cx))
             .children(self.header)
             .children(self.tray)
             .child(self.input)
             .child(
                 h_flex()
-                    .mx(px(-BUTTON_ROW_INSET))
+                    .mx(zoomed(-BUTTON_ROW_INSET, cx))
                     .items_end()
                     .justify_between()
                     .child(
@@ -142,7 +147,7 @@ impl RenderOnce for MessageInput {
                         h_flex()
                             .flex_none()
                             .items_center()
-                            .gap(px(SPACE_1))
+                            .gap(zoomed(SPACE_1, cx))
                             .children(self.trailing)
                             .children(self.primary),
                     ),

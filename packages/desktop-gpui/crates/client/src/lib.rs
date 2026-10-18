@@ -39,6 +39,7 @@ pub use model::{
     GitAction, GitActionReply, GitStatus, GitStatusEvent, MergeMethod, PrCheck, PrMergeCapability,
     PrStatus, PrStatusReply, PrTimelineItem, StashEntry, WorkspaceScript,
 };
+pub use model::{PromptEntry, PromptIndex};
 pub use plugins::{
     PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite, PluginStatus,
 };
@@ -971,6 +972,22 @@ impl Client {
         cx: &mut Context<Client>,
     ) -> Task<anyhow::Result<HistoryPage>> {
         let receiver = self.core.fetch_agent_history(search, cursor);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Whether the host lists the prompts of a timeline (`features.agentTimelinePromptIndex`).
+    pub fn prompt_index_supported(&self) -> bool {
+        self.core.prompt_index_supported()
+    }
+
+    /// Every user prompt of the agent's timeline, loaded or not.
+    pub fn list_prompts(
+        &mut self,
+        agent_id: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<PromptIndex>> {
+        let receiver = self.core.list_prompts(agent_id);
         self.publish(cx);
         reply_task(receiver, cx)
     }

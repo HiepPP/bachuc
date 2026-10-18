@@ -13,7 +13,7 @@ use bachuc_client::WorkspaceScript;
 use bachuc_icons::{IconName, github_mark, icon};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, HEADER_HEIGHT, ICON_SM, RADIUS_LG, RADIUS_MD, SETTINGS_SIDEBAR_WIDTH,
-    SPACE_1, SPACE_2, SPACE_3, SPACE_6, TRAFFIC_LIGHT_WIDTH, WEIGHT_MEDIUM,
+    SPACE_1, SPACE_2, SPACE_3, SPACE_6, TRAFFIC_LIGHT_WIDTH,
 };
 use bachuc_theme::{ShadowSize, popup_offset, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
@@ -73,10 +73,11 @@ fn menu_item(
     label: &'static str,
     name: IconName,
     weak: WeakEntity<Shell>,
+    cx: &App,
     run: impl Fn(&mut Shell, &mut Window, &mut Context<Shell>) + 'static,
 ) -> PopupMenuItem {
     PopupMenuItem::new(label)
-        .icon(icon(name).with_size(px(ICON_SM)))
+        .icon(icon(name).with_size(zoomed(ICON_SM, cx)))
         .on_click(move |_, window, cx| {
             weak.update(cx, |shell, cx| run(shell, window, cx)).ok();
         })
@@ -133,14 +134,14 @@ impl Shell {
                             .role(Role::Button)
                             .aria_label(host_option_label(host, current))
                             .aria_selected(current)
-                            .mx(px(SPACE_2))
-                            .px(px(SPACE_2))
-                            .py(px(SPACE_1))
-                            .rounded(px(RADIUS_LG))
+                            .mx(zoomed(SPACE_2, cx))
+                            .px(zoomed(SPACE_2, cx))
+                            .py(zoomed(SPACE_1, cx))
+                            .rounded(zoomed(RADIUS_LG, cx))
                             .flex()
                             .flex_row()
                             .items_center()
-                            .gap(px(SPACE_2))
+                            .gap(zoomed(SPACE_2, cx))
                             .cursor_pointer()
                             .overflow_hidden()
                             .text_size(ui_font_size(FONT_SM, cx))
@@ -150,9 +151,12 @@ impl Shell {
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.switch_host(ix, window, cx)
                             }))
-                            .child(div().w(px(ICON_SM)).flex_shrink_0().when(current, |slot| {
-                                slot.child(icon(IconName::Check).with_size(px(ICON_SM)))
-                            }))
+                            .child(div().w(zoomed(ICON_SM, cx)).flex_shrink_0().when(
+                                current,
+                                |slot| {
+                                    slot.child(icon(IconName::Check).with_size(zoomed(ICON_SM, cx)))
+                                },
+                            ))
                             .child(host.name.clone())
                             .child(div().text_color(t.foreground_muted).child(host.url.clone()))
                     })
@@ -170,7 +174,7 @@ impl Shell {
         let host_switch = div()
             .flex_shrink_0()
             .relative()
-            .h(px(32.))
+            .h(zoomed(32., cx))
             .bg(t.surface_sidebar)
             .border_r_1()
             .border_color(t.border)
@@ -184,14 +188,14 @@ impl Shell {
                     .absolute()
                     .top_0()
                     .bottom_0()
-                    .left(px(SPACE_2))
-                    .right(px(SPACE_2))
-                    .px(px(SPACE_2))
-                    .rounded(px(RADIUS_LG))
+                    .left(zoomed(SPACE_2, cx))
+                    .right(zoomed(SPACE_2, cx))
+                    .px(zoomed(SPACE_2, cx))
+                    .rounded(zoomed(RADIUS_LG, cx))
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .cursor_pointer()
                     .overflow_hidden()
                     .text_size(ui_font_size(FONT_BASE, cx))
@@ -201,7 +205,7 @@ impl Shell {
                         this.hosts_open = !this.hosts_open;
                         cx.notify();
                     }))
-                    .child(icon(IconName::Server).with_size(px(ICON_SM)))
+                    .child(icon(IconName::Server).with_size(zoomed(ICON_SM, cx)))
                     .child(div().flex_1().min_w_0().truncate().child(host_name))
                     .child(
                         icon(if hosts_open {
@@ -209,7 +213,7 @@ impl Shell {
                         } else {
                             IconName::ChevronDown
                         })
-                        .with_size(px(ICON_SM)),
+                        .with_size(zoomed(ICON_SM, cx)),
                     ),
             );
         v_flex()
@@ -226,11 +230,17 @@ impl Shell {
                         .aria_label("Hosts")
                         .flex_shrink_0()
                         .relative()
-                        .h(px(30. * options.len() as f32 + SPACE_1))
+                        .h(zoomed(30. * options.len() as f32 + SPACE_1, cx))
                         .bg(t.surface_sidebar)
                         .border_r_1()
                         .border_color(t.border)
-                        .child(v_flex().absolute().inset_0().gap(px(2.)).children(options)),
+                        .child(
+                            v_flex()
+                                .absolute()
+                                .inset_0()
+                                .gap(zoomed(2., cx))
+                                .children(options),
+                        ),
                 )
             })
             .child(div().flex_1().min_h_0().child(self.sidebar.clone()))
@@ -299,11 +309,11 @@ impl Shell {
             .relative()
             .flex_shrink_0()
             .h(zoomed(HEADER_HEIGHT, cx))
-            .px(px(SPACE_3))
+            .px(zoomed(SPACE_3, cx))
             .when(!self.layout.sidebar_open, |row| {
-                row.pl(px(TRAFFIC_LIGHT_WIDTH + SPACE_3))
+                row.pl(zoomed(TRAFFIC_LIGHT_WIDTH + SPACE_3, cx))
             })
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .items_center()
             .justify_between()
             .bg(t.surface0)
@@ -315,7 +325,7 @@ impl Shell {
                     .flex_1()
                     .min_w_0()
                     .items_center()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .child(
                         chrome_button(
                             "toggle-sidebar",
@@ -342,7 +352,9 @@ impl Shell {
                             .min_w_0()
                             .truncate()
                             .text_size(ui_font_size(FONT_BASE, cx))
-                            .font_weight(FontWeight(WEIGHT_MEDIUM))
+                            .font_weight(FontWeight(
+                                bachuc_theme::reading_look(cx).header_title_weight,
+                            ))
                             .text_color(t.foreground)
                             .child(title),
                     )
@@ -364,7 +376,7 @@ impl Shell {
                 h_flex()
                     .flex_shrink_0()
                     .items_center()
-                    .gap(px(SPACE_1))
+                    .gap(zoomed(SPACE_1, cx))
                     .children(side_panel)
                     .child(menu)
                     .children(header_buttons)
@@ -430,15 +442,19 @@ impl Shell {
             .child(button)
             .when_some(menu, |slot, menu| {
                 slot.child(
-                    div().absolute().top(px(popup_offset(28.))).right_0().child(
-                        deferred(
-                            anchored()
-                                .anchor(Anchor::TopRight)
-                                .snap_to_window_with_margin(px(8.))
-                                .child(menu),
-                        )
-                        .with_priority(gpui_kit::base::POPUP_PRIORITY),
-                    ),
+                    div()
+                        .absolute()
+                        .top(zoomed(popup_offset(28.), cx))
+                        .right_0()
+                        .child(
+                            deferred(
+                                anchored()
+                                    .anchor(Anchor::TopRight)
+                                    .snap_to_window_with_margin(zoomed(8., cx))
+                                    .child(menu),
+                            )
+                            .with_priority(gpui_kit::base::POPUP_PRIORITY),
+                        ),
                 )
             })
             .into_any_element()
@@ -460,8 +476,8 @@ impl Shell {
         let weak = cx.weak_entity();
         // The menu returns the focus here when it closes without moving it.
         let restore = window.focused(cx).unwrap_or_else(|| self.focus.clone());
-        let menu = PopupMenu::build(window, cx, move |menu: PopupMenu, _, _| {
-            let mut menu = menu.action_context(restore.clone()).min_w(px(220.));
+        let menu = PopupMenu::build(window, cx, move |menu: PopupMenu, _, cx| {
+            let mut menu = menu.action_context(restore.clone()).min_w(zoomed(220., cx));
             if let Some(agent_id) = active_agent.clone() {
                 let rename_id = agent_id.clone();
                 menu = menu
@@ -469,12 +485,14 @@ impl Shell {
                         "Rename agent",
                         IconName::Pencil,
                         weak.clone(),
+                        cx,
                         move |shell, window, cx| shell.rename_agent(rename_id.clone(), window, cx),
                     ))
                     .item(menu_item(
                         "Archive agent",
                         IconName::Archive,
                         weak.clone(),
+                        cx,
                         move |shell, _, cx| shell.archive_agent(&agent_id, cx),
                     ))
                     .separator();
@@ -483,18 +501,21 @@ impl Shell {
                 "New tab",
                 IconName::Plus,
                 weak.clone(),
+                cx,
                 |shell, window, cx| shell.run_action("workspace.tab.menu.open", window, cx),
             ))
             .item(menu_item(
                 "Split pane right",
                 IconName::Columns2,
                 weak.clone(),
+                cx,
                 |shell, window, cx| shell.run_action("workspace.pane.split.right", window, cx),
             ))
             .item(menu_item(
                 "Split pane down",
                 IconName::Rows2,
                 weak.clone(),
+                cx,
                 |shell, window, cx| shell.run_action("workspace.pane.split.down", window, cx),
             ))
             .when(has_workspace, |menu| {
@@ -502,6 +523,7 @@ impl Shell {
                     "Copy path",
                     IconName::Copy,
                     weak.clone(),
+                    cx,
                     |shell, window, cx| shell.copy_workspace_path(window, cx),
                 ))
             })
@@ -534,11 +556,11 @@ impl Shell {
                 .id(id)
                 .role(Role::Button)
                 .aria_label(label)
-                .h(px(28.))
-                .px(px(SPACE_3))
-                .gap(px(SPACE_1))
+                .h(zoomed(28., cx))
+                .px(zoomed(SPACE_3, cx))
+                .gap(zoomed(SPACE_1, cx))
                 .items_center()
-                .rounded(px(RADIUS_LG))
+                .rounded(zoomed(RADIUS_LG, cx))
                 .border_1()
                 .cursor_pointer()
                 .text_size(ui_font_size(FONT_SM, cx))
@@ -552,7 +574,7 @@ impl Shell {
                         .text_color(t.foreground)
                         .hover(|style| style.bg(t.surface2))
                 })
-                .child(icon(name).with_size(px(ICON_SM)))
+                .child(icon(name).with_size(zoomed(ICON_SM, cx)))
                 .child(label)
         };
         Some(
@@ -563,13 +585,13 @@ impl Shell {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .gap(px(SPACE_3))
-                .px(px(SPACE_6))
+                .gap(zoomed(SPACE_3, cx))
+                .px(zoomed(SPACE_6, cx))
                 .child(
                     v_flex()
                         .items_center()
-                        .gap(px(SPACE_2))
-                        .max_w(px(520.))
+                        .gap(zoomed(SPACE_2, cx))
+                        .max_w(zoomed(520., cx))
                         .text_size(ui_font_size(FONT_BASE, cx))
                         .child(div().text_color(t.foreground).child(title))
                         .child(div().text_color(t.foreground_muted).child(description))
@@ -580,7 +602,7 @@ impl Shell {
                 .when(offline, |gate| {
                     gate.child(
                         h_flex()
-                            .gap(px(SPACE_2))
+                            .gap(zoomed(SPACE_2, cx))
                             .child(
                                 button("gate-retry", "Retry", IconName::RotateCw, true).on_click(
                                     cx.listener(|this, _, window, cx| {
@@ -618,7 +640,7 @@ impl Shell {
                     .bg(t.surface0)
                     .child(
                         div()
-                            .w(px(SETTINGS_SIDEBAR_WIDTH))
+                            .w(zoomed(SETTINGS_SIDEBAR_WIDTH, cx))
                             .h_full()
                             .bg(t.surface_sidebar)
                             .border_r_1()
@@ -671,18 +693,18 @@ impl Shell {
             .role(Role::Button)
             .aria_label("Workspace scripts")
             .aria_expanded(open)
-            .h(px(28.))
-            .px(px(SPACE_1))
-            .gap(px(2.))
+            .h(zoomed(28., cx))
+            .px(zoomed(SPACE_1, cx))
+            .gap(zoomed(2., cx))
             .items_center()
-            .rounded(px(RADIUS_MD))
+            .rounded(zoomed(RADIUS_MD, cx))
             .cursor_pointer()
             .when(open, |button| button.bg(t.surface2))
             .hover(|style| style.bg(t.surface2))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 icon(IconName::Play)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(if running {
                         t.palette_blue_400
                     } else {
@@ -691,7 +713,7 @@ impl Shell {
             )
             .child(
                 icon(IconName::ChevronDown)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(t.foreground_extra_muted),
             );
         let trigger = pressable(
@@ -801,9 +823,9 @@ impl Shell {
         ));
         let state = script_state(&script);
         let header = h_flex()
-            .h(px(MENU_ITEM_HEIGHT))
-            .px(px(SPACE_2))
-            .gap(px(SPACE_2))
+            .h(zoomed(MENU_ITEM_HEIGHT, cx))
+            .px(zoomed(SPACE_2, cx))
+            .gap(zoomed(SPACE_2, cx))
             .items_center()
             .child(
                 icon(if service {
@@ -811,7 +833,7 @@ impl Shell {
                 } else {
                     IconName::SquareTerminal
                 })
-                .with_size(px(ICON_SM))
+                .with_size(zoomed(ICON_SM, cx))
                 .text_color(color)
                 .flex_shrink_0(),
             )
@@ -846,12 +868,12 @@ impl Shell {
                 .id(("script-url", ix))
                 .role(Role::Button)
                 .aria_label(format!("Open {label}"))
-                .h(px(MENU_ITEM_HEIGHT))
-                .mx(px(SPACE_1))
-                .pl(px(SPACE_2 + ICON_SM + SPACE_2 - SPACE_1))
-                .pr(px(SPACE_2))
+                .h(zoomed(MENU_ITEM_HEIGHT, cx))
+                .mx(zoomed(SPACE_1, cx))
+                .pl(zoomed(SPACE_2 + ICON_SM + SPACE_2 - SPACE_1, cx))
+                .pr(zoomed(SPACE_2, cx))
                 .items_center()
-                .rounded(px(RADIUS_MD))
+                .rounded(zoomed(RADIUS_MD, cx))
                 .cursor_pointer()
                 .text_color(t.foreground_muted)
                 .hover(|style| style.bg(t.surface2).text_color(t.foreground))
@@ -880,7 +902,7 @@ impl Shell {
             .role(Role::Button)
             .aria_label(format!("Open workspace in {}", preferred.label()))
             .h_full()
-            .px(px(SPACE_1 + 2.))
+            .px(zoomed(SPACE_1 + 2., cx))
             .items_center()
             .cursor_pointer()
             .text_color(t.foreground_muted)
@@ -889,6 +911,7 @@ impl Shell {
             .child(editor_glyph_element(
                 editor_glyph(preferred, &self.editor_icons),
                 t.foreground_muted,
+                cx,
             ));
         let primary = pressable(
             primary,
@@ -903,7 +926,7 @@ impl Shell {
             .aria_label("Choose editor")
             .aria_expanded(open)
             .h_full()
-            .px(px(2.))
+            .px(zoomed(2., cx))
             .items_center()
             .cursor_pointer()
             .border_l_1()
@@ -913,7 +936,7 @@ impl Shell {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 icon(IconName::ChevronDown)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(t.foreground_extra_muted),
             );
         let caret = pressable(
@@ -986,9 +1009,9 @@ impl Shell {
             .flex_shrink_0()
             .child(
                 h_flex()
-                    .h(px(HEADER_CONTROL_HEIGHT))
+                    .h(zoomed(HEADER_CONTROL_HEIGHT, cx))
                     .items_stretch()
-                    .rounded(px(RADIUS_MD))
+                    .rounded(zoomed(RADIUS_MD, cx))
                     .border_1()
                     .border_color(t.border_accent)
                     .overflow_hidden()
@@ -1187,12 +1210,12 @@ fn script_action(
         .id(id)
         .role(Role::Button)
         .aria_label(label)
-        .size(px(22.))
+        .size(zoomed(22., cx))
         .flex_shrink_0()
         .justify_center()
-        .rounded(px(RADIUS_MD))
+        .rounded(zoomed(RADIUS_MD, cx))
         .text_color(t.foreground_muted)
-        .child(icon(glyph).with_size(px(ICON_SM)));
+        .child(icon(glyph).with_size(zoomed(ICON_SM, cx)));
     match run {
         Some(run) => pressable(
             button
@@ -1283,11 +1306,14 @@ fn app_icon(_bundle_id: &str) -> Option<Arc<Image>> {
 }
 
 /// An Open in editor glyph: the app's own icon, else its lucide icon in `color`.
-fn editor_glyph_element(glyph: EditorGlyph, color: Hsla) -> AnyElement {
+fn editor_glyph_element(glyph: EditorGlyph, color: Hsla, cx: &App) -> AnyElement {
     match glyph {
-        EditorGlyph::App(image) => img(image).flex_none().size(px(ICON_SM)).into_any_element(),
+        EditorGlyph::App(image) => img(image)
+            .flex_none()
+            .size(zoomed(ICON_SM, cx))
+            .into_any_element(),
         EditorGlyph::Lucide(name) => icon(name)
-            .with_size(px(ICON_SM))
+            .with_size(zoomed(ICON_SM, cx))
             .text_color(color)
             .into_any_element(),
     }
@@ -1306,26 +1332,31 @@ fn menu_row(
         .role(Role::MenuItem)
         .aria_label(label.clone())
         .aria_selected(selected)
-        .h(px(MENU_ITEM_HEIGHT))
-        .mx(px(SPACE_1))
-        .px(px(SPACE_2))
-        .gap(px(SPACE_2))
+        .h(zoomed(MENU_ITEM_HEIGHT, cx))
+        .mx(zoomed(SPACE_1, cx))
+        .px(zoomed(SPACE_2, cx))
+        .gap(zoomed(SPACE_2, cx))
         .items_center()
-        .rounded(px(RADIUS_MD))
+        .rounded(zoomed(RADIUS_MD, cx))
         .cursor_pointer()
         .text_size(ui_font_size(FONT_SM, cx))
         .line_height(relative(1.3))
         .text_color(t.foreground)
         .hover(|style| style.bg(t.surface2))
-        .child(editor_glyph_element(glyph, t.foreground_muted))
+        .child(editor_glyph_element(glyph, t.foreground_muted, cx))
         .child(div().flex_1().min_w_0().truncate().child(label))
-        .child(div().w(px(ICON_SM)).flex_shrink_0().when(selected, |slot| {
-            slot.child(
-                icon(IconName::Check)
-                    .with_size(px(ICON_SM))
-                    .text_color(t.foreground_muted),
-            )
-        }))
+        .child(
+            div()
+                .w(zoomed(ICON_SM, cx))
+                .flex_shrink_0()
+                .when(selected, |slot| {
+                    slot.child(
+                        icon(IconName::Check)
+                            .with_size(zoomed(ICON_SM, cx))
+                            .text_color(t.foreground_muted),
+                    )
+                }),
+        )
 }
 
 /// A header menu under its trigger of `trigger_height`, right-aligned, closed by a press
@@ -1340,25 +1371,25 @@ fn header_popover(
     let t = tokens(cx);
     div()
         .absolute()
-        .top(px(popup_offset(trigger_height)))
+        .top(zoomed(popup_offset(trigger_height), cx))
         .right_0()
         .child(
             deferred(
                 anchored()
                     .anchor(Anchor::TopRight)
-                    .snap_to_window_with_margin(px(8.))
+                    .snap_to_window_with_margin(zoomed(8., cx))
                     .child(
                         v_flex()
                             .id(id)
                             .role(Role::Menu)
                             .aria_label(label)
-                            .min_w(px(200.))
-                            .max_w(px(280.))
-                            .py(px(SPACE_1))
+                            .min_w(zoomed(200., cx))
+                            .max_w(zoomed(280., cx))
+                            .py(zoomed(SPACE_1, cx))
                             .bg(t.popover)
                             .border_1()
                             .border_color(t.border_accent)
-                            .rounded(px(RADIUS_LG))
+                            .rounded(zoomed(RADIUS_LG, cx))
                             .shadow(vec![shadow(ShadowSize::Md, cx)])
                             .occlude()
                             .on_mouse_down_out(cx.listener(|this, _, _, cx| {

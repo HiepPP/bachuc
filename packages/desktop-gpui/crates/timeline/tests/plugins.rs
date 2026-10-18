@@ -13,9 +13,9 @@ use bachuc_plugin_host::{
 };
 use bachuc_timeline::grouping::{Row, TurnGrouper, group_turns};
 use bachuc_timeline::plugins::{
-    Part, ProjectInput, Projector, RevealPlan, StepPart, assistant_selection, call_listed,
-    daemon_item, item_id, phase_of, renderer_for_item, reveal_plan, shown_text, step_parts,
-    toolbar_origin, transform_entry, unique_match,
+    Part, ProjectInput, Projector, RevealPlan, StepPart, TOOLBAR_GAP, assistant_selection,
+    call_listed, daemon_item, item_id, phase_of, renderer_for_item, reveal_plan, shown_parts,
+    shown_text, step_parts, toolbar_origin, transform_entry, unique_match,
 };
 use gpui_kit::{AnyView, App, Window, bounds, point, px, size};
 use serde_json::{Value, json};
@@ -264,6 +264,60 @@ fn a_last_source_keeps_the_call_unchanged_after_the_items() {
         vec![StepPart::Item(&projection.items[0]), StepPart::ToolCall]
     );
     assert!(call_listed(Some(&projection)));
+}
+
+/// An item with no renderer draws nothing; the kept source still draws, and an entry with no
+/// part left shows nothing.
+#[test]
+fn an_item_with_no_renderer_is_hidden() {
+    let mut plugin = Contributions::default();
+    plugin.add_timeline_transformer(transformer("assistant_message", |_| {
+        Some(result(
+            vec![
+                plugin_item("html-reply", 1, None),
+                plugin_item("card", 1, None),
+            ],
+            Some(SourcePlacement {
+                position: SourcePosition::First,
+                text: None,
+            }),
+        ))
+    }));
+    plugin.add_timeline_transformer(transformer("user_message", |_| {
+        Some(result(vec![plugin_item("html-reply", 1, None)], None))
+    }));
+    plugin.add_timeline_renderer(renderer("card", 1));
+    let index = index(&[("p", &plugin)]);
+    let has_renderer = |plugin_id: &'static str| {
+        let index = &index;
+        move |item: &bachuc_timeline::plugins::ProjectedItem| {
+            renderer_for_item(index, plugin_id, &item.item.kind, item.item.version).is_some()
+        }
+    };
+    let project = |item_type: &str, entry: &Value| {
+        transform_entry(
+            index.transformers_for(item_type),
+            "agent",
+            &no_labels(),
+            entry,
+            TimelinePhase::Complete,
+        )
+        .unwrap()
+    };
+
+    // A renderer: the item shows. None: it is hidden, and the kept source stays.
+    let kept = project("assistant_message", &assistant(1, "hi"));
+    assert_eq!(
+        shown_parts(&kept, has_renderer("p")),
+        vec![Part::Source, Part::Item(&kept.items[1])]
+    );
+    assert_eq!(shown_parts(&kept, |_| false), vec![Part::Source]);
+
+    // Items that replace the entry, none with a renderer: nothing is left to draw.
+    let replaced = project("user_message", &user(2, "hi"));
+    assert!(shown_parts(&replaced, has_renderer("p")).is_empty());
+    // A renderer of another plugin does not show it.
+    assert!(shown_parts(&kept, has_renderer("someone-else")).len() == 1);
 }
 
 #[test]
@@ -537,19 +591,30 @@ fn the_toolbar_sits_above_the_text_inside_the_timeline() {
     let toolbar = size(px(120.), px(30.));
     let text = bounds(point(px(150.), px(300.)), size(px(200.), px(80.)));
     // Centered on 250 (150 relative), 8 above the text's top.
+    assert_eq!(TOOLBAR_GAP, 8.);
     assert_eq!(
-        toolbar_origin(text, toolbar, area),
+        toolbar_origin(text, toolbar, area, px(TOOLBAR_GAP)),
         Some(point(px(90.), px(212.)))
     );
     // Near the left edge it stays inside.
     let left = bounds(point(px(100.), px(300.)), size(px(20.), px(20.)));
-    assert_eq!(toolbar_origin(left, toolbar, area).unwrap().x, px(0.));
+    assert_eq!(
+        toolbar_origin(left, toolbar, area, px(TOOLBAR_GAP))
+            .unwrap()
+            .x,
+        px(0.)
+    );
     // Text above the top of the timeline: the toolbar holds at the top.
     let above = bounds(point(px(150.), px(20.)), size(px(200.), px(200.)));
-    assert_eq!(toolbar_origin(above, toolbar, area).unwrap().y, px(0.));
+    assert_eq!(
+        toolbar_origin(above, toolbar, area, px(TOOLBAR_GAP))
+            .unwrap()
+            .y,
+        px(0.)
+    );
     // Text scrolled out: no toolbar.
     let out = bounds(point(px(150.), px(700.)), size(px(200.), px(20.)));
-    assert_eq!(toolbar_origin(out, toolbar, area), None);
+    assert_eq!(toolbar_origin(out, toolbar, area, px(TOOLBAR_GAP)), None);
 }
 
 #[test]

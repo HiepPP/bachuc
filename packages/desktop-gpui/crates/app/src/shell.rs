@@ -56,7 +56,7 @@ use bachuc_sidebar::model::archive_prompt;
 use bachuc_sidebar::{Sidebar, SidebarEvent, SidebarNavEvent, SidebarPluginEvent};
 use bachuc_terminal::{TerminalEvent, TerminalView};
 use bachuc_theme::metrics::TRAFFIC_LIGHT_WIDTH;
-use bachuc_theme::tokens;
+use bachuc_theme::{tokens, zoomed};
 use bachuc_timeline::grouping::{item_type, message_key};
 use bachuc_timeline::{ForkTarget, TimelineEvent, TimelineForkEvent, TimelineView};
 use bachuc_workspace::model::Rect;
@@ -1326,7 +1326,7 @@ impl Shell {
             let key = key.clone();
             dialog
                 .title("Rename terminal")
-                .w(px(420.))
+                .w(zoomed(420., cx))
                 .child(Input::new(&input).aria_label("Terminal name"))
                 .button_props(
                     DialogButtonProps::default()
@@ -2826,7 +2826,7 @@ impl Shell {
             let field = input.clone();
             dialog
                 .title("Rename agent")
-                .w(px(420.))
+                .w(zoomed(420., cx))
                 .child(Input::new(&input).aria_label("Agent name"))
                 .button_props(
                     DialogButtonProps::default()
@@ -3512,8 +3512,8 @@ impl Shell {
                         .absolute()
                         .top_0()
                         .bottom_0()
-                        .left(px(-HANDLE_WIDTH / 2.))
-                        .w(px(HANDLE_WIDTH))
+                        .left(zoomed(-HANDLE_WIDTH / 2., cx))
+                        .w(zoomed(HANDLE_WIDTH, cx))
                         .cursor_col_resize()
                         .on_drag(ExplorerResize, |_, _, _, cx| cx.new(|_| NoPreview))
                         .child(
@@ -3521,7 +3521,7 @@ impl Shell {
                                 .absolute()
                                 .top_0()
                                 .bottom_0()
-                                .left(px(HANDLE_WIDTH / 2.))
+                                .left(zoomed(HANDLE_WIDTH / 2., cx))
                                 .w(px(1.))
                                 .bg(t.foreground.opacity(0.25))
                                 .invisible()

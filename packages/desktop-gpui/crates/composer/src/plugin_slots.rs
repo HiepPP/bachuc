@@ -15,13 +15,13 @@ use bachuc_plugin_host::{
 use bachuc_theme::metrics::{
     FONT_SM, ICON_SM, POPUP_GAP, RADIUS_2XL, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
 };
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Selectable, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
 use std::rc::Rc;
@@ -271,11 +271,11 @@ fn pill_body(
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(SPACE_1))
-            .h(px(TOOLBAR_PILL_HEIGHT))
-            .px(px(SPACE_2))
-            .mr(px(SPACE_1))
-            .rounded(px(RADIUS_2XL))
+            .gap(zoomed(SPACE_1, cx))
+            .h(zoomed(TOOLBAR_PILL_HEIGHT, cx))
+            .px(zoomed(SPACE_2, cx))
+            .mr(zoomed(SPACE_1, cx))
+            .rounded(zoomed(RADIUS_2XL, cx))
             .text_size(small)
             .when(open, |pill| pill.bg(t.surface2))
             .hover(move |pill| pill.bg(t.surface2)),
@@ -285,11 +285,11 @@ fn pill_body(
             .flex()
             .flex_none()
             .items_center()
-            .gap(px(SPACE_2))
-            .min_h(px(FLOATING_PILL_HEIGHT))
-            .px(px(SPACE_3))
-            .py(px(SPACE_1))
-            .rounded(px(RADIUS_2XL))
+            .gap(zoomed(SPACE_2, cx))
+            .min_h(zoomed(FLOATING_PILL_HEIGHT, cx))
+            .px(zoomed(SPACE_3, cx))
+            .py(zoomed(SPACE_1, cx))
+            .rounded(zoomed(RADIUS_2XL, cx))
             .border_1()
             .border_color(state.color.unwrap_or(t.border_accent))
             .bg(if open { t.surface2 } else { t.surface1 })
@@ -306,14 +306,15 @@ fn pill_body(
         .children(
             state
                 .icon
-                .map(|name| icon(name).with_size(px(ICON_SM)).text_color(color)),
+                .map(|name| icon(name).with_size(zoomed(ICON_SM, cx)).text_color(color)),
         )
-        .children(
-            state
-                .label
-                .clone()
-                .map(|label| div().min_w_0().truncate().max_w(px(label_max)).child(label)),
-        )
+        .children(state.label.clone().map(|label| {
+            div()
+                .min_w_0()
+                .truncate()
+                .max_w(zoomed(label_max, cx))
+                .child(label)
+        }))
 }
 
 /// Draws one plugin pill with its behavior: a press runs the action (or opens a draft's New
@@ -360,7 +361,7 @@ pub fn plugin_pill(
             on_select,
         } => Popover::new(id.clone())
             .anchor(Anchor::BottomLeft)
-            .offset(px(POPUP_GAP))
+            .offset(zoomed(POPUP_GAP, cx))
             .p_1()
             .trigger(PluginPillTrigger {
                 id: ElementId::Name(format!("plugin-pill-trigger-{key}").into()),
@@ -395,8 +396,8 @@ pub fn plugin_pill(
                     .id("plugin-pill-menu")
                     .role(Role::Menu)
                     .aria_label(state.title.clone())
-                    .min_w(px(200.))
-                    .max_h(px(320.))
+                    .min_w(zoomed(200., cx))
+                    .max_h(zoomed(320., cx))
                     .overflow_y_scroll()
                     .children(rows)
             })
@@ -406,7 +407,7 @@ pub fn plugin_pill(
             let closed_key = key.clone();
             Popover::new(id.clone())
                 .anchor(Anchor::BottomLeft)
-                .offset(px(POPUP_GAP))
+                .offset(zoomed(POPUP_GAP, cx))
                 .map(|popover| if flush { popover.p_0() } else { popover.p_3() })
                 .trigger(PluginPillTrigger {
                     id: ElementId::Name(format!("plugin-pill-trigger-{key}").into()),
@@ -446,7 +447,15 @@ pub struct CornerPills {
     client: Entity<Client>,
     agent_id: String,
     popovers: PopoverViews,
+    /// The width of the pill column at the last paint, 0 while no pill shows.
+    width: Rc<Cell<Pixels>>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// Whether a measured pill column width is new enough to pass on. A smaller change is layout
+/// noise, and passing it on would redraw the timeline again on the next frame.
+pub fn width_changed(old: Pixels, new: Pixels) -> bool {
+    (f32::from(old) - f32::from(new)).abs() > 0.5
 }
 
 impl CornerPills {
@@ -474,15 +483,33 @@ impl CornerPills {
             client,
             agent_id,
             popovers: PopoverViews::default(),
+            width: Rc::new(Cell::new(px(0.))),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The width the pill column took at the last paint, 0 while no pill shows. The agent pane
+    /// reads it to keep message text clear of the pills; it changes the value only by more than
+    /// half a pixel.
+    pub fn width(&self) -> Pixels {
+        self.width.get()
+    }
+
+    /// Hides the column: its width goes to 0 and the observers hear of it.
+    fn hide(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.width.get() != px(0.) {
+            self.width.set(px(0.));
+            let id = cx.entity_id();
+            cx.defer(move |cx| cx.notify(id));
+        }
+        div().into_any_element()
     }
 }
 
 impl Render for CornerPills {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(host) = host(cx) else {
-            return div().into_any_element();
+            return self.hide(cx);
         };
         let workspace_id = self
             .client
@@ -505,7 +532,7 @@ impl Render for CornerPills {
         };
         let states = pill_states(&corner, &target, cx);
         if states.is_empty() {
-            return div().into_any_element();
+            return self.hide(cx);
         }
         // A corner pill never opens a New workspace panel: it sits on an agent pane.
         let show_panel: ShowPanel = Rc::new(|_, _, _| {});
@@ -522,15 +549,31 @@ impl Render for CornerPills {
                 )
             })
             .collect();
+        let width = self.width.clone();
+        let id = cx.entity_id();
         v_flex()
             .id("plugin-composer-corner-pills")
             .role(Role::Group)
             .aria_label("Plugin pills")
             .absolute()
-            .top(px(SPACE_3))
-            .right(px(SPACE_3))
+            .top(zoomed(SPACE_3, cx))
+            .right(zoomed(SPACE_3, cx))
             .items_end()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
+            .child(
+                // Records the column width so the timeline can keep its text clear of it.
+                canvas(
+                    move |bounds, _, cx| {
+                        if width_changed(width.get(), bounds.size.width) {
+                            width.set(bounds.size.width);
+                            cx.defer(move |cx| cx.notify(id));
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
             .children(pills)
             .into_any_element()
     }
@@ -565,6 +608,7 @@ mod tests {
         DRAFT_PILLS_PADDING_BOTTOM, DRAFT_PILLS_PADDING_X, HostAction, PressEffect,
         command_visible, host_action, needs_intercept, option_checked, picker_sources, pill_slots,
         press_effect, run_chain, stop_button, toggle_chip, upsert_chip, visible_commands,
+        width_changed,
     };
     use crate::pill_styles::DOCKED_PILL_HEIGHT;
     use bachuc_icons::IconName;
@@ -839,6 +883,16 @@ mod tests {
                 .is_empty()
         );
         assert!(stop_button(&inactive).is_none());
+    }
+
+    #[test]
+    fn a_pill_width_passes_on_only_past_half_a_pixel() {
+        use gpui_kit::px;
+        assert!(!width_changed(px(170.), px(170.)));
+        assert!(!width_changed(px(170.), px(170.4)));
+        assert!(width_changed(px(170.), px(170.6)));
+        assert!(width_changed(px(170.), px(0.)));
+        assert!(width_changed(px(0.), px(170.)));
     }
 
     #[test]

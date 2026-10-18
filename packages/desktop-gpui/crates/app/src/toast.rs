@@ -4,7 +4,7 @@
 
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{FONT_BASE, HEADER_HEIGHT, RADIUS_2XL, SPACE_2, SPACE_3, SPACE_4};
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::*;
 use std::time::Duration;
@@ -85,19 +85,19 @@ pub fn render_toasts(stack: &ToastStack, cx: &App) -> Option<AnyElement> {
             .id(("toast", toast.id as usize))
             .role(Role::Status)
             .aria_label(toast.message.clone())
-            .max_w(px(TOAST_MAX_WIDTH))
-            .gap(px(SPACE_2))
+            .max_w(zoomed(TOAST_MAX_WIDTH, cx))
+            .gap(zoomed(SPACE_2, cx))
             .items_center()
-            .py(px(SPACE_2))
-            .px(px(SPACE_3))
+            .py(zoomed(SPACE_2, cx))
+            .px(zoomed(SPACE_3, cx))
             .bg(t.surface0)
             .border_1()
             .border_color(border)
-            .rounded(px(RADIUS_2XL))
+            .rounded(zoomed(RADIUS_2XL, cx))
             .shadow(vec![shadow(ShadowSize::Md, cx)])
             .child(
                 icon(glyph)
-                    .with_size(px(TOAST_ICON))
+                    .with_size(zoomed(TOAST_ICON, cx))
                     .text_color(color)
                     .flex_shrink_0(),
             )
@@ -114,16 +114,16 @@ pub fn render_toasts(stack: &ToastStack, cx: &App) -> Option<AnyElement> {
         v_flex()
             .id("toasts")
             .absolute()
-            .top(px(HEADER_HEIGHT + SPACE_2))
-            .left(px(SPACE_4))
-            .right(px(SPACE_4))
+            .top(zoomed(HEADER_HEIGHT + SPACE_2, cx))
+            .left(zoomed(SPACE_4, cx))
+            .right(zoomed(SPACE_4, cx))
             .items_center()
             .child(
                 v_flex()
                     .w(relative(0.92))
-                    .max_w(px(TOAST_MAX_WIDTH))
+                    .max_w(zoomed(TOAST_MAX_WIDTH, cx))
                     .items_center()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .children(notes),
             )
             .into_any_element(),

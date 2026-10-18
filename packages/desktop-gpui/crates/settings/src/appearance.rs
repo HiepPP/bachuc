@@ -5,9 +5,9 @@
 use anyhow::{Context as _, Result};
 use bachuc_theme::{
     DEFAULT_CONTENT_FONT_SIZE, MAX_CONTENT_FONT_SIZE, MIN_CONTENT_FONT_SIZE, SyntaxThemeId,
-    TabClosePosition, ThemeChoice, metrics, set_content_font_size, set_custom_theme,
-    set_font_families, set_font_scale, set_syntax_theme, set_tab_close_position, set_theme,
-    set_zoom,
+    TabClosePosition, ThemeChoice, metrics, set_chat_outline, set_content_font_size,
+    set_custom_theme, set_font_families, set_font_scale, set_syntax_theme, set_tab_close_position,
+    set_theme, set_zoom,
 };
 use gpui_kit::{App, SharedString};
 use serde_json::{Map, Value, json};
@@ -83,6 +83,9 @@ pub struct Appearance {
     pub zoom: f32,
     /// The side of the tab close button; a file without it reads as `Left`.
     pub tab_close_position: TabClosePosition,
+    /// The Chat outline rail beside the thread; a file without it reads as on
+    /// (`chatOutlineEnabled` in Electron).
+    pub chat_outline: bool,
 }
 
 impl Default for Appearance {
@@ -98,6 +101,7 @@ impl Default for Appearance {
             plugin_theme: None,
             zoom: 1.,
             tab_close_position: TabClosePosition::Left,
+            chat_outline: true,
         }
     }
 }
@@ -264,6 +268,9 @@ pub fn load_from(dir: &Path) -> Appearance {
     {
         appearance.tab_close_position = position;
     }
+    if let Some(enabled) = stored.get("chatOutline").and_then(Value::as_bool) {
+        appearance.chat_outline = enabled;
+    }
     appearance
 }
 
@@ -292,6 +299,7 @@ pub fn save_to(dir: &Path, appearance: &Appearance) -> Result<()> {
         "tabClosePosition".into(),
         json!(tab_close_key(appearance.tab_close_position)),
     );
+    value.insert("chatOutline".into(), json!(appearance.chat_outline));
     let value = Value::Object(value);
     let temp = dir.join(format!("{FILE}.tmp"));
     std::fs::write(
@@ -322,6 +330,7 @@ pub fn apply(appearance: &Appearance, cx: &mut App) {
     set_custom_theme(appearance.plugin_theme.clone().map(SharedString::from), cx);
     set_zoom(appearance.zoom, cx);
     set_tab_close_position(appearance.tab_close_position, cx);
+    set_chat_outline(appearance.chat_outline, cx);
 }
 
 /// Reads `appearance.json` from `~/Library/Application Support/BachucGpui` and applies it. Call
@@ -700,6 +709,32 @@ mod tests {
         save_to(&dir, &saved).unwrap();
         assert_eq!(load_from(&dir), saved);
         assert_eq!(tab_close_label(TabClosePosition::Right), "Right");
+    }
+
+    #[test]
+    fn the_chat_outline_is_on_unless_the_file_says_off() {
+        let dir = temp_dir("appearance-chat-outline");
+        assert!(Appearance::default().chat_outline);
+        // A file from before the setting.
+        std::fs::write(dir.join(FILE), r#"{"theme":"light"}"#).unwrap();
+        assert!(load_from(&dir).chat_outline);
+        for (text, want) in [
+            (r#"{"chatOutline":false}"#, false),
+            (r#"{"chatOutline":true}"#, true),
+            (r#"{"chatOutline":"no"}"#, true),
+            (r#"{"chatOutline":0}"#, true),
+        ] {
+            std::fs::write(dir.join(FILE), text).unwrap();
+            assert_eq!(load_from(&dir).chat_outline, want, "{text}");
+        }
+        let saved = Appearance {
+            chat_outline: false,
+            ..Appearance::default()
+        };
+        save_to(&dir, &saved).unwrap();
+        assert_eq!(load_from(&dir), saved);
+        let text = std::fs::read_to_string(dir.join(FILE)).unwrap();
+        assert!(text.contains("\"chatOutline\": false"), "{text}");
     }
 
     #[test]

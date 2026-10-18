@@ -68,9 +68,9 @@ fn open_thread(id: SharedString, agent_id: String, on_open: OnId, cx: &App) -> A
         .role(Role::Button)
         .aria_label("Open thread")
         .flex_shrink_0()
-        .px(px(OPEN_PADDING_X))
-        .py(px(OPEN_PADDING_Y))
-        .rounded(px(OPEN_RADIUS))
+        .px(bachuc_theme::zoomed(OPEN_PADDING_X, cx))
+        .py(bachuc_theme::zoomed(OPEN_PADDING_Y, cx))
+        .rounded(bachuc_theme::zoomed(OPEN_RADIUS, cx))
         .border_1()
         .border_color(colors.border)
         .bg(colors.surface0)
@@ -100,25 +100,25 @@ pub(crate) fn plan_top(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(LEAD_GAP))
-        .py(px(LEAD_PADDING_Y))
-        .px(px(LEAD_PADDING_X))
-        .rounded(px(LEAD_RADIUS))
+        .gap(bachuc_theme::zoomed(LEAD_GAP, cx))
+        .py(bachuc_theme::zoomed(LEAD_PADDING_Y, cx))
+        .px(bachuc_theme::zoomed(LEAD_PADDING_X, cx))
+        .rounded(bachuc_theme::zoomed(LEAD_RADIUS, cx))
         .border_1()
         .border_color(colors.border)
         .bg(colors.surface1)
         .child(
             div()
                 .flex_shrink_0()
-                .size(px(LEAD_BOX))
-                .rounded(px(LEAD_BOX_RADIUS))
+                .size(bachuc_theme::zoomed(LEAD_BOX, cx))
+                .rounded(bachuc_theme::zoomed(LEAD_BOX_RADIUS, cx))
                 .flex()
                 .items_center()
                 .justify_center()
                 .bg(colors.surface2)
                 .child(
                     icon(IconName::Bot)
-                        .with_size(px(LEAD_ICON))
+                        .with_size(bachuc_theme::zoomed(LEAD_ICON, cx))
                         .text_color(colors.foreground),
                 ),
         )
@@ -138,7 +138,7 @@ pub(crate) fn plan_top(
                 )
                 .child(
                     div()
-                        .pt(px(SECONDARY_GAP))
+                        .pt(bachuc_theme::zoomed(SECONDARY_GAP, cx))
                         .truncate()
                         .text_size(ui_font_size(SECONDARY_TEXT, cx))
                         .text_color(colors.foreground_muted)
@@ -155,7 +155,7 @@ pub(crate) fn plan_top(
             cx,
         ))
         .children(pace_line(pace, cx))
-        .child(div().pb(px(WAVE_GAP)).child(lead_row))
+        .child(div().pb(bachuc_theme::zoomed(WAVE_GAP, cx)).child(lead_row))
         .into_any_element()
 }
 
@@ -174,10 +174,12 @@ pub(crate) fn wave_header(wave: &PlanTreeWave, cx: &App) -> AnyElement {
                 .flex()
                 .flex_row()
                 .items_baseline()
-                .gap(px(ROW_GAP))
-                .py(px(WAVE_PADDING_Y))
-                .px(px(WAVE_PADDING_X))
-                .when(wave.rows.is_empty(), |this| this.mb(px(WAVE_GAP)))
+                .gap(bachuc_theme::zoomed(ROW_GAP, cx))
+                .py(bachuc_theme::zoomed(WAVE_PADDING_Y, cx))
+                .px(bachuc_theme::zoomed(WAVE_PADDING_X, cx))
+                .when(wave.rows.is_empty(), |this| {
+                    this.mb(bachuc_theme::zoomed(WAVE_GAP, cx))
+                })
                 .child(
                     div()
                         .flex_shrink_0()
@@ -205,11 +207,11 @@ fn state_icon(state: RowState, id: &str, cx: &App) -> AnyElement {
     let colors = tokens(cx);
     let glyph = match state {
         RowState::Done => icon(IconName::CircleCheck)
-            .with_size(px(STATE_ICON))
+            .with_size(bachuc_theme::zoomed(STATE_ICON, cx))
             .text_color(colors.status_success)
             .into_any_element(),
         RowState::Running => icon(IconName::LoaderCircle)
-            .with_size(px(STATE_ICON))
+            .with_size(bachuc_theme::zoomed(STATE_ICON, cx))
             .text_color(colors.accent)
             .with_animation(
                 SharedString::from(format!("wt-spin-{id}")),
@@ -218,24 +220,24 @@ fn state_icon(state: RowState, id: &str, cx: &App) -> AnyElement {
             )
             .into_any_element(),
         RowState::Waiting => icon(IconName::Hand)
-            .with_size(px(STATE_ICON))
+            .with_size(bachuc_theme::zoomed(STATE_ICON, cx))
             .text_color(colors.status_warning)
             .into_any_element(),
         RowState::Blocked => icon(IconName::CircleAlert)
-            .with_size(px(STATE_ICON))
+            .with_size(bachuc_theme::zoomed(STATE_ICON, cx))
             .text_color(colors.foreground)
             .into_any_element(),
         RowState::Planned => div()
-            .size(px(PLANNED_CIRCLE))
+            .size(bachuc_theme::zoomed(PLANNED_CIRCLE, cx))
             .rounded_full()
-            .border(px(PLANNED_BORDER))
+            .border(bachuc_theme::zoomed(PLANNED_BORDER, cx))
             .border_dashed()
             .border_color(colors.foreground_muted)
             .into_any_element(),
     };
     div()
         .flex_shrink_0()
-        .size(px(ICON_BOX))
+        .size(bachuc_theme::zoomed(ICON_BOX, cx))
         .flex()
         .items_center()
         .justify_center()
@@ -275,7 +277,7 @@ pub(crate) fn task_row(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(ROW_GAP))
+        .gap(bachuc_theme::zoomed(ROW_GAP, cx))
         .cursor_pointer()
         .active(|style| style.opacity(0.6))
         .on_click(move |_, window, cx| on_select(task_id.clone(), window, cx))
@@ -291,7 +293,7 @@ pub(crate) fn task_row(
                         .flex()
                         .flex_row()
                         .items_baseline()
-                        .gap(px(ROW_GAP))
+                        .gap(bachuc_theme::zoomed(ROW_GAP, cx))
                         .child(
                             div()
                                 .flex_shrink_0()
@@ -318,7 +320,7 @@ pub(crate) fn task_row(
                 .when(!secondary.is_empty(), |this| {
                     this.child(
                         div()
-                            .pt(px(SECONDARY_GAP))
+                            .pt(bachuc_theme::zoomed(SECONDARY_GAP, cx))
                             .truncate()
                             .text_size(ui_font_size(SECONDARY_TEXT, cx))
                             .text_color(if waiting {
@@ -352,10 +354,10 @@ pub(crate) fn task_row(
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(ROW_GAP))
-        .py(px(ROW_PADDING_Y))
-        .px(px(ROW_PADDING_X))
-        .rounded(px(ROW_RADIUS))
+        .gap(bachuc_theme::zoomed(ROW_GAP, cx))
+        .py(bachuc_theme::zoomed(ROW_PADDING_Y, cx))
+        .px(bachuc_theme::zoomed(ROW_PADDING_X, cx))
+        .rounded(bachuc_theme::zoomed(ROW_RADIUS, cx))
         .overflow_hidden()
         .border_1()
         .border_color(if waiting {
@@ -386,11 +388,11 @@ pub(crate) fn task_row(
         this.child(
             div()
                 .absolute()
-                .left(px(-TICK))
+                .left(bachuc_theme::zoomed(-TICK, cx))
                 .top(relative(0.5))
-                .mt(px(-SPINE_WIDTH / 2.))
-                .w(px(TICK))
-                .h(px(SPINE_WIDTH))
+                .mt(bachuc_theme::zoomed(-SPINE_WIDTH / 2., cx))
+                .w(bachuc_theme::zoomed(TICK, cx))
+                .h(bachuc_theme::zoomed(SPINE_WIDTH, cx))
                 .bg(colors.border),
         )
     });
@@ -398,13 +400,17 @@ pub(crate) fn task_row(
         row_box
     } else {
         div()
-            .ml(px(SPINE_INSET))
-            .pl(px(SPINE_GAP))
-            .border_l(px(SPINE_WIDTH))
+            .ml(bachuc_theme::zoomed(SPINE_INSET, cx))
+            .pl(bachuc_theme::zoomed(SPINE_GAP, cx))
+            .border_l(bachuc_theme::zoomed(SPINE_WIDTH, cx))
             .border_color(colors.border)
             .child(row_box)
     };
     cell_slice(Slice::Middle, false, cx)
-        .child(div().when(last, |this| this.pb(px(WAVE_GAP))).child(hung))
+        .child(
+            div()
+                .when(last, |this| this.pb(bachuc_theme::zoomed(WAVE_GAP, cx)))
+                .child(hung),
+        )
         .into_any_element()
 }

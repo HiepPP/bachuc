@@ -4,7 +4,7 @@
 use crate::space_menu::{MenuClosed, SpaceMenu};
 use crate::state::SpacesState;
 use bachuc_theme::metrics::{FONT_SM, RADIUS_MD, SPACE_1, SPACE_1_5, SPACE_2};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -114,7 +114,7 @@ impl Render for Strip {
                 .id("space-retry")
                 .role(Role::Button)
                 .aria_label(text.clone())
-                .p(px(SPACE_2))
+                .p(zoomed(SPACE_2, cx))
                 .cursor_pointer()
                 .text_size(size)
                 .text_color(t.foreground_muted)
@@ -124,16 +124,21 @@ impl Render for Strip {
                 .child(text)
                 .into_any_element();
         }
+        let (tab_size, tab_padding, tab_radius) = (
+            zoomed(TAB_SIZE, cx),
+            zoomed(TAB_PADDING, cx),
+            zoomed(RADIUS_MD, cx),
+        );
         let tab_style = |active: bool| {
             move |tab: Stateful<Div>| {
                 tab.relative()
                     .flex()
                     .items_center()
                     .justify_center()
-                    .min_w(px(TAB_SIZE))
-                    .h(px(TAB_SIZE))
-                    .px(px(TAB_PADDING))
-                    .rounded(px(RADIUS_MD))
+                    .min_w(tab_size)
+                    .h(tab_size)
+                    .px(tab_padding)
+                    .rounded(tab_radius)
                     .border_1()
                     .border_color(if active { t.accent } else { t.border })
                     .when(active, |tab| tab.bg(t.accent))
@@ -142,7 +147,7 @@ impl Render for Strip {
         let tab_row = h_flex()
             .flex_wrap()
             .items_center()
-            .gap(px(SPACE_1))
+            .gap(zoomed(SPACE_1, cx))
             .children(tabs.iter().enumerate().map(|(index, (id, name))| {
                 let active = selected.as_deref() == Some(id.as_str());
                 let (select_id, menu_id, bounds_id) = (id.clone(), id.clone(), id.clone());
@@ -200,9 +205,9 @@ impl Render for Strip {
             );
 
         v_flex()
-            .gap(px(SPACE_1_5))
-            .px(px(STRIP_PADDING_X))
-            .py(px(STRIP_PADDING_Y))
+            .gap(zoomed(SPACE_1_5, cx))
+            .px(zoomed(STRIP_PADDING_X, cx))
+            .py(zoomed(STRIP_PADDING_Y, cx))
             .border_t_1()
             .border_color(t.border)
             .child(tab_row)

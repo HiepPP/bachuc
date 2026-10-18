@@ -11,7 +11,7 @@ use bachuc_icons::{IconName, icon};
 use bachuc_plugin_host::{PluginContext, PluginSettings, TimelineRenderInput};
 use bachuc_theme::metrics::{FONT_BASE, FONT_CODE, ICON_SM, RADIUS_LG, SPACE_2, SPACE_3};
 use bachuc_theme::{
-    SyntaxColors, code_font_size, mono_font_family, syntax_colors, tokens, ui_font_size,
+    SyntaxColors, code_font_size, mono_font_family, syntax_colors, tokens, ui_font_size, zoomed,
 };
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -101,6 +101,11 @@ enum Line {
         hunk: usize,
         row: usize,
     },
+}
+
+/// The diff list height at zoom 100%: every line plus the padding, capped at `MAX_DIFF_HEIGHT`.
+fn body_height(lines: usize) -> f32 {
+    (lines as f32 * LINE_HEIGHT + 2. * BODY_GAP).min(MAX_DIFF_HEIGHT)
 }
 
 /// The numbered lines of the hunks, with the gutter width in characters.
@@ -355,17 +360,17 @@ impl EditRowView {
         let line_box = || {
             h_flex()
                 .w_full()
-                .h(px(LINE_HEIGHT))
+                .h(zoomed(LINE_HEIGHT, cx))
                 .font_family(mono)
                 .text_size(code)
-                .line_height(px(LINE_HEIGHT))
+                .line_height(zoomed(LINE_HEIGHT, cx))
                 .whitespace_nowrap()
         };
         edit.lines[range]
             .iter()
             .map(|line| match line {
                 Line::Gap => line_box()
-                    .pl(px(SPACE_2))
+                    .pl(zoomed(SPACE_2, cx))
                     .text_color(t.foreground_muted)
                     .child(format!("{:>width$}", "⋮"))
                     .into_any_element(),
@@ -395,12 +400,12 @@ impl EditRowView {
                         .and_then(|runs| runs.get(*hunk)?.get(*row).cloned())
                         .unwrap_or_default();
                     line_box()
-                        .pr(px(SPACE_3))
+                        .pr(zoomed(SPACE_3, cx))
                         .bg(bg)
                         .child(
                             div()
                                 .flex_none()
-                                .px(px(SPACE_2))
+                                .px(zoomed(SPACE_2, cx))
                                 .text_color(t.foreground_muted)
                                 .child(format!(
                                     "{:>width$}",
@@ -443,7 +448,7 @@ impl Render for EditRowView {
                 .id("edit-diff-unavailable")
                 .role(Role::Note)
                 .aria_label(UNAVAILABLE)
-                .py(px(SPACE_2))
+                .py(zoomed(SPACE_2, cx))
                 .text_size(ui_font_size(FONT_BASE, cx))
                 .text_color(t.foreground_muted)
                 .child(UNAVAILABLE)
@@ -456,96 +461,95 @@ impl Render for EditRowView {
         let mono = mono_font_family(cx);
         let (added, removed) = (edit.added, edit.removed);
 
-        let header =
-            h_flex()
-                .id("edit-diff-header")
-                .role(Role::Button)
-                .aria_label(format!(
-                    "{} {}",
-                    header_label(data.action, data.status),
-                    data.file_path
-                ))
-                .aria_expanded(expanded)
-                .flex_shrink(1.)
-                .min_w_0()
-                .max_w_full()
-                .gap(px(SPACE_2))
-                .items_center()
-                .cursor_pointer()
-                .on_click(cx.listener(|this, _, _, cx| this.toggle(cx)))
-                .child(
-                    div()
-                        .w(px(ICON_SM))
-                        .flex_none()
-                        .flex()
-                        .justify_center()
-                        .child(
-                            icon(if expanded {
-                                IconName::ChevronDown
-                            } else {
-                                IconName::ChevronRight
-                            })
-                            .with_size(px(ICON_SM))
-                            .text_color(muted),
-                        ),
-                )
-                .child(
-                    div()
-                        .flex_shrink(1.)
-                        .min_w_0()
-                        .truncate()
-                        .font_family(mono)
-                        .text_size(code_font_size(PATH_SIZE, cx))
-                        .text_color(if failed {
-                            t.status_danger
+        let header = h_flex()
+            .id("edit-diff-header")
+            .role(Role::Button)
+            .aria_label(format!(
+                "{} {}",
+                header_label(data.action, data.status),
+                data.file_path
+            ))
+            .aria_expanded(expanded)
+            .flex_shrink(1.)
+            .min_w_0()
+            .max_w_full()
+            .gap(zoomed(SPACE_2, cx))
+            .items_center()
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, _, cx| this.toggle(cx)))
+            .child(
+                div()
+                    .w(zoomed(ICON_SM, cx))
+                    .flex_none()
+                    .flex()
+                    .justify_center()
+                    .child(
+                        icon(if expanded {
+                            IconName::ChevronDown
                         } else {
-                            t.foreground
+                            IconName::ChevronRight
                         })
-                        .child(display_path(&data.file_path, edit.cwd.as_deref())),
-                )
-                .when(!edit.bar.is_empty(), |header| {
-                    header.child(h_flex().flex_none().gap(px(BAR_GAP)).children(
-                        edit.bar.iter().map(|square| {
-                            div()
-                                .size(px(BAR_SQUARE))
-                                .rounded(px(BAR_RADIUS))
-                                .bg(match square {
-                                    Square::Add => t.status_success,
-                                    Square::Remove => t.status_danger,
-                                })
-                        }),
-                    ))
-                })
-                .when(added > 0, |header| {
-                    header.child(
+                        .with_size(zoomed(ICON_SM, cx))
+                        .text_color(muted),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_shrink(1.)
+                    .min_w_0()
+                    .truncate()
+                    .font_family(mono)
+                    .text_size(code_font_size(PATH_SIZE, cx))
+                    .text_color(if failed {
+                        t.status_danger
+                    } else {
+                        t.foreground
+                    })
+                    .child(display_path(&data.file_path, edit.cwd.as_deref())),
+            )
+            .when(!edit.bar.is_empty(), |header| {
+                header.child(h_flex().flex_none().gap(zoomed(BAR_GAP, cx)).children(
+                    edit.bar.iter().map(|square| {
                         div()
-                            .flex_none()
-                            .text_size(stat)
-                            .text_color(t.status_success)
-                            .child(format!("+{added}")),
-                    )
-                })
-                .when(removed > 0, |header| {
-                    header.child(
-                        div()
-                            .flex_none()
-                            .text_size(stat)
-                            .text_color(t.status_danger)
-                            .child(format!("−{removed}")),
-                    )
-                })
-                .children(shown_status(data.action, data.status).map(|status| {
+                            .size(zoomed(BAR_SQUARE, cx))
+                            .rounded(zoomed(BAR_RADIUS, cx))
+                            .bg(match square {
+                                Square::Add => t.status_success,
+                                Square::Remove => t.status_danger,
+                            })
+                    }),
+                ))
+            })
+            .when(added > 0, |header| {
+                header.child(
                     div()
                         .flex_none()
                         .text_size(stat)
-                        .text_color(if failed { t.status_danger } else { muted })
-                        .child(status)
-                }));
+                        .text_color(t.status_success)
+                        .child(format!("+{added}")),
+                )
+            })
+            .when(removed > 0, |header| {
+                header.child(
+                    div()
+                        .flex_none()
+                        .text_size(stat)
+                        .text_color(t.status_danger)
+                        .child(format!("−{removed}")),
+                )
+            })
+            .children(shown_status(data.action, data.status).map(|status| {
+                div()
+                    .flex_none()
+                    .text_size(stat)
+                    .text_color(if failed { t.status_danger } else { muted })
+                    .child(status)
+            }));
 
         let body = expanded.then(|| {
             let content = if edit.lines.is_empty() {
                 div()
-                    .p(px(SPACE_2))
+                    .p(zoomed(SPACE_2, cx))
                     .text_size(stat)
                     .text_color(muted)
                     .child("No changes to show.")
@@ -560,8 +564,9 @@ impl Render for EditRowView {
                 .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
                 .with_width_from_item(Some(edit.widest))
                 .w_full()
-                .max_h(px(MAX_DIFF_HEIGHT))
-                .py(px(BODY_GAP))
+                // A uniform list with only a max height collapses to its padding.
+                .h(zoomed(body_height(edit.lines.len()), cx))
+                .py(zoomed(BODY_GAP, cx))
                 .into_any_element()
             };
             v_flex()
@@ -572,15 +577,15 @@ impl Render for EditRowView {
                     data.file_path
                 ))
                 .w_full()
-                .mt(px(BODY_GAP))
+                .mt(zoomed(BODY_GAP, cx))
                 .border_1()
                 .border_color(t.border)
-                .rounded(px(RADIUS_LG))
+                .rounded(zoomed(RADIUS_LG, cx))
                 .overflow_hidden()
                 .bg(t.surface1)
                 .children(data.error.as_ref().map(|error| {
                     div()
-                        .p(px(SPACE_2))
+                        .p(zoomed(SPACE_2, cx))
                         .text_size(stat)
                         .text_color(t.status_danger)
                         .child(error.clone())
@@ -600,8 +605,15 @@ impl Render for EditRowView {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob import brings a `test` attribute of its own.
-    use super::{Line, body_lines};
+    use super::{BODY_GAP, LINE_HEIGHT, Line, MAX_DIFF_HEIGHT, body_height, body_lines};
     use crate::diff::parse_unified_diff;
+
+    #[test]
+    fn body_height_fits_the_lines_and_stops_at_the_cap() {
+        assert_eq!(body_height(1), LINE_HEIGHT + 2. * BODY_GAP);
+        assert_eq!(body_height(3), 3. * LINE_HEIGHT + 2. * BODY_GAP);
+        assert_eq!(body_height(1000), MAX_DIFF_HEIGHT);
+    }
 
     #[test]
     fn body_lines_number_rows_and_put_an_ellipsis_between_hunks() {

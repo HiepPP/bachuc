@@ -18,7 +18,7 @@ use bachuc_theme::metrics::{
     SPACE_0_5, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
 use bachuc_theme::{
-    ShadowSize, Tokens, mono_font_family, popup_offset, shadow, tokens, ui_font_size,
+    ShadowSize, Tokens, mono_font_family, popup_offset, shadow, tokens, ui_font_size, zoom, zoomed,
 };
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
@@ -753,9 +753,9 @@ impl PullRequestView {
             .text_color(color)
     }
 
-    fn spinner(&self, id: &'static str, size: f32, color: Hsla) -> AnyElement {
+    fn spinner(&self, id: &'static str, size: f32, color: Hsla, cx: &App) -> AnyElement {
         icon(IconName::LoaderCircle)
-            .with_size(px(size))
+            .with_size(zoomed(size, cx))
             .text_color(color)
             .with_animation(id, Animation::new(SPIN).repeat(), |icon, delta| {
                 icon.transform(Transformation::rotate(percentage(delta)))
@@ -770,16 +770,16 @@ impl PullRequestView {
             .pressable("pr-view-open", "View pull request", cx, move |this, cx| {
                 this.open_url(open.clone(), cx)
             })
-            .h(px(VIEW_BUTTON_HEIGHT))
-            .px(px(SPACE_1))
+            .h(zoomed(VIEW_BUTTON_HEIGHT, cx))
+            .px(zoomed(SPACE_1, cx))
             .flex()
             .items_center()
-            .gap(px(SPACE_1))
-            .rounded(px(RADIUS_BASE))
+            .gap(zoomed(SPACE_1, cx))
+            .rounded(zoomed(RADIUS_BASE, cx))
             .hover(move |style| style.bg(colors.surface_sidebar_hover))
             .child(
                 icon(IconName::ExternalLink)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(colors.foreground),
             )
             .child(self.text(FONT_SM, colors.foreground, cx).child("View"));
@@ -790,19 +790,19 @@ impl PullRequestView {
                 "Refresh git and GitHub state"
             };
             let glyph = if self.refreshing {
-                self.spinner("pr-view-refresh-spin", ICON_SM, colors.foreground_muted)
+                self.spinner("pr-view-refresh-spin", ICON_SM, colors.foreground_muted, cx)
             } else {
                 icon(IconName::RotateCw)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(colors.foreground_muted)
                     .into_any_element()
             };
             self.pressable("pr-view-refresh", label, cx, |this, cx| this.refresh(cx))
-                .size(px(TOOLBAR_BUTTON))
+                .size(zoomed(TOOLBAR_BUTTON, cx))
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(RADIUS_MD))
+                .rounded(zoomed(RADIUS_MD, cx))
                 .hover(move |style| style.bg(colors.interaction_highlight))
                 .child(glyph)
         });
@@ -811,8 +811,8 @@ impl PullRequestView {
             .role(Role::Toolbar)
             .aria_label("Pull request")
             .flex_shrink_0()
-            .h(px(TOOLBAR_HEIGHT))
-            .px(px(SPACE_3))
+            .h(zoomed(TOOLBAR_HEIGHT, cx))
+            .px(zoomed(SPACE_3, cx))
             .justify_between()
             .child(view_button)
             .children(refresh)
@@ -841,12 +841,12 @@ impl PullRequestView {
         .group("pr-view-header")
         .flex()
         .flex_col()
-        .gap(px(SPACE_2))
-        .p(px(SPACE_4))
+        .gap(zoomed(SPACE_2, cx))
+        .p(zoomed(SPACE_4, cx))
         .child(
             div()
                 .text_size(title_size)
-                .line_height(px(TITLE_LINE_HEIGHT))
+                .line_height(zoomed(TITLE_LINE_HEIGHT, cx))
                 .text_color(colors.foreground)
                 .child(StyledText::new(title).with_highlights([(
                     number_range,
@@ -858,11 +858,11 @@ impl PullRequestView {
         )
         .child(
             h_flex()
-                .min_h(px(16.))
-                .gap(px(SPACE_1))
+                .min_h(zoomed(16., cx))
+                .gap(zoomed(SPACE_1, cx))
                 .child(
                     icon(state_icon)
-                        .with_size(px(ICON_SM))
+                        .with_size(zoomed(ICON_SM, cx))
                         .text_color(state_color),
                 )
                 .child(
@@ -873,7 +873,7 @@ impl PullRequestView {
                 .when_some(repo, |this, repo| {
                     this.child(
                         self.text(FONT_SM, colors.foreground_muted, cx)
-                            .ml(px(SPACE_1))
+                            .ml(zoomed(SPACE_1, cx))
                             .min_w_0()
                             .flex_shrink(1.)
                             .truncate()
@@ -882,13 +882,13 @@ impl PullRequestView {
                 })
                 .child(
                     div()
-                        .ml(px(SPACE_1))
+                        .ml(zoomed(SPACE_1, cx))
                         .flex_shrink_0()
                         .opacity(0.)
                         .group_hover("pr-view-header", |style| style.opacity(1.))
                         .child(
                             icon(IconName::ExternalLink)
-                                .with_size(px(ICON_XS))
+                                .with_size(zoomed(ICON_XS, cx))
                                 .text_color(colors.foreground_muted),
                         ),
                 ),
@@ -904,7 +904,7 @@ impl PullRequestView {
         } else {
             format!("{}. {}", summary.headline, summary.detail)
         };
-        let ring = checks_ring(&summary.groups, ICON_LG, &colors);
+        let ring = checks_ring(&summary.groups, ICON_LG, &colors, cx);
         let header = self
             .pressable("pr-view-checks-header", label, cx, |this, cx| {
                 this.checks_open = !this.checks_open;
@@ -912,15 +912,15 @@ impl PullRequestView {
             })
             .flex()
             .items_center()
-            .gap(px(SPACE_2))
-            .p(px(SPACE_3))
+            .gap(zoomed(SPACE_2, cx))
+            .p(zoomed(SPACE_3, cx))
             .hover(move |style| style.bg(colors.surface_sidebar_hover))
             .child(ring)
             .child(
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap(px(SPACE_0_5))
+                    .gap(zoomed(SPACE_0_5, cx))
                     .child(
                         self.text(FONT_BASE, colors.foreground, cx)
                             .font_weight(FontWeight::MEDIUM)
@@ -935,7 +935,7 @@ impl PullRequestView {
                         )
                     }),
             )
-            .child(disclosure(self.checks_open, ICON_SM, &colors));
+            .child(disclosure(self.checks_open, ICON_SM, &colors, cx));
         let list = (self.checks_open && !summary.groups.is_empty()).then(|| {
             let groups: Vec<AnyElement> = summary
                 .groups
@@ -946,9 +946,9 @@ impl PullRequestView {
                 .id("pr-view-checks-list")
                 .role(Role::List)
                 .aria_label("Checks")
-                .max_h(px(CHECKS_MAX_HEIGHT))
+                .max_h(zoomed(CHECKS_MAX_HEIGHT, cx))
                 .overflow_y_scroll()
-                .pb(px(SPACE_2))
+                .pb(zoomed(SPACE_2, cx))
                 .children(groups)
         });
         v_flex().child(header).children(list).into_any_element()
@@ -972,16 +972,16 @@ impl PullRequestView {
             )
             .flex()
             .items_center()
-            .gap(px(SPACE_1))
-            .px(px(SPACE_3))
-            .pt(px(SPACE_2))
-            .pb(px(SPACE_1))
+            .gap(zoomed(SPACE_1, cx))
+            .px(zoomed(SPACE_3, cx))
+            .pt(zoomed(SPACE_2, cx))
+            .pb(zoomed(SPACE_1, cx))
             .child(
                 self.text(FONT_SM, colors.foreground_muted, cx)
                     .font_weight(FontWeight::MEDIUM)
                     .child(group.label.clone()),
             )
-            .child(disclosure(!collapsed, ICON_XS, &colors));
+            .child(disclosure(!collapsed, ICON_XS, &colors, cx));
         let rows: Vec<AnyElement> = if collapsed {
             Vec::new()
         } else {
@@ -1017,13 +1017,13 @@ impl PullRequestView {
             cx,
             move |this, cx| this.open_url(url.clone(), cx),
         )
-        .h(px(CHECK_ROW_HEIGHT))
-        .px(px(SPACE_3))
+        .h(zoomed(CHECK_ROW_HEIGHT, cx))
+        .px(zoomed(SPACE_3, cx))
         .flex()
         .items_center()
-        .gap(px(SPACE_2))
+        .gap(zoomed(SPACE_2, cx))
         .hover(move |style| style.bg(colors.surface_sidebar_hover))
-        .child(check_icon(kind, ICON_SM, &colors))
+        .child(check_icon(kind, ICON_SM, &colors, cx))
         .child(
             self.text(FONT_BASE, colors.foreground, cx)
                 .min_w_0()
@@ -1064,8 +1064,8 @@ impl PullRequestView {
         let pill = |count: usize, glyph: IconName, size: f32, color: Hsla, cx: &App| {
             (count > 0).then(|| {
                 h_flex()
-                    .gap(px(3.))
-                    .child(icon(glyph).with_size(px(size)).text_color(color))
+                    .gap(zoomed(3., cx))
+                    .child(icon(glyph).with_size(zoomed(size, cx)).text_color(color))
                     .child(self.text(FONT_SM, color, cx).child(count.to_string()))
             })
         };
@@ -1076,10 +1076,10 @@ impl PullRequestView {
             })
             .flex()
             .items_center()
-            .gap(px(SPACE_2))
-            .px(px(SPACE_3))
-            .py(px(SPACE_2))
-            .child(disclosure(self.activity_open, ICON_SM, &colors))
+            .gap(zoomed(SPACE_2, cx))
+            .px(zoomed(SPACE_3, cx))
+            .py(zoomed(SPACE_2, cx))
+            .child(disclosure(self.activity_open, ICON_SM, &colors, cx))
             .child(
                 self.text(FONT_SM, colors.foreground_muted, cx)
                     .font_weight(FontWeight::MEDIUM)
@@ -1088,7 +1088,7 @@ impl PullRequestView {
             .child(
                 h_flex()
                     .ml_auto()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .children(pill(
                         pills.approvals,
                         IconName::CircleCheck,
@@ -1114,13 +1114,13 @@ impl PullRequestView {
         let body = self.activity_open.then(|| {
             let empty = |text: String| {
                 self.text(FONT_SM, colors.foreground_muted, cx)
-                    .px(px(SPACE_3))
-                    .py(px(SPACE_2))
+                    .px(zoomed(SPACE_3, cx))
+                    .py(zoomed(SPACE_2, cx))
                     .child(text)
                     .into_any_element()
             };
             let children: Vec<AnyElement> = match &self.activity {
-                Activity::Loading => vec![activity_skeleton(&colors)],
+                Activity::Loading => vec![activity_skeleton(&colors, cx)],
                 Activity::Failed => {
                     vec![empty("Unable to load pull request activity".into())]
                 }
@@ -1137,7 +1137,7 @@ impl PullRequestView {
                         .collect()
                 }
             };
-            v_flex().pb(px(SPACE_3)).children(children)
+            v_flex().pb(zoomed(SPACE_3, cx)).children(children)
         });
         v_flex()
             .id("pr-view-activity")
@@ -1209,22 +1209,22 @@ impl PullRequestView {
             )
             .flex()
             .items_center()
-            .gap(px(SPACE_2))
-            .px(px(SPACE_3))
-            .py(px(SPACE_2))
-            .min_h(px(ENTRY_HEADER_MIN_HEIGHT))
+            .gap(zoomed(SPACE_2, cx))
+            .px(zoomed(SPACE_3, cx))
+            .py(zoomed(SPACE_2, cx))
+            .min_h(zoomed(ENTRY_HEADER_MIN_HEIGHT, cx))
             .hover(move |style| style.bg(colors.surface_sidebar_hover))
             .child(
                 div()
-                    .size(px(AVATAR_SIZE))
+                    .size(zoomed(AVATAR_SIZE, cx))
                     .flex_shrink_0()
                     .rounded_full()
                     .bg(rgb(avatar_color(author)))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_size(px(10.))
-                    .line_height(px(12.))
+                    .text_size(zoomed(10., cx))
+                    .line_height(zoomed(12., cx))
                     .text_color(white())
                     .child(initial),
             )
@@ -1238,8 +1238,8 @@ impl PullRequestView {
             .child(match verb_color {
                 Some((glyph, color)) => h_flex()
                     .flex_shrink_0()
-                    .gap(px(SPACE_1))
-                    .child(icon(glyph).with_size(px(ICON_XS)).text_color(color))
+                    .gap(zoomed(SPACE_1, cx))
+                    .child(icon(glyph).with_size(zoomed(ICON_XS, cx)).text_color(color))
                     .child(self.text(FONT_SM, color, cx).child(verb))
                     .into_any_element(),
                 None => self
@@ -1252,7 +1252,7 @@ impl PullRequestView {
                 h_flex()
                     .ml_auto()
                     .flex_shrink_0()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .child(
                         self.text(FONT_SM, colors.foreground_muted, cx)
                             .child(format_age(created_at_ms, now)),
@@ -1264,26 +1264,29 @@ impl PullRequestView {
             .group(group)
             .role(Role::ListItem)
             .aria_label(format!("{author} {verb}"))
-            .mx(px(SPACE_3));
+            .mx(zoomed(SPACE_3, cx));
         if !has_body {
-            return card.mb(px(SPACE_2)).child(header).into_any_element();
+            return card
+                .mb(zoomed(SPACE_2, cx))
+                .child(header)
+                .into_any_element();
         }
         let text_size = ui_font_size(FONT_BASE, cx);
         let view = cx.weak_entity();
-        card.mb(px(SPACE_3))
+        card.mb(zoomed(SPACE_3, cx))
             .border_1()
             .border_color(colors.border)
-            .rounded(px(RADIUS_LG))
+            .rounded(zoomed(RADIUS_LG, cx))
             .bg(colors.surface_sidebar)
             .overflow_hidden()
             .child(header)
             .when(!collapsed, |this| {
                 this.child(
                     v_flex()
-                        .px(px(SPACE_3))
-                        .pt(px(SPACE_2))
-                        .pb(px(SPACE_3))
-                        .gap(px(SPACE_1))
+                        .px(zoomed(SPACE_3, cx))
+                        .pt(zoomed(SPACE_2, cx))
+                        .pb(zoomed(SPACE_3, cx))
+                        .gap(zoomed(SPACE_1, cx))
                         .when_some(location, |this, location| {
                             this.child(
                                 self.text(FONT_SM, colors.foreground_muted, cx)
@@ -1336,12 +1339,12 @@ impl PullRequestView {
                 cx,
                 move |this, cx| this.toggle_menu(index, cx),
             )
-            .p(px(2.))
-            .rounded(px(RADIUS_BASE))
+            .p(zoomed(2., cx))
+            .rounded(zoomed(RADIUS_BASE, cx))
             .hover(move |style| style.bg(colors.surface2))
             .child(
                 icon(IconName::Ellipsis)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(colors.foreground_muted),
             );
         let menu = open.then(|| {
@@ -1368,24 +1371,24 @@ impl PullRequestView {
             }
             div()
                 .absolute()
-                .top(px(popup_offset(KEBAB_TRIGGER_HEIGHT)))
+                .top(zoomed(popup_offset(KEBAB_TRIGGER_HEIGHT), cx))
                 .right_0()
                 .child(
                     deferred(
                         anchored()
                             .anchor(Anchor::TopRight)
-                            .snap_to_window_with_margin(px(8.))
+                            .snap_to_window_with_margin(zoomed(8., cx))
                             .child(
                                 v_flex()
                                     .id(("pr-view-item-menu-list", index))
                                     .role(Role::Menu)
                                     .aria_label("Comment actions")
-                                    .w(px(MENU_WIDTH))
-                                    .py(px(SPACE_1))
+                                    .w(zoomed(MENU_WIDTH, cx))
+                                    .py(zoomed(SPACE_1, cx))
                                     .bg(colors.popover)
                                     .border_1()
                                     .border_color(colors.border_accent)
-                                    .rounded(px(RADIUS_LG))
+                                    .rounded(zoomed(RADIUS_LG, cx))
                                     .shadow(vec![shadow(ShadowSize::Md, cx)])
                                     .occlude()
                                     .on_mouse_down_out(cx.listener(|this, _, _, cx| {
@@ -1400,7 +1403,7 @@ impl PullRequestView {
         });
         div()
             .relative()
-            .w(px(KEBAB_SLOT))
+            .w(zoomed(KEBAB_SLOT, cx))
             .flex()
             .items_center()
             .justify_center()
@@ -1424,17 +1427,17 @@ impl PullRequestView {
         let colors = tokens(cx);
         self.pressable(id, label, cx, press)
             .role(Role::MenuItem)
-            .min_h(px(MENU_ITEM_HEIGHT))
-            .mx(px(SPACE_1))
-            .px(px(SPACE_2))
+            .min_h(zoomed(MENU_ITEM_HEIGHT, cx))
+            .mx(zoomed(SPACE_1, cx))
+            .px(zoomed(SPACE_2, cx))
             .flex()
             .items_center()
-            .gap(px(SPACE_2))
-            .rounded(px(RADIUS_MD))
+            .gap(zoomed(SPACE_2, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .hover(move |style| style.bg(colors.surface2))
             .child(
                 icon(glyph)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(colors.foreground_muted),
             )
             .child(self.text(FONT_BASE, colors.foreground, cx).child(label))
@@ -1455,8 +1458,8 @@ impl PullRequestView {
             .flex_1()
             .items_center()
             .justify_center()
-            .gap(px(SPACE_3))
-            .px(px(SPACE_4))
+            .gap(zoomed(SPACE_3, cx))
+            .px(zoomed(SPACE_4, cx))
             .child(
                 self.text(FONT_SM, colors.foreground_muted, cx)
                     .text_center()
@@ -1464,16 +1467,16 @@ impl PullRequestView {
             )
             .child(
                 self.pressable("pr-view-retry", "Retry", cx, |this, cx| this.retry(cx))
-                    .h(px(VIEW_BUTTON_HEIGHT))
-                    .px(px(SPACE_2))
+                    .h(zoomed(VIEW_BUTTON_HEIGHT, cx))
+                    .px(zoomed(SPACE_2, cx))
                     .flex()
                     .items_center()
-                    .gap(px(SPACE_1))
-                    .rounded(px(RADIUS_BASE))
+                    .gap(zoomed(SPACE_1, cx))
+                    .rounded(zoomed(RADIUS_BASE, cx))
                     .hover(move |style| style.bg(colors.surface_sidebar_hover))
                     .child(
                         icon(IconName::RotateCw)
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .text_color(colors.foreground),
                     )
                     .child(self.text(FONT_SM, colors.foreground, cx).child("Retry")),
@@ -1490,8 +1493,8 @@ impl PullRequestView {
             .flex_1()
             .items_center()
             .justify_center()
-            .gap(px(SPACE_2))
-            .p(px(SPACE_6))
+            .gap(zoomed(SPACE_2, cx))
+            .p(zoomed(SPACE_6, cx))
             .child(
                 self.text(FONT_BASE, colors.foreground, cx)
                     .child("No pull request yet"),
@@ -1505,20 +1508,20 @@ impl PullRequestView {
     }
 }
 
-fn disclosure(open: bool, size: f32, colors: &Tokens) -> AnyElement {
+fn disclosure(open: bool, size: f32, colors: &Tokens, cx: &App) -> AnyElement {
     icon(if open {
         IconName::ChevronDown
     } else {
         IconName::ChevronRight
     })
-    .with_size(px(size))
+    .with_size(zoomed(size, cx))
     .text_color(colors.foreground_muted)
     .into_any_element()
 }
 
 /// `CHECK_PRESENTATION_VIEW_POLICY`. The manual kinds draw the Settings gear, because the icon
 /// set has no `ManualStatusIcon`.
-fn check_icon(kind: CheckKind, size: f32, colors: &Tokens) -> AnyElement {
+fn check_icon(kind: CheckKind, size: f32, colors: &Tokens, cx: &App) -> AnyElement {
     let (glyph, color) = match kind {
         CheckKind::Success => (IconName::CircleCheck, colors.status_success),
         CheckKind::Failure => (IconName::CircleX, colors.status_danger),
@@ -1530,13 +1533,14 @@ fn check_icon(kind: CheckKind, size: f32, colors: &Tokens) -> AnyElement {
     };
     div()
         .flex_shrink_0()
-        .child(icon(glyph).with_size(px(size)).text_color(color))
+        .child(icon(glyph).with_size(zoomed(size, cx)).text_color(color))
         .into_any_element()
 }
 
 /// `ChecksRing`: the track, then one arc per check group in `CHECK_ORDER`, clockwise from
 /// twelve. With no checks only the track shows.
-fn checks_ring(groups: &[ChecksGroup], size: f32, colors: &Tokens) -> AnyElement {
+fn checks_ring(groups: &[ChecksGroup], size: f32, colors: &Tokens, cx: &App) -> AnyElement {
+    let size = size * zoom(cx);
     let track = colors.surface3;
     let arcs: Vec<(Hsla, f32, f32)> = ring_segments(groups)
         .into_iter()
@@ -1590,23 +1594,28 @@ fn checks_ring(groups: &[ChecksGroup], size: f32, colors: &Tokens) -> AnyElement
     div().flex_shrink_0().child(ring).into_any_element()
 }
 
-fn skeleton_bar(width: impl Into<Length> + Clone, height: f32, colors: &Tokens) -> Div {
+fn skeleton_bar(width: impl Into<Length> + Clone, height: f32, colors: &Tokens, cx: &App) -> Div {
     div()
         .w(width)
-        .h(px(height))
-        .rounded(px(RADIUS_SM))
+        .h(zoomed(height, cx))
+        .rounded(zoomed(RADIUS_SM, cx))
         .bg(colors.surface2)
 }
 
 /// `PullRequestPaneSkeleton`, without the pulse.
-fn pane_skeleton(colors: &Tokens) -> AnyElement {
+fn pane_skeleton(colors: &Tokens, cx: &App) -> AnyElement {
     let check_row = |_| {
         h_flex()
-            .min_h(px(CHECK_ROW_HEIGHT))
-            .px(px(SPACE_3))
-            .gap(px(SPACE_2))
-            .child(div().size(px(ICON_SM)).rounded_full().bg(colors.surface2))
-            .child(skeleton_bar(relative(0.6), 12., colors))
+            .min_h(zoomed(CHECK_ROW_HEIGHT, cx))
+            .px(zoomed(SPACE_3, cx))
+            .gap(zoomed(SPACE_2, cx))
+            .child(
+                div()
+                    .size(zoomed(ICON_SM, cx))
+                    .rounded_full()
+                    .bg(colors.surface2),
+            )
+            .child(skeleton_bar(relative(0.6), 12., colors, cx))
     };
     v_flex()
         .id("pr-view-skeleton")
@@ -1614,53 +1623,61 @@ fn pane_skeleton(colors: &Tokens) -> AnyElement {
         .aria_label("Loading pull request")
         .child(
             v_flex()
-                .gap(px(SPACE_2))
-                .p(px(SPACE_4))
-                .child(skeleton_bar(relative(0.75), 16., colors))
-                .child(skeleton_bar(relative(0.4), 12., colors)),
+                .gap(zoomed(SPACE_2, cx))
+                .p(zoomed(SPACE_4, cx))
+                .child(skeleton_bar(relative(0.75), 16., colors, cx))
+                .child(skeleton_bar(relative(0.4), 12., colors, cx)),
         )
         .child(
             h_flex()
-                .h(px(TOOLBAR_HEIGHT))
-                .px(px(SPACE_3))
-                .gap(px(SPACE_2))
-                .child(skeleton_bar(px(96.), 24., colors).rounded(px(RADIUS_LG)))
-                .child(skeleton_bar(px(96.), 24., colors).rounded(px(RADIUS_LG))),
+                .h(zoomed(TOOLBAR_HEIGHT, cx))
+                .px(zoomed(SPACE_3, cx))
+                .gap(zoomed(SPACE_2, cx))
+                .child(
+                    skeleton_bar(zoomed(96., cx), 24., colors, cx).rounded(zoomed(RADIUS_LG, cx)),
+                )
+                .child(
+                    skeleton_bar(zoomed(96., cx), 24., colors, cx).rounded(zoomed(RADIUS_LG, cx)),
+                ),
         )
         .child(
             v_flex()
-                .py(px(SPACE_2))
-                .gap(px(SPACE_1))
+                .py(zoomed(SPACE_2, cx))
+                .gap(zoomed(SPACE_1, cx))
                 .children((0..3).map(check_row)),
         )
-        .child(v_flex().py(px(SPACE_2)).child(activity_skeleton(colors)))
+        .child(
+            v_flex()
+                .py(zoomed(SPACE_2, cx))
+                .child(activity_skeleton(colors, cx)),
+        )
         .into_any_element()
 }
 
 /// `PrActivitySkeleton`: two placeholder cards.
-fn activity_skeleton(colors: &Tokens) -> AnyElement {
+fn activity_skeleton(colors: &Tokens, cx: &App) -> AnyElement {
     let card = |_| {
         v_flex()
-            .mx(px(SPACE_3))
-            .mb(px(SPACE_3))
-            .p(px(SPACE_3))
-            .gap(px(SPACE_2))
+            .mx(zoomed(SPACE_3, cx))
+            .mb(zoomed(SPACE_3, cx))
+            .p(zoomed(SPACE_3, cx))
+            .gap(zoomed(SPACE_2, cx))
             .border_1()
             .border_color(colors.border)
-            .rounded(px(RADIUS_LG))
+            .rounded(zoomed(RADIUS_LG, cx))
             .child(
                 h_flex()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .child(
                         div()
-                            .size(px(AVATAR_SIZE))
+                            .size(zoomed(AVATAR_SIZE, cx))
                             .rounded_full()
                             .bg(colors.surface2),
                     )
-                    .child(skeleton_bar(relative(0.3), 12., colors)),
+                    .child(skeleton_bar(relative(0.3), 12., colors, cx)),
             )
-            .child(skeleton_bar(relative(0.9), 12., colors))
-            .child(skeleton_bar(relative(0.6), 12., colors))
+            .child(skeleton_bar(relative(0.9), 12., colors, cx))
+            .child(skeleton_bar(relative(0.6), 12., colors, cx))
     };
     v_flex().children((0..2).map(card)).into_any_element()
 }
@@ -1678,7 +1695,7 @@ impl Render for PullRequestView {
             .bg(colors.surface_sidebar)
             .text_color(colors.foreground);
         let status = match &self.load {
-            Load::Loading => return root.child(pane_skeleton(&colors)),
+            Load::Loading => return root.child(pane_skeleton(&colors, cx)),
             Load::Failed(message) => {
                 let message = message.clone();
                 return root.child(self.render_error(&message, cx));

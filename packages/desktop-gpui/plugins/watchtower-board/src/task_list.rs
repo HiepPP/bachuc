@@ -216,12 +216,12 @@ impl TaskList {
             )))
             .aria_expanded(!collapsed)
             .w_full()
-            .min_h(px(GROUP_MIN_HEIGHT))
-            .py(px(GROUP_PADDING))
+            .min_h(bachuc_theme::zoomed(GROUP_MIN_HEIGHT, cx))
+            .py(bachuc_theme::zoomed(GROUP_PADDING, cx))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(GROUP_GAP))
+            .gap(bachuc_theme::zoomed(GROUP_GAP, cx))
             .border_t_1()
             .border_color(colors.border)
             .cursor_pointer()
@@ -232,13 +232,13 @@ impl TaskList {
                 view.rail_changed(cx);
             }))
             .child(
-                div().w(px(ICON_XS)).child(
+                div().w(bachuc_theme::zoomed(ICON_XS, cx)).child(
                     icon(if collapsed {
                         IconName::ChevronRight
                     } else {
                         IconName::ChevronDown
                     })
-                    .with_size(px(ICON_XS))
+                    .with_size(bachuc_theme::zoomed(ICON_XS, cx))
                     .text_color(colors.foreground_muted),
                 ),
             )
@@ -284,7 +284,7 @@ impl TaskList {
             .flex()
             .flex_row()
             .items_start()
-            .gap(px(SPACE_2))
+            .gap(bachuc_theme::zoomed(SPACE_2, cx))
             .cursor_pointer()
             .on_click(cx.listener(move |view: &mut V, _, _, cx| {
                 if let Some(list) = view.task_list() {
@@ -306,7 +306,7 @@ impl TaskList {
                     .flex_shrink_0()
                     .truncate()
                     .text_size(ui_font_size(TEXT_11, cx))
-                    .line_height(px(LINE_18))
+                    .line_height(bachuc_theme::zoomed(LINE_18, cx))
                     .text_color(colors.foreground_muted)
                     .child(class)
             }))
@@ -315,7 +315,7 @@ impl TaskList {
                     .flex_1()
                     .min_w_0()
                     .text_size(ui_font_size(TEXT_13, cx))
-                    .line_height(px(LINE_18))
+                    .line_height(bachuc_theme::zoomed(LINE_18, cx))
                     .text_color(colors.foreground)
                     .when(!selected, |this| this.truncate())
                     .child(task_title(&task.id, &task.title)),
@@ -323,11 +323,11 @@ impl TaskList {
             .child(
                 div()
                     .flex_shrink_0()
-                    .px(px(BADGE_PADDING_X))
-                    .py(px(BADGE_PADDING_Y))
+                    .px(bachuc_theme::zoomed(BADGE_PADDING_X, cx))
+                    .py(bachuc_theme::zoomed(BADGE_PADDING_Y, cx))
                     .border_1()
                     .border_color(badge)
-                    .rounded(px(BADGE_RADIUS))
+                    .rounded(bachuc_theme::zoomed(BADGE_RADIUS, cx))
                     .text_size(ui_font_size(TEXT_10, cx))
                     .font_weight(FontWeight(WEIGHT_SEMIBOLD))
                     .text_color(badge)
@@ -337,14 +337,17 @@ impl TaskList {
             .w_full()
             .flex()
             .flex_col()
-            .gap(px(SPACE_2))
-            .py(px(ROW_PADDING_Y))
-            .px(px(if self.dense {
-                ROW_PADDING_X_DENSE
-            } else {
-                ROW_PADDING_X
-            }))
-            .rounded(px(RADIUS_MD))
+            .gap(bachuc_theme::zoomed(SPACE_2, cx))
+            .py(bachuc_theme::zoomed(ROW_PADDING_Y, cx))
+            .px(bachuc_theme::zoomed(
+                if self.dense {
+                    ROW_PADDING_X_DENSE
+                } else {
+                    ROW_PADDING_X
+                },
+                cx,
+            ))
+            .rounded(bachuc_theme::zoomed(RADIUS_MD, cx))
             .when(selected, |this| this.bg(colors.surface1))
             .child(row)
             .when(selected, |this| {
@@ -371,14 +374,14 @@ impl TaskList {
         let text = |value: String, cx: &App| {
             div()
                 .text_size(ui_font_size(FONT_BASE, cx))
-                .line_height(px(LINE_20))
+                .line_height(bachuc_theme::zoomed(LINE_20, cx))
                 .text_color(colors.foreground)
                 .child(value)
         };
         let danger = |value: String, cx: &App| {
             div()
                 .text_size(ui_font_size(TEXT_13, cx))
-                .line_height(px(LINE_19))
+                .line_height(bachuc_theme::zoomed(LINE_19, cx))
                 .text_color(colors.status_danger)
                 .child(value)
         };
@@ -390,13 +393,13 @@ impl TaskList {
             .filter(|_| task.brief.is_some() && task.error.is_none())
             .map(|workspace_id| attachment_key(workspace_id, &task.id));
         div()
-            .mt(px(DETAILS_MARGIN))
-            .pt(px(DETAILS_PADDING))
+            .mt(bachuc_theme::zoomed(DETAILS_MARGIN, cx))
+            .pt(bachuc_theme::zoomed(DETAILS_PADDING, cx))
             .border_t_1()
             .border_color(colors.border)
             .flex()
             .flex_col()
-            .gap(px(SPACE_2))
+            .gap(bachuc_theme::zoomed(SPACE_2, cx))
             .child(section(
                 "Brief",
                 text(
@@ -469,7 +472,7 @@ impl TaskList {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(SPACE_2))
+                    .gap(bachuc_theme::zoomed(SPACE_2, cx))
                     .child(
                         div()
                             .text_size(ui_font_size(TEXT_11, cx))
@@ -484,9 +487,9 @@ impl TaskList {
                                 "Copy attachment search for {task_id}"
                             )))
                             .self_start()
-                            .px(px(COPY_PADDING_X))
-                            .py(px(COPY_PADDING_Y))
-                            .rounded(px(RADIUS_MD))
+                            .px(bachuc_theme::zoomed(COPY_PADDING_X, cx))
+                            .py(bachuc_theme::zoomed(COPY_PADDING_Y, cx))
+                            .rounded(bachuc_theme::zoomed(RADIUS_MD, cx))
                             .bg(colors.accent)
                             .cursor_pointer()
                             .text_size(ui_font_size(FONT_SM, cx))
@@ -511,7 +514,7 @@ impl TaskList {
                         .role(Role::Status)
                         .aria_label(SharedString::from(self.notice.clone()))
                         .text_size(ui_font_size(FONT_SM, cx))
-                        .line_height(px(LINE_17))
+                        .line_height(bachuc_theme::zoomed(LINE_17, cx))
                         .text_color(colors.foreground_muted)
                         .child(self.notice.clone()),
                 )

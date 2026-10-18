@@ -14,7 +14,7 @@ use bachuc_theme::metrics::{
 };
 use bachuc_theme::{
     SyntaxColors, Tokens, code_font_size, mono_font_family, scheme, syntax_colors, tokens,
-    ui_font_size,
+    ui_font_size, zoomed,
 };
 use gpui_kit::component::highlighter::SyntaxHighlighter;
 use gpui_kit::component::{Rope, Sizable as _, h_flex, v_flex};
@@ -73,6 +73,7 @@ pub(crate) fn icon_button(
     name: IconName,
     color: Hsla,
     t: &Tokens,
+    cx: &App,
 ) -> Stateful<Div> {
     let fill = t.interaction_highlight;
     div()
@@ -83,11 +84,11 @@ pub(crate) fn icon_button(
         .flex_none()
         .items_center()
         .justify_center()
-        .p(px(SPACE_1))
-        .rounded(px(RADIUS_MD))
+        .p(zoomed(SPACE_1, cx))
+        .rounded(zoomed(RADIUS_MD, cx))
         .cursor_pointer()
         .hover(move |button| button.bg(fill))
-        .child(icon(name).with_size(px(ICON_SM)).text_color(color))
+        .child(icon(name).with_size(zoomed(ICON_SM, cx)).text_color(color))
 }
 
 impl TimelineView {
@@ -192,11 +193,11 @@ impl TimelineView {
 
         let tool_icon = if is_error {
             icon(IconName::TriangleAlert)
-                .with_size(px(ICON_XS))
+                .with_size(zoomed(ICON_XS, cx))
                 .text_color(t.destructive.opacity(0.8))
         } else {
             icon(shown.icon)
-                .with_size(px(ICON_XS))
+                .with_size(zoomed(ICON_XS, cx))
                 .text_color(if expanded {
                     t.foreground
                 } else {
@@ -208,7 +209,7 @@ impl TimelineView {
         } else {
             IconName::ChevronRight
         })
-        .with_size(px(ICON_SM))
+        .with_size(zoomed(ICON_SM, cx))
         .text_color(t.foreground);
         // The tool icon turns into the chevron on hover or while open. Hover swaps visibility
         // of two stacked layers, never `display`: GPUI hit-tests hover in prepaint against the
@@ -225,9 +226,9 @@ impl TimelineView {
         };
         let icon_slot = div()
             .relative()
-            .size(px(ICON_SLOT))
+            .size(zoomed(ICON_SLOT, cx))
             .flex_none()
-            .mr(px(SPACE_1))
+            .mr(zoomed(SPACE_1, cx))
             .flex()
             .items_center()
             .justify_center()
@@ -263,7 +264,7 @@ impl TimelineView {
             div()
                 .flex_shrink(1.)
                 .min_w_0()
-                .ml(px(SPACE_2))
+                .ml(zoomed(SPACE_2, cx))
                 .truncate()
                 .text_color(active(t.foreground_muted))
                 .group_hover(group.clone(), |s| s.text_color(t.foreground))
@@ -277,8 +278,9 @@ impl TimelineView {
                 IconName::FileSymlink,
                 t.foreground_muted,
                 &t,
+                cx,
             )
-            .ml(px(SPACE_1))
+            .ml(zoomed(SPACE_1, cx))
             .invisible()
             .group_hover(group.clone(), |s| s.visible())
             .on_click(cx.listener(move |_, _, _, cx| {
@@ -306,9 +308,9 @@ impl TimelineView {
             .aria_label(aria.clone())
             .when(can_open, |header| header.aria_expanded(expanded))
             .items_center()
-            .px(px(SPACE_2))
-            .py(px(SPACE_1))
-            .rounded(px(RADIUS_LG))
+            .px(zoomed(SPACE_2, cx))
+            .py(zoomed(SPACE_1, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .border_1()
             .border_color(transparent_black())
             .when(expanded, |header| {
@@ -332,7 +334,7 @@ impl TimelineView {
                 .id(("badge-detail", key))
                 .role(Role::Group)
                 .aria_label(format!("{} details", shown.name))
-                .rounded_b(px(RADIUS_LG))
+                .rounded_b(zoomed(RADIUS_LG, cx))
                 .border_1()
                 .border_t_0()
                 .border_color(t.border)
@@ -350,7 +352,7 @@ impl TimelineView {
             .group(group)
             .role(Role::Group)
             .aria_label(format!("Tool call {aria}"))
-            .mx(px(-BADGE_BLEED))
+            .mx(zoomed(-BADGE_BLEED, cx))
             .child(header)
             .children(details)
             .into_any_element()
@@ -369,7 +371,7 @@ impl TimelineView {
         let full_bleed = matches!(detail["type"].as_str(), Some("edit" | "shell" | "write"));
         let path = detail["filePath"].as_str();
         v_flex()
-            .gap(px(if full_bleed { SPACE_2 } else { SPACE_4 }))
+            .gap(zoomed(if full_bleed { SPACE_2 } else { SPACE_4 }, cx))
             .children(sections.iter().enumerate().map(|(position, section)| {
                 let id = ElementId::Name(format!("section-{key}-{position}").into());
                 match section {
@@ -418,45 +420,48 @@ impl TimelineView {
                         self.code_area(id, max_height, true, &t, cx)
                             .children(session.clone().map(|session| {
                                 div()
-                                    .mb(px(SPACE_2))
+                                    .mb(zoomed(SPACE_2, cx))
                                     .text_color(t.foreground_muted)
                                     .child(format!("session {session}"))
                             }))
                             .when(!actions.is_empty(), |area| {
-                                area.child(v_flex().gap(px(SPACE_1)).mb(px(SPACE_2)).children(
-                                    actions.iter().map(|(tool, summary)| {
-                                        h_flex()
-                                            .gap(px(SPACE_2))
-                                            .font_family(mono)
-                                            .child(
-                                                div()
-                                                    .text_color(t.foreground_muted)
-                                                    .child(tool.clone()),
-                                            )
-                                            .children(summary.clone())
-                                    }),
-                                ))
+                                area.child(
+                                    v_flex()
+                                        .gap(zoomed(SPACE_1, cx))
+                                        .mb(zoomed(SPACE_2, cx))
+                                        .children(actions.iter().map(|(tool, summary)| {
+                                            h_flex()
+                                                .gap(zoomed(SPACE_2, cx))
+                                                .font_family(mono)
+                                                .child(
+                                                    div()
+                                                        .text_color(t.foreground_muted)
+                                                        .child(tool.clone()),
+                                                )
+                                                .children(summary.clone())
+                                        })),
+                                )
                             })
                             .when(!log.is_empty(), |area| area.child(cut_lines(log)))
                             .into_any_element()
                     }
                     Section::Plain(text) => div()
                         .id(id)
-                        .max_h(px(max_height))
+                        .max_h(zoomed(max_height, cx))
                         .overflow_y_scroll()
-                        .p(px(SPACE_3))
-                        .rounded(px(RADIUS_BASE))
+                        .p(zoomed(SPACE_3, cx))
+                        .rounded(zoomed(RADIUS_BASE, cx))
                         .border_1()
                         .border_color(t.border)
                         .bg(t.surface2)
                         .text_size(ui_font_size(FONT_BASE, cx))
-                        .line_height(px(22.))
+                        .line_height(zoomed(22., cx))
                         .text_color(t.foreground)
                         .child(text.clone())
                         .into_any_element(),
                     Section::Header(title) => div()
-                        .px(px(SPACE_3))
-                        .py(px(SPACE_2))
+                        .px(zoomed(SPACE_3, cx))
+                        .py(zoomed(SPACE_2, cx))
                         .border_b_1()
                         .border_color(t.border)
                         .text_size(ui_font_size(FONT_BASE, cx))
@@ -464,7 +469,7 @@ impl TimelineView {
                         .child(title.clone())
                         .into_any_element(),
                     Section::Error(error) => v_flex()
-                        .gap(px(SPACE_2))
+                        .gap(zoomed(SPACE_2, cx))
                         .child(
                             div()
                                 .text_size(ui_font_size(FONT_SM, cx))
@@ -476,14 +481,14 @@ impl TimelineView {
                             div()
                                 .id(id)
                                 .overflow_x_scroll()
-                                .p(px(SPACE_3))
-                                .rounded(px(RADIUS_BASE))
+                                .p(zoomed(SPACE_3, cx))
+                                .rounded(zoomed(RADIUS_BASE, cx))
                                 .border_1()
                                 .border_color(t.destructive)
                                 .bg(t.surface2)
                                 .font_family(mono_font_family(cx))
                                 .text_size(code_font_size(FONT_CODE, cx))
-                                .line_height(px(CODE_LINE_HEIGHT))
+                                .line_height(zoomed(CODE_LINE_HEIGHT, cx))
                                 .whitespace_nowrap()
                                 .text_color(t.destructive)
                                 .child(error.clone()),
@@ -505,19 +510,19 @@ impl TimelineView {
     ) -> Stateful<Div> {
         div()
             .id(id)
-            .max_h(px(max_height))
+            .max_h(zoomed(max_height, cx))
             .overflow_scroll()
-            .p(px(SPACE_3))
+            .p(zoomed(SPACE_3, cx))
             .font_family(mono_font_family(cx))
             .text_size(code_font_size(FONT_CODE, cx))
-            .line_height(px(CODE_LINE_HEIGHT))
+            .line_height(zoomed(CODE_LINE_HEIGHT, cx))
             .whitespace_nowrap()
             .text_color(t.foreground)
             .map(|area| {
                 if full_bleed {
                     area.bg(t.surface1)
                 } else {
-                    area.rounded(px(RADIUS_BASE))
+                    area.rounded(zoomed(RADIUS_BASE, cx))
                         .border_1()
                         .border_color(t.border)
                         .bg(t.surface2)
@@ -555,7 +560,7 @@ impl TimelineView {
                     .children(start_line.map(|start| {
                         div()
                             .flex_none()
-                            .pr(px(SPACE_3))
+                            .pr(zoomed(SPACE_3, cx))
                             .text_color(muted)
                             .child(format!("{:>gutter$}", start + index as u64))
                     }))
@@ -577,10 +582,10 @@ impl TimelineView {
         let runs = self.diff_runs(lines, path, cx);
         let area = div()
             .id(id)
-            .max_h(px(max_height))
+            .max_h(zoomed(max_height, cx))
             .overflow_scroll()
             .bg(t.surface1)
-            .p(px(SPACE_3))
+            .p(zoomed(SPACE_3, cx))
             .font_family(mono_font_family(cx))
             .text_size(code_font_size(FONT_CODE, cx))
             .whitespace_nowrap();
@@ -598,7 +603,7 @@ impl TimelineView {
                     LineKind::Hunk => ("", t.surface1, t.foreground_muted),
                 };
                 h_flex()
-                    .py(px(SPACE_1))
+                    .py(zoomed(SPACE_1, cx))
                     .bg(bg)
                     .text_color(color)
                     .child(sign)

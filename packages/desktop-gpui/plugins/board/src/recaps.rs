@@ -176,7 +176,7 @@ impl BoardPage {
                 .id("board-recaps-loading")
                 .role(Role::ProgressIndicator)
                 .aria_label("Loading recaps")
-                .child(spinner(t.accent, px(20.)))
+                .child(spinner(t.accent, bachuc_theme::zoomed(20., cx)))
                 .into_any_element(),
             RecapsBody::Message(text) => div()
                 .id("board-recaps-message")
@@ -224,7 +224,7 @@ impl BoardPage {
             return div().into_any_element();
         };
         let board = store.read(cx);
-        let scale = crate::model::settings::board_scale(board.size());
+        let scale = crate::model::settings::board_scale(board.size()) * bachuc_theme::zoom(cx);
         let s = |value: f32| px(value * scale);
         let t = bachuc_theme::tokens(cx);
         match *item {

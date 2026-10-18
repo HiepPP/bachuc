@@ -3929,6 +3929,7 @@ impl BlockNode {
                                 NodeRenderOptions {
                                     is_first,
                                     prev,
+                                    in_blockquote: true,
                                     ..options.is_last(is_last)
                                 },
                                 node_cx,
@@ -3948,7 +3949,17 @@ impl BlockNode {
             } => div()
                 .w_full()
                 .min_w_0()
-                .pb(mb)
+                .map(|this| {
+                    // A top-level list takes the style's own space above and
+                    // below; nested lists and lists in a blockquote keep the
+                    // paragraph gap.
+                    match node_cx.style.list_spacing() {
+                        Some((top, bottom)) if options.depth == 0 && !options.in_blockquote => {
+                            this.pt(top).pb(if mb.is_zero() { mb } else { bottom })
+                        }
+                        _ => this.pb(mb),
+                    }
+                })
                 .children({
                     let mut items = Vec::with_capacity(children.len());
                     let mut item_index = 0;

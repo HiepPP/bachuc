@@ -5,7 +5,7 @@ use crate::notes::{Ask, Note, Outcome, cache_key, is_cache_only};
 use crate::shared::Shared;
 use bachuc_plugin_host::TimelineRenderInput;
 use bachuc_theme::metrics::{FONT_SM, SPACE_1_5, SPACE_3};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::*;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -149,13 +149,13 @@ impl Render for NoteView {
             .flex()
             .flex_col()
             .items_end()
-            .px(px(SPACE_3))
-            .pb(px(SPACE_1_5))
+            .px(zoomed(SPACE_3, cx))
+            .pb(zoomed(SPACE_1_5, cx))
             .child(
                 div()
                     .max_w_full()
                     .text_size(ui_font_size(FONT_SM, cx))
-                    .line_height(px(NOTE_LINE_HEIGHT))
+                    .line_height(zoomed(NOTE_LINE_HEIGHT, cx))
                     .text_color(tokens(cx).foreground_muted)
                     .child(StyledText::new(text).with_highlights(runs)),
             )

@@ -646,7 +646,9 @@ impl BoardPage {
                     })
                     .child(meta),
             )
-            .when(pending, |header| header.child(spinner(t.accent, px(16.))))
+            .when(pending, |header| {
+                header.child(spinner(t.accent, bachuc_theme::zoomed(16., cx)))
+            })
             .child(div().flex_1().h(px(1.)).bg(t.border));
 
         let body = v_flex()
@@ -708,7 +710,7 @@ impl BoardPage {
         let board = store.read(cx);
         let chart = Chart {
             t: bachuc_theme::tokens(cx),
-            scale: crate::model::settings::board_scale(board.size()),
+            scale: crate::model::settings::board_scale(board.size()) * bachuc_theme::zoom(cx),
             model,
             hues: board.hues(),
             store: store.downgrade(),

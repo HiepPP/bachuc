@@ -261,7 +261,7 @@ impl BoardPage {
                 .items_center()
                 .justify_center()
                 .gap(s(10.))
-                .child(spinner(t.accent, px(16.)))
+                .child(spinner(t.accent, bachuc_theme::zoomed(16., cx)))
                 .child(
                     div()
                         .text_size(s(13.))
@@ -530,7 +530,8 @@ impl BoardPage {
         let Some(store) = self.store.upgrade() else {
             return div().into_any_element();
         };
-        let scale = crate::model::settings::board_scale(store.read(cx).size());
+        let scale =
+            crate::model::settings::board_scale(store.read(cx).size()) * bachuc_theme::zoom(cx);
         let online = store.read(cx).is_connected();
         let watchtower = crate::store::watchtower_open(cx);
         let page = cx.weak_entity();

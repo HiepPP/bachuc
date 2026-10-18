@@ -6,7 +6,7 @@ use crate::pins::Pins;
 use bachuc_icons::{IconName, icon};
 use bachuc_plugin_host::ComposerTarget;
 use bachuc_theme::metrics::{FONT_BASE, FONT_SM, ICON_MD, RADIUS_MD, SPACE_1, SPACE_2};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -75,13 +75,13 @@ impl SkillsMenu {
             .id(id)
             .role(Role::MenuItem)
             .aria_label(label)
-            .min_h(px(ROW_MIN_HEIGHT))
-            .mx(px(SPACE_1))
-            .px(px(ROW_PAD_X))
-            .py(px(ROW_PAD_Y))
-            .gap(px(SPACE_2))
+            .min_h(zoomed(ROW_MIN_HEIGHT, cx))
+            .mx(zoomed(SPACE_1, cx))
+            .px(zoomed(ROW_PAD_X, cx))
+            .py(zoomed(ROW_PAD_Y, cx))
+            .gap(zoomed(SPACE_2, cx))
             .items_center()
-            .rounded(px(RADIUS_MD))
+            .rounded(zoomed(RADIUS_MD, cx))
             .when(disabled, |row| row.opacity(0.5))
             .when(pressable, |row| {
                 row.cursor_pointer().hover(move |row| row.bg(t.surface2))
@@ -104,7 +104,7 @@ impl SkillsMenu {
                     div()
                         .truncate()
                         .text_size(ui_font_size(FONT_BASE, cx))
-                        .line_height(px(LABEL_LINE))
+                        .line_height(zoomed(LABEL_LINE, cx))
                         .text_color(if muted {
                             t.foreground_muted
                         } else {
@@ -114,10 +114,10 @@ impl SkillsMenu {
                 )
                 .children(description.map(|text| {
                     div()
-                        .mt(px(2.))
+                        .mt(zoomed(2., cx))
                         .line_clamp(2)
                         .text_size(ui_font_size(FONT_SM, cx))
-                        .line_height(px(SMALL_LINE))
+                        .line_height(zoomed(SMALL_LINE, cx))
                         .text_color(t.foreground_muted)
                         .child(text)
                 }))
@@ -125,7 +125,7 @@ impl SkillsMenu {
                     div()
                         .line_clamp(2)
                         .text_size(ui_font_size(FONT_SM, cx))
-                        .line_height(px(SMALL_LINE))
+                        .line_height(zoomed(SMALL_LINE, cx))
                         .text_color(t.status_warning)
                         .child(text)
                 })),
@@ -133,7 +133,7 @@ impl SkillsMenu {
         .when(selected == Some(true), |row| {
             row.child(
                 icon(IconName::Check)
-                    .with_size(px(ICON_MD))
+                    .with_size(zoomed(ICON_MD, cx))
                     .text_color(t.foreground_muted),
             )
         })
@@ -149,11 +149,12 @@ impl Render for SkillsMenu {
         let pinned = skills.clone().unwrap_or_default();
         let unknown = skills.is_none();
         let small = ui_font_size(FONT_SM, cx);
+        let (note_pad, note_line) = (zoomed(NOTE_PAD_X, cx), zoomed(SMALL_LINE, cx));
         let note = |text: String, color: Hsla| {
             div()
-                .px(px(NOTE_PAD_X))
+                .px(note_pad)
                 .text_size(small)
-                .line_height(px(SMALL_LINE))
+                .line_height(note_line)
                 .text_color(color)
                 .child(text)
         };
@@ -193,17 +194,21 @@ impl Render for SkillsMenu {
             .id("skill-pins-menu")
             .role(Role::Menu)
             .aria_label("Pinned skills")
-            .min_w(px(MENU_MIN_WIDTH))
-            .py(px(SPACE_1))
+            .min_w(zoomed(MENU_MIN_WIDTH, cx))
+            .py(zoomed(SPACE_1, cx))
             .child(
                 div()
-                    .pt(px(SPACE_2))
-                    .pb(px(SPACE_1))
+                    .pt(zoomed(SPACE_2, cx))
+                    .pb(zoomed(SPACE_1, cx))
                     .child(note("Pinned for this chat".into(), t.foreground_muted)),
             )
-            .children(error.map(|error| div().pb(px(SPACE_1)).child(note(error, t.status_danger))))
+            .children(error.map(|error| {
+                div()
+                    .pb(zoomed(SPACE_1, cx))
+                    .child(note(error, t.status_danger))
+            }))
             .children(rows)
-            .child(div().h(px(1.)).my(px(SPACE_1)).bg(t.border))
+            .child(div().h(px(1.)).my(zoomed(SPACE_1, cx)).bg(t.border))
             .child(clear)
     }
 }

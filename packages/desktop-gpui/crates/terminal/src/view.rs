@@ -13,7 +13,7 @@ use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
     BORDER_WIDTH_2, FONT_SM, ICON_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3,
 };
-use bachuc_theme::{ShadowSize, Tokens, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, Tokens, shadow, tokens, ui_font_size, zoomed};
 use futures::StreamExt;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::theme::Theme;
@@ -547,17 +547,17 @@ impl TerminalView {
 
 /// The find field's outline, drawn as a border on a box that reaches past the field. GPUI has no
 /// outline, and the box takes no pointer events because it has no handler.
-fn focus_ring(color: Hsla) -> Div {
+fn focus_ring(color: Hsla, cx: &App) -> Div {
     let reach = RING_WIDTH + RING_OFFSET;
     div()
         .absolute()
-        .top(px(-reach))
-        .right(px(-reach))
-        .bottom(px(-reach))
-        .left(px(-reach))
-        .border(px(RING_WIDTH))
+        .top(zoomed(-reach, cx))
+        .right(zoomed(-reach, cx))
+        .bottom(zoomed(-reach, cx))
+        .left(zoomed(-reach, cx))
+        .border(zoomed(RING_WIDTH, cx))
         .border_color(color)
-        .rounded(px(RADIUS_MD + reach))
+        .rounded(zoomed(RADIUS_MD + reach, cx))
 }
 
 type BarAction = fn(&mut TerminalView, &mut Window, &mut Context<TerminalView>);
@@ -810,8 +810,8 @@ impl TerminalView {
             .flex_none()
             .items_center()
             .justify_center()
-            .p(px(SPACE_1))
-            .rounded(px(RADIUS_MD))
+            .p(zoomed(SPACE_1, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .cursor_pointer()
             .hover(move |button| button.bg(fill))
             .when(!enabled, |button| button.opacity(0.5))
@@ -821,7 +821,7 @@ impl TerminalView {
             })
             .child(
                 icon(icon_name)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(t.foreground_muted),
             )
     }
@@ -843,38 +843,38 @@ impl TerminalView {
         Some(
             div()
                 .absolute()
-                .top(px(SPACE_2))
-                .right(px(SPACE_3))
+                .top(zoomed(SPACE_2, cx))
+                .right(zoomed(SPACE_3, cx))
                 .occlude()
                 .child(
                     h_flex()
                         .id("terminal-find")
                         .role(Role::Search)
                         .aria_label("Find")
-                        .w(px(FIND_WIDTH))
+                        .w(zoomed(FIND_WIDTH, cx))
                         .max_w_full()
-                        .p(px(SPACE_1_5))
-                        .gap(px(SPACE_1))
+                        .p(zoomed(SPACE_1_5, cx))
+                        .gap(zoomed(SPACE_1, cx))
                         .items_center()
                         .text_size(size)
                         .line_height(line_height)
                         .bg(t.surface1)
                         .border_1()
                         .border_color(t.border)
-                        .rounded(px(RADIUS_LG))
+                        .rounded(zoomed(RADIUS_LG, cx))
                         .shadow(vec![shadow(ShadowSize::Md, cx)])
                         .child(
                             h_flex()
                                 .flex_1()
                                 .min_w_0()
-                                .h(px(FIELD_HEIGHT))
-                                .gap(px(SPACE_2))
+                                .h(zoomed(FIELD_HEIGHT, cx))
+                                .gap(zoomed(SPACE_2, cx))
                                 .items_center()
-                                .px(px(SPACE_2))
+                                .px(zoomed(SPACE_2, cx))
                                 .relative()
                                 .bg(t.surface2)
-                                .rounded(px(RADIUS_MD))
-                                .when(focused, |field| field.child(focus_ring(t.accent)))
+                                .rounded(zoomed(RADIUS_MD, cx))
+                                .when(focused, |field| field.child(focus_ring(t.accent, cx)))
                                 .child(
                                     div().flex_1().min_w_0().child(
                                         Input::new(&finder.input)

@@ -14,7 +14,7 @@ use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_SM, SPACE_1, SPACE_2, SPACE_3, SPACE_4, WEIGHT_MEDIUM,
 };
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_kit::component::switch::Switch;
@@ -330,7 +330,7 @@ impl ProjectEditor {
 
     fn callout_buttons(&self, cx: &mut Context<Self>, retry: bool) -> AnyElement {
         h_flex()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .when(retry, |this| {
                 this.child(
                     Button::new("project-try-again")
@@ -415,7 +415,7 @@ impl ProjectEditor {
             );
         if removing {
             item = item.child(
-                div().px(px(SPACE_4)).pb(px(SPACE_4)).child(
+                div().px(zoomed(SPACE_4, cx)).pb(zoomed(SPACE_4, cx)).child(
                     callout(cx)
                         .id(("script-remove-confirm", id))
                         .role(Role::AlertDialog)
@@ -423,7 +423,7 @@ impl ProjectEditor {
                         .child(div().child(format!("Remove {title}?")))
                         .child(
                             h_flex()
-                                .gap(px(SPACE_2))
+                                .gap(zoomed(SPACE_2, cx))
                                 .justify_end()
                                 .child(
                                     Button::new("script-remove-cancel")
@@ -466,13 +466,13 @@ impl ProjectEditor {
             .id("script-form")
             .role(Role::Form)
             .aria_label(title.clone())
-            .mb(px(SPACE_3))
-            .p(px(SPACE_4))
-            .gap(px(SPACE_3))
+            .mb(zoomed(SPACE_3, cx))
+            .p(zoomed(SPACE_4, cx))
+            .gap(zoomed(SPACE_3, cx))
             .child(div().font_weight(FontWeight(WEIGHT_MEDIUM)).child(title))
             .child(
                 v_flex()
-                    .gap(px(SPACE_1))
+                    .gap(zoomed(SPACE_1, cx))
                     .child(field_label("Name", cx))
                     .child(
                         Input::new(&edit.name)
@@ -487,7 +487,7 @@ impl ProjectEditor {
             )
             .child(
                 v_flex()
-                    .gap(px(SPACE_1))
+                    .gap(zoomed(SPACE_1, cx))
                     .child(field_label("Command", cx))
                     .child(
                         Textarea::new(&edit.command)
@@ -502,13 +502,13 @@ impl ProjectEditor {
             )
             .child(
                 h_flex()
-                    .gap(px(SPACE_3))
+                    .gap(zoomed(SPACE_3, cx))
                     .items_center()
                     .child(
                         v_flex()
                             .flex_1()
                             .min_w_0()
-                            .gap(px(SPACE_1))
+                            .gap(zoomed(SPACE_1, cx))
                             .child(div().child("Run as a service"))
                             .child(
                                 div()
@@ -531,7 +531,7 @@ impl ProjectEditor {
             )
             .child(
                 h_flex()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .justify_end()
                     .child(
                         Button::new("script-form-cancel")
@@ -591,8 +591,8 @@ impl ProjectEditor {
             .enumerate()
             .map(|(index, state)| {
                 v_flex()
-                    .gap(px(SPACE_2))
-                    .mb(px(SPACE_3))
+                    .gap(zoomed(SPACE_2, cx))
+                    .mb(zoomed(SPACE_3, cx))
                     .child(field_label(PROMPT_TITLES[index], cx))
                     .child(
                         Textarea::new(state)
@@ -639,8 +639,8 @@ impl ProjectEditor {
                 v_flex()
                     .child(
                         v_flex()
-                            .gap(px(SPACE_2))
-                            .mb(px(SPACE_3))
+                            .gap(zoomed(SPACE_2, cx))
+                            .mb(zoomed(SPACE_3, cx))
                             .child(field_label("Setup", cx))
                             .child(
                                 Textarea::new(&self.setup)
@@ -650,7 +650,7 @@ impl ProjectEditor {
                     )
                     .child(
                         v_flex()
-                            .gap(px(SPACE_2))
+                            .gap(zoomed(SPACE_2, cx))
                             .child(field_label("Teardown", cx))
                             .child(
                                 Textarea::new(&self.teardown)
@@ -672,12 +672,12 @@ impl ProjectEditor {
                 v_flex().children(prompt_sections),
                 cx,
             ))
-            .children(write_callout.map(|callout| div().mb(px(SPACE_3)).child(callout)))
+            .children(write_callout.map(|callout| div().mb(zoomed(SPACE_3, cx)).child(callout)))
             .child(
                 h_flex()
                     .items_center()
                     .justify_end()
-                    .gap(px(SPACE_3))
+                    .gap(zoomed(SPACE_3, cx))
                     .children(self.saved.then(|| {
                         div()
                             .id("project-saved")
@@ -725,8 +725,8 @@ impl Render for ProjectEditor {
         let colors = tokens(cx);
         let header = h_flex()
             .items_center()
-            .gap(px(SPACE_3))
-            .mb(px(SPACE_4))
+            .gap(zoomed(SPACE_3, cx))
+            .mb(zoomed(SPACE_4, cx))
             .child(
                 Button::new("project-back")
                     .ghost()
@@ -745,7 +745,7 @@ impl Render for ProjectEditor {
                     .font_weight(FontWeight(WEIGHT_MEDIUM))
                     .child(self.name.clone()),
             );
-        let page = column().child(page_title("Projects", cx)).child(header);
+        let page = column(cx).child(page_title("Projects", cx)).child(header);
         let body = match &self.load {
             Load::Loading => page.child(
                 div()
@@ -841,7 +841,7 @@ impl Render for ProjectsPane {
                     ))
                     .child(
                         icon(IconName::ChevronRight)
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .text_color(colors.foreground_muted),
                     )
                     .into_any_element()
@@ -849,7 +849,11 @@ impl Render for ProjectsPane {
             .collect();
         let body = if rows.is_empty() {
             card(cx)
-                .child(div().p(px(SPACE_4)).child(note("No projects yet", cx)))
+                .child(
+                    div()
+                        .p(zoomed(SPACE_4, cx))
+                        .child(note("No projects yet", cx)),
+                )
                 .into_any_element()
         } else {
             card(cx)
@@ -862,7 +866,7 @@ impl Render for ProjectsPane {
         scroll_page(
             "projects-pane",
             &self.scroll,
-            column()
+            column(cx)
                 .child(page_title("Projects", cx))
                 .child(section("Projects", None, body, cx)),
             cx,

@@ -18,7 +18,7 @@ use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_MD, RADIUS_LG, SETTINGS_DETAIL_MIN_WIDTH, SETTINGS_SIDEBAR_WIDTH,
     SPACE_0_5, SPACE_1, SPACE_2, SPACE_3,
 };
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -206,20 +206,20 @@ impl Settings {
             .role(Role::Tab)
             .aria_label(label.clone())
             .aria_selected(selected)
-            .min_h(px(28.))
-            .px(px(SPACE_2))
-            .py(px(bachuc_theme::metrics::SPACE_1))
+            .min_h(zoomed(28., cx))
+            .px(zoomed(SPACE_2, cx))
+            .py(zoomed(bachuc_theme::metrics::SPACE_1, cx))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(SPACE_2))
-            .rounded(px(RADIUS_LG))
+            .gap(zoomed(SPACE_2, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .cursor_pointer()
             .when(selected, |this| this.bg(colors.surface_sidebar_hover))
             .hover(|style| style.bg(colors.surface_sidebar_hover))
             .child(
                 icon(icon_name)
-                    .with_size(px(ICON_MD))
+                    .with_size(zoomed(ICON_MD, cx))
                     .text_color(colors.foreground_muted),
             )
             .child(
@@ -261,7 +261,7 @@ impl Settings {
         scroll_page(
             "plugin-screen-pane",
             &self.scroll,
-            column()
+            column(cx)
                 .child(page_title(page_header(rows, id), cx))
                 .child(body),
             cx,
@@ -344,32 +344,32 @@ impl Render for Settings {
                     .id("settings-sidebar")
                     .role(Role::Navigation)
                     .aria_label("Settings sections")
-                    .w(px(SETTINGS_SIDEBAR_WIDTH))
+                    .w(zoomed(SETTINGS_SIDEBAR_WIDTH, cx))
                     .h_full()
                     .flex_shrink_0()
                     .border_r_1()
                     .border_color(colors.border)
                     .bg(colors.surface_sidebar)
-                    .p(px(SPACE_2))
-                    .gap(px(SPACE_0_5))
+                    .p(zoomed(SPACE_2, cx))
+                    .gap(zoomed(SPACE_0_5, cx))
                     .child(
                         div()
                             .id("settings-back")
                             .role(Role::Button)
                             .aria_label("Back")
-                            .min_h(px(28.))
-                            .px(px(SPACE_2))
-                            .mb(px(SPACE_2))
+                            .min_h(zoomed(28., cx))
+                            .px(zoomed(SPACE_2, cx))
+                            .mb(zoomed(SPACE_2, cx))
                             .flex()
                             .flex_row()
                             .items_center()
-                            .gap(px(SPACE_2))
-                            .rounded(px(RADIUS_LG))
+                            .gap(zoomed(SPACE_2, cx))
+                            .rounded(zoomed(RADIUS_LG, cx))
                             .cursor_pointer()
                             .hover(|style| style.bg(colors.surface_sidebar_hover))
                             .child(
                                 icon(IconName::ArrowLeft)
-                                    .with_size(px(ICON_MD))
+                                    .with_size(zoomed(ICON_MD, cx))
                                     .text_color(colors.foreground_muted),
                             )
                             .child(
@@ -385,7 +385,7 @@ impl Render for Settings {
                             .id("settings-sections")
                             .role(Role::TabList)
                             .aria_label("Sections")
-                            .gap(px(SPACE_0_5))
+                            .gap(zoomed(SPACE_0_5, cx))
                             .children(rows),
                     )
                     .when(!plugin_rows.is_empty(), |this| {
@@ -394,9 +394,9 @@ impl Render for Settings {
                                 .id("settings-plugins-label")
                                 .role(Role::Heading)
                                 .aria_label(GROUP_LABEL)
-                                .mt(px(SPACE_3))
-                                .mb(px(SPACE_1))
-                                .px(px(SPACE_2))
+                                .mt(zoomed(SPACE_3, cx))
+                                .mb(zoomed(SPACE_1, cx))
+                                .px(zoomed(SPACE_2, cx))
                                 .text_size(ui_font_size(FONT_SM, cx))
                                 .text_color(colors.foreground_muted)
                                 .child(GROUP_LABEL),
@@ -406,7 +406,7 @@ impl Render for Settings {
                                 .id("settings-plugin-screens")
                                 .role(Role::TabList)
                                 .aria_label("Plugin screens")
-                                .gap(px(SPACE_0_5))
+                                .gap(zoomed(SPACE_0_5, cx))
                                 .children(plugin_rows),
                         )
                     }),
@@ -415,7 +415,7 @@ impl Render for Settings {
                 div()
                     .flex_1()
                     .h_full()
-                    .min_w(px(SETTINGS_DETAIL_MIN_WIDTH))
+                    .min_w(zoomed(SETTINGS_DETAIL_MIN_WIDTH, cx))
                     .child(pane),
             )
     }

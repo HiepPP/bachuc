@@ -608,6 +608,7 @@ dependencies = [
  "bachuc-plugin-host",
  "bachuc-sidebar",
  "bachuc-theme",
+ "bachuc-timeline",
  "base64 0.22.1",
  "chrono",
  "futures",
@@ -709,6 +710,7 @@ name = "bachuc-plugin-claude-look"
 version = "0.1.0"
 dependencies = [
  "bachuc-plugin-host",
+ "bachuc-theme",
  "gpui-kit",
 ]
 

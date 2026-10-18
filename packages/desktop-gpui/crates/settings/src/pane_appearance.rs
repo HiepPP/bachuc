@@ -17,9 +17,11 @@ use bachuc_plugin_host::PluginHostEvent;
 use bachuc_theme::metrics::{FONT_BASE, ICON_MD, RADIUS_MD, SPACE_2, SPACE_3, SPACE_4};
 use bachuc_theme::{
     SyntaxThemeId, TabClosePosition, ThemeChoice, installed_font_families, tokens, ui_font_size,
+    zoomed,
 };
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Side, Sizable as _, h_flex, v_flex};
 use gpui_kit::*;
@@ -155,6 +157,14 @@ impl AppearancePane {
         }
     }
 
+    fn set_chat_outline(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.current.chat_outline != enabled {
+            let mut next = self.current.clone();
+            next.chat_outline = enabled;
+            self.persist(next, cx);
+        }
+    }
+
     fn set_tab_close_position(&mut self, position: TabClosePosition, cx: &mut Context<Self>) {
         if self.current.tab_close_position != position {
             let mut next = self.current.clone();
@@ -174,11 +184,11 @@ impl AppearancePane {
             format!("Tab close button: {}", tab_close_label(current)),
             cx,
         )
-        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, app| {
             [TabClosePosition::Left, TabClosePosition::Right]
                 .into_iter()
                 .fold(
-                    menu.min_w(px(200.)).check_side(Side::Right),
+                    menu.min_w(zoomed(200., app)).check_side(Side::Right),
                     |menu, position| {
                         menu.item(Self::text_item(
                             tab_close_label(position).into(),
@@ -267,10 +277,10 @@ impl AppearancePane {
         let families = self.families.clone();
         let weak = cx.weak_entity();
         select_trigger(id, None, shown.clone(), format!("{label}: {shown}"), cx)
-            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, app| {
                 let menu = menu
-                    .min_w(px(240.))
-                    .max_h(px(320.))
+                    .min_w(zoomed(240., app))
+                    .max_h(zoomed(320., app))
                     .scrollable(true)
                     .check_side(Side::Right)
                     .item(Self::text_item(
@@ -302,9 +312,9 @@ impl AppearancePane {
             format!("Highlight theme: {}", current.label()),
             cx,
         )
-        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, app| {
             SyntaxThemeId::ALL.into_iter().fold(
-                menu.min_w(px(200.)).check_side(Side::Right),
+                menu.min_w(zoomed(200., app)).check_side(Side::Right),
                 |menu, theme| {
                     menu.item(Self::text_item(
                         theme.label().into(),
@@ -340,9 +350,9 @@ impl AppearancePane {
         };
         let items = theme_items(current, selected, &themes, &THEMES);
         let weak = cx.weak_entity();
-        trigger.dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+        trigger.dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, app| {
             items.iter().cloned().fold(
-                menu.min_w(px(200.)).check_side(Side::Right),
+                menu.min_w(zoomed(200., app)).check_side(Side::Right),
                 |menu, item| {
                     let weak = weak.clone();
                     // An element item: `PopupMenuItem::icon` forces an extra-small icon and the
@@ -354,11 +364,11 @@ impl AppearancePane {
                                 h_flex()
                                     .flex_1()
                                     .items_center()
-                                    .gap(px(SPACE_2))
+                                    .gap(zoomed(SPACE_2, cx))
                                     .text_size(ui_font_size(FONT_BASE, cx))
                                     .child(
                                         icon(theme_icon(theme))
-                                            .with_size(px(ICON_MD))
+                                            .with_size(zoomed(ICON_MD, cx))
                                             .text_color(tokens(cx).foreground_muted),
                                     )
                                     .child(theme_label(theme))
@@ -378,7 +388,7 @@ impl AppearancePane {
                                 h_flex()
                                     .flex_1()
                                     .items_center()
-                                    .gap(px(SPACE_2))
+                                    .gap(zoomed(SPACE_2, cx))
                                     .text_size(ui_font_size(FONT_BASE, cx))
                                     .child(swatch(color, cx))
                                     .child(div().flex_1().truncate().child(name.clone()))
@@ -426,8 +436,8 @@ impl AppearancePane {
         let field = Input::new(input)
             .accessibility_id(id)
             .aria_label(label)
-            .px(px(SPACE_3))
-            .rounded(px(RADIUS_MD))
+            .px(zoomed(SPACE_3, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .bg(colors.surface2)
             .border_color(colors.border)
             .text_size(ui_font_size(FONT_BASE, cx))
@@ -436,9 +446,13 @@ impl AppearancePane {
             .child(row_text(title, Some(hint.into()), cx))
             .child(
                 h_flex()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .items_center()
-                    .child(div().w(px(64.)).child(Styled::h(field, px(36.))))
+                    .child(
+                        div()
+                            .w(zoomed(64., cx))
+                            .child(Styled::h(field, zoomed(36., cx))),
+                    )
                     .child(
                         div()
                             .text_size(ui_font_size(FONT_BASE, cx))
@@ -467,7 +481,7 @@ impl Render for AppearancePane {
             false,
             cx,
         );
-        let body = column()
+        let body = column(cx)
             .child(page_title("Appearance", cx))
             .child(section(
                 "Theme",
@@ -518,7 +532,7 @@ impl Render for AppearancePane {
                 "Syntax",
                 None,
                 v_flex()
-                    .gap(px(SPACE_4))
+                    .gap(zoomed(SPACE_4, cx))
                     .child(
                         card(cx).child(
                             row(true, cx)
@@ -548,6 +562,27 @@ impl Render for AppearancePane {
                             cx,
                         ))
                         .child(self.tab_close_dropdown(cx)),
+                ),
+                cx,
+            ))
+            .child(section(
+                "Chat",
+                None,
+                card(cx).child(
+                    row(true, cx)
+                        .child(row_text(
+                            "Chat outline",
+                            Some("Show an outline for jumping between prompts".into()),
+                            cx,
+                        ))
+                        .child(
+                            Switch::new("chat-outline-switch")
+                                .checked(self.current.chat_outline)
+                                .accessibility_label("Chat outline")
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                    this.set_chat_outline(*checked, cx)
+                                })),
+                        ),
                 ),
                 cx,
             ))

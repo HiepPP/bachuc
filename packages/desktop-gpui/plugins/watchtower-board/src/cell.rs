@@ -52,7 +52,7 @@ pub(crate) fn cell_slice(slice: Slice, warning: bool, cx: &App) -> Div {
         .w_full()
         .flex()
         .flex_col()
-        .px(px(CELL_PADDING))
+        .px(bachuc_theme::zoomed(CELL_PADDING, cx))
         .bg(colors.surface0)
         .border_color(border)
         .border_l_1()
@@ -60,13 +60,13 @@ pub(crate) fn cell_slice(slice: Slice, warning: bool, cx: &App) -> Div {
         .line_height(relative(LINE_HEIGHT))
         .when(top, |this| {
             this.border_t_1()
-                .rounded_t(px(CELL_RADIUS))
-                .pt(px(CELL_PADDING))
+                .rounded_t(bachuc_theme::zoomed(CELL_RADIUS, cx))
+                .pt(bachuc_theme::zoomed(CELL_PADDING, cx))
         })
         .when(bottom, |this| {
             this.border_b_1()
-                .rounded_b(px(CELL_RADIUS))
-                .pb(px(CELL_PADDING))
+                .rounded_b(bachuc_theme::zoomed(CELL_RADIUS, cx))
+                .pb(bachuc_theme::zoomed(CELL_PADDING, cx))
         })
         .when(warning, |this| {
             // The tint sits under the content, as the absolute tint view does.
@@ -94,8 +94,8 @@ pub(crate) fn cell_title(
         .flex_row()
         .justify_between()
         .items_baseline()
-        .gap(px(SPACE_2))
-        .mb(px(TITLE_GAP))
+        .gap(bachuc_theme::zoomed(SPACE_2, cx))
+        .mb(bachuc_theme::zoomed(TITLE_GAP, cx))
         .child(
             div()
                 .id(SharedString::from(format!("cell-{title}")))
@@ -171,8 +171,8 @@ pub(crate) fn show_more(
             .aria_label(SharedString::from(label.clone()))
             .aria_expanded(expanded)
             .self_start()
-            .mt(px(SHOW_MORE_SPACE))
-            .py(px(SHOW_MORE_SPACE))
+            .mt(bachuc_theme::zoomed(SHOW_MORE_SPACE, cx))
+            .py(bachuc_theme::zoomed(SHOW_MORE_SPACE, cx))
             .cursor_pointer()
             .active(|style| style.opacity(0.6))
             .text_size(ui_font_size(SHOW_MORE_SIZE, cx))

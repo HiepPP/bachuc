@@ -10,7 +10,7 @@ use crate::git_actions::{
 use bachuc_client::{Client, ClientEvent, GitStatus, GitStatusEvent, PrStatusReply};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{FONT_BASE, ICON_MD, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2};
-use bachuc_theme::{ShadowSize, popup_offset, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, popup_offset, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -266,7 +266,7 @@ impl GitActionsButton {
 
     fn spinner(&self, id: &'static str, cx: &App) -> AnyElement {
         icon(IconName::LoaderCircle)
-            .with_size(px(ICON_MD))
+            .with_size(zoomed(ICON_MD, cx))
             .text_color(tokens(cx).foreground)
             .with_animation(id, Animation::new(SPIN).repeat(), |icon, delta| {
                 icon.transform(Transformation::rotate(percentage(delta)))
@@ -283,10 +283,10 @@ impl GitActionsButton {
         } else {
             h_flex()
                 .items_center()
-                .gap(px(SPACE_1))
+                .gap(zoomed(SPACE_1, cx))
                 .child(
                     icon(action_icon(action.id))
-                        .with_size(px(ICON_MD))
+                        .with_size(zoomed(ICON_MD, cx))
                         .text_color(colors.foreground_muted),
                 )
                 .child(
@@ -308,7 +308,7 @@ impl GitActionsButton {
             .role(Role::Button)
             .aria_label(action.label.clone())
             .h_full()
-            .px(px(SPACE_2))
+            .px(zoomed(SPACE_2, cx))
             .flex()
             .items_center()
             .justify_center()
@@ -334,7 +334,7 @@ impl GitActionsButton {
             .id("git-actions-caret")
             .role(Role::Button)
             .aria_label("More options")
-            .w(px(HEADER_CONTROL_HEIGHT))
+            .w(zoomed(HEADER_CONTROL_HEIGHT, cx))
             .h_full()
             .flex()
             .items_center()
@@ -350,7 +350,7 @@ impl GitActionsButton {
             })
             .child(
                 icon(IconName::ChevronDown)
-                    .with_size(px(ICON_MD))
+                    .with_size(zoomed(ICON_MD, cx))
                     .text_color(colors.foreground_extra_muted),
             )
             .into_any_element()
@@ -378,12 +378,16 @@ impl GitActionsButton {
             self.spinner("git-actions-menu-spin", cx)
         } else {
             icon(action_icon(action.id))
-                .with_size(px(ICON_MD))
+                .with_size(zoomed(ICON_MD, cx))
                 .text_color(colors.foreground_muted)
                 .into_any_element()
         };
-        let separator = (action.starts_group && index > 0)
-            .then(|| div().h(px(1.)).my(px(SPACE_1)).bg(colors.border_accent));
+        let separator = (action.starts_group && index > 0).then(|| {
+            div()
+                .h(px(1.))
+                .my(zoomed(SPACE_1, cx))
+                .bg(colors.border_accent)
+        });
         let action = Rc::new(action);
         let ax_action = action.clone();
         let view = cx.weak_entity();
@@ -391,14 +395,14 @@ impl GitActionsButton {
             .id(SharedString::from(format!("git-actions-item-{index}")))
             .role(Role::MenuItem)
             .aria_label(label.clone())
-            .min_h(px(MENU_ITEM_HEIGHT))
-            .mx(px(SPACE_1))
-            .px(px(SPACE_2))
-            .py(px(SPACE_1))
+            .min_h(zoomed(MENU_ITEM_HEIGHT, cx))
+            .mx(zoomed(SPACE_1, cx))
+            .px(zoomed(SPACE_2, cx))
+            .py(zoomed(SPACE_1, cx))
             .flex()
             .items_center()
-            .gap(px(SPACE_2))
-            .rounded(px(RADIUS_MD))
+            .gap(zoomed(SPACE_2, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .when(dimmed, |el| el.opacity(0.5))
             .when(muted, |el| el.opacity(0.72))
             .when(pressable, |el| {
@@ -435,24 +439,24 @@ impl GitActionsButton {
             .collect();
         div()
             .absolute()
-            .top(px(popup_offset(HEADER_CONTROL_HEIGHT)))
+            .top(zoomed(popup_offset(HEADER_CONTROL_HEIGHT), cx))
             .right_0()
             .child(
                 deferred(
                     anchored()
                         .anchor(Anchor::TopRight)
-                        .snap_to_window_with_margin(px(8.))
+                        .snap_to_window_with_margin(zoomed(8., cx))
                         .child(
                             v_flex()
                                 .id("git-actions-menu")
                                 .role(Role::Menu)
                                 .aria_label("More options")
-                                .min_w(px(MENU_MIN_WIDTH))
-                                .py(px(SPACE_1))
+                                .min_w(zoomed(MENU_MIN_WIDTH, cx))
+                                .py(zoomed(SPACE_1, cx))
                                 .bg(colors.popover)
                                 .border_1()
                                 .border_color(colors.border_accent)
-                                .rounded(px(RADIUS_LG))
+                                .rounded(zoomed(RADIUS_LG, cx))
                                 .shadow(vec![shadow(ShadowSize::Md, cx)])
                                 .occlude()
                                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
@@ -505,9 +509,9 @@ impl Render for GitActionsButton {
             .flex_shrink_0()
             .child(
                 h_flex()
-                    .h(px(HEADER_CONTROL_HEIGHT))
+                    .h(zoomed(HEADER_CONTROL_HEIGHT, cx))
                     .items_stretch()
-                    .rounded(px(RADIUS_MD))
+                    .rounded(zoomed(RADIUS_MD, cx))
                     .border_1()
                     .border_color(colors.border_accent)
                     .overflow_hidden()

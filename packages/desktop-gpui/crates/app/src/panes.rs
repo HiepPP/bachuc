@@ -9,10 +9,10 @@ use bachuc_composer::{Composer, CornerPills};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
-    BORDER_WIDTH_1, FONT_BASE, FONT_SM, ICON_MD, MAX_CONTENT_WIDTH, RADIUS_2XL, RADIUS_LG,
-    RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
+    BORDER_WIDTH_1, FONT_BASE, FONT_SM, ICON_MD, RADIUS_2XL, RADIUS_LG, RADIUS_MD, SPACE_0_5,
+    SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use bachuc_timeline::TimelineView;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
@@ -101,26 +101,36 @@ impl AgentPane {
         let composer_client = client.clone();
         let composer_id = agent_id.clone();
         let composer = cx.new(|cx| Composer::new(composer_client, composer_id, window, cx));
-        let subscriptions = vec![cx.subscribe_in(
-            &client,
-            window,
-            |this: &mut AgentPane, client, event: &ClientEvent, window, cx| {
-                // The archived state and the connection change with directory and socket
-                // events only.
-                if matches!(event, ClientEvent::TimelineChanged { .. }) {
-                    return;
-                }
-                if this.unarchiving && !client.read(cx).is_archived(&this.agent_id) {
-                    this.unarchiving = false;
-                    this.unarchive_error = None;
-                    if this.callout_focus.is_focused(window) {
-                        this.composer
-                            .update(cx, |composer, cx| composer.focus(window, cx));
+        let subscriptions = vec![
+            // The timeline keeps its text clear of the corner pills, and the composer keeps its edge.
+            cx.observe(&corner_pills, |this: &mut AgentPane, pills, cx| {
+                let width = pills.read(cx).width();
+                this.timeline
+                    .update(cx, |timeline, cx| timeline.set_corner_reserve(width, cx));
+                this.composer
+                    .update(cx, |composer, cx| composer.set_corner_reserve(width, cx));
+            }),
+            cx.subscribe_in(
+                &client,
+                window,
+                |this: &mut AgentPane, client, event: &ClientEvent, window, cx| {
+                    // The archived state and the connection change with directory and socket
+                    // events only.
+                    if matches!(event, ClientEvent::TimelineChanged { .. }) {
+                        return;
                     }
-                }
-                cx.notify();
-            },
-        )];
+                    if this.unarchiving && !client.read(cx).is_archived(&this.agent_id) {
+                        this.unarchiving = false;
+                        this.unarchive_error = None;
+                        if this.callout_focus.is_focused(window) {
+                            this.composer
+                                .update(cx, |composer, cx| composer.focus(window, cx));
+                        }
+                    }
+                    cx.notify();
+                },
+            ),
+        ];
         AgentPane {
             timeline,
             composer,
@@ -185,9 +195,9 @@ impl AgentPane {
             .role(Role::Button)
             .aria_label("Unarchive")
             .flex_shrink_0()
-            .px(px(SPACE_3))
-            .py(px(SPACE_1_5))
-            .rounded(px(RADIUS_MD))
+            .px(zoomed(SPACE_3, cx))
+            .py(zoomed(SPACE_1_5, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .bg(t.surface2)
             .text_size(ui_font_size(FONT_SM, cx))
             .text_color(t.foreground)
@@ -208,26 +218,26 @@ impl AgentPane {
             .aria_label("This agent is archived")
             .track_focus(&self.callout_focus)
             .w_full()
-            .min_h(px(FOOTER_HEIGHT))
+            .min_h(zoomed(FOOTER_HEIGHT, cx))
             .flex()
             .justify_center()
-            .p(px(SPACE_4))
+            .p(zoomed(SPACE_4, cx))
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(px(MAX_CONTENT_WIDTH))
-                    .gap(px(SPACE_2))
+                    .max_w(zoomed(bachuc_theme::reading_look(cx).content_width, cx))
+                    .gap(zoomed(SPACE_2, cx))
                     .child(
                         h_flex()
                             .items_center()
                             .justify_center()
-                            .gap(px(SPACE_3))
-                            .py(px(SPACE_4))
-                            .px(px(SPACE_6))
+                            .gap(zoomed(SPACE_3, cx))
+                            .py(zoomed(SPACE_4, cx))
+                            .px(zoomed(SPACE_6, cx))
                             .bg(t.surface1)
                             .border(px(BORDER_WIDTH_1))
                             .border_color(t.border_accent)
-                            .rounded(px(RADIUS_2XL))
+                            .rounded(zoomed(RADIUS_2XL, cx))
                             .child(
                                 div()
                                     .text_size(size)
@@ -422,13 +432,13 @@ impl NewTabPane {
                 item.label().to_string()
             })
             .w_full()
-            .min_h(px(44.))
-            .px(px(SPACE_3))
+            .min_h(zoomed(44., cx))
+            .px(zoomed(SPACE_3, cx))
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(SPACE_2))
-            .rounded(px(RADIUS_LG))
+            .gap(zoomed(SPACE_2, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .border_1()
             .border_color(transparent_black())
             .bg(t.surface1)
@@ -445,7 +455,7 @@ impl NewTabPane {
             })
             .child(
                 icon(item.icon())
-                    .with_size(px(ICON_MD))
+                    .with_size(zoomed(ICON_MD, cx))
                     .text_color(t.foreground_muted),
             )
             .child(
@@ -460,9 +470,9 @@ impl NewTabPane {
             .children(hints.into_iter().map(|text| {
                 div()
                     .flex_shrink_0()
-                    .px(px(SPACE_1))
-                    .py(px(SPACE_0_5))
-                    .rounded(px(RADIUS_MD))
+                    .px(zoomed(SPACE_1, cx))
+                    .py(zoomed(SPACE_0_5, cx))
+                    .rounded(zoomed(RADIUS_MD, cx))
                     .bg(t.surface3.opacity(0.5))
                     .text_size(ui_font_size(FONT_SM, cx))
                     .text_color(t.foreground_muted)
@@ -489,15 +499,15 @@ impl Render for NewTabPane {
             .flex()
             .items_center()
             .justify_center()
-            .p(px(SPACE_6))
+            .p(zoomed(SPACE_6, cx))
             .child(
                 v_flex()
                     .id("new-tab-rows")
                     .role(Role::List)
                     .aria_label("Open in this tab")
                     .w_full()
-                    .max_w(px(LAUNCHER_MAX_WIDTH))
-                    .gap(px(SPACE_1))
+                    .max_w(zoomed(LAUNCHER_MAX_WIDTH, cx))
+                    .gap(zoomed(SPACE_1, cx))
                     .children(rows),
             )
     }
@@ -517,16 +527,16 @@ pub fn chrome_button(
         .role(Role::Button)
         .aria_label(label)
         .flex_shrink_0()
-        .w(px(28.))
-        .h(px(28.))
+        .w(zoomed(28., cx))
+        .h(zoomed(28., cx))
         .justify_center()
-        .rounded(px(RADIUS_MD))
+        .rounded(zoomed(RADIUS_MD, cx))
         .cursor_pointer()
         .text_color(t.foreground_muted)
         .hover(move |style| style.bg(t.surface2).text_color(fg))
         // A press must not also start a window drag in the title bar under it.
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(icon(name).with_size(px(ICON_MD)))
+        .child(icon(name).with_size(zoomed(ICON_MD, cx)))
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ use crate::tracks::{TrackSegment, track_pill, track_row};
 use bachuc_client::{TaskEntry, TaskStatus};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::ICON_MD;
-use bachuc_theme::tokens;
+use bachuc_theme::{tokens, zoomed};
 use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -74,7 +74,7 @@ pub fn task_pill(tasks: Vec<TaskEntry>) -> Option<AnyElement> {
                         ),
                     };
                     track_row(("composer-task", index), text.to_string(), false, cx)
-                        .child(icon(glyph).with_size(px(ICON_MD)).text_color(color))
+                        .child(icon(glyph).with_size(zoomed(ICON_MD, cx)).text_color(color))
                         .child(
                             div()
                                 .flex_1()

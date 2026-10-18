@@ -6,7 +6,7 @@ use bachuc_sidebar::model::StatusBucket;
 use bachuc_theme::metrics::{
     FONT_BASE, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_1_5, SPACE_2, SPACE_4,
 };
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::popover::{Popover, PopoverState};
 use gpui_kit::component::{Selectable, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -59,11 +59,11 @@ impl RenderOnce for TrackStrip {
             .role(Role::Group)
             .aria_label("Agent tracks")
             .items_center()
-            .gap(px(SPACE_0_5))
-            .min_h(px(STRIP_HEIGHT))
-            .mt(px(-SURFACE_PADDING_Y))
-            .mx(px(-SURFACE_PADDING_X))
-            .px(px(SURFACE_PADDING_X - SPACE_1_5))
+            .gap(zoomed(SPACE_0_5, cx))
+            .min_h(zoomed(STRIP_HEIGHT, cx))
+            .mt(zoomed(-SURFACE_PADDING_Y, cx))
+            .mx(zoomed(-SURFACE_PADDING_X, cx))
+            .px(zoomed(SURFACE_PADDING_X - SPACE_1_5, cx))
             .border_b_1()
             .border_color(t.border)
             .overflow_hidden()
@@ -76,16 +76,22 @@ impl RenderOnce for TrackStrip {
 /// The state mark of a segment: the ring for running, else the status dot.
 fn track_mark(bucket: StatusBucket, cx: &App) -> AnyElement {
     let t = tokens(cx);
-    let dot = |color: Hsla| div().flex_none().size(px(DOT)).rounded_full().bg(color);
+    let dot = |color: Hsla| {
+        div()
+            .flex_none()
+            .size(zoomed(DOT, cx))
+            .rounded_full()
+            .bg(color)
+    };
     match bucket {
         StatusBucket::Running => div()
             .flex_none()
-            .size(px(RING))
+            .size(zoomed(RING, cx))
             .flex()
             .items_center()
             .justify_center()
             .rounded_full()
-            .border(px(RING_STROKE))
+            .border(zoomed(RING_STROKE, cx))
             .border_color(t.dot_running.opacity(RING_TRACK_OPACITY))
             .child(dot(t.dot_running))
             .into_any_element(),
@@ -128,13 +134,13 @@ impl RenderOnce for TrackPillTrigger {
                     .min_w_0()
                     .flex_shrink(1.)
                     .items_center()
-                    .gap(px(SPACE_4))
+                    .gap(zoomed(SPACE_4, cx))
                     .children(self.segments.into_iter().map(|segment| {
                         h_flex()
                             .min_w_0()
                             .flex_shrink(1.)
                             .items_center()
-                            .gap(px(SPACE_2))
+                            .gap(zoomed(SPACE_2, cx))
                             .children(segment.bucket.map(|bucket| track_mark(bucket, cx)))
                             .child(div().truncate().child(segment.text))
                     })),
@@ -153,30 +159,62 @@ pub fn track_pill(
     panel_title: &'static str,
     content: impl Fn(&mut PopoverState, &mut Window, &mut Context<PopoverState>) -> AnyElement + 'static,
 ) -> AnyElement {
-    let id = id.into();
-    let content: PanelContent = Rc::new(content);
-    Popover::new(id.clone())
-        .anchor(Anchor::BottomLeft)
-        .offset(px(PANEL_OFFSET))
-        .p_1()
-        .trigger(TrackPillTrigger {
+    TrackPill {
+        id: id.into(),
+        segments,
+        label,
+        panel_title,
+        content: Rc::new(content),
+    }
+    .into_any_element()
+}
+
+/// A `RenderOnce` wrapper, so the panel offset and sizes read the zoom at render time.
+#[derive(IntoElement)]
+struct TrackPill {
+    id: ElementId,
+    segments: Vec<TrackSegment>,
+    label: String,
+    panel_title: &'static str,
+    content: PanelContent,
+}
+
+impl RenderOnce for TrackPill {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let Self {
             id,
             segments,
             label,
-            open: false,
-        })
-        .content(move |state, window, cx| {
-            v_flex()
-                .id("composer-track-panel")
-                .role(Role::Menu)
-                .aria_label(panel_title)
-                .min_w(px(PANEL_MIN_WIDTH))
-                .max_w(px(PANEL_MAX_WIDTH))
-                .max_h(px(PANEL_MAX_HEIGHT))
-                .overflow_y_scroll()
-                .child(content(state, window, cx))
-        })
-        .into_any_element()
+            panel_title,
+            content,
+        } = self;
+        let (min_w, max_w, max_h) = (
+            zoomed(PANEL_MIN_WIDTH, cx),
+            zoomed(PANEL_MAX_WIDTH, cx),
+            zoomed(PANEL_MAX_HEIGHT, cx),
+        );
+        Popover::new(id.clone())
+            .anchor(Anchor::BottomLeft)
+            .offset(zoomed(PANEL_OFFSET, cx))
+            .p_1()
+            .trigger(TrackPillTrigger {
+                id,
+                segments,
+                label,
+                open: false,
+            })
+            .content(move |state, window, cx| {
+                v_flex()
+                    .id("composer-track-panel")
+                    .role(Role::Menu)
+                    .aria_label(panel_title)
+                    .min_w(min_w)
+                    .max_w(max_w)
+                    .max_h(max_h)
+                    .overflow_y_scroll()
+                    .child(content(state, window, cx))
+            })
+    }
 }
 
 /// `ComposerTrackRow`: one line of a track panel. A pressable row fills with `surface2` on
@@ -197,12 +235,12 @@ pub fn track_row(
         })
         .aria_label(label)
         .items_center()
-        .gap(px(SPACE_2))
-        .min_h(px(ROW_MIN_HEIGHT))
-        .mx(px(SPACE_1))
-        .px(px(SPACE_2))
-        .py(px(SPACE_1))
-        .rounded(px(RADIUS_MD))
+        .gap(zoomed(SPACE_2, cx))
+        .min_h(zoomed(ROW_MIN_HEIGHT, cx))
+        .mx(zoomed(SPACE_1, cx))
+        .px(zoomed(SPACE_2, cx))
+        .py(zoomed(SPACE_1, cx))
+        .rounded(zoomed(RADIUS_MD, cx))
         .text_size(ui_font_size(FONT_BASE, cx))
         .when(pressable, |row| {
             row.cursor_pointer().hover(move |row| row.bg(t.surface2))
@@ -211,5 +249,8 @@ pub fn track_row(
 
 /// `MenuSeparator` under the panel actions.
 pub fn track_separator(cx: &App) -> Div {
-    div().h(px(1.)).my(px(SPACE_1)).bg(tokens(cx).border)
+    div()
+        .h(px(1.))
+        .my(zoomed(SPACE_1, cx))
+        .bg(tokens(cx).border)
 }

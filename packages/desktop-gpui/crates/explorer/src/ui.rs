@@ -10,7 +10,7 @@ use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_MD, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
-use bachuc_theme::{Tokens, tokens, ui_font_size};
+use bachuc_theme::{Tokens, tokens, ui_font_size, zoomed};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::{Selectable, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -53,8 +53,8 @@ pub fn state_message(
         .flex_col()
         .items_center()
         .justify_center()
-        .pt(px(SPACE_16))
-        .px(px(SPACE_6))
+        .pt(zoomed(SPACE_16, cx))
+        .px(zoomed(SPACE_6, cx))
         .text_size(ui_font_size(FONT_BASE, cx))
         .text_center()
         .text_color(if error {
@@ -83,8 +83,8 @@ pub fn centered_text(
         .flex_col()
         .items_center()
         .justify_center()
-        .gap(px(SPACE_2))
-        .p(px(SPACE_4))
+        .gap(zoomed(SPACE_2, cx))
+        .p(zoomed(SPACE_4, cx))
         .text_size(ui_font_size(FONT_BASE, cx))
         .text_center()
         .text_color(if error {
@@ -113,31 +113,31 @@ pub fn file_meta_state(
         .flex_col()
         .items_center()
         .justify_center()
-        .gap(px(SPACE_3))
-        .p(px(SPACE_4))
+        .gap(zoomed(SPACE_3, cx))
+        .p(zoomed(SPACE_4, cx))
         .text_size(ui_font_size(FONT_BASE, cx))
         .text_color(colors.foreground_muted)
         .child(div().text_center().child(title))
         .when_some(meta, |this, meta| {
-            this.child(div().mt(px(SPACE_2)).child(meta))
+            this.child(div().mt(zoomed(SPACE_2, cx)).child(meta))
         })
 }
 
 /// The colored file icon of a row.
-pub fn file_icon_element(file_name: &str) -> impl IntoElement + use<> {
+pub fn file_icon_element(file_name: &str, cx: &App) -> impl IntoElement + use<> {
     div()
-        .size(px(TREE_ICON))
+        .size(zoomed(TREE_ICON, cx))
         .flex_shrink_0()
         .flex()
         .items_center()
         .justify_center()
-        .child(img(file_icon(file_name)).size(px(TREE_ICON)))
+        .child(img(file_icon(file_name)).size(zoomed(TREE_ICON, cx)))
 }
 
 /// The disclosure chevron of a folder row.
-pub fn chevron(expanded: bool, colors: &Tokens) -> impl IntoElement + use<> {
+pub fn chevron(expanded: bool, colors: &Tokens, cx: &App) -> impl IntoElement + use<> {
     div()
-        .size(px(TREE_ICON))
+        .size(zoomed(TREE_ICON, cx))
         .flex_shrink_0()
         .flex()
         .items_center()
@@ -148,22 +148,22 @@ pub fn chevron(expanded: bool, colors: &Tokens) -> impl IntoElement + use<> {
             } else {
                 IconName::ChevronRight
             })
-            .with_size(px(TREE_ICON))
+            .with_size(zoomed(TREE_ICON, cx))
             .text_color(colors.foreground_extra_muted),
         )
 }
 
 /// The slot of a folder whose listing is on its way.
-pub fn loading_marker(colors: &Tokens) -> impl IntoElement + use<> {
+pub fn loading_marker(colors: &Tokens, cx: &App) -> impl IntoElement + use<> {
     div()
-        .size(px(TREE_ICON))
+        .size(zoomed(TREE_ICON, cx))
         .flex_shrink_0()
         .flex()
         .items_center()
         .justify_center()
         .child(
             icon(IconName::RotateCw)
-                .with_size(px(ICON_SM))
+                .with_size(zoomed(ICON_SM, cx))
                 .text_color(colors.foreground_extra_muted),
         )
 }
@@ -172,8 +172,8 @@ pub fn loading_marker(colors: &Tokens) -> impl IntoElement + use<> {
 pub fn diff_stat(added: u32, removed: u32, cx: &App) -> impl IntoElement + use<> {
     let colors = tokens(cx);
     h_flex()
-        .h(px(20.))
-        .gap(px(SPACE_1))
+        .h(zoomed(20., cx))
+        .gap(zoomed(SPACE_1, cx))
         .flex_shrink_0()
         .text_size(ui_font_size(FONT_SM, cx))
         .child(
@@ -188,13 +188,13 @@ pub fn diff_stat(added: u32, removed: u32, cx: &App) -> impl IntoElement + use<>
         )
 }
 
-pub fn change_icon(change: Change, colors: &Tokens) -> impl IntoElement + use<> {
+pub fn change_icon(change: Change, colors: &Tokens, cx: &App) -> impl IntoElement + use<> {
     let (name, color) = match change {
         Change::Added => (IconName::SquarePlus, colors.status_success),
         Change::Deleted => (IconName::SquareMinus, colors.status_danger),
         Change::Modified => (IconName::SquareDot, colors.status_warning),
     };
-    icon(name).with_size(px(ICON_SM)).text_color(color)
+    icon(name).with_size(zoomed(ICON_SM, cx)).text_color(color)
 }
 
 /// The padding that every pane uses at the right edge: `WORKSPACE_PANE_TRAILING_GLYPH_RAIL`.
@@ -279,10 +279,10 @@ pub fn diff_mode_menu(id: &'static str, cwd: &str, cx: &App) -> impl IntoElement
         .role(Role::Button)
         .aria_label("Diff mode")
         .flex_shrink_0()
-        .h(px(MODE_TRIGGER_HEIGHT))
-        .px(px(SPACE_1))
-        .gap(px(SPACE_1))
-        .rounded(px(RADIUS_MD))
+        .h(zoomed(MODE_TRIGGER_HEIGHT, cx))
+        .px(zoomed(SPACE_1, cx))
+        .gap(zoomed(SPACE_1, cx))
+        .rounded(zoomed(RADIUS_MD, cx))
         .cursor_pointer()
         .hover(|style| style.bg(colors.interaction_highlight))
         .child(
@@ -293,12 +293,13 @@ pub fn diff_mode_menu(id: &'static str, cwd: &str, cx: &App) -> impl IntoElement
         )
         .child(
             icon(IconName::ChevronDown)
-                .with_size(px(12.))
+                .with_size(zoomed(12., cx))
                 .text_color(colors.foreground_extra_muted),
         );
     let cwd = cwd.to_string();
     let muted = colors.foreground_muted;
     let size = ui_font_size(FONT_SM, cx);
+    let menu_width = zoomed(MODE_MENU_WIDTH, cx);
     MenuTrigger {
         base,
         open: false,
@@ -333,7 +334,7 @@ pub fn diff_mode_menu(id: &'static str, cwd: &str, cx: &App) -> impl IntoElement
         } else {
             PopupMenuItem::new("Committed")
         };
-        menu.min_w(px(MODE_MENU_WIDTH))
+        menu.min_w(menu_width)
             .item(
                 PopupMenuItem::new("Uncommitted")
                     .checked(mode == DiffMode::Uncommitted)

@@ -13,7 +13,7 @@ use bachuc_icons::{IconName, icon, provider_fallback_icon, provider_logo};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_SM, POPUP_GAP, RADIUS_2XL, RADIUS_MD, SPACE_2,
 };
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use control::{GLYPH, Glyph, PillTrigger, TriggerLook};
 use features::{
     FeatureRequests, feature_icon, feature_tint, feature_tooltip, select_choices, select_current,
@@ -67,11 +67,11 @@ pub(crate) fn menu_row(
         .role(Role::MenuItem)
         .aria_label(label.clone())
         .aria_selected(selected)
-        .h(px(MENU_ROW_HEIGHT))
-        .px(px(SPACE_2))
-        .gap(px(SPACE_2))
+        .h(zoomed(MENU_ROW_HEIGHT, cx))
+        .px(zoomed(SPACE_2, cx))
+        .gap(zoomed(SPACE_2, cx))
         .items_center()
-        .rounded(px(RADIUS_MD))
+        .rounded(zoomed(RADIUS_MD, cx))
         .cursor_pointer()
         .text_size(ui_font_size(FONT_BASE, cx))
         .text_color(t.foreground)
@@ -80,7 +80,7 @@ pub(crate) fn menu_row(
         .when(selected, |row| {
             row.child(
                 icon(IconName::Check)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(t.foreground_muted),
             )
         })
@@ -100,6 +100,7 @@ pub fn choice_pill(
     tooltip: Option<String>,
     look: TriggerLook,
     on_pick: impl Fn(&str, &mut App) + 'static,
+    cx: &App,
 ) -> AnyElement {
     let label = pill_label(&choices, current.as_deref(), fallback);
     let trigger = PillTrigger {
@@ -119,7 +120,7 @@ pub fn choice_pill(
     let on_pick: PickFn = Rc::new(on_pick);
     Popover::new(id)
         .anchor(Anchor::BottomLeft)
-        .offset(px(POPUP_GAP))
+        .offset(zoomed(POPUP_GAP, cx))
         .p_1()
         .trigger(trigger)
         .content(move |_, _, cx| {
@@ -138,8 +139,8 @@ pub fn choice_pill(
                 .id("composer-menu")
                 .role(Role::Menu)
                 .aria_label(format!("{kind} menu"))
-                .min_w(px(200.))
-                .max_h(px(320.))
+                .min_w(zoomed(200., cx))
+                .max_h(zoomed(320., cx))
                 .overflow_y_scroll()
                 .children(rows)
         })
@@ -153,17 +154,18 @@ fn feature_toggle(
     hover: Hsla,
     pending: bool,
     on_click: impl Fn(&mut App) + 'static,
+    cx: &App,
 ) -> AnyElement {
     let tooltip = feature_tooltip(feature).to_string();
     h_flex()
         .id(element_id("composer-feature", &feature.id))
         .role(Role::Button)
         .aria_label(tooltip.clone())
-        .h(px(CONTROL_SIZE))
-        .px(px(SPACE_2))
+        .h(zoomed(CONTROL_SIZE, cx))
+        .px(zoomed(SPACE_2, cx))
         .flex_none()
         .items_center()
-        .rounded(px(RADIUS_2XL))
+        .rounded(zoomed(RADIUS_2XL, cx))
         .cursor_pointer()
         .hover(move |pill| pill.bg(hover))
         .when(pending, |pill| pill.opacity(0.5))
@@ -171,7 +173,7 @@ fn feature_toggle(
         .on_click(move |_, _, cx| on_click(cx))
         .child(
             icon(feature_icon(feature.icon.as_deref()))
-                .with_size(px(GLYPH))
+                .with_size(zoomed(GLYPH, cx))
                 .text_color(color),
         )
         .into_any_element()
@@ -204,6 +206,7 @@ fn feature_pills(
                     t.surface2,
                     requests.is_pending(&feature.id),
                     move |cx| toggle(&feature_id, cx),
+                    cx,
                 )
             }
             AgentFeatureKind::Select { .. } => {
@@ -218,6 +221,7 @@ fn feature_pills(
                     Some(feature_tooltip(feature).to_string()),
                     look,
                     move |option_id, cx| select(&feature_id, option_id, cx),
+                    cx,
                 )
             }
         })
@@ -225,12 +229,12 @@ fn feature_pills(
 }
 
 /// The condensed features: one Settings2 button whose menu lists every feature.
-fn features_menu(features: &[AgentFeature], handlers: &FeatureHandlers) -> AnyElement {
+fn features_menu(features: &[AgentFeature], handlers: &FeatureHandlers, cx: &App) -> AnyElement {
     let features = Rc::new(features.to_vec());
     let handlers = handlers.clone();
     Popover::new("agent-controls-features")
         .anchor(Anchor::BottomLeft)
-        .offset(px(POPUP_GAP))
+        .offset(zoomed(POPUP_GAP, cx))
         .p_1()
         .trigger(PillTrigger {
             id: "agent-controls-features-trigger".into(),
@@ -267,8 +271,8 @@ fn features_menu(features: &[AgentFeature], handlers: &FeatureHandlers) -> AnyEl
                     AgentFeatureKind::Select { .. } => {
                         rows.push(
                             div()
-                                .px(px(SPACE_2))
-                                .pt(px(SPACE_2))
+                                .px(zoomed(SPACE_2, cx))
+                                .pt(zoomed(SPACE_2, cx))
                                 .text_size(small)
                                 .text_color(t.foreground_muted)
                                 .child(feature.label.clone())
@@ -300,8 +304,8 @@ fn features_menu(features: &[AgentFeature], handlers: &FeatureHandlers) -> AnyEl
                 .id("agent-features-menu")
                 .role(Role::Menu)
                 .aria_label("Features")
-                .min_w(px(200.))
-                .max_h(px(320.))
+                .min_w(zoomed(200., cx))
+                .max_h(zoomed(320., cx))
                 .overflow_y_scroll()
                 .children(rows)
         })
@@ -345,6 +349,7 @@ fn grouped_model_pill(
     current: Option<String>,
     look: TriggerLook,
     on_pick: PickFn,
+    cx: &App,
 ) -> AnyElement {
     let label = groups
         .iter()
@@ -373,7 +378,7 @@ fn grouped_model_pill(
     let groups = Rc::new(groups);
     Popover::new("composer-model")
         .anchor(Anchor::BottomLeft)
-        .offset(px(POPUP_GAP))
+        .offset(zoomed(POPUP_GAP, cx))
         .p_1()
         .trigger(trigger)
         .content(move |_, _, cx| {
@@ -383,8 +388,8 @@ fn grouped_model_pill(
             for group in groups.iter() {
                 rows.push(
                     div()
-                        .px(px(SPACE_2))
-                        .pt(px(SPACE_2))
+                        .px(zoomed(SPACE_2, cx))
+                        .pt(zoomed(SPACE_2, cx))
                         .text_size(small)
                         .text_color(t.foreground_muted)
                         .child(group.label.clone())
@@ -413,8 +418,8 @@ fn grouped_model_pill(
                 .id("composer-menu")
                 .role(Role::Menu)
                 .aria_label("Model menu")
-                .min_w(px(240.))
-                .max_h(px(320.))
+                .min_w(zoomed(240., cx))
+                .max_h(zoomed(320., cx))
                 .overflow_y_scroll()
                 .children(rows)
         })
@@ -465,6 +470,7 @@ pub fn agent_controls(
             view.current_model,
             look,
             model,
+            cx,
         )),
         None => pills.push(choice_pill(
             "composer-model".into(),
@@ -476,6 +482,7 @@ pub fn agent_controls(
             None,
             look,
             move |id, cx| model(id, cx),
+            cx,
         )),
     }
     if let Some(thinking) = view.thinking {
@@ -490,6 +497,7 @@ pub fn agent_controls(
             None,
             look,
             move |id, cx| pick(id, cx),
+            cx,
         ));
     }
     // `AgentModeControl` renders nothing while the agent reports no modes (a closed agent).
@@ -508,11 +516,12 @@ pub fn agent_controls(
                 icon_only: !shown.show_mode_label,
             },
             move |id, cx| pick(id, cx),
+            cx,
         ));
     }
     if shown.aggregate_features {
         if !view.features.is_empty() {
-            pills.push(features_menu(view.features, &handlers.features));
+            pills.push(features_menu(view.features, &handlers.features, cx));
         }
     } else {
         pills.extend(feature_pills(

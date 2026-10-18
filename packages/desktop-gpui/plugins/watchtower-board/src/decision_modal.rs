@@ -61,7 +61,7 @@ fn block(block: &Block, cx: &App) -> AnyElement {
     let text = |cx: &App| {
         div()
             .text_size(ui_font_size(TEXT, cx))
-            .line_height(px(TEXT_LINE))
+            .line_height(bachuc_theme::zoomed(TEXT_LINE, cx))
             .text_color(colors.foreground)
     };
     match block {
@@ -72,14 +72,16 @@ fn block(block: &Block, cx: &App) -> AnyElement {
                 _ => (H3, H_LINE),
             };
             div()
-                .when(*level > 1, |this| this.pt(px(HEADING_TOP)))
+                .when(*level > 1, |this| {
+                    this.pt(bachuc_theme::zoomed(HEADING_TOP, cx))
+                })
                 .child(
                     div()
                         .id(SharedString::from(format!("wt-adr-h-{body}")))
                         .role(Role::Heading)
                         .aria_label(SharedString::from(body.clone()))
                         .text_size(ui_font_size(size, cx))
-                        .line_height(px(line))
+                        .line_height(bachuc_theme::zoomed(line, cx))
                         .font_weight(FontWeight(WEIGHT_BOLD))
                         .text_color(colors.foreground)
                         .child(body.clone()),
@@ -89,20 +91,20 @@ fn block(block: &Block, cx: &App) -> AnyElement {
         Block::Bullet { depth, text: body } => div()
             .flex()
             .flex_row()
-            .gap(px(SPACE_2))
-            .ml(px(*depth as f32 * BULLET_INDENT))
+            .gap(bachuc_theme::zoomed(SPACE_2, cx))
+            .ml(bachuc_theme::zoomed(*depth as f32 * BULLET_INDENT, cx))
             .child(text(cx).text_color(colors.foreground_muted).child("•"))
             .child(text(cx).flex_1().min_w_0().child(body.clone()))
             .into_any_element(),
         Block::Code { text: body } => div()
-            .p(px(CODE_PADDING))
-            .rounded(px(RADIUS_LG))
+            .p(bachuc_theme::zoomed(CODE_PADDING, cx))
+            .rounded(bachuc_theme::zoomed(RADIUS_LG, cx))
             .bg(colors.surface2)
             .child(
                 div()
                     .font_family(mono_font_family(cx))
                     .text_size(ui_font_size(CODE_TEXT, cx))
-                    .line_height(px(CODE_LINE))
+                    .line_height(bachuc_theme::zoomed(CODE_LINE, cx))
                     .text_color(colors.foreground)
                     .child(body.clone()),
             )
@@ -134,7 +136,7 @@ fn body(modal: &DecisionModal, on_retry: OnClick, cx: &App) -> Vec<AnyElement> {
                     .flex()
                     .flex_col()
                     .items_start()
-                    .gap(px(ERROR_GAP))
+                    .gap(bachuc_theme::zoomed(ERROR_GAP, cx))
                     .child(
                         div()
                             .text_size(ui_font_size(TEXT, cx))
@@ -184,7 +186,7 @@ pub(crate) fn decision_overlay(
         .flex()
         .items_center()
         .justify_center()
-        .p(px(SPACE_6))
+        .p(bachuc_theme::zoomed(SPACE_6, cx))
         .child(
             div()
                 .id("wt-adr-backdrop")
@@ -212,13 +214,13 @@ pub(crate) fn decision_overlay(
                 .occlude()
                 .relative()
                 .w_full()
-                .max_w(px(CARD_WIDTH))
+                .max_w(bachuc_theme::zoomed(CARD_WIDTH, cx))
                 .max_h(relative(CARD_HEIGHT))
                 .flex()
                 .flex_col()
                 .overflow_hidden()
                 .bg(colors.surface1)
-                .rounded(px(RADIUS_XL))
+                .rounded(bachuc_theme::zoomed(RADIUS_XL, cx))
                 .border_1()
                 .border_color(colors.surface2)
                 .line_height(relative(LINE_HEIGHT))
@@ -228,14 +230,14 @@ pub(crate) fn decision_overlay(
                         .flex()
                         .flex_row()
                         .items_center()
-                        .gap(px(SPACE_2))
-                        .px(px(SPACE_6))
-                        .py(px(SPACE_4))
+                        .gap(bachuc_theme::zoomed(SPACE_2, cx))
+                        .px(bachuc_theme::zoomed(SPACE_6, cx))
+                        .py(bachuc_theme::zoomed(SPACE_4, cx))
                         .border_b_1()
                         .border_color(colors.surface2)
                         .child(
                             icon(IconName::Scale)
-                                .with_size(px(TITLE_ICON))
+                                .with_size(bachuc_theme::zoomed(TITLE_ICON, cx))
                                 .text_color(colors.foreground),
                         )
                         .child(
@@ -253,8 +255,8 @@ pub(crate) fn decision_overlay(
                                 .id("wt-adr-close")
                                 .role(Role::Button)
                                 .aria_label("Close")
-                                .p(px(SPACE_2))
-                                .rounded(px(RADIUS_LG))
+                                .p(bachuc_theme::zoomed(SPACE_2, cx))
+                                .rounded(bachuc_theme::zoomed(RADIUS_LG, cx))
                                 .cursor_pointer()
                                 .hover(|style| style.bg(colors.surface2))
                                 .on_click(cx.listener(|page, _, window, cx| {
@@ -262,7 +264,7 @@ pub(crate) fn decision_overlay(
                                 }))
                                 .child(
                                     icon(IconName::X)
-                                        .with_size(px(CLOSE_ICON))
+                                        .with_size(bachuc_theme::zoomed(CLOSE_ICON, cx))
                                         .text_color(colors.foreground_muted),
                                 ),
                         ),
@@ -273,10 +275,10 @@ pub(crate) fn decision_overlay(
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
-                        .p(px(BODY_PADDING))
+                        .p(bachuc_theme::zoomed(BODY_PADDING, cx))
                         .flex()
                         .flex_col()
-                        .gap(px(BODY_GAP))
+                        .gap(bachuc_theme::zoomed(BODY_GAP, cx))
                         .children(content),
                 ),
         )

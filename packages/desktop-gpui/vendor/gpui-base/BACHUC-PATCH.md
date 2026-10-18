@@ -10,6 +10,10 @@ This folder is the published crate gpui-base 0.7.3 from crates.io, with one chan
 - GPUI filters `Role::GenericContainer` out of the AX tree, and `role()` debug-asserts against it, so `Group` is the most neutral role that makes a node.
 - Every other file is unchanged. Check with `diff -r ~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/gpui-base-0.7.3 vendor/gpui-base`.
 
+## List spacing (TASK-243)
+
+`TextViewStyle::with_list_spacing(top, bottom)` and `list_spacing()` (`src/text/style.rs`) set the space above and below a top-level list (`BlockNode::List` in `src/text/node.rs`, `depth == 0` and not inside a blockquote). The default `None` keeps the paragraph gap below and no space above. A list that is the last block keeps no bottom gap. `NodeRenderOptions.in_blockquote` (`src/text/document.rs`) marks blocks inside a blockquote.
+
 ## Re-apply after a gpui-kit upgrade
 
 1. If upstream gpui-base now gives `input-state` a role, delete this folder and the `[patch.crates-io]` entry.
