@@ -119,8 +119,6 @@ const STEP_LIST_TOP: f32 = 16.;
 const LIVE_LINE_HEIGHT: f32 = 19.;
 const RULE_TOP: f32 = 22.;
 const RULE_BOTTOM: f32 = 18.;
-/// The user bubble's line height, as `fontSize.content * 1.4`.
-const USER_LINE_HEIGHT: f32 = 1.4;
 /// The web stream's empty slot above the first row, where older history loads
 /// (`HISTORY_START_SLOT_HEIGHT_PX`), under the 16 px content padding.
 const HISTORY_START_SLOT: f32 = 32.;
@@ -130,7 +128,7 @@ const USER_TRAILING_ROW: f32 = SPACE_2 + 24.;
 /// The space between two markdown blocks: the paragraph's `marginBottom: 12` and the block
 /// container's 12.
 const BLOCK_GAP: f32 = SPACE_6;
-/// The prose line height over the font size, as the markdown `body`:
+/// The prose line height over the font size, as the markdown `body` and the user bubble:
 /// `Math.round(fontSize.content * 1.4)`, a line box of 21 at the content size.
 const BODY_LINE_HEIGHT: f32 = 1.4;
 /// The gap under a paragraph in the text view. Both line boxes are whole pixels, so the gap is
@@ -186,6 +184,25 @@ enum RowKind {
         end: usize,
     },
     Permission(Value),
+}
+
+/// The space under a message row for the row below it. A user message gets
+/// `getGapBetweenStreamItems`. An assistant message also keeps its last block's
+/// `marginBottom: 12` and its own `paddingBottom: 12`, which it drops above a footer.
+fn message_gap(is_user: bool, below: Below) -> f32 {
+    if is_user {
+        return match below {
+            Below::Nothing | Below::Assistant => 0.,
+            Below::User => SPACE_1,
+            _ => SPACE_4,
+        };
+    }
+    match below {
+        Below::Footer => SPACE_3,
+        Below::Nothing => SPACE_3 * 2.,
+        Below::Tools => SPACE_3 * 2. + SPACE_1,
+        _ => SPACE_3 * 2. + SPACE_4,
+    }
 }
 
 /// The row under a message row, for the space between them.
@@ -1234,19 +1251,7 @@ impl TimelineView {
             Some(RowKind::TurnHeader(_)) => Below::Tools,
             Some(_) => Below::Other,
         };
-        if is_user {
-            return Some(match below {
-                Below::Nothing | Below::Assistant => 0.,
-                Below::User => SPACE_1,
-                _ => SPACE_4,
-            });
-        }
-        Some(match below {
-            Below::Footer => SPACE_3,
-            Below::Nothing => SPACE_3 * 2.,
-            Below::Tools => SPACE_3 * 2. + SPACE_1,
-            _ => SPACE_3 * 2. + SPACE_4,
-        })
+        Some(message_gap(is_user, below))
     }
 
     fn render_entry(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -1306,7 +1311,7 @@ impl TimelineView {
                             .bg(t.surface3)
                             .text_color(t.foreground)
                             .text_size(size)
-                            .line_height(size * USER_LINE_HEIGHT)
+                            .line_height(px(body_line_height(size / px(1.))))
                             .child(StyledText::new(text).with_highlights(highlights)),
                     )
                     .into_any_element()
@@ -2517,11 +2522,12 @@ fn preview(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob brings its own `test` attribute.
+    use super::Below;
     use super::tool_view::{code_styles, fence_language};
     use super::{
         BLOCK_GAP, PARAGRAPH_GAP, StepCounts, body_line_height, counts_text, fence_spacing,
         fork_boundary, format_clock, format_duration, format_elapsed, heading_style,
-        latest_assistant, paragraph_pitch, toggle,
+        latest_assistant, message_gap, paragraph_pitch, toggle,
     };
     use bachuc_client::{ForkBoundary, ForkCursor};
     use bachuc_theme::metrics::FONT_CONTENT;
@@ -2601,6 +2607,23 @@ mod tests {
         assert_eq!(body_line_height(FONT_CONTENT), 21.);
         assert_eq!(PARAGRAPH_GAP, BLOCK_GAP);
         assert_eq!(paragraph_pitch(FONT_CONTENT), 45.);
+    }
+
+    /// `getGapBetweenStreamItems` plus the assistant's `marginBottom: 12` and
+    /// `paddingVertical: 12` (`compactBottom` above a footer).
+    #[test]
+    fn message_gaps_match_the_web_stream() {
+        assert_eq!(message_gap(true, Below::User), 4.);
+        assert_eq!(message_gap(true, Below::Assistant), 0.);
+        assert_eq!(message_gap(true, Below::Tools), 16.);
+        assert_eq!(message_gap(true, Below::Other), 16.);
+        assert_eq!(message_gap(true, Below::Nothing), 0.);
+        assert_eq!(message_gap(false, Below::Footer), 12.);
+        assert_eq!(message_gap(false, Below::Nothing), 24.);
+        assert_eq!(message_gap(false, Below::Tools), 28.);
+        assert_eq!(message_gap(false, Below::Assistant), 40.);
+        assert_eq!(message_gap(false, Below::User), 40.);
+        assert_eq!(message_gap(false, Below::Other), 40.);
     }
 
     #[test]
