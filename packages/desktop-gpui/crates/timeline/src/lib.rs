@@ -40,7 +40,7 @@ use bachuc_theme::metrics::{
 };
 use bachuc_theme::{
     ShadowSize, TurnLabel, code_font_size, content_font_size, mono_font_family, popup_offset,
-    scheme, shadow, syntax_colors, tokens, turn_label_colors, ui_font_size,
+    rem_size, scheme, shadow, syntax_colors, tokens, turn_label_colors, ui_font_size, zoomed,
 };
 use gpui_kit::base::text::{CodeBlock, TextView as RichText, TextViewStyle as RichTextStyle};
 use gpui_kit::component::text::{TextView, TextViewState};
@@ -1596,7 +1596,7 @@ impl TimelineView {
             .with_selection(theme.selection)
             .with_code_background(t.surface2)
             .with_border(theme.border)
-            .with_paragraph_gap(rems(PARAGRAPH_GAP / FONT_BASE))
+            .with_paragraph_gap(window_rems(zoomed(PARAGRAPH_GAP, cx), rem_size(cx)))
             .with_code_block(code_block)
             .with_table(corners)
             .with_table_head(table_head)
@@ -2404,6 +2404,12 @@ fn body_line_height(content: f32) -> f32 {
     (content * BODY_LINE_HEIGHT).round()
 }
 
+/// `gap` in rems of the window. The window's rem size is GPUI's 16 with the zoom, not
+/// `FONT_BASE`: `rems(24 / FONT_BASE)` drew the paragraph gap 27.4 px high.
+fn window_rems(gap: Pixels, rem_size: Pixels) -> Rems {
+    rems(gap / rem_size)
+}
+
 /// Distance between the tops of two paragraphs of one line: the line box and the gap under it.
 #[cfg(test)]
 fn paragraph_pitch(content: f32) -> f32 {
@@ -2533,7 +2539,7 @@ mod tests {
     use super::{
         BLOCK_GAP, PARAGRAPH_GAP, StepCounts, body_line_height, counts_text, fence_spacing,
         fork_boundary, format_clock, format_duration, format_elapsed, heading_style,
-        latest_assistant, message_gap, paragraph_pitch, toggle,
+        latest_assistant, message_gap, paragraph_pitch, toggle, window_rems,
     };
     use bachuc_client::{ForkBoundary, ForkCursor};
     use bachuc_theme::metrics::FONT_CONTENT;
@@ -2613,6 +2619,17 @@ mod tests {
         assert_eq!(body_line_height(FONT_CONTENT), 21.);
         assert_eq!(PARAGRAPH_GAP, BLOCK_GAP);
         assert_eq!(paragraph_pitch(FONT_CONTENT), 45.);
+    }
+
+    /// The text view resolves the paragraph gap at the window's rem size, 16 with the zoom, so
+    /// the gap draws as `PARAGRAPH_GAP` at every zoom.
+    #[test]
+    fn paragraph_gap_draws_at_the_window_rem_size() {
+        for zoom in [1., 1.25] {
+            let rem = px(16. * zoom);
+            let gap = px(PARAGRAPH_GAP * zoom);
+            assert_eq!(window_rems(gap, rem).to_pixels(rem), gap);
+        }
     }
 
     /// `getGapBetweenStreamItems` plus the assistant's `marginBottom: 12` and
