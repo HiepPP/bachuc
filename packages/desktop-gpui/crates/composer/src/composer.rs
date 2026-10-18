@@ -2254,7 +2254,14 @@ fn density_box(
         .min_w_0()
         .overflow_hidden()
         .child(measure)
-        .child(h_flex().items_center().children(pills))
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .overflow_hidden()
+                .items_center()
+                .children(pills),
+        )
         .into_any_element()
 }
 
@@ -2688,29 +2695,36 @@ impl Composer {
                     }),
             )
             .when(empty, |input_box| {
+                // One row: the placeholder shrinks and ends in "…" before the hint, which
+                // keeps its width. Electron lets the two overlap; Q-163 cuts the placeholder.
                 input_box.child(
-                    div()
+                    h_flex()
                         .absolute()
                         .top_0()
                         .left(px(INPUT_INSET))
                         .right(px(INPUT_INSET))
-                        .truncate()
-                        .text_size(small_size)
-                        .line_height(input_line)
-                        .text_color(t.surface4)
-                        .child(PLACEHOLDER),
-                )
-            })
-            .when_some(focus_hint, |input_box, hint| {
-                input_box.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .right(px(INPUT_INSET))
-                        .text_size(small_size)
-                        .text_color(t.foreground_muted)
-                        .opacity(0.5)
-                        .child(hint),
+                        .items_start()
+                        .gap(zoomed(SPACE_2, cx))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(small_size)
+                                .line_height(input_line)
+                                .text_color(t.surface4)
+                                .child(PLACEHOLDER),
+                        )
+                        .when_some(focus_hint, |row, hint| {
+                            row.child(
+                                div()
+                                    .flex_none()
+                                    .text_size(small_size)
+                                    .text_color(t.foreground_muted)
+                                    .opacity(0.5)
+                                    .child(hint),
+                            )
+                        }),
                 )
             })
     }

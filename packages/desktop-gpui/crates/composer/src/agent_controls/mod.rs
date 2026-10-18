@@ -122,6 +122,7 @@ pub fn choice_pill(
         .anchor(Anchor::BottomLeft)
         .offset(zoomed(POPUP_GAP, cx))
         .p_1()
+        .when(!look.icon_only, |popover| popover.min_w_0())
         .trigger(trigger)
         .content(move |_, _, cx| {
             let current = current.clone();
@@ -380,6 +381,7 @@ fn grouped_model_pill(
         .anchor(Anchor::BottomLeft)
         .offset(zoomed(POPUP_GAP, cx))
         .p_1()
+        .when(!look.icon_only, |popover| popover.min_w_0())
         .trigger(trigger)
         .content(move |_, _, cx| {
             let t = tokens(cx);
