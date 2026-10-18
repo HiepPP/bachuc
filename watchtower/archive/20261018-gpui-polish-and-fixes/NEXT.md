@@ -4,7 +4,7 @@
 
 - Title: GPUI polish and fixes
 - Slug: 20261018-gpui-polish-and-fixes
-- Status: DONE (implement run and owner hand tests passed)
+- Status: ARCHIVED
 - Updated: 2026-10-18
 
 ## Tracker
@@ -51,4 +51,4 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Archive
 
-- None.
+- Archived: 2026-10-18 -> watchtower/archive/20261018-gpui-polish-and-fixes/
