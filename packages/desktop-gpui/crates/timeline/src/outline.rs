@@ -422,8 +422,16 @@ impl OutlineRail {
                                 .shadow(vec![shadow(ShadowSize::Md, cx)])
                                 .text_size(ui_font_size(FONT_SM, cx))
                                 .text_color(t.foreground)
-                                .line_clamp(2)
-                                .child(prompt.preview.clone()),
+                                // A flex row lays its text out unwrapped; a full-width block
+                                // wraps it and clamps it to Electron's two lines.
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .min_w_0()
+                                        .line_clamp(2)
+                                        .text_ellipsis()
+                                        .child(prompt.preview.clone()),
+                                ),
                         ),
                 )
             })
