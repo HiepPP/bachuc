@@ -103,6 +103,11 @@ enum Line {
     },
 }
 
+/// The diff list height at zoom 100%: every line plus the padding, capped at `MAX_DIFF_HEIGHT`.
+fn body_height(lines: usize) -> f32 {
+    (lines as f32 * LINE_HEIGHT + 2. * BODY_GAP).min(MAX_DIFF_HEIGHT)
+}
+
 /// The numbered lines of the hunks, with the gutter width in characters.
 fn body_lines(hunks: &[Hunk]) -> (Vec<Line>, usize) {
     let mut lines = Vec::new();
@@ -559,7 +564,8 @@ impl Render for EditRowView {
                 .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
                 .with_width_from_item(Some(edit.widest))
                 .w_full()
-                .max_h(zoomed(MAX_DIFF_HEIGHT, cx))
+                // A uniform list with only a max height collapses to its padding.
+                .h(zoomed(body_height(edit.lines.len()), cx))
                 .py(zoomed(BODY_GAP, cx))
                 .into_any_element()
             };
@@ -599,8 +605,15 @@ impl Render for EditRowView {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob import brings a `test` attribute of its own.
-    use super::{Line, body_lines};
+    use super::{BODY_GAP, LINE_HEIGHT, Line, MAX_DIFF_HEIGHT, body_height, body_lines};
     use crate::diff::parse_unified_diff;
+
+    #[test]
+    fn body_height_fits_the_lines_and_stops_at_the_cap() {
+        assert_eq!(body_height(1), LINE_HEIGHT + 2. * BODY_GAP);
+        assert_eq!(body_height(3), 3. * LINE_HEIGHT + 2. * BODY_GAP);
+        assert_eq!(body_height(1000), MAX_DIFF_HEIGHT);
+    }
 
     #[test]
     fn body_lines_number_rows_and_put_an_ellipsis_between_hunks() {
