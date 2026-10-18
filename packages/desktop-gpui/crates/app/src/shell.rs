@@ -4,7 +4,8 @@
 //! center and the settings screen open over it.
 
 use crate::actions::{
-    BindingSpec, JumpToTab, RunAction, SHELL_CONTEXT, binding_specs, rebind, settings_key_context,
+    AGENT_CONTEXT, BindingSpec, JumpToTab, RunAction, SHELL_CONTEXT, TEXT_CONTEXTS, ZOOM_IN,
+    ZOOM_OUT, ZOOM_RESET, binding_specs, rebind, settings_key_context,
 };
 use crate::chrome::{ExplorerResize, HANDLE_WIDTH, HeaderMenu, NoPreview};
 use crate::dock;
@@ -19,8 +20,8 @@ use crate::plugins::{
     keystroke_text, panel_identity, panel_location, plugin_shortcut, surface_heading,
 };
 use crate::state::{
-    Connection, EditorTarget, LayoutPrefs, LogoFill, absolute_path, agent_icon, agent_key,
-    agent_of_key, agent_title, all_diffs_key, badge_count, badge_label, command_items,
+    AppIcons, Connection, EditorTarget, LayoutPrefs, LogoFill, absolute_path, agent_icon,
+    agent_key, agent_of_key, agent_title, all_diffs_key, badge_count, badge_label, command_items,
     commit_diff_key, commit_diff_title, diff_key, editor_targets, explorer_width, file_key,
     file_name, file_of_key, find_workspace, initial_host, load_ship_default, next_mode,
     notification_for, pull_request_key, save_ship_default, step_index, step_workspace,
@@ -49,6 +50,7 @@ use bachuc_icons::{IconName, provider_logo};
 use bachuc_plugin_host::{
     AgentAnchor, PanelInput, PanelTarget, PluginHost, PluginHostEvent, SurfacePresentation,
 };
+use bachuc_settings::appearance::{Appearance, ZoomDirection, zoom_step};
 use bachuc_settings::{Settings, SettingsEvent};
 use bachuc_sidebar::model::archive_prompt;
 use bachuc_sidebar::{Sidebar, SidebarEvent, SidebarNavEvent, SidebarPluginEvent};
@@ -62,6 +64,7 @@ use bachuc_workspace::{PaneEvent, PaneItem, SplitAxis, TabKind, TabMenuEvent, Wo
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{WindowExt as _, h_flex};
@@ -251,8 +254,12 @@ pub struct Shell {
     pr_checked: HashMap<String, Instant>,
     /// The header menu that shows, if any.
     pub(crate) header_menu: Option<HeaderMenu>,
+    /// The Workspace actions menu while it shows.
+    pub(crate) header_actions: Option<(Entity<PopupMenu>, Subscription)>,
     /// The Open in editor apps, read once at start, and the last pick of the session.
     pub(crate) editor_targets: Vec<EditorTarget>,
+    /// Each listed app's own icon, loaded once after start (ADR-0046).
+    pub(crate) editor_icons: AppIcons,
     pub(crate) editor_choice: Option<EditorTarget>,
     /// The GitHub page of a folder, read when the Open in editor menu opens: (cwd, url).
     pub(crate) editor_github: Option<(String, String)>,
@@ -261,7 +268,7 @@ pub struct Shell {
     /// Scripts that Restart stopped, as `workspace_id/name`; each starts again once the daemon
     /// reports it stopped.
     pub(crate) scripts_restart: HashSet<String>,
-    focus: FocusHandle,
+    pub(crate) focus: FocusHandle,
     /// Subscriptions to the client and the views that hold it; a host switch replaces them.
     host_subscriptions: Vec<Subscription>,
     _subscriptions: Vec<Subscription>,
@@ -335,7 +342,9 @@ impl Shell {
             pr_inflight: HashSet::new(),
             pr_checked: HashMap::new(),
             header_menu: None,
+            header_actions: None,
             editor_targets: editor_targets(|path| std::path::Path::new(path).exists()),
+            editor_icons: Vec::new(),
             editor_choice: None,
             editor_github: None,
             scripts_busy: HashSet::new(),
@@ -346,6 +355,7 @@ impl Shell {
         };
         shell.subscribe_host(window, cx);
         shell.ensure_home(window, cx);
+        shell.load_editor_icons(cx);
         shell
     }
 
@@ -2204,6 +2214,47 @@ impl Shell {
         }
     }
 
+    /// A printable key typed in a thread with nothing that takes text focused goes to the
+    /// focused pane's composer, as in Electron. It runs in the bubble phase, after the bindings
+    /// and the views' own key handlers.
+    fn on_key_type(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let overlay = self.surface.is_some()
+            || self.settings.is_some()
+            || self.command.is_some()
+            || self.shortcuts_dialog.is_some();
+        let contexts = window.context_stack();
+        let keys: Vec<&str> = contexts
+            .iter()
+            .filter_map(|context| context.primary().map(|entry| entry.key.as_ref()))
+            .collect();
+        let keystroke = &event.keystroke;
+        if !should_redirect_to_composer(
+            &keystroke.key,
+            keystroke.key_char.as_deref(),
+            &keystroke.modifiers,
+            focus_kind(&keys, overlay),
+        ) {
+            return;
+        }
+        let Some(text) = keystroke.key_char.clone() else {
+            return;
+        };
+        let Some(composer) = self.active_key(cx).and_then(|key| {
+            let pane = self.workspaces.get(&self.selected)?.panes.get(&key)?;
+            let PaneContent::Agent(view) = &pane.content else {
+                return None;
+            };
+            // An archived agent shows the Unarchive callout in place of the composer.
+            let archived = agent_of_key(&key)
+                .is_some_and(|agent_id| self.client.read(cx).is_archived(agent_id));
+            (!archived).then(|| view.read(cx).composer.clone())
+        }) else {
+            return;
+        };
+        cx.stop_propagation();
+        composer.update(cx, |composer, cx| composer.insert_text(&text, window, cx));
+    }
+
     /// The open surface as a page or an overlay, with its view built once per input.
     fn render_surface(
         &mut self,
@@ -3263,6 +3314,24 @@ impl Shell {
                     log::warn!("cannot save appearance.json: {error}");
                 }
             }
+            ZOOM_IN | ZOOM_OUT | ZOOM_RESET => {
+                let direction = match action {
+                    ZOOM_IN => ZoomDirection::In,
+                    ZOOM_OUT => ZoomDirection::Out,
+                    _ => ZoomDirection::Reset,
+                };
+                let zoom = zoom_step(bachuc_theme::zoom(cx), direction);
+                bachuc_theme::set_zoom(zoom, cx);
+                window.set_rem_size(bachuc_theme::rem_size(cx));
+                let dir = data_dir();
+                let appearance = Appearance {
+                    zoom,
+                    ..bachuc_settings::appearance::load_from(&dir)
+                };
+                if let Err(error) = bachuc_settings::appearance::save_to(&dir, &appearance) {
+                    log::warn!("cannot save appearance.json: {error}");
+                }
+            }
             "host.cycle" => {
                 let next = (self.host_index + 1) % self.hosts.len();
                 self.switch_host(next, window, cx);
@@ -3514,6 +3583,9 @@ fn neighbor_active_key(workspace: &Workspace, direction: &str) -> Option<String>
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // gpui-kit sizes are rems, so the zoom reaches them through the rem size. The call only
+        // stores the value.
+        window.set_rem_size(bachuc_theme::rem_size(cx));
         let t = tokens(cx);
         if let Some((settings, _)) = &self.settings {
             let settings: AnyView = settings.clone().into();
@@ -3582,6 +3654,7 @@ impl Render for Shell {
                 this.run_action(&action.0, window, cx)
             }))
             .capture_key_down(cx.listener(Self::on_key_capture))
+            .on_key_down(cx.listener(Self::on_key_type))
             .on_action(cx.listener(|this, action: &JumpToTab, window, cx| {
                 let index = action.0;
                 let selected = this.selected.clone();
@@ -3635,6 +3708,73 @@ impl Render for Shell {
             })
             .children(render_toasts(&self.toasts, cx))
             .into_any_element()
+    }
+}
+
+/// The key context of the timeline root in `bachuc-timeline`.
+const TIMELINE_CONTEXT: &str = "Timeline";
+
+/// Where the keyboard focus is, for [`should_redirect_to_composer`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FocusKind {
+    /// The agent pane or its timeline: nothing there takes typed text.
+    Thread,
+    /// The composer, a text field, a search box, or the terminal.
+    TextInput,
+    /// Home, Settings, the command center, a plugin overlay, a menu, or a tab with no composer.
+    NoComposer,
+}
+
+/// The focus kind from the primary key contexts of the focus path, outermost first. `overlay`
+/// is true while Settings, the command center, the shortcuts dialog, or a plugin surface shows.
+/// Only a focus on the agent pane itself or on its timeline is a thread; an inner context,
+/// such as a menu, is not.
+pub(crate) fn focus_kind(contexts: &[&str], overlay: bool) -> FocusKind {
+    if contexts
+        .iter()
+        .any(|context| TEXT_CONTEXTS.contains(context))
+    {
+        return FocusKind::TextInput;
+    }
+    let innermost = contexts.last().copied();
+    let in_thread = contexts.contains(&AGENT_CONTEXT)
+        && matches!(innermost, Some(AGENT_CONTEXT | TIMELINE_CONTEXT));
+    if in_thread && !overlay {
+        FocusKind::Thread
+    } else {
+        FocusKind::NoComposer
+    }
+}
+
+/// Whether a key typed at `focus` moves to the composer and types there: a printable
+/// character, Shift allowed, with no Cmd, Ctrl, Alt, or Fn, as Electron's `isTypeToFocusKey`.
+/// Space, Enter, Tab, arrows, and other named keys keep their meaning. A key with no character,
+/// such as a dead key that starts an IME composition, never moves.
+pub(crate) fn should_redirect_to_composer(
+    key: &str,
+    key_char: Option<&str>,
+    modifiers: &Modifiers,
+    focus: FocusKind,
+) -> bool {
+    if focus != FocusKind::Thread
+        || modifiers.platform
+        || modifiers.control
+        || modifiers.alt
+        || modifiers.function
+        || key.chars().count() != 1
+    {
+        return false;
+    }
+    let Some(text) = key_char else {
+        return false;
+    };
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        // macOS gives arrows and other function keys private-use characters.
+        (Some(c), None) => {
+            !c.is_control() && !c.is_whitespace() && !('\u{E000}'..='\u{F8FF}').contains(&c)
+        }
+        _ => false,
     }
 }
 
@@ -3920,12 +4060,13 @@ pub(crate) fn latest_prompt_reveal(state: Option<&TimelineState>) -> PromptRevea
 mod tests {
     // Not `super::*`: the gpui glob brings a `test` macro that shadows the std one.
     use super::{
-        AgentOpen, CANNOT_RENAME, FORK_ATTACHMENT_LABEL, FORK_FAILED, FORK_MISSING_WORKSPACE,
-        PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE, RESUME_ID_UNAVAILABLE,
-        RenameTarget, TERMINAL_NOT_OPEN, agent_open, agent_target, agent_workspace,
-        auto_opens_pr_tab, chat_target, closes_surface_on_open, fork_attachment_label,
-        fork_draft_seed, fork_error, fork_tab_cwd, fork_workspace_preset, has_pull_request,
-        latest_prompt_reveal, reload_error, rename_target, resume_text, workspace_file_attachment,
+        AGENT_CONTEXT, AgentOpen, CANNOT_RENAME, FORK_ATTACHMENT_LABEL, FORK_FAILED,
+        FORK_MISSING_WORKSPACE, FocusKind, PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE,
+        RESUME_ID_UNAVAILABLE, RenameTarget, SHELL_CONTEXT, TERMINAL_NOT_OPEN, agent_open,
+        agent_target, agent_workspace, auto_opens_pr_tab, chat_target, closes_surface_on_open,
+        focus_kind, fork_attachment_label, fork_draft_seed, fork_error, fork_tab_cwd,
+        fork_workspace_preset, has_pull_request, latest_prompt_reveal, reload_error, rename_target,
+        resume_text, should_redirect_to_composer, workspace_file_attachment,
     };
     use bachuc_client::{
         AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, PrMergeCapability, PrStatus,
@@ -4279,5 +4420,128 @@ mod tests {
             })
         );
         assert_eq!(workspace_file_attachment("README.md").0, "README.md");
+    }
+
+    #[test]
+    fn a_printable_key_in_a_thread_moves_to_the_composer() {
+        use gpui_kit::Modifiers;
+        let plain = Modifiers::default();
+        let shift = Modifiers {
+            shift: true,
+            ..Modifiers::default()
+        };
+        let thread = FocusKind::Thread;
+        for (key, text, modifiers) in [
+            ("a", "a", &plain),
+            ("a", "A", &shift),
+            ("1", "1", &plain),
+            ("/", "/", &plain),
+            ("?", "?", &plain),
+            ("đ", "đ", &plain),
+        ] {
+            assert!(
+                should_redirect_to_composer(key, Some(text), modifiers, thread),
+                "{key} {text}"
+            );
+        }
+        for (name, modifiers) in [
+            (
+                "cmd",
+                Modifiers {
+                    platform: true,
+                    ..Modifiers::default()
+                },
+            ),
+            (
+                "ctrl",
+                Modifiers {
+                    control: true,
+                    ..Modifiers::default()
+                },
+            ),
+            (
+                "alt",
+                Modifiers {
+                    alt: true,
+                    ..Modifiers::default()
+                },
+            ),
+            (
+                "fn",
+                Modifiers {
+                    function: true,
+                    ..Modifiers::default()
+                },
+            ),
+        ] {
+            assert!(
+                !should_redirect_to_composer("a", Some("a"), &modifiers, thread),
+                "{name}"
+            );
+        }
+        // Named keys keep their meaning, with or without a character.
+        for (key, text) in [
+            ("up", Some("\u{F700}")),
+            ("down", None),
+            ("enter", Some("\r")),
+            ("tab", Some("\t")),
+            ("space", Some(" ")),
+            ("escape", None),
+            ("backspace", Some("\u{8}")),
+        ] {
+            assert!(
+                !should_redirect_to_composer(key, text, &plain, thread),
+                "{key}"
+            );
+        }
+        // A dead key that starts an IME composition has no character yet.
+        assert!(!should_redirect_to_composer("e", None, &plain, thread));
+        assert!(!should_redirect_to_composer("e", Some(""), &plain, thread));
+        for focus in [FocusKind::TextInput, FocusKind::NoComposer] {
+            assert!(!should_redirect_to_composer("a", Some("a"), &plain, focus));
+        }
+    }
+
+    #[test]
+    fn only_the_timeline_or_the_agent_pane_counts_as_a_thread() {
+        const WORKSPACE: &str = bachuc_workspace::KEY_CONTEXT;
+        let thread = [SHELL_CONTEXT, WORKSPACE, AGENT_CONTEXT, "Timeline"];
+        assert_eq!(focus_kind(&thread, false), FocusKind::Thread);
+        assert_eq!(
+            focus_kind(&[SHELL_CONTEXT, WORKSPACE, AGENT_CONTEXT], false),
+            FocusKind::Thread
+        );
+        // The composer, with or without an IME composition, and the find bar take text.
+        assert_eq!(
+            focus_kind(&[SHELL_CONTEXT, WORKSPACE, AGENT_CONTEXT, "Input"], false),
+            FocusKind::TextInput
+        );
+        assert_eq!(
+            focus_kind(
+                &[SHELL_CONTEXT, WORKSPACE, AGENT_CONTEXT, "Timeline", "Input"],
+                false
+            ),
+            FocusKind::TextInput
+        );
+        assert_eq!(
+            focus_kind(&[SHELL_CONTEXT, WORKSPACE, "Terminal"], false),
+            FocusKind::TextInput
+        );
+        // Settings, the command center, and a plugin overlay are overlays; Home and a file tab
+        // have no agent pane; a menu inside the pane is not the thread.
+        assert_eq!(focus_kind(&thread, true), FocusKind::NoComposer);
+        assert_eq!(focus_kind(&[SHELL_CONTEXT], false), FocusKind::NoComposer);
+        assert_eq!(
+            focus_kind(&[SHELL_CONTEXT, WORKSPACE], false),
+            FocusKind::NoComposer
+        );
+        assert_eq!(
+            focus_kind(
+                &[SHELL_CONTEXT, WORKSPACE, AGENT_CONTEXT, "PopupMenu"],
+                false
+            ),
+            FocusKind::NoComposer
+        );
+        assert_eq!(focus_kind(&[], false), FocusKind::NoComposer);
     }
 }

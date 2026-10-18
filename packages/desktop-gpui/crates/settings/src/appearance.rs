@@ -1,12 +1,13 @@
 //! The Appearance settings: theme, the interface and code font families and sizes, the content
-//! size, and the syntax theme, stored in `appearance.json` next to `hosts.json` and applied
+//! size, the syntax theme, the whole-UI zoom, and the tab close button side, stored in `appearance.json` next to `hosts.json` and applied
 //! through `bachuc_theme`.
 
 use anyhow::{Context as _, Result};
 use bachuc_theme::{
     DEFAULT_CONTENT_FONT_SIZE, MAX_CONTENT_FONT_SIZE, MIN_CONTENT_FONT_SIZE, SyntaxThemeId,
-    ThemeChoice, metrics, set_content_font_size, set_custom_theme, set_font_families,
-    set_font_scale, set_syntax_theme, set_theme,
+    TabClosePosition, ThemeChoice, metrics, set_content_font_size, set_custom_theme,
+    set_font_families, set_font_scale, set_syntax_theme, set_tab_close_position, set_theme,
+    set_zoom,
 };
 use gpui_kit::{App, SharedString};
 use serde_json::{Map, Value, json};
@@ -20,6 +21,43 @@ pub const INTERFACE_RANGE: (f32, f32) = (10., 21.);
 pub const CODE_RANGE: (f32, f32) = (9., 22.);
 /// `MIN_CONTENT_FONT_SIZE` and `MAX_CONTENT_FONT_SIZE` of the Electron app.
 pub const CONTENT_RANGE: (f32, f32) = (MIN_CONTENT_FONT_SIZE, MAX_CONTENT_FONT_SIZE);
+
+/// The whole-UI zoom levels, as factors: the Electron and Chrome zoom steps from 50% to 200%.
+pub const ZOOM_STEPS: [f32; 11] = [0.5, 0.67, 0.75, 0.8, 0.9, 1., 1.1, 1.25, 1.5, 1.75, 2.];
+
+/// A zoom shortcut: one step in, one step out, or back to 100%.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoomDirection {
+    In,
+    Out,
+    Reset,
+}
+
+/// The [`ZOOM_STEPS`] entry nearest to `factor`. A factor that is not finite gives 1.0, and
+/// one out of range gives the end step.
+pub fn nearest_zoom_step(factor: f32) -> f32 {
+    if !factor.is_finite() {
+        return 1.;
+    }
+    ZOOM_STEPS
+        .into_iter()
+        .min_by(|a, b| (a - factor).abs().total_cmp(&(b - factor).abs()))
+        .unwrap_or(1.)
+}
+
+/// The zoom factor after one shortcut from `current`. In and Out move one step from the step
+/// nearest to `current` and stop at 50% and 200%.
+pub fn zoom_step(current: f32, direction: ZoomDirection) -> f32 {
+    let index = ZOOM_STEPS
+        .iter()
+        .position(|step| *step == nearest_zoom_step(current))
+        .unwrap_or(5);
+    match direction {
+        ZoomDirection::Reset => 1.,
+        ZoomDirection::In => ZOOM_STEPS[(index + 1).min(ZOOM_STEPS.len() - 1)],
+        ZoomDirection::Out => ZOOM_STEPS[index.saturating_sub(1)],
+    }
+}
 
 /// The first entry of a font family picker: no family chosen.
 pub const DEFAULT_FAMILY: &str = "Default";
@@ -41,6 +79,10 @@ pub struct Appearance {
     /// The selected plugin theme, `<plugin_id>/theme/<id>` (`pluginThemeId` in Electron). The id
     /// stays in the file while its plugin is off; the stored `theme` applies then.
     pub plugin_theme: Option<String>,
+    /// The whole-UI zoom factor, one of [`ZOOM_STEPS`]; 1.0 is 100%.
+    pub zoom: f32,
+    /// The side of the tab close button; a file without it reads as `Left`.
+    pub tab_close_position: TabClosePosition,
 }
 
 impl Default for Appearance {
@@ -54,6 +96,8 @@ impl Default for Appearance {
             code_font: None,
             syntax_theme: SyntaxThemeId::default(),
             plugin_theme: None,
+            zoom: 1.,
+            tab_close_position: TabClosePosition::Left,
         }
     }
 }
@@ -101,6 +145,29 @@ pub(crate) fn theme_key(theme: ThemeChoice) -> &'static str {
         ThemeChoice::Light => "light",
         ThemeChoice::ClaudeDark => "claude-dark",
         ThemeChoice::System => "system",
+    }
+}
+
+fn tab_close_key(position: TabClosePosition) -> &'static str {
+    match position {
+        TabClosePosition::Left => "left",
+        TabClosePosition::Right => "right",
+    }
+}
+
+fn tab_close_from_key(key: &str) -> Option<TabClosePosition> {
+    Some(match key {
+        "left" => TabClosePosition::Left,
+        "right" => TabClosePosition::Right,
+        _ => return None,
+    })
+}
+
+/// The label on the tab close button control.
+pub fn tab_close_label(position: TabClosePosition) -> &'static str {
+    match position {
+        TabClosePosition::Left => "Left",
+        TabClosePosition::Right => "Right",
     }
 }
 
@@ -187,6 +254,16 @@ pub fn load_from(dir: &Path) -> Appearance {
         appearance.syntax_theme = id;
     }
     appearance.plugin_theme = family("pluginThemeId");
+    if let Some(zoom) = stored.get("zoom").and_then(Value::as_f64) {
+        appearance.zoom = nearest_zoom_step(zoom as f32);
+    }
+    if let Some(position) = stored
+        .get("tabClosePosition")
+        .and_then(Value::as_str)
+        .and_then(tab_close_from_key)
+    {
+        appearance.tab_close_position = position;
+    }
     appearance
 }
 
@@ -208,6 +285,13 @@ pub fn save_to(dir: &Path, appearance: &Appearance) -> Result<()> {
     if let Some(id) = &appearance.plugin_theme {
         value.insert("pluginThemeId".into(), json!(id));
     }
+    // Rounded, so 1.1 is stored as 1.1 and not as the f64 of the f32.
+    let zoom = (f64::from(appearance.zoom) * 100.).round() / 100.;
+    value.insert("zoom".into(), json!(zoom));
+    value.insert(
+        "tabClosePosition".into(),
+        json!(tab_close_key(appearance.tab_close_position)),
+    );
     let value = Value::Object(value);
     let temp = dir.join(format!("{FILE}.tmp"));
     std::fs::write(
@@ -219,8 +303,8 @@ pub fn save_to(dir: &Path, appearance: &Appearance) -> Result<()> {
     Ok(())
 }
 
-/// Applies the theme, the font scale, the families, the content size, and the syntax theme to
-/// the running app. A family that is not installed selects the default.
+/// Applies the theme, the font scale, the families, the content size, the syntax theme, the
+/// zoom, and the tab close button side to the running app. A family that is not installed selects the default.
 pub fn apply(appearance: &Appearance, cx: &mut App) {
     set_theme(appearance.theme, cx);
     set_font_scale(
@@ -236,6 +320,8 @@ pub fn apply(appearance: &Appearance, cx: &mut App) {
     set_content_font_size(appearance.content_size, cx);
     set_syntax_theme(appearance.syntax_theme, cx);
     set_custom_theme(appearance.plugin_theme.clone().map(SharedString::from), cx);
+    set_zoom(appearance.zoom, cx);
+    set_tab_close_position(appearance.tab_close_position, cx);
 }
 
 /// Reads `appearance.json` from `~/Library/Application Support/BachucGpui` and applies it. Call
@@ -519,6 +605,101 @@ mod tests {
         assert_eq!(appearance.theme, ThemeChoice::System);
         assert_eq!(appearance.interface_size, INTERFACE_RANGE.1);
         assert_eq!(appearance.code_size, 12.);
+    }
+
+    #[test]
+    fn zoom_steps_in_and_out_and_stops_at_50_and_200_percent() {
+        assert_eq!(zoom_step(1., ZoomDirection::In), 1.1);
+        assert_eq!(zoom_step(1., ZoomDirection::Out), 0.9);
+        assert_eq!(zoom_step(0.9, ZoomDirection::Out), 0.8);
+        assert_eq!(zoom_step(1.5, ZoomDirection::Reset), 1.);
+        assert_eq!(zoom_step(0.5, ZoomDirection::Out), 0.5);
+        assert_eq!(zoom_step(0.67, ZoomDirection::Out), 0.5);
+        assert_eq!(zoom_step(2., ZoomDirection::In), 2.);
+        assert_eq!(zoom_step(1.75, ZoomDirection::In), 2.);
+        let mut level = 1.;
+        for _ in 0..20 {
+            level = zoom_step(level, ZoomDirection::In);
+        }
+        assert_eq!(level, 2.);
+        for _ in 0..20 {
+            level = zoom_step(level, ZoomDirection::Out);
+        }
+        assert_eq!(level, 0.5);
+        assert_eq!(zoom_step(f32::NAN, ZoomDirection::In), 1.1);
+    }
+
+    #[test]
+    fn a_stored_zoom_reads_as_the_nearest_step_or_100_percent() {
+        assert_eq!(nearest_zoom_step(1.5), 1.5);
+        assert_eq!(nearest_zoom_step(1.3), 1.25);
+        assert_eq!(nearest_zoom_step(0.66), 0.67);
+        assert_eq!(nearest_zoom_step(9.), 2.);
+        assert_eq!(nearest_zoom_step(0.01), 0.5);
+        assert_eq!(nearest_zoom_step(-4.), 0.5);
+        assert_eq!(nearest_zoom_step(f32::NAN), 1.);
+        assert_eq!(nearest_zoom_step(f32::INFINITY), 1.);
+        let dir = temp_dir("appearance-zoom");
+        for (text, want) in [
+            (r#"{"zoom":1.5}"#, 1.5),
+            (r#"{"zoom":1.3}"#, 1.25),
+            (r#"{"zoom":40}"#, 2.),
+            (r#"{"zoom":0}"#, 0.5),
+            (r#"{"zoom":"NaN"}"#, 1.),
+            (r#"{"zoom":null}"#, 1.),
+            (r#"{"theme":"light"}"#, 1.),
+        ] {
+            std::fs::write(dir.join(FILE), text).unwrap();
+            assert_eq!(load_from(&dir).zoom, want, "{text}");
+        }
+        let saved = Appearance {
+            zoom: 1.5,
+            ..Appearance::default()
+        };
+        save_to(&dir, &saved).unwrap();
+        assert_eq!(load_from(&dir), saved);
+        let text = std::fs::read_to_string(dir.join(FILE)).unwrap();
+        assert!(text.contains("\"zoom\": 1.5"), "{text}");
+        for step in ZOOM_STEPS {
+            let saved = Appearance {
+                zoom: step,
+                ..Appearance::default()
+            };
+            save_to(&dir, &saved).unwrap();
+            assert_eq!(load_from(&dir).zoom, step);
+        }
+    }
+
+    #[test]
+    fn the_tab_close_button_is_left_unless_the_file_says_right() {
+        let dir = temp_dir("appearance-tab-close");
+        // A file from before the setting.
+        std::fs::write(
+            dir.join(FILE),
+            r#"{"theme":"light","interfaceSize":16,"codeSize":13}"#,
+        )
+        .unwrap();
+        assert_eq!(load_from(&dir).tab_close_position, TabClosePosition::Left);
+        assert_eq!(
+            Appearance::default().tab_close_position,
+            TabClosePosition::Left
+        );
+        for (text, want) in [
+            (r#"{"tabClosePosition":"right"}"#, TabClosePosition::Right),
+            (r#"{"tabClosePosition":"left"}"#, TabClosePosition::Left),
+            (r#"{"tabClosePosition":"top"}"#, TabClosePosition::Left),
+            (r#"{"tabClosePosition":2}"#, TabClosePosition::Left),
+        ] {
+            std::fs::write(dir.join(FILE), text).unwrap();
+            assert_eq!(load_from(&dir).tab_close_position, want, "{text}");
+        }
+        let saved = Appearance {
+            tab_close_position: TabClosePosition::Right,
+            ..Appearance::default()
+        };
+        save_to(&dir, &saved).unwrap();
+        assert_eq!(load_from(&dir), saved);
+        assert_eq!(tab_close_label(TabClosePosition::Right), "Right");
     }
 
     #[test]

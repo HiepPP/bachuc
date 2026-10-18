@@ -46,5 +46,22 @@ uuid = { version = "1", features = ["v4"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 # GPUI has no dock badge API, so the badge goes through NSDockTile.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSDockTile", "NSResponder"] }
-objc2-foundation = { version = "0.3", features = ["NSString"] }
+# The Open in editor menu draws each app's bundle icon (ADR-0046).
+objc2-app-kit = { version = "0.3", features = [
+    "NSApplication",
+    "NSBitmapImageRep",
+    "NSDockTile",
+    "NSGraphics",
+    "NSGraphicsContext",
+    "NSImage",
+    "NSImageRep",
+    "NSResponder",
+    "NSWorkspace",
+] }
+objc2-foundation = { version = "0.3", features = [
+    "NSData",
+    "NSDictionary",
+    "NSGeometry",
+    "NSString",
+    "NSURL",
+] }

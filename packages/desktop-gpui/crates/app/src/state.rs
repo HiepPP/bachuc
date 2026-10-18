@@ -9,8 +9,9 @@ use bachuc_command::{CommandItem, Shortcut};
 use bachuc_explorer::ShipDefault;
 use bachuc_icons::IconName;
 use bachuc_theme::ThemeChoice;
-use gpui_kit::Hsla;
+use gpui_kit::{Hsla, Image};
 use std::path::Path;
+use std::sync::Arc;
 
 /// The host to open on. `preferred` is a host name (the `BACHUC_HOST` variable); without it
 /// the host named `live` opens, then the first one.
@@ -352,6 +353,18 @@ impl EditorTarget {
         }
     }
 
+    /// The macOS bundle id, the key of the app icon cache.
+    pub fn bundle_id(self) -> &'static str {
+        match self {
+            EditorTarget::VsCode => "com.microsoft.VSCode",
+            EditorTarget::Cursor => "com.todesktop.230313mzl4w4u92",
+            EditorTarget::Zed => "dev.zed.Zed",
+            EditorTarget::Finder => "com.apple.finder",
+            EditorTarget::Terminal => "com.apple.Terminal",
+        }
+    }
+
+    /// The lucide fallback when the app's own icon is not loaded.
     pub fn icon(self) -> IconName {
         match self {
             EditorTarget::VsCode | EditorTarget::Cursor | EditorTarget::Zed => IconName::Code,
@@ -369,6 +382,27 @@ impl EditorTarget {
             EditorTarget::Finder | EditorTarget::Terminal => None,
         }
     }
+}
+
+/// The app icons loaded at start, by bundle id. Five entries at most, so a list, not a map.
+pub type AppIcons = Vec<(&'static str, Arc<Image>)>;
+
+/// What a row or the split button draws for an app.
+#[derive(Clone, Debug)]
+pub enum EditorGlyph {
+    App(Arc<Image>),
+    Lucide(IconName),
+}
+
+/// The app's own icon from `icons`, else its lucide icon (an app that is not installed, or an
+/// icon that did not load).
+pub fn editor_glyph(target: EditorTarget, icons: &[(&'static str, Arc<Image>)]) -> EditorGlyph {
+    icons
+        .iter()
+        .find(|(id, _)| *id == target.bundle_id())
+        .map_or(EditorGlyph::Lucide(target.icon()), |(_, image)| {
+            EditorGlyph::App(image.clone())
+        })
 }
 
 /// The targets to list: each editor whose bundle `exists`, then Finder and Terminal.
@@ -823,6 +857,31 @@ mod tests {
         assert_eq!(script_state(&script), "running");
         script.health = Some("healthy".into());
         assert_eq!(script_state(&script), "running, healthy");
+    }
+
+    #[test]
+    fn a_missing_app_icon_falls_back_to_the_lucide_icon() {
+        let image = Arc::new(Image::from_bytes(gpui_kit::ImageFormat::Png, Vec::new()));
+        let icons: AppIcons = vec![("com.apple.finder", image.clone())];
+        assert!(matches!(
+            editor_glyph(EditorTarget::Finder, &icons),
+            EditorGlyph::App(found) if Arc::ptr_eq(&found, &image)
+        ));
+        // VS Code is not installed, so it has no loaded icon.
+        assert!(matches!(
+            editor_glyph(EditorTarget::VsCode, &icons),
+            EditorGlyph::Lucide(IconName::Code)
+        ));
+        assert!(matches!(
+            editor_glyph(EditorTarget::Terminal, &[]),
+            EditorGlyph::Lucide(IconName::SquareTerminal)
+        ));
+        // A bundle id that no app has keys nothing.
+        let wrong: AppIcons = vec![("com.example.missing", image)];
+        assert!(matches!(
+            editor_glyph(EditorTarget::Finder, &wrong),
+            EditorGlyph::Lucide(IconName::FolderOpen)
+        ));
     }
 
     #[test]

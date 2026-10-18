@@ -21,7 +21,7 @@ use bachuc_theme::metrics::{
     CONTROL_XS, FONT_BASE, ICON_SM, ICON_XS, RADIUS_MD, RADIUS_SM, SPACE_0_5, SPACE_1,
     TAB_BAR_HEIGHT,
 };
-use bachuc_theme::{Tokens, tokens, ui_font_size};
+use bachuc_theme::{TabClosePosition, Tokens, tokens, ui_font_size, zoomed};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Selectable, Sizable as _, h_flex, v_flex};
@@ -50,6 +50,13 @@ struct TabDrag {
     title: SharedString,
     icon: IconName,
     logo: Option<Arc<Image>>,
+}
+
+/// The More actions menu of one group's tab bar while it shows.
+struct OpenSplitMenu {
+    group: NodeId,
+    menu: Entity<PopupMenu>,
+    _dismiss: Subscription,
 }
 
 /// The open tab context menu and what keeps it alive.
@@ -87,7 +94,7 @@ impl Render for DragPreview {
         };
         let t = tokens(cx);
         h_flex()
-            .h(px(CONTROL_XS))
+            .h(zoomed(CONTROL_XS, cx))
             .px(px(TAB_CHIP_PADDING))
             .gap(px(TAB_CONTENT_GAP))
             .rounded(px(RADIUS_MD))
@@ -206,6 +213,7 @@ pub struct Workspace {
     new_tab_menu: Option<MenuBuilder>,
     extras: TabExtras,
     tab_menu: Option<OpenTabMenuState>,
+    split_menu: Option<OpenSplitMenu>,
     /// The bounds of each tab chip in the last frame, for the keyboard menu key.
     tab_bounds: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
 }
@@ -237,6 +245,7 @@ impl Workspace {
             new_tab_menu: None,
             extras: TabExtras::default(),
             tab_menu: None,
+            split_menu: None,
             tab_bounds: Rc::default(),
         }
     }
@@ -455,6 +464,54 @@ impl Workspace {
         self.tab_menu = Some(OpenTabMenuState {
             menu,
             position,
+            _dismiss: dismiss,
+        });
+        cx.notify();
+    }
+
+    /// Opens the More actions menu of `group`, or closes it when it shows. The menu is owned
+    /// here, not by a gpui-kit `DropdownMenu`, so the AX press opens it too.
+    fn toggle_split_menu(&mut self, group: NodeId, window: &mut Window, cx: &mut Context<Self>) {
+        self.tab_menu = None;
+        if self
+            .split_menu
+            .take()
+            .is_some_and(|open| open.group == group)
+        {
+            self.focus_handle.focus(window, cx);
+            cx.notify();
+            return;
+        }
+        self.focus_group(group, cx);
+        let focus = self.focus_handle.clone();
+        let muted = tokens(cx).foreground_muted;
+        let menu = PopupMenu::build(window, cx, move |menu, _, _| {
+            menu.action_context(focus.clone())
+                .min_w(px(SPLIT_MENU_WIDTH))
+                .menu_with_icon(
+                    "Split right",
+                    icon(IconName::Columns2)
+                        .with_size(px(ICON_SM))
+                        .text_color(muted),
+                    Box::new(SplitRight),
+                )
+                .menu_with_icon(
+                    "Split down",
+                    icon(IconName::Rows2)
+                        .with_size(px(ICON_SM))
+                        .text_color(muted),
+                    Box::new(SplitDown),
+                )
+        });
+        // The menu gives the focus back to the workspace itself when it closes.
+        let dismiss = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, _, cx| {
+            this.split_menu = None;
+            cx.notify();
+        });
+        menu.focus_handle(cx).focus(window, cx);
+        self.split_menu = Some(OpenSplitMenu {
+            group,
+            menu,
             _dismiss: dismiss,
         });
         cx.notify();
@@ -824,14 +881,14 @@ impl Workspace {
                 self.layout.maximized().is_some() || self.layout.groups().len() > 1,
                 |toolbar| toolbar.child(self.render_maximize_button(id, t, cx)),
             )
-            .child(self.render_split_menu(id, t));
+            .child(self.render_split_menu(id, t, cx));
         let tab_bar = h_flex()
             .id(("tab-bar", id as usize))
             .role(Role::TabList)
             .aria_label("Tabs")
             .flex_none()
             .w_full()
-            .h(px(TAB_BAR_HEIGHT))
+            .h(zoomed(TAB_BAR_HEIGHT, cx))
             .border_b_1()
             .border_color(t.border)
             .bg(t.surface0)
@@ -899,6 +956,8 @@ impl Workspace {
         };
 
         let close_key = key.clone();
+        let a11y_close_key = key.clone();
+        let close_left = bachuc_theme::tab_close_position(cx) == TabClosePosition::Left;
         let close_button = div()
             .id(SharedString::from(format!("tab-close:{key}")))
             .role(Role::Button)
@@ -935,23 +994,46 @@ impl Workspace {
                         this.hovered_close = None;
                         this.close(&close_key, window, cx);
                     }))
+            })
+            .on_a11y_action(AccessibleAction::Click, {
+                let view = cx.weak_entity();
+                move |_, window, cx| {
+                    view.update(cx, |this, cx| {
+                        this.hovered_close = None;
+                        this.close(&a11y_close_key, window, cx);
+                    })
+                    .ok();
+                }
             });
-        let close_overlay = h_flex()
-            .absolute()
-            .top_0()
-            .bottom_0()
-            .right_0()
-            .w(px(CLOSE_OVERLAY_WIDTH))
-            .justify_end()
-            .pr(px(SPACE_1))
-            .rounded_r(px(RADIUS_MD))
-            .bg(linear_gradient(
-                90.,
-                linear_color_stop(backdrop.opacity(0.), 0.),
-                linear_color_stop(backdrop, CLOSE_SCRIM_SOLID),
-            ))
-            .when(!hovered, |overlay| overlay.opacity(0.))
-            .child(close_button);
+        // Left: on hover the close button takes the icon slot, so the chip keeps its width.
+        // Both layers stay in the layout and swap by opacity.
+        let glyph = tab_glyph(item.icon, self.extras.logo(&key), label_color);
+        let (icon_slot, close_overlay) = if close_left {
+            let slot = div()
+                .flex_none()
+                .relative()
+                .size(px(TAB_ICON_WIDTH))
+                .child(
+                    div()
+                        .size_full()
+                        .when(hovered, |glyph| glyph.opacity(0.))
+                        .child(glyph),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top(px((TAB_ICON_WIDTH - CLOSE_BUTTON) / 2.))
+                        .left(px((TAB_ICON_WIDTH - CLOSE_BUTTON) / 2.))
+                        .when(!hovered, |layer| layer.opacity(0.))
+                        .child(close_button),
+                );
+            (slot.into_any_element(), None)
+        } else {
+            (
+                glyph,
+                Some(self.close_overlay(close_button, backdrop, hovered)),
+            )
+        };
 
         let hover_key = key.clone();
         let middle_key = key.clone();
@@ -978,7 +1060,7 @@ impl Workspace {
             .aria_selected(active)
             .relative()
             .w(px(width))
-            .h(px(CONTROL_XS))
+            .h(zoomed(CONTROL_XS, cx))
             .px(px(TAB_CHIP_PADDING))
             .gap(px(TAB_CONTENT_GAP))
             .rounded(px(RADIUS_MD))
@@ -1037,7 +1119,7 @@ impl Workspace {
             )
             .tooltip(move |window, cx| Tooltip::new(tooltip_title.clone()).build(window, cx))
             .tooltip_show_delay(TAB_TOOLTIP_DELAY)
-            .child(tab_glyph(item.icon, logo.as_ref(), label_color))
+            .child(icon_slot)
             .child(
                 div()
                     .flex_1()
@@ -1059,7 +1141,7 @@ impl Workspace {
                         .bg(t.foreground_muted),
                 )
             })
-            .child(close_overlay)
+            .children(close_overlay)
             .child(measure);
 
         let pill_offset = -(TAB_CHIP_GAP / 2. + TAB_DROP_INDICATOR_WIDTH / 2.);
@@ -1083,6 +1165,27 @@ impl Workspace {
                 })
             })
             .into_any_element()
+    }
+
+    /// The Right close button: an overlay at the chip's right end with a scrim of the chip
+    /// fill under it.
+    fn close_overlay(&self, close_button: Stateful<Div>, backdrop: Hsla, hovered: bool) -> Div {
+        h_flex()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right_0()
+            .w(px(CLOSE_OVERLAY_WIDTH))
+            .justify_end()
+            .pr(px(SPACE_1))
+            .rounded_r(px(RADIUS_MD))
+            .bg(linear_gradient(
+                90.,
+                linear_color_stop(backdrop.opacity(0.), 0.),
+                linear_color_stop(backdrop, CLOSE_SCRIM_SOLID),
+            ))
+            .when(!hovered, |overlay| overlay.opacity(0.))
+            .child(close_button)
     }
 
     fn icon_button(
@@ -1173,9 +1276,20 @@ impl Workspace {
         .into_any_element()
     }
 
-    fn render_split_menu(&self, group: NodeId, t: &Tokens) -> AnyElement {
-        let focus = self.focus_handle.clone();
-        let muted = t.foreground_muted;
+    /// The More actions button and, while it shows, its menu under the button's right edge.
+    fn render_split_menu(
+        &self,
+        group: NodeId,
+        t: &Tokens,
+        cx: &mut Context<Workspace>,
+    ) -> AnyElement {
+        let menu = self
+            .split_menu
+            .as_ref()
+            .filter(|open| open.group == group)
+            .map(|open| open.menu.clone());
+        let open = menu.is_some();
+        let fill = t.interaction_highlight;
         let button = self
             .icon_button(
                 ("split-menu", group as usize).into(),
@@ -1184,31 +1298,48 @@ impl Workspace {
                 TOOLBAR_BUTTON,
                 t,
             )
-            .tooltip(|window, cx| Tooltip::new("More actions").build(window, cx));
-        ChromeButton {
-            base: button,
-            open: false,
-            fill: t.interaction_highlight,
-        }
-        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
-            menu.action_context(focus.clone())
-                .min_w(px(SPLIT_MENU_WIDTH))
-                .menu_with_icon(
-                    "Split right",
-                    icon(IconName::Columns2)
-                        .with_size(px(ICON_SM))
-                        .text_color(muted),
-                    Box::new(SplitRight),
+            .aria_expanded(open)
+            .when(open, |button| button.bg(fill))
+            .tooltip(|window, cx| Tooltip::new("More actions").build(window, cx))
+            // The capture phase runs before the open menu's press-outside listener, so a second
+            // press closes the menu instead of closing and opening it again.
+            .capture_any_mouse_down(
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    if event.button == MouseButton::Left {
+                        cx.stop_propagation();
+                        this.toggle_split_menu(group, window, cx);
+                    }
+                }),
+            )
+            .on_a11y_action(AccessibleAction::Click, {
+                let view = cx.weak_entity();
+                move |_, window, cx| {
+                    view.update(cx, |this, cx| this.toggle_split_menu(group, window, cx))
+                        .ok();
+                }
+            });
+        div()
+            .relative()
+            .flex_none()
+            .child(button)
+            .when_some(menu, |slot, menu| {
+                slot.child(
+                    div()
+                        .absolute()
+                        .top(px(TOOLBAR_BUTTON + SPACE_1))
+                        .right_0()
+                        .child(
+                            deferred(
+                                anchored()
+                                    .anchor(Anchor::TopRight)
+                                    .snap_to_window_with_margin(px(8.))
+                                    .child(menu),
+                            )
+                            .with_priority(gpui_kit::base::POPUP_PRIORITY),
+                        ),
                 )
-                .menu_with_icon(
-                    "Split down",
-                    icon(IconName::Rows2)
-                        .with_size(px(ICON_SM))
-                        .text_color(muted),
-                    Box::new(SplitDown),
-                )
-        })
-        .into_any_element()
+            })
+            .into_any_element()
     }
 }
 
