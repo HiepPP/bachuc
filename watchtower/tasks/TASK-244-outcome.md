@@ -28,3 +28,14 @@ DEFERRED (UI checker): TASK-233 row gaps change by 0 px. The three `UI checker:`
 ## Lessons
 
 - The gap must follow the renderer lookup, not the built view: `space_below` also runs in `sync`, before `ensure_plugin_views` builds any view.
+
+## UI Checks
+
+- UI checker: html-reply answer thread, no note and no blank band (also needs a daemon item that live lacks) -> UNVERIFIED (unattended): background frame
+- UI checker: turn diff card thread, the card shows -> UNVERIFIED (unattended): background frame
+- UI checker: step list with one rendered and one unrendered plugin item, no gap -> UNVERIFIED (unattended): background frame
+- Anti-goal: TASK-233 row gaps change by 0 px -> UNVERIFIED (unattended): background frame
+
+Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (8 s apart), before-key-try.png, before-key-try2.png: the 1200x800 window still shows "Connecting / live" while the app holds an ESTABLISHED socket to 127.0.0.1:6768. GPUI does not redraw a background window (Q-069), so no frame shows thread, composer, or zoom. A Cmd+= and a Cmd+- key reached the app (appearance.json changed 1.25 -> 1.5 -> 1.25) but the window did not redraw. The check bundle was built (exit 0); a baseline copy is at `Bachuc GPUI Zoom Before.app`. The checker did not use the front, the pointer, or AX clicks.
+
+Blocked: BUILT, UNVERIFIED (Q-161)

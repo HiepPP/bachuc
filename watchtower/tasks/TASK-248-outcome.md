@@ -42,3 +42,12 @@ DEFERRED (UI checker): 0 changed pixel rows at zoom 100% needs screenshots. At 1
 
 - In edition 2024, an `impl IntoElement` return captures every `&` and `&mut` argument. A builder that takes `cx: &App` and returns `impl IntoElement` holds the borrow in its caller. Declare `+ use<..>` to release it.
 - A regex swap of `px(` also matches the `.px(` method. Check `.px(zoomed(..))` after a bulk swap.
+
+## UI Checks
+
+- UI checker 1200x800 zoom 150%: header, tab bar with 3 tabs, sidebar with projects and agents, split pane -> UNVERIFIED (unattended): background frame
+- Anti-goal: zoom 100%, 0 changed pixel rows before vs after -> UNVERIFIED (unattended): background frame
+
+Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (8 s apart), before-key-try.png, before-key-try2.png: the 1200x800 window still shows "Connecting / live" while the app holds an ESTABLISHED socket to 127.0.0.1:6768. GPUI does not redraw a background window (Q-069), so no frame shows thread, composer, or zoom. A Cmd+= and a Cmd+- key reached the app (appearance.json changed 1.25 -> 1.5 -> 1.25) but the window did not redraw. The check bundle was built (exit 0); a baseline copy is at `Bachuc GPUI Zoom Before.app`. The checker did not use the front, the pointer, or AX clicks.
+
+Blocked: BUILT, UNVERIFIED (Q-161)

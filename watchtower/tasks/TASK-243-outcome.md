@@ -31,3 +31,15 @@ DEFERRED (UI checker): the other rows of the TASK-233 gap table within 1 px of r
 
 - A list inside a blockquote is still `depth == 0`; `NodeRenderOptions.in_blockquote` tells them apart.
 - The TASK-233 outcome moved to `watchtower/archive/20261018-gpui-polish-and-fixes/tasks/`; the spec link is stale but the gap table is not needed for the code.
+
+## UI Checks
+
+- UI checker: TASK-233 thread vs /tmp/wt-ui/ref-233-electron.png, paragraph to list and list end to code block within 2 px -> UNVERIFIED (unattended): background frame
+- UI checker: last-node list and nested list message, bottom gap only under the top-level list -> UNVERIFIED (unattended): background frame
+- UI checker: list-first message and blockquote list, 4 px on top of the first -> UNVERIFIED (unattended): background frame
+- UI checker: Cmd+= once, list gaps grow with the zoom -> UNVERIFIED (unattended): background frame
+- Anti-goal: TASK-233 gap table rows within 1 px of run 2 -> UNVERIFIED (unattended): background frame
+
+Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (8 s apart), before-key-try.png, before-key-try2.png: the 1200x800 window still shows "Connecting / live" while the app holds an ESTABLISHED socket to 127.0.0.1:6768. GPUI does not redraw a background window (Q-069), so no frame shows thread, composer, or zoom. A Cmd+= and a Cmd+- key reached the app (appearance.json changed 1.25 -> 1.5 -> 1.25) but the window did not redraw. The check bundle was built (exit 0); a baseline copy is at `Bachuc GPUI Zoom Before.app`. The checker did not use the front, the pointer, or AX clicks.
+
+Blocked: BUILT, UNVERIFIED (Q-161)

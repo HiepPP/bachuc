@@ -49,3 +49,12 @@ DEFERRED (UI checker): Board with runs and the Watchtower board with a TASK dial
 - The Board already had its own size scale. Folding the zoom into that scale was smaller and safer than converting each `s(..)` call.
 - A page that picks its layout from a measured width must divide the width by the zoom, or breakpoints move with the zoom.
 - Group B edits only `private` helpers' signatures; no public symbol changed.
+
+## UI Checks
+
+- UI checker 1200x800 zoom 150%: Board with runs and Watchtower board with a TASK dialog (also needs Board runs that live may lack) -> UNVERIFIED (unattended): background frame
+- Anti-goal: zoom 100%, 0 changed pixel rows before vs after -> UNVERIFIED (unattended): background frame
+
+Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (8 s apart), before-key-try.png, before-key-try2.png: the 1200x800 window still shows "Connecting / live" while the app holds an ESTABLISHED socket to 127.0.0.1:6768. GPUI does not redraw a background window (Q-069), so no frame shows thread, composer, or zoom. A Cmd+= and a Cmd+- key reached the app (appearance.json changed 1.25 -> 1.5 -> 1.25) but the window did not redraw. The check bundle was built (exit 0); a baseline copy is at `Bachuc GPUI Zoom Before.app`. The checker did not use the front, the pointer, or AX clicks.
+
+Blocked: BUILT, UNVERIFIED (Q-161)

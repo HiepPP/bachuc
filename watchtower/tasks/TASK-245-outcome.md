@@ -31,3 +31,14 @@ DEFERRED (UI checker): no frame loop, CPU under 1% over 10 s. By reading: the ca
 
 - `draft_pill_row(pills)` in `plugin_slots.rs` still uses `px` for its two paddings: it has no `cx`, and its only caller is in `composer.rs` (owned by another group). It needs a `cx` argument from `composer.rs:3060`. Q-ID suggestion: convert it with TASK-247.
 - Taffy does not need `relative()` on the absolute pill column for the `canvas` child to measure it.
+
+## UI Checks
+
+- UI checker 1200x800, finished Board run thread: pill and text AX bounds do not intersect (also needs a finished Board run that live lacks) -> UNVERIFIED (unattended): background frame
+- UI checker 1600x900: text column x and width equal the run before -> UNVERIFIED (unattended): background frame
+- UI checker: running run, inset 0 -> UNVERIFIED (unattended): background frame
+- UI checker: running run finishes, gutter appears; daemon stop hides pills (daemon stop is forbidden: UNVERIFIED by rule) -> UNVERIFIED (unattended): background frame
+
+Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (8 s apart), before-key-try.png, before-key-try2.png: the 1200x800 window still shows "Connecting / live" while the app holds an ESTABLISHED socket to 127.0.0.1:6768. GPUI does not redraw a background window (Q-069), so no frame shows thread, composer, or zoom. A Cmd+= and a Cmd+- key reached the app (appearance.json changed 1.25 -> 1.5 -> 1.25) but the window did not redraw. The check bundle was built (exit 0); a baseline copy is at `Bachuc GPUI Zoom Before.app`. The checker did not use the front, the pointer, or AX clicks.
+
+Blocked: BUILT, UNVERIFIED (Q-161)

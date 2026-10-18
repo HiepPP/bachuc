@@ -38,3 +38,16 @@ DEFERRED (UI checker): zoom 150% for the turn diff card, the Space menu, next-pr
 
 - A `move` closure that captures `cx: &mut Context<Self>` blocks later uses of `cx`. Compute the zoomed `Pixels` before the closure.
 - A Verify grep for `px(` must skip `.px(` method calls; a plain `\bpx\(` matches them.
+
+## UI Checks
+
+- UI checker 1200x800 zoom 150%: turn diff card, Space menu, next-prompt buttons, skill pins -> UNVERIFIED (unattended): background frame
+- Extra (b), Q-158: at zoom 150% the stop-orb grows with the composer -> UNVERIFIED (unattended): background frame
+- Plan Verify: 1200x800 and 1600x900, zoom 100% and 150%; thread, composer, sidebar, explorer, settings, Board, Watchtower board -> UNVERIFIED (unattended): background frame
+- Anti-goal: zoom 100%, 0 changed pixel rows before vs after -> UNVERIFIED (unattended): background frame
+
+Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (8 s apart), before-key-try.png, before-key-try2.png: the 1200x800 window still shows "Connecting / live" while the app holds an ESTABLISHED socket to 127.0.0.1:6768. GPUI does not redraw a background window (Q-069), so no frame shows thread, composer, or zoom. A Cmd+= and a Cmd+- key reached the app (appearance.json changed 1.25 -> 1.5 -> 1.25) but the window did not redraw. The check bundle was built (exit 0); a baseline copy is at `Bachuc GPUI Zoom Before.app`. The checker did not use the front, the pointer, or AX clicks.
+
+By reading only (not a check result): the composer passes `size: zoomed(CONTROL, cx)` and `icon_size: zoomed(TOOLBAR_GLYPH, cx)` to `StopButtonProps` for a plugin stop face (`crates/composer/src/composer.rs:2835`). Both grow with zoom, so a plugin orb should scale. The default red face uses `size_full()` in its slot. Q-158 stays open until a 150% screenshot.
+
+Blocked: BUILT, UNVERIFIED (Q-161)

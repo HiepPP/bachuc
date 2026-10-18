@@ -60,3 +60,12 @@ DEFERRED (UI checker): the 100% screenshot comparison. At zoom 1.0, `zoomed(X, c
 - A `px(..)` swap inside a `move |menu, _, _|` closure of `PopupMenu::build` or `dropdown_menu_with_anchor` cannot capture `cx` (borrow escapes). Name the third closure argument and use it, or compute the zoomed value before the closure. A nested `PopupMenuItem::element(move |_, cx| ..)` has its own `cx`.
 - A uniform `ListState` keeps the row height it was built with. A view that uses `reset_with_uniform_height` with a zoomed height must rebuild the list when the zoom changes (`DiffView.zoom`).
 - A terminal `PADDING` change needs `size.rs` (`grid_size`, `cell_at`) to follow; it is zero today.
+
+## UI Checks
+
+- UI checker 1200x800 zoom 150%: explorer tree and diff, terminal, history, Appearance and Projects settings -> UNVERIFIED (unattended): background frame
+- Anti-goal: zoom 100%, 0 changed pixel rows before vs after -> UNVERIFIED (unattended): background frame
+
+Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (8 s apart), before-key-try.png, before-key-try2.png: the 1200x800 window still shows "Connecting / live" while the app holds an ESTABLISHED socket to 127.0.0.1:6768. GPUI does not redraw a background window (Q-069), so no frame shows thread, composer, or zoom. A Cmd+= and a Cmd+- key reached the app (appearance.json changed 1.25 -> 1.5 -> 1.25) but the window did not redraw. The check bundle was built (exit 0); a baseline copy is at `Bachuc GPUI Zoom Before.app`. The checker did not use the front, the pointer, or AX clicks.
+
+Blocked: BUILT, UNVERIFIED (Q-161)

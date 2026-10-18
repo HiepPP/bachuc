@@ -48,3 +48,15 @@ UI checker line at 150% also DEFERRED (UI checker).
 - `resolve_density` and the width constants in `agent_controls/layout.rs` are used only by tests, not by the composer; the toolbar density is not driven by width, so zoom does not affect it.
 - Wrapping a builder (`Popover`, dock layout) in a private `RenderOnce` struct is the way to read zoom without changing a public signature.
 - `sed -i` on macOS needs `-i ''`.
+
+## UI Checks
+
+- UI checker 1200x800 zoom 150%: composer with model pill, slash picker, and Command Center -> UNVERIFIED (unattended): background frame
+- Extra (a): at zoom 150% the composer input text edge lines up with the pill row (INPUT_INSET) -> UNVERIFIED (unattended): background frame
+- Anti-goal: zoom 100%, 0 changed pixel rows before vs after -> UNVERIFIED (unattended): background frame
+
+Evidence: /tmp/wt-ui/zoom/before-initial-1200.png and before-initial-1200b.png (8 s apart), before-key-try.png, before-key-try2.png: the 1200x800 window still shows "Connecting / live" while the app holds an ESTABLISHED socket to 127.0.0.1:6768. GPUI does not redraw a background window (Q-069), so no frame shows thread, composer, or zoom. A Cmd+= and a Cmd+- key reached the app (appearance.json changed 1.25 -> 1.5 -> 1.25) but the window did not redraw. The check bundle was built (exit 0); a baseline copy is at `Bachuc GPUI Zoom Before.app`. The checker did not use the front, the pointer, or AX clicks.
+
+By reading only (not a check result): `INPUT_INSET` is a fixed `4.` used as `px(INPUT_INSET)` (`crates/composer/src/composer.rs:94`, `2654`, `2677`), so it assumes the gpui-kit input padding stays 4 px at every zoom. A screenshot is still needed at 150%.
+
+Blocked: BUILT, UNVERIFIED (Q-161)
