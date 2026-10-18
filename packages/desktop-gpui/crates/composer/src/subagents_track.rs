@@ -7,7 +7,7 @@ use bachuc_client::{SubagentKind, SubagentRow};
 use bachuc_icons::{IconName, icon, provider_fallback_icon, provider_logo};
 use bachuc_sidebar::model::{StatusBucket, bucket_for_agent};
 use bachuc_theme::metrics::{FONT_SM, SPACE_1};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::popover::PopoverState;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Sizable as _, v_flex};
@@ -160,11 +160,14 @@ pub struct SubagentActions {
     pub archive_finished: Rc<dyn Fn(&mut App)>,
 }
 
-fn provider_icon(provider: &str, color: Hsla) -> AnyElement {
+fn provider_icon(provider: &str, color: Hsla, cx: &App) -> AnyElement {
     match provider_logo(provider, color) {
-        Some(image) => img(image).flex_none().size(px(ROW_ICON)).into_any_element(),
+        Some(image) => img(image)
+            .flex_none()
+            .size(zoomed(ROW_ICON, cx))
+            .into_any_element(),
         None => icon(provider_fallback_icon(provider))
-            .with_size(px(ROW_ICON))
+            .with_size(zoomed(ROW_ICON, cx))
             .text_color(color)
             .into_any_element(),
     }
@@ -200,7 +203,7 @@ pub fn subagents_pill(
                 .group("subagents-archive-finished")
                 .child(
                     icon(IconName::Archive)
-                        .with_size(px(ROW_ICON))
+                        .with_size(zoomed(ROW_ICON, cx))
                         .text_color(t.foreground_muted),
                 )
                 .child(
@@ -240,7 +243,7 @@ pub fn subagents_pill(
                     cx,
                 )
                 .group(group.clone())
-                .child(provider_icon(&row.provider, t.foreground_muted))
+                .child(provider_icon(&row.provider, t.foreground_muted, cx))
                 .child(
                     div()
                         .flex_grow(1.)
@@ -273,7 +276,7 @@ pub fn subagents_pill(
                             .role(Role::Button)
                             .aria_label(archive_label)
                             .flex_none()
-                            .p(px(SPACE_1))
+                            .p(zoomed(SPACE_1, cx))
                             .cursor_pointer()
                             .opacity(0.)
                             .group_hover(group, |action| action.opacity(1.))
@@ -286,7 +289,7 @@ pub fn subagents_pill(
                             })
                             .child(
                                 icon(IconName::Archive)
-                                    .with_size(px(ROW_ICON))
+                                    .with_size(zoomed(ROW_ICON, cx))
                                     .text_color(t.foreground_muted),
                             ),
                     )

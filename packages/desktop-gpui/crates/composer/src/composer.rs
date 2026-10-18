@@ -64,7 +64,7 @@ use bachuc_theme::metrics::{
     FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, POPUP_GAP, RADIUS_LG, RADIUS_MD,
     SPACE_1, SPACE_2, SPACE_3, SPACE_4,
 };
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::input::{
     Input, InputEvent, InputState, Position, Textarea, TextareaState,
 };
@@ -1437,10 +1437,10 @@ impl Composer {
                 .child(
                     v_flex()
                         .items_center()
-                        .gap(px(SPACE_2))
+                        .gap(zoomed(SPACE_2, cx))
                         .child(
                             icon(IconName::Upload)
-                                .with_size(px(DROP_GLYPH))
+                                .with_size(zoomed(DROP_GLYPH, cx))
                                 .text_color(t.foreground),
                         )
                         .child(
@@ -2303,11 +2303,11 @@ fn spinner(cx: &App) -> AnyElement {
         .flex_none()
         .items_center()
         .justify_center()
-        .size(px(CONTROL))
-        .ml(px(SPACE_1))
+        .size(zoomed(CONTROL, cx))
+        .ml(zoomed(SPACE_1, cx))
         .child(
             Spinner::new()
-                .with_size(px(ICON_SM))
+                .with_size(zoomed(ICON_SM, cx))
                 .color(tokens(cx).foreground_muted),
         )
         .into_any_element()
@@ -2315,14 +2315,14 @@ fn spinner(cx: &App) -> AnyElement {
 
 /// Where an autocomplete menu sits: above the card, as an overlay that takes no layout height.
 /// The gap is the `AutocompletePopover` `OFFSET_FROM_ANCHOR`.
-fn popup_anchor() -> Div {
+fn popup_anchor(cx: &App) -> Div {
     v_flex()
         .absolute()
         .bottom_full()
         .left_0()
         .right_0()
-        .pb(px(SPACE_3))
-        .gap(px(SPACE_1))
+        .pb(zoomed(SPACE_3, cx))
+        .gap(zoomed(SPACE_1, cx))
 }
 
 /// The bordered box of an autocomplete menu.
@@ -2332,7 +2332,7 @@ fn popup_box(cx: &App) -> Div {
         .bg(t.surface1)
         .border_1()
         .border_color(t.border_accent)
-        .rounded(px(RADIUS_LG))
+        .rounded(zoomed(RADIUS_LG, cx))
         .shadow(vec![shadow(ShadowSize::Md, cx)])
         .overflow_hidden()
         .occlude()
@@ -2360,10 +2360,10 @@ impl Composer {
                 .role(Role::MenuItem)
                 .aria_label(format!("/{}, {}", item.name, item.description))
                 .aria_selected(ix == active)
-                .min_h(px(36.))
-                .px(px(SPACE_3))
-                .py(px(SPACE_2))
-                .gap(px(SPACE_2))
+                .min_h(zoomed(36., cx))
+                .px(zoomed(SPACE_3, cx))
+                .py(zoomed(SPACE_2, cx))
+                .gap(zoomed(SPACE_2, cx))
                 .items_center()
                 .cursor_pointer()
                 .text_size(size)
@@ -2394,14 +2394,14 @@ impl Composer {
         let detail = (!selected.description.is_empty()).then(|| {
             // React Native Web text has the CSS `normal` line height, about 1.2.
             v_flex()
-                .gap(px(SPACE_1))
-                .px(px(SPACE_3))
-                .py(px(SPACE_3))
+                .gap(zoomed(SPACE_1, cx))
+                .px(zoomed(SPACE_3, cx))
+                .py(zoomed(SPACE_3, cx))
                 .line_height(relative(1.2))
                 .bg(t.surface1)
                 .border_1()
                 .border_color(t.border_accent)
-                .rounded(px(RADIUS_LG))
+                .rounded(zoomed(RADIUS_LG, cx))
                 .shadow(vec![shadow(ShadowSize::Md, cx)])
                 .occlude()
                 .child(
@@ -2418,16 +2418,16 @@ impl Composer {
                 )
         });
         Some(
-            popup_anchor().children(detail).child(
+            popup_anchor(cx).children(detail).child(
                 popup_box(cx).child(
                     v_flex()
                         .id("composer-slash-menu")
                         .role(Role::Menu)
                         .aria_label("Slash commands")
                         .track_scroll(&self.slash_scroll)
-                        .max_h(px(SLASH_MAX_HEIGHT))
+                        .max_h(zoomed(SLASH_MAX_HEIGHT, cx))
                         .overflow_y_scroll()
-                        .py(px(SPACE_1))
+                        .py(zoomed(SPACE_1, cx))
                         .children(rows),
                 ),
             ),
@@ -2459,10 +2459,10 @@ impl Composer {
                 .role(Role::Button)
                 .aria_label(item.path.clone())
                 .aria_selected(ix == active)
-                .min_h(px(36.))
-                .px(px(SPACE_3))
-                .py(px(SPACE_2))
-                .gap(px(SPACE_2))
+                .min_h(zoomed(36., cx))
+                .px(zoomed(SPACE_3, cx))
+                .py(zoomed(SPACE_2, cx))
+                .gap(zoomed(SPACE_2, cx))
                 .items_center()
                 .cursor_pointer()
                 .text_size(size)
@@ -2478,7 +2478,7 @@ impl Composer {
                 })
                 .child(
                     icon(glyph)
-                        .with_size(px(ICON_SM))
+                        .with_size(zoomed(ICON_SM, cx))
                         .text_color(t.foreground_muted),
                 )
                 .child(
@@ -2492,24 +2492,24 @@ impl Composer {
         });
         let status = self.mention.status().map(|status| {
             div()
-                .px(px(SPACE_3))
-                .py(px(SPACE_2))
+                .px(zoomed(SPACE_3, cx))
+                .py(zoomed(SPACE_2, cx))
                 .text_size(ui_font_size(FONT_SM, cx))
                 .line_height(relative(1.2))
                 .text_color(t.foreground_muted)
                 .child(status)
         });
         Some(
-            popup_anchor().child(
+            popup_anchor(cx).child(
                 popup_box(cx).child(
                     v_flex()
                         .id("composer-mention-menu")
                         .role(Role::Menu)
                         .aria_label("Files")
                         .track_scroll(&self.mention_scroll)
-                        .max_h(px(SLASH_MAX_HEIGHT))
+                        .max_h(zoomed(SLASH_MAX_HEIGHT, cx))
                         .overflow_y_scroll()
-                        .py(px(SPACE_1))
+                        .py(zoomed(SPACE_1, cx))
                         .children(rows)
                         .children(status),
                 ),
@@ -2536,9 +2536,9 @@ impl Composer {
                 .id(("composer-picker-item", index))
                 .role(Role::MenuItem)
                 .aria_label(format!("{} {}", item.identifier, item.title))
-                .min_h(px(32.))
-                .px(px(SPACE_3))
-                .gap(px(SPACE_2))
+                .min_h(zoomed(32., cx))
+                .px(zoomed(SPACE_3, cx))
+                .gap(zoomed(SPACE_2, cx))
                 .items_center()
                 .cursor_pointer()
                 .text_size(size)
@@ -2566,8 +2566,8 @@ impl Composer {
                 .absolute()
                 .bottom_full()
                 .left_0()
-                .w(px(360.))
-                .pb(px(SPACE_3))
+                .w(zoomed(360., cx))
+                .pb(zoomed(SPACE_3, cx))
                 .child(
                     v_flex()
                         .id("composer-picker")
@@ -2576,11 +2576,11 @@ impl Composer {
                         .bg(t.surface1)
                         .border_1()
                         .border_color(t.border_accent)
-                        .rounded(px(RADIUS_LG))
+                        .rounded(zoomed(RADIUS_LG, cx))
                         .shadow(vec![shadow(ShadowSize::Md, cx)])
                         .occlude()
-                        .p(px(SPACE_2))
-                        .gap(px(SPACE_1))
+                        .p(zoomed(SPACE_2, cx))
+                        .gap(zoomed(SPACE_1, cx))
                         .child(
                             h_flex()
                                 .justify_between()
@@ -2597,6 +2597,7 @@ impl Composer {
                                         None,
                                         t.foreground_muted,
                                         t.surface2,
+                                        cx,
                                     )
                                     .on_click(cx.listener(
                                         |this, _, _, cx| {
@@ -2612,14 +2613,14 @@ impl Composer {
                                 .id("composer-picker-list")
                                 .role(Role::Menu)
                                 .aria_label("Results")
-                                .max_h(px(SLASH_MAX_HEIGHT))
+                                .max_h(zoomed(SLASH_MAX_HEIGHT, cx))
                                 .overflow_y_scroll()
                                 .children(rows),
                         )
                         .children(picker.status.clone().map(|status| {
                             div()
-                                .px(px(SPACE_3))
-                                .py(px(SPACE_2))
+                                .px(zoomed(SPACE_3, cx))
+                                .py(zoomed(SPACE_2, cx))
                                 .text_size(small)
                                 .text_color(t.foreground_muted)
                                 .child(status)
@@ -2709,6 +2710,7 @@ impl Composer {
             None,
             t.foreground_muted,
             t.surface2,
+            cx,
         );
         if sources.is_empty() {
             return button
@@ -2718,7 +2720,7 @@ impl Composer {
         let weak = cx.weak_entity();
         Popover::new("composer-attach-menu")
             .anchor(Anchor::BottomLeft)
-            .offset(px(POPUP_GAP))
+            .offset(zoomed(POPUP_GAP, cx))
             .p_1()
             .trigger(AttachTrigger { open: false })
             .content(move |_, _, cx| {
@@ -2748,7 +2750,7 @@ impl Composer {
                             false,
                             cx,
                         )
-                        .child(icon(glyph).with_size(px(ICON_SM)))
+                        .child(icon(glyph).with_size(zoomed(ICON_SM, cx)))
                         .on_click(cx.listener(move |state, _, window, cx| {
                             state.dismiss(window, cx);
                             let source = source.clone();
@@ -2762,7 +2764,7 @@ impl Composer {
                     .id("composer-attach-menu-list")
                     .role(Role::Menu)
                     .aria_label("Attach")
-                    .min_w(px(200.))
+                    .min_w(zoomed(200., cx))
                     .children(rows)
             })
             .into_any_element()
@@ -2797,8 +2799,9 @@ impl Composer {
                         Some(t.accent),
                         t.accent_foreground,
                         t.accent_bright,
+                        cx,
                     )
-                    .ml(px(SPACE_1))
+                    .ml(zoomed(SPACE_1, cx))
                     .on_click(
                         cx.listener(|this, _, window, cx| this.submit(false, None, window, cx)),
                     )
@@ -2819,8 +2822,9 @@ impl Composer {
                     Some(t.accent),
                     t.accent_foreground,
                     t.accent_bright,
+                    cx,
                 )
-                .ml(px(SPACE_1))
+                .ml(zoomed(SPACE_1, cx))
                 .on_click(cx.listener(|this, _, window, cx| this.submit(false, None, window, cx)))
                 .into_any_element(),
             ),
@@ -2830,8 +2834,8 @@ impl Composer {
                     Some(button) => {
                         let props = StopButtonProps {
                             agent_id: self.agent_id.clone(),
-                            size: px(CONTROL),
-                            icon_size: px(TOOLBAR_GLYPH),
+                            size: zoomed(CONTROL, cx),
+                            icon_size: zoomed(TOOLBAR_GLYPH, cx),
                             cancelling: self.cancelling,
                         };
                         (button.value.render)(&props, window, cx)
@@ -2843,7 +2847,12 @@ impl Composer {
                         .justify_center()
                         .rounded_full()
                         .bg(rgb(STOP_RED))
-                        .child(div().size(px(10.)).rounded(px(2.)).bg(rgb(0xffffff)))
+                        .child(
+                            div()
+                                .size(zoomed(10., cx))
+                                .rounded(zoomed(2., cx))
+                                .bg(rgb(0xffffff)),
+                        )
                         .into_any_element(),
                 };
                 Some(
@@ -2855,8 +2864,8 @@ impl Composer {
                         .flex_none()
                         .items_center()
                         .justify_center()
-                        .size(px(CONTROL))
-                        .ml(px(SPACE_1))
+                        .size(zoomed(CONTROL, cx))
+                        .ml(zoomed(SPACE_1, cx))
                         .rounded_full()
                         .cursor_pointer()
                         .child(face)
@@ -2931,7 +2940,7 @@ impl Composer {
                 cx,
             ));
         }
-        attachment_tray(chips)
+        attachment_tray(chips, cx)
     }
 }
 
@@ -2945,17 +2954,17 @@ fn raw_chip(index: usize, label: &str, on_remove: Rc<dyn Fn(&mut App)>, cx: &App
         .role(Role::ListItem)
         .aria_label(format!("Attachment {label}"))
         .items_center()
-        .gap(px(SPACE_2))
-        .h(px(48.))
-        .px(px(SPACE_2))
-        .max_w(px(280.))
+        .gap(zoomed(SPACE_2, cx))
+        .h(zoomed(48., cx))
+        .px(zoomed(SPACE_2, cx))
+        .max_w(zoomed(280., cx))
         .border_1()
         .border_color(t.border_accent)
-        .rounded(px(RADIUS_MD))
+        .rounded(zoomed(RADIUS_MD, cx))
         .bg(t.surface1)
         .child(
             icon(IconName::FileText)
-                .with_size(px(ICON_SM))
+                .with_size(zoomed(ICON_SM, cx))
                 .text_color(t.foreground_muted),
         )
         .child(
@@ -2976,6 +2985,7 @@ fn raw_chip(index: usize, label: &str, on_remove: Rc<dyn Fn(&mut App)>, cx: &App
                 None,
                 t.foreground_muted,
                 t.surface3,
+                cx,
             )
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
@@ -3014,6 +3024,7 @@ impl RenderOnce for AttachTrigger {
             self.open.then_some(t.surface2),
             t.foreground_muted,
             t.surface2,
+            cx,
         )
         .aria_expanded(self.open)
     }
@@ -3066,7 +3077,7 @@ impl Render for Composer {
             .then(|| {
                 div()
                     .flex_none()
-                    .size(px(SLOT))
+                    .size(zoomed(SLOT, cx))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -3094,11 +3105,11 @@ impl Render for Composer {
         // `inputAreaContainer`: 16 px at the sides and bottom, the content centered at 820 px.
         div()
             .w_full()
-            .min_h(px(FOOTER_HEIGHT))
+            .min_h(zoomed(FOOTER_HEIGHT, cx))
             .flex()
             .justify_center()
-            .px(px(SPACE_4))
-            .pb(px(SPACE_4))
+            .px(zoomed(SPACE_4, cx))
+            .pb(zoomed(SPACE_4, cx))
             .relative()
             .when(self.locked(), |area| area.opacity(LOCKED_OPACITY))
             .on_drag_move::<ExternalPaths>(
@@ -3113,8 +3124,8 @@ impl Render for Composer {
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(px(MAX_CONTENT_WIDTH))
-                    .gap(px(SPACE_3))
+                    .max_w(zoomed(MAX_CONTENT_WIDTH, cx))
+                    .gap(zoomed(SPACE_3, cx))
                     .children(queue)
                     .children(send_error)
                     .child(

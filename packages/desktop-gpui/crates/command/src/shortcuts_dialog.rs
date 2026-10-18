@@ -14,7 +14,7 @@ use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_MD, RADIUS_LG, RADIUS_MD, RADIUS_XL, SPACE_0_5, SPACE_1, SPACE_2,
     SPACE_3, SPACE_4, SPACE_6,
 };
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -202,21 +202,21 @@ impl ShortcutsDialog {
             None => div()
                 .flex_shrink_0()
                 .text_size(ui_font_size(FONT_BASE, cx))
-                .line_height(px(LINE_BASE))
+                .line_height(zoomed(LINE_BASE, cx))
                 .text_color(colors.foreground_muted)
                 .child(UNASSIGNED)
                 .into_any_element(),
             Some(keys) => h_flex()
                 .flex_shrink_0()
-                .gap(px(SPACE_1))
+                .gap(zoomed(SPACE_1, cx))
                 .children(keys.iter().map(|text| {
                     div()
-                        .px(px(SPACE_1))
-                        .py(px(SPACE_0_5))
-                        .rounded(px(RADIUS_MD))
+                        .px(zoomed(SPACE_1, cx))
+                        .py(zoomed(SPACE_0_5, cx))
+                        .rounded(zoomed(RADIUS_MD, cx))
                         .bg(colors.surface3.opacity(0.5))
                         .text_size(ui_font_size(FONT_SM, cx))
-                        .line_height(px(LINE_SM))
+                        .line_height(zoomed(LINE_SM, cx))
                         .text_color(colors.foreground_muted)
                         .child(text.clone())
                 }))
@@ -230,9 +230,9 @@ impl ShortcutsDialog {
             .role(Role::ListItem)
             .aria_label(row.label.clone())
             .justify_between()
-            .gap(px(SPACE_3))
-            .px(px(SPACE_4))
-            .py(px(SPACE_3))
+            .gap(zoomed(SPACE_3, cx))
+            .px(zoomed(SPACE_4, cx))
+            .py(zoomed(SPACE_3, cx))
             .border_b_1()
             .border_color(colors.surface2)
             .child(
@@ -242,15 +242,15 @@ impl ShortcutsDialog {
                     .child(
                         div()
                             .text_size(ui_font_size(FONT_BASE, cx))
-                            .line_height(px(LINE_BASE))
+                            .line_height(zoomed(LINE_BASE, cx))
                             .text_color(colors.foreground)
                             .child(row.label.clone()),
                     )
                     .children(row.note.map(|note| {
                         div()
-                            .mt(px(SPACE_0_5))
+                            .mt(zoomed(SPACE_0_5, cx))
                             .text_size(ui_font_size(FONT_SM, cx))
-                            .line_height(px(LINE_SM))
+                            .line_height(zoomed(LINE_SM, cx))
                             .text_color(colors.foreground_muted)
                             .child(note)
                     })),
@@ -271,21 +271,21 @@ impl Render for ShortcutsDialog {
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .p(px(SPACE_6))
+            .p(zoomed(SPACE_6, cx))
             .flex()
             .flex_col()
-            .gap(px(SPACE_4));
+            .gap(zoomed(SPACE_4, cx));
         for (position, section) in self.visible.iter().enumerate() {
             let title = section.section.title();
             content = content.child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .child(
                         div()
                             .text_size(ui_font_size(FONT_SM, cx))
-                            .line_height(px(LINE_SM))
+                            .line_height(zoomed(LINE_SM, cx))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(colors.foreground_muted)
                             .child(title),
@@ -297,7 +297,7 @@ impl Render for ShortcutsDialog {
                             .aria_label(title)
                             .border_1()
                             .border_color(colors.surface2)
-                            .rounded(px(RADIUS_LG))
+                            .rounded(zoomed(RADIUS_LG, cx))
                             .overflow_hidden()
                             .children(section.rows.iter().map(|row| self.render_row(row, cx))),
                     ),
@@ -309,10 +309,10 @@ impl Render for ShortcutsDialog {
                     .id("keyboard-shortcuts-dialog-empty")
                     .role(Role::Status)
                     .aria_label(NO_RESULTS)
-                    .py(px(SPACE_6))
+                    .py(zoomed(SPACE_6, cx))
                     .text_center()
                     .text_size(ui_font_size(FONT_BASE, cx))
-                    .line_height(px(LINE_BASE))
+                    .line_height(zoomed(LINE_BASE, cx))
                     .text_color(colors.foreground_muted)
                     .child(NO_RESULTS),
             );
@@ -326,7 +326,7 @@ impl Render for ShortcutsDialog {
             .flex()
             .items_center()
             .justify_center()
-            .p(px(SPACE_6))
+            .p(zoomed(SPACE_6, cx))
             .child(
                 div()
                     .id("keyboard-shortcuts-dialog-backdrop")
@@ -349,11 +349,11 @@ impl Render for ShortcutsDialog {
                     .flex()
                     .flex_col()
                     .w_full()
-                    .max_w(px(CARD_MAX_WIDTH))
+                    .max_w(zoomed(CARD_MAX_WIDTH, cx))
                     .max_h(relative(CARD_MAX_HEIGHT))
                     .overflow_hidden()
                     .bg(colors.surface1)
-                    .rounded(px(RADIUS_XL))
+                    .rounded(zoomed(RADIUS_XL, cx))
                     .border_1()
                     .border_color(colors.surface2)
                     .text_color(colors.foreground)
@@ -364,16 +364,16 @@ impl Render for ShortcutsDialog {
                             .border_color(colors.surface2)
                             .child(
                                 h_flex()
-                                    .px(px(SPACE_6))
-                                    .py(px(SPACE_4))
-                                    .gap(px(SPACE_2))
+                                    .px(zoomed(SPACE_6, cx))
+                                    .py(zoomed(SPACE_4, cx))
+                                    .gap(zoomed(SPACE_2, cx))
                                     .child(
                                         div()
                                             .flex_1()
                                             .min_w_0()
                                             .truncate()
                                             .text_size(ui_font_size(FONT_BASE, cx))
-                                            .line_height(px(LINE_BASE))
+                                            .line_height(zoomed(LINE_BASE, cx))
                                             .font_weight(FontWeight::MEDIUM)
                                             .child(TITLE),
                                     )
@@ -383,8 +383,8 @@ impl Render for ShortcutsDialog {
                                             .role(Role::Button)
                                             .aria_label("Close")
                                             .flex_shrink_0()
-                                            .p(px(SPACE_2))
-                                            .rounded(px(RADIUS_LG))
+                                            .p(zoomed(SPACE_2, cx))
+                                            .rounded(zoomed(RADIUS_LG, cx))
                                             .cursor_pointer()
                                             .text_color(colors.foreground_muted)
                                             .active(|style| style.text_color(colors.foreground))
@@ -398,17 +398,19 @@ impl Render for ShortcutsDialog {
                                                     .ok();
                                                 },
                                             )
-                                            .child(icon(IconName::X).with_size(px(ICON_MD))),
+                                            .child(
+                                                icon(IconName::X).with_size(zoomed(ICON_MD, cx)),
+                                            ),
                                     ),
                             )
                             .child(
                                 h_flex()
-                                    .px(px(SPACE_6))
-                                    .pb(px(SPACE_3))
-                                    .gap(px(SPACE_2))
+                                    .px(zoomed(SPACE_6, cx))
+                                    .pb(zoomed(SPACE_3, cx))
+                                    .gap(zoomed(SPACE_2, cx))
                                     .child(
                                         icon(IconName::Search)
-                                            .with_size(px(ICON_MD))
+                                            .with_size(zoomed(ICON_MD, cx))
                                             .text_color(colors.foreground_muted),
                                     )
                                     .child(
@@ -418,12 +420,15 @@ impl Render for ShortcutsDialog {
                                                 .bordered(false)
                                                 .focus_bordered(false)
                                                 .px_0()
-                                                .py(px(SPACE_2))
+                                                .py(zoomed(SPACE_2, cx))
                                                 // `Input::h` sets only a multi-line height.
                                                 .map(|input| {
-                                                    Styled::h(input, px(LINE_BASE + SPACE_2 * 2.))
+                                                    Styled::h(
+                                                        input,
+                                                        zoomed(LINE_BASE + SPACE_2 * 2., cx),
+                                                    )
                                                 })
-                                                .line_height(px(LINE_BASE))
+                                                .line_height(zoomed(LINE_BASE, cx))
                                                 .text_size(ui_font_size(FONT_BASE, cx))
                                                 .accessibility_id("keyboard-shortcuts-search")
                                                 .aria_label(PLACEHOLDER),

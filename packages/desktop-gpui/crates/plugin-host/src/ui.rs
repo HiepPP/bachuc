@@ -8,7 +8,10 @@ use bachuc_theme::metrics::{
     CONTROL_SM, FONT_2XL, FONT_BASE, FONT_CODE, FONT_LG, FONT_SM, FONT_XL, ICON_SM, RADIUS_LG,
     RADIUS_XL, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
-use bachuc_theme::{code_font_size, content_font_size, mono_font_family, tokens, ui_font_size};
+use bachuc_theme::{
+    code_font_size, content_font_size, mono_font_family, rem_size, tokens, ui_font_size, zoom,
+    zoomed,
+};
 use gpui_kit::base::text::{TextView, TextViewStyle};
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{Input, InputState};
@@ -52,14 +55,14 @@ pub fn section(title: impl Into<SharedString>, body: impl IntoElement, cx: &App)
     let colors = tokens(cx);
     let title = title.into();
     v_flex()
-        .mb(px(SPACE_6))
+        .mb(zoomed(SPACE_6, cx))
         .child(
             div()
                 .id(SharedString::from(format!("heading-{title}")))
                 .role(Role::Heading)
                 .aria_label(title.clone())
-                .mb(px(SPACE_3))
-                .ml(px(SPACE_1))
+                .mb(zoomed(SPACE_3, cx))
+                .ml(zoomed(SPACE_1, cx))
                 .text_size(ui_font_size(FONT_SM, cx))
                 .text_color(colors.foreground_muted)
                 .child(title),
@@ -74,7 +77,7 @@ pub fn card(rows: Vec<AnyElement>, cx: &App) -> AnyElement {
     v_flex()
         .w_full()
         .bg(colors.surface1)
-        .rounded(px(RADIUS_LG))
+        .rounded(zoomed(RADIUS_LG, cx))
         .border_1()
         .border_color(colors.border)
         .overflow_hidden()
@@ -96,14 +99,14 @@ fn row(text: RowText, control: impl IntoElement, cx: &App) -> AnyElement {
         .w_full()
         .items_center()
         .justify_between()
-        .gap(px(SPACE_3))
-        .px(px(SPACE_4))
-        .py(px(SPACE_4))
+        .gap(zoomed(SPACE_3, cx))
+        .px(zoomed(SPACE_4, cx))
+        .py(zoomed(SPACE_4, cx))
         .child(
             v_flex()
                 .flex_1()
                 .min_w_0()
-                .gap(px(SPACE_1))
+                .gap(zoomed(SPACE_1, cx))
                 .child(
                     div()
                         .text_size(ui_font_size(FONT_BASE, cx))
@@ -208,13 +211,13 @@ pub fn select_row(
         .id(id)
         .role(Role::Button)
         .aria_label(SharedString::from(format!("{}: {shown}", text.label)))
-        .h(px(CONTROL_SM))
-        .px(px(SPACE_3))
+        .h(zoomed(CONTROL_SM, cx))
+        .px(zoomed(SPACE_3, cx))
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(SPACE_2))
-        .rounded(px(RADIUS_XL))
+        .gap(zoomed(SPACE_2, cx))
+        .rounded(zoomed(RADIUS_XL, cx))
         .border_1()
         .border_color(colors.border_accent)
         .when(disabled, |this| this.opacity(0.5))
@@ -223,16 +226,16 @@ pub fn select_row(
         })
         .child(
             div()
-                .max_w(px(SELECT_MENU_WIDTH))
+                .max_w(zoomed(SELECT_MENU_WIDTH, cx))
                 .truncate()
                 .text_size(ui_font_size(FONT_BASE, cx))
                 .text_color(colors.foreground)
                 .child(shown),
         )
         .child(
-            div().pt(px(1.)).child(
+            div().pt(zoomed(1., cx)).child(
                 icon(IconName::ChevronDown)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(colors.foreground_muted),
             ),
         );
@@ -245,9 +248,10 @@ pub fn select_row(
         return row(text, trigger, cx);
     }
     let on_change = Rc::new(on_change);
+    let menu_width = zoomed(SELECT_MENU_WIDTH, cx);
     let control = trigger.dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
         options.iter().fold(
-            menu.min_w(px(SELECT_MENU_WIDTH)).check_side(Side::Right),
+            menu.min_w(menu_width).check_side(Side::Right),
             |menu, option| {
                 let on_change = on_change.clone();
                 let picked = option.id.clone();
@@ -273,8 +277,8 @@ pub fn input_row(
     let field = Input::new(input)
         .aria_label(text.label.clone())
         .disabled(disabled)
-        .px(px(SPACE_3))
-        .rounded(px(RADIUS_LG))
+        .px(zoomed(SPACE_3, cx))
+        .rounded(zoomed(RADIUS_LG, cx))
         .bg(colors.surface2)
         .border_color(colors.border)
         .text_size(ui_font_size(FONT_BASE, cx));
@@ -282,8 +286,8 @@ pub fn input_row(
     row(
         text,
         div()
-            .w(px(SELECT_MENU_WIDTH))
-            .child(Styled::h(field, px(CONTROL_SM))),
+            .w(zoomed(SELECT_MENU_WIDTH, cx))
+            .child(Styled::h(field, zoomed(CONTROL_SM, cx))),
         cx,
     )
 }
@@ -334,9 +338,9 @@ pub fn markdown_style(cx: &App) -> TextViewStyle {
     let code_block = corners
         .clone()
         .relative()
-        .top(px(SPACE_3))
-        .mb(px(SPACE_3))
-        .p(px(SPACE_3))
+        .top(zoomed(SPACE_3, cx))
+        .mb(zoomed(SPACE_3, cx))
+        .p(zoomed(SPACE_3, cx))
         .font_family(mono_font_family(cx))
         .text_size(code)
         .line_height((code * FENCE_LINE_HEIGHT).round());
@@ -345,6 +349,7 @@ pub fn markdown_style(cx: &App) -> TextViewStyle {
         .text_color(theme.table_head_foreground);
     let content = content_font_size(cx);
     let border = t.border;
+    let zoom = zoom(cx);
     TextViewStyle::default()
         .with_foreground(theme.foreground)
         .with_muted_foreground(theme.muted_foreground)
@@ -352,7 +357,9 @@ pub fn markdown_style(cx: &App) -> TextViewStyle {
         .with_selection(theme.selection)
         .with_code_background(t.surface2)
         .with_border(theme.border)
-        .with_paragraph_gap(rems(PARAGRAPH_GAP / FONT_BASE))
+        .with_paragraph_gap(rems(
+            f32::from(zoomed(PARAGRAPH_GAP, cx)) / f32::from(rem_size(cx)),
+        ))
         .with_code_block(code_block)
         .with_table(corners)
         .with_table_head(table_head)
@@ -361,11 +368,11 @@ pub fn markdown_style(cx: &App) -> TextViewStyle {
             ..Default::default()
         })
         .with_dark(theme.is_dark())
-        .with_heading(move |level| heading_style(level, content, border))
+        .with_heading(move |level| heading_style(level, content, border, zoom))
 }
 
 /// One heading level of `markdown-styles.ts`, as the timeline's `heading_style`.
-fn heading_style(level: u8, content: Pixels, border: Hsla) -> StyleRefinement {
+fn heading_style(level: u8, content: Pixels, border: Hsla, zoom: f32) -> StyleRefinement {
     let block = BLOCK_GAP - SPACE_3;
     let (tier, top, bottom) = match level {
         1 => (FONT_4XL, SPACE_6, SPACE_3),
@@ -378,18 +385,18 @@ fn heading_style(level: u8, content: Pixels, border: Hsla) -> StyleRefinement {
     let style = StyleRefinement::default()
         .text_size(size)
         .line_height((size * HEADING_LINE_HEIGHT).round())
-        .pt(px(top));
+        .pt(px(top * zoom));
     if level <= 2 {
         style
             .font_weight(FontWeight::BOLD)
-            .pb(px(SPACE_2))
-            .mb(px(bottom + block))
+            .pb(px(SPACE_2 * zoom))
+            .mb(px((bottom + block) * zoom))
             .border_b_1()
             .border_color(border)
     } else {
         style
             .font_weight(FontWeight::SEMIBOLD)
-            .pb(px(bottom + block))
+            .pb(px((bottom + block) * zoom))
     }
 }
 

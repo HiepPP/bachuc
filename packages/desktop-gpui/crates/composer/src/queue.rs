@@ -5,7 +5,7 @@
 use bachuc_client::QueuedPrompt;
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{FONT_BASE, ICON_SM, RADIUS_LG, SPACE_2, SPACE_3};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::*;
 use std::rc::Rc;
@@ -83,13 +83,17 @@ fn action_button(
         .flex_none()
         .items_center()
         .justify_center()
-        .size(px(ACTION_SIZE))
+        .size(zoomed(ACTION_SIZE, cx))
         .rounded_full()
         .cursor_pointer()
         .bg(background)
         .hover(move |button| button.bg(hover))
         .on_click(move |_, window, cx| on_action(action.clone(), window, cx))
-        .child(icon(glyph).with_size(px(ICON_SM)).text_color(foreground))
+        .child(
+            icon(glyph)
+                .with_size(zoomed(ICON_SM, cx))
+                .text_color(foreground),
+        )
         .into_any_element()
 }
 
@@ -101,13 +105,13 @@ fn queue_item(id: impl Into<ElementId>, label: String, cx: &App) -> Stateful<Div
         .aria_label(label)
         .items_center()
         .justify_between()
-        .gap(px(SPACE_2))
-        .px(px(SPACE_3))
-        .py(px(SPACE_2))
+        .gap(zoomed(SPACE_2, cx))
+        .px(zoomed(SPACE_3, cx))
+        .py(zoomed(SPACE_2, cx))
         .bg(t.surface1)
         .border_1()
         .border_color(t.border)
-        .rounded(px(RADIUS_LG))
+        .rounded(zoomed(RADIUS_LG, cx))
 }
 
 /// The queue; `None` when it is empty.
@@ -215,13 +219,13 @@ pub fn queue_track(
             h_flex()
                 .flex_none()
                 .items_center()
-                .gap(px(SPACE_2))
+                .gap(zoomed(SPACE_2, cx))
                 .children(actions),
         )
     });
     Some(
         v_flex()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .children(held_notice)
             .children(rows)
             .into_any_element(),

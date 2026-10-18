@@ -7,7 +7,7 @@ use crate::input::round_button;
 use bachuc_icons::{IconName, icon};
 use bachuc_plugin_host::ComposerAttachment;
 use bachuc_theme::metrics::{FONT_SM, ICON_SM, RADIUS_MD, SPACE_2};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -41,11 +41,11 @@ pub fn image_chips(
                         .id(("composer-chip", index))
                         .role(Role::ListItem)
                         .aria_label(format!("Attachment {}", attachment.name))
-                        .size(px(CHIP))
+                        .size(zoomed(CHIP, cx))
                         .overflow_hidden()
                         .border_1()
                         .border_color(t.border_accent)
-                        .rounded(px(RADIUS_MD))
+                        .rounded(zoomed(RADIUS_MD, cx))
                         .child(
                             img(attachment.preview.clone())
                                 .size_full()
@@ -53,20 +53,25 @@ pub fn image_chips(
                         ),
                 )
                 .child(
-                    div().absolute().top(px(-8.)).left(px(-8.)).child(
-                        round_button(
-                            ("composer-chip-remove", index),
-                            IconName::X,
-                            "Remove attachment",
-                            REMOVE,
-                            Some(t.surface2),
-                            t.foreground_muted,
-                            t.surface3,
-                        )
-                        .border_1()
-                        .border_color(t.border_accent)
-                        .on_click(move |_, _, cx| on_remove(index, cx)),
-                    ),
+                    div()
+                        .absolute()
+                        .top(zoomed(-8., cx))
+                        .left(zoomed(-8., cx))
+                        .child(
+                            round_button(
+                                ("composer-chip-remove", index),
+                                IconName::X,
+                                "Remove attachment",
+                                REMOVE,
+                                Some(t.surface2),
+                                t.foreground_muted,
+                                t.surface3,
+                                cx,
+                            )
+                            .border_1()
+                            .border_color(t.border_accent)
+                            .on_click(move |_, _, cx| on_remove(index, cx)),
+                        ),
                 )
                 .into_any_element()
         })
@@ -91,13 +96,13 @@ pub fn plugin_chip(
         .role(Role::ListItem)
         .aria_label(format!("{}: {title}", chip.source_title))
         .items_center()
-        .gap(px(SPACE_2))
-        .h(px(CHIP))
-        .px(px(SPACE_2))
-        .max_w(px(PLUGIN_CHIP_MAX_WIDTH))
+        .gap(zoomed(SPACE_2, cx))
+        .h(zoomed(CHIP, cx))
+        .px(zoomed(SPACE_2, cx))
+        .max_w(zoomed(PLUGIN_CHIP_MAX_WIDTH, cx))
         .border_1()
         .border_color(t.border_accent)
-        .rounded(px(RADIUS_MD))
+        .rounded(zoomed(RADIUS_MD, cx))
         .bg(t.surface1)
         .when_some(on_open, |chip, on_open| {
             chip.cursor_pointer()
@@ -106,7 +111,7 @@ pub fn plugin_chip(
         })
         .child(
             icon(chip.icon)
-                .with_size(px(ICON_SM))
+                .with_size(zoomed(ICON_SM, cx))
                 .text_color(t.foreground_muted),
         )
         .child(
@@ -136,6 +141,7 @@ pub fn plugin_chip(
                 None,
                 t.foreground_muted,
                 t.surface3,
+                cx,
             )
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
@@ -146,7 +152,7 @@ pub fn plugin_chip(
 }
 
 /// The tray; `None` without a chip. The padding leaves room for the remove buttons.
-pub fn attachment_tray(chips: Vec<AnyElement>) -> Option<AnyElement> {
+pub fn attachment_tray(chips: Vec<AnyElement>, cx: &App) -> Option<AnyElement> {
     if chips.is_empty() {
         return None;
     }
@@ -156,9 +162,9 @@ pub fn attachment_tray(chips: Vec<AnyElement>) -> Option<AnyElement> {
             .role(Role::List)
             .aria_label("Attachments")
             .flex_wrap()
-            .gap(px(SPACE_2))
-            .pt(px(SPACE_2))
-            .pl(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
+            .pt(zoomed(SPACE_2, cx))
+            .pl(zoomed(SPACE_2, cx))
             .children(chips)
             .into_any_element(),
     )
