@@ -88,6 +88,11 @@ pub(crate) fn menu_row(
 
 pub(crate) type PickFn = Rc<dyn Fn(&str, &mut App)>;
 
+/// The style of a pill's trigger box in the toolbar row: it may shrink below its content.
+fn shrinking_trigger() -> StyleRefinement {
+    StyleRefinement::default().flex().min_w_0()
+}
+
 /// A pill that opens a menu of choices above itself. With no choices it only shows the label.
 #[allow(clippy::too_many_arguments)]
 pub fn choice_pill(
@@ -122,6 +127,11 @@ pub fn choice_pill(
         .anchor(Anchor::BottomLeft)
         .offset(zoomed(POPUP_GAP, cx))
         .p_1()
+        // `Styled` on this `Popover` styles the menu panel; the trigger box takes
+        // `trigger_style`, and it must shrink for the label to truncate.
+        .when(!look.icon_only, |popover| {
+            popover.trigger_style(shrinking_trigger())
+        })
         .trigger(trigger)
         .content(move |_, _, cx| {
             let current = current.clone();
@@ -380,6 +390,11 @@ fn grouped_model_pill(
         .anchor(Anchor::BottomLeft)
         .offset(zoomed(POPUP_GAP, cx))
         .p_1()
+        // `Styled` on this `Popover` styles the menu panel; the trigger box takes
+        // `trigger_style`, and it must shrink for the label to truncate.
+        .when(!look.icon_only, |popover| {
+            popover.trigger_style(shrinking_trigger())
+        })
         .trigger(trigger)
         .content(move |_, _, cx| {
             let t = tokens(cx);

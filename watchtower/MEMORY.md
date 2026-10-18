@@ -63,6 +63,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid terminal restore mode `"full-snapshot"` (`0x05` ANSI bytes) in the GPUI client while the daemon sends the `0x04` JSON grid without a restore mode. Reason: [ADR-0042](watchtower/decisions/ADR-0042-json-grid-terminal-restore-over-ansi-snapshot.md).
 - Avoid gpui-kit default themes and the gpui-kit `IconName` set in the GPUI client, and porting every dark theme variant now, while the owner wants the exact Electron look in `light` and `claude` dark. Reason: [ADR-0043](watchtower/decisions/ADR-0043-electron-tokens-and-lucide-icons-over-gpui-kit-defaults.md).
 - Avoid generic lucide icons in the GPUI Open-in menu while the owner wants each app to show its own icon. Reason: [ADR-0046](watchtower/decisions/ADR-0046-real-app-icons-in-open-in-menu-over-lucide.md).
+- Avoid the Electron overlap of the composer placeholder and the focus hint while the GPUI composer can be narrow. Reason: [ADR-0047](watchtower/decisions/ADR-0047-cut-placeholder-before-focus-hint-over-electron-overlap.md).
 
 ## Learnings
 
@@ -381,3 +382,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: a GPUI window that is covered or in the background stops drawing, so screenshots and the AX tree show a stale frame. Raise the window with the AX `Raise` action, read the AX state, then take the screenshot. Navigate with keys (`cmd+k`, type, `Return`) rather than sidebar clicks. Set the zoom in `~/Library/Application Support/BachucGpui/appearance.json` before launch, and restore the owner's value after.
 - Source: TASK-243 to TASK-251 UI checks, `/tmp/wt-ui/zoom/`.
 - Use next time: a UI checker that cannot raise the window reports `UNVERIFIED (unattended): background frame` instead of guessing.
+
+### 2026-10-19 - Implement 20261019-gpui-composer-and-outline-polish
+
+- Learned: `Styled` on the gpui-component `Popover` styles the menu panel, not the trigger box. A layout rule for the trigger in its parent row (`min_w_0`, shrink) needs `Popover::trigger_style`. A builder that put `min_w_0` on the `Popover` passed every code check, and only the screen check caught it.
+- Source: TASK-253 fix round 1, `packages/desktop-gpui/crates/composer/src/agent_controls/mod.rs` (`shrinking_trigger`), `gpui-component-0.7.3/src/popover.rs`.
+- Use next time: style a popover trigger through `trigger_style`; a `cua_repl` screenshot takes 95 to 460 ms, so it cannot catch a 140 ms animation frame.

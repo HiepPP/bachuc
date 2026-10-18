@@ -25,9 +25,9 @@ pub enum Glyph {
 
 pub fn glyph_element(glyph: Glyph, color: Hsla, cx: &App) -> AnyElement {
     match glyph {
-        Glyph::Icon(name) => icon(name)
-            .with_size(zoomed(GLYPH, cx))
-            .text_color(color)
+        Glyph::Icon(name) => div()
+            .flex_none()
+            .child(icon(name).with_size(zoomed(GLYPH, cx)).text_color(color))
             .into_any_element(),
         Glyph::Image(image) => img(image)
             .flex_none()
@@ -80,16 +80,21 @@ impl RenderOnce for PillTrigger {
             .aria_label(format!("{}: {}", self.kind, self.label))
             .aria_expanded(self.open)
             .h(zoomed(CONTROL_SIZE, cx))
-            .flex_none()
             .items_center()
             .rounded(zoomed(RADIUS_2XL, cx))
             .text_size(size)
             .text_color(t.foreground_muted)
             .map(|pill| {
                 if look.icon_only {
-                    pill.w(zoomed(CONTROL_SIZE, cx)).justify_center()
+                    pill.w(zoomed(CONTROL_SIZE, cx))
+                        .flex_none()
+                        .justify_center()
                 } else {
-                    pill.px(zoomed(SPACE_2, cx)).gap(zoomed(SPACE_1, cx))
+                    // The label text shrinks first, as `container` and `modelControl` do on web.
+                    pill.min_w_0()
+                        .flex_shrink(1.)
+                        .px(zoomed(SPACE_2, cx))
+                        .gap(zoomed(SPACE_1, cx))
                 }
             })
             .when(self.open, |pill| pill.bg(t.surface2))
@@ -105,6 +110,8 @@ impl RenderOnce for PillTrigger {
                 pill.child(
                     div()
                         .truncate()
+                        .min_w_0()
+                        .flex_shrink(1.)
                         .max_w(zoomed(VALUE_MAX_WIDTH, cx))
                         .child(self.label),
                 )
