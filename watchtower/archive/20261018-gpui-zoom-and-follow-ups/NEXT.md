@@ -4,8 +4,8 @@
 
 - Title: GPUI zoom and follow-ups
 - Slug: 20261018-gpui-zoom-and-follow-ups
-- Status: ACTIVE
-- Updated: 2026-10-18
+- Status: ARCHIVED
+- Updated: 2026-10-19
 
 ## Tracker
 
@@ -51,4 +51,4 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Archive
 
-- None.
+- Archived: 2026-10-19 -> watchtower/archive/20261018-gpui-zoom-and-follow-ups/
