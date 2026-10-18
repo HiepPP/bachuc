@@ -5,6 +5,7 @@ use crate::diff::EditSource;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 /// Agent label that turns edit diffs off for one thread. Board sets it too, so keep it stable.
 pub(crate) const EDIT_DIFFS_MODE_LABEL: &str = "edit-diffs.mode";
@@ -110,16 +111,34 @@ pub(crate) fn toggled_mode(labels: &BTreeMap<String, String>) -> &'static str {
 }
 
 /// `displayPath`: the path under the agent folder without the folder. macOS reports `/tmp` and
-/// `/var` paths through their `/private` real path.
+/// `/var` paths through their `/private` real path. A path outside the folder under the home
+/// folder shows as `~/...`, which Electron does not do (owner choice, 2026-10-17).
 pub(crate) fn display_path(file_path: &str, cwd: Option<&str>) -> String {
-    let Some(cwd) = cwd.filter(|cwd| !cwd.is_empty()) else {
-        return file_path.to_string();
+    static HOME: OnceLock<Option<String>> = OnceLock::new();
+    let home = HOME.get_or_init(|| std::env::var("HOME").ok());
+    display_path_in(file_path, cwd, home.as_deref())
+}
+
+fn display_path_in(file_path: &str, cwd: Option<&str>, home: Option<&str>) -> String {
+    let under = |root: &str, prefixes: &[&str]| {
+        let root = root.strip_suffix('/').unwrap_or(root);
+        prefixes
+            .iter()
+            .find_map(|prefix| file_path.strip_prefix(&format!("{prefix}{root}/")))
     };
-    let root = cwd.strip_suffix('/').unwrap_or(cwd);
-    [format!("{root}/"), format!("/private{root}/")]
-        .iter()
-        .find_map(|prefix| file_path.strip_prefix(prefix.as_str()))
-        .map_or_else(|| file_path.to_string(), str::to_string)
+    if let Some(relative) = cwd
+        .filter(|cwd| !cwd.is_empty())
+        .and_then(|cwd| under(cwd, &["", "/private"]))
+    {
+        return relative.to_string();
+    }
+    match home
+        .filter(|home| !home.is_empty() && *home != "/")
+        .and_then(|home| under(home, &[""]))
+    {
+        Some(relative) => format!("~/{relative}"),
+        None => file_path.to_string(),
+    }
 }
 
 /// `headerLabel`.
@@ -250,6 +269,33 @@ mod tests {
         assert_eq!(display_path("/other/a.rs", Some("/tmp/x")), "/other/a.rs");
         assert_eq!(display_path("/tmp/x/a.rs", None), "/tmp/x/a.rs");
         assert_eq!(display_path("/tmp/xy/a.rs", Some("/tmp/x")), "/tmp/xy/a.rs");
+    }
+
+    #[test]
+    fn display_path_shows_the_home_folder_as_a_tilde_outside_the_agent_folder() {
+        let home = Some("/Users/hiep");
+        let cwd = Some("/Users/hiep/Projects/bachuc");
+        assert_eq!(
+            display_path_in("/Users/hiep/Projects/bachuc/a.rs", cwd, home),
+            "a.rs"
+        );
+        assert_eq!(
+            display_path_in("/Users/hiep/.claude/x.md", cwd, home),
+            "~/.claude/x.md"
+        );
+        assert_eq!(display_path_in("/etc/hosts", cwd, home), "/etc/hosts");
+        assert_eq!(
+            display_path_in("/Users/hiepx/a.rs", cwd, home),
+            "/Users/hiepx/a.rs"
+        );
+        assert_eq!(
+            display_path_in("/Users/hiep/.claude/x.md", Some(""), home),
+            "~/.claude/x.md"
+        );
+        assert_eq!(
+            display_path_in("/Users/hiep/.claude/x.md", cwd, None),
+            "/Users/hiep/.claude/x.md"
+        );
     }
 
     #[test]

@@ -20,10 +20,15 @@ use crate::attachments::{Attachment, can_send, mime_for_path};
 use crate::context_window_meter::{SLOT, context_window_meter};
 use crate::diff_stat_pill::{diff_stat_pill, visible_diff_stat};
 use crate::draft::{
-    DraftOptions, DraftSubmission, Generation, SubmitIcon, apply_feature, default_provider,
-    draft_config, min_input_height, model_groups, model_key, split_model_key,
+    DraftOptions, DraftSeed, DraftSubmission, Generation, SubmitIcon, apply_feature,
+    default_provider, draft_config, min_input_height, model_groups, model_key, offered,
+    outgoing_attachments, seed_feature_values, seed_provider_model, split_model_key,
 };
 use crate::input::{CONTROL, MessageInput, round_button};
+use crate::mention::{
+    DEBOUNCE_MS, FileMention, LIMIT, MentionMenu, apply_mention, find_active_file_mention,
+    insert_mentions, mention_path,
+};
 use crate::plugin_slots::{
     HostAction, PopoverViews, ShowPanel, draft_pill_row, host_action, needs_intercept,
     picker_sources, pill_slots, pill_states, plugin_pill, run_chain, stop_button, toggle_chip,
@@ -56,8 +61,8 @@ use bachuc_plugin_host::{
     SendKey, SlashInput, StopButtonProps, decode_attachment_search,
 };
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, RADIUS_LG, SPACE_1, SPACE_2,
-    SPACE_3, SPACE_4,
+    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, RADIUS_LG, RADIUS_MD, SPACE_1,
+    SPACE_2, SPACE_3, SPACE_4,
 };
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
 use gpui_kit::component::input::{
@@ -71,9 +76,9 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Electron draws the stop button with `palette.red[600]` in every theme. The theme crate carries
 /// that value only as the light terminal red (`ansi[1]`), which is a different role.
@@ -95,6 +100,13 @@ const FOOTER_HEIGHT: f32 = 75.;
 const LOCKED_OPACITY: f32 = 0.6;
 /// The stop glyph the plugin face gets: the toolbar glyph size.
 const TOOLBAR_GLYPH: f32 = 14.;
+/// `FileDropBackdrop`: the overlay fades in and out over 150 ms.
+const DROP_FADE: Duration = Duration::from_millis(150);
+/// `FileDropBackdrop`: `surface0` at 0.7 behind a 32 px Upload glyph and the text.
+const DROP_BACKDROP_OPACITY: f32 = 0.7;
+const DROP_GLYPH: f32 = 32.;
+/// `composer.attachments.dropFilesHere` in `packages/app/src/i18n/resources/en.ts`.
+const DROP_FILES_HERE: &str = "Drop files here";
 
 /// What a `Composer` tells its owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -250,6 +262,9 @@ struct DraftState {
     /// The owner creates the workspace: the input keeps its text, locked.
     submitting: bool,
     plugin_draft: Entity<ComposerDraft>,
+    /// The seeded mode and feature values wait for the provider's lists.
+    seed_mode: Option<String>,
+    seed_features: Option<serde_json::Value>,
 }
 
 impl DraftState {
@@ -266,6 +281,56 @@ impl DraftState {
             self.thinking_id.as_deref(),
         )
     }
+}
+
+/// The "Drop files here" overlay: on while a Finder drag is over the composer, faded by opacity.
+/// GPUI has no per-element leave event, so the composer sets it from each drag move, and clears
+/// it on a drop and in render once the drag has ended.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct DropOverlay {
+    over: bool,
+    /// The opacity when `over` last changed.
+    from: f32,
+    /// When `over` last changed; `None` once the fade is done.
+    since: Option<Instant>,
+}
+
+impl DropOverlay {
+    /// Sets the drag state. Returns true when it changed, so the view renders only then.
+    fn set_over(&mut self, over: bool, now: Instant) -> bool {
+        if over == self.over {
+            return false;
+        }
+        self.from = self.opacity(now);
+        self.over = over;
+        self.since = Some(now);
+        true
+    }
+
+    fn opacity(&self, now: Instant) -> f32 {
+        let target = if self.over { 1. } else { 0. };
+        let Some(since) = self.since else {
+            return target;
+        };
+        let t = now.saturating_duration_since(since).as_secs_f32() / DROP_FADE.as_secs_f32();
+        self.from + (target - self.from) * t.min(1.)
+    }
+
+    fn fading(&self, now: Instant) -> bool {
+        self.since
+            .is_some_and(|since| now.saturating_duration_since(since) < DROP_FADE)
+    }
+}
+
+/// A drag move is over the composer when it is inside the drop zone and a drop would attach.
+fn drag_over(bounds: Bounds<Pixels>, position: Point<Pixels>, accepts: bool) -> bool {
+    accepts && bounds.contains(&position)
+}
+
+/// An attachment the composer sends as given, such as a fork's chat history.
+struct RawAttachment {
+    label: String,
+    attachment: serde_json::Value,
 }
 
 /// A plugin chip and its comment field.
@@ -299,6 +364,11 @@ pub struct Composer {
     /// Escape closed the menu for the text being typed.
     slash_dismissed: bool,
     slash_scroll: ScrollHandle,
+    /// The `@` file menu.
+    mention: MentionMenu,
+    mention_scroll: ScrollHandle,
+    /// The debounced suggestion request; a newer keystroke drops it.
+    mention_fetch: Option<Task<()>>,
     /// The feature requests that wait for the daemon.
     requests: FeatureRequests,
     /// The row limit the input was last given, from the window height.
@@ -314,11 +384,13 @@ pub struct Composer {
     tick: Option<Task<()>>,
     archive: ArchiveFinished,
     draft: Option<DraftState>,
+    raw_attachments: Vec<RawAttachment>,
     plugin_chips: Vec<PluginChip>,
     /// Interceptors run: the primary button shows a spinner.
     processing: bool,
     /// A stop press waits for the agent to leave the running status.
     cancelling: bool,
+    drop: DropOverlay,
     picker: Option<Picker>,
     popovers: PopoverViews,
     _subscriptions: Vec<Subscription>,
@@ -402,6 +474,8 @@ impl Composer {
                     cwd,
                     values: BTreeMap::new(),
                 }),
+                seed_mode: None,
+                seed_features: None,
             }
         });
         let weak = cx.weak_entity();
@@ -445,7 +519,9 @@ impl Composer {
                 }
                 let key = event.keystroke.key.clone();
                 let handled = weak
-                    .update(cx, |this, cx| this.slash_key(&key, window, cx))
+                    .update(cx, |this, cx| {
+                        this.mention_key(&key, window, cx) || this.slash_key(&key, window, cx)
+                    })
                     .unwrap_or(false);
                 if handled {
                     cx.stop_propagation();
@@ -473,6 +549,9 @@ impl Composer {
             slash_active: 0,
             slash_dismissed: false,
             slash_scroll: ScrollHandle::new(),
+            mention: MentionMenu::default(),
+            mention_scroll: ScrollHandle::new(),
+            mention_fetch: None,
             requests: FeatureRequests::default(),
             max_rows,
             focus_hint: focus_hint(&load_shortcuts()),
@@ -482,9 +561,11 @@ impl Composer {
             tick: None,
             archive: ArchiveFinished::default(),
             draft,
+            raw_attachments: Vec::new(),
             plugin_chips: Vec::new(),
             processing: false,
             cancelling: false,
+            drop: DropOverlay::default(),
             picker: None,
             popovers: PopoverViews::default(),
             _subscriptions: subscriptions,
@@ -511,7 +592,7 @@ impl Composer {
         Some(DraftSubmission::build(
             self.value(cx).trim().to_string(),
             self.attachments.iter().map(Attachment::to_json).collect(),
-            self.plugin_attachments(cx),
+            outgoing_attachments(&self.raw_json(), self.plugin_attachments(cx)),
             draft.config(),
             &draft.features,
             draft.plugin_draft.read(cx),
@@ -534,6 +615,50 @@ impl Composer {
         self.reload_draft(cx);
     }
 
+    /// Seeds the draft from a source agent as if the owner picked each field. A field the
+    /// provider does not offer is ignored; the mode and features apply when their lists load.
+    pub fn set_draft_seed(
+        &mut self,
+        seed: DraftSeed,
+        _window: &mut Window,
+        cx: &mut Context<Composer>,
+    ) {
+        let Some(draft) = self.draft.as_mut() else {
+            return;
+        };
+        let Some((provider, model)) =
+            seed_provider_model(&seed, draft.provider.as_deref(), &self.watched.providers)
+        else {
+            return;
+        };
+        let client = self.client.read(cx);
+        let model = model.or_else(|| client.default_model(&provider));
+        let thinking = model
+            .as_deref()
+            .and_then(|model| client.model_thinking(&provider, model))
+            .map(|thinking| thinking.options)
+            .unwrap_or_default();
+        draft.thinking_id = offered(seed.thinking_option_id.as_deref(), &thinking);
+        draft.provider = Some(provider);
+        draft.model = model;
+        draft.mode_id = None;
+        draft.seed_mode = seed.mode;
+        draft.seed_features = seed.features;
+        self.reload_draft(cx);
+    }
+
+    /// Adds a chip that the next prompt sends unchanged, such as a fork's chat history.
+    pub fn add_raw_attachment(
+        &mut self,
+        label: String,
+        attachment: serde_json::Value,
+        cx: &mut Context<Composer>,
+    ) {
+        self.raw_attachments
+            .push(RawAttachment { label, attachment });
+        cx.notify();
+    }
+
     /// While the owner submits, the input keeps its text, locked, and the primary button spins.
     pub fn set_submitting(&mut self, submitting: bool, cx: &mut Context<Composer>) {
         if let Some(draft) = self.draft.as_mut() {
@@ -542,9 +667,10 @@ impl Composer {
         }
     }
 
-    /// Empties the input, the images, the plugin chips, and the send error.
+    /// Empties the input, the images, the raw attachments, the plugin chips, and the send error.
     pub fn clear(&mut self, window: &mut Window, cx: &mut Context<Composer>) {
         self.attachments.clear();
+        self.raw_attachments.clear();
         self.plugin_chips.clear();
         self.send_error = None;
         self.clear_input(window, cx);
@@ -581,6 +707,18 @@ impl Composer {
     /// The agent id plugin events address; a draft has none.
     fn plugin_agent_id(&self) -> Option<&str> {
         (!self.is_draft()).then_some(self.agent_id.as_str())
+    }
+
+    fn raw_json(&self) -> Vec<serde_json::Value> {
+        self.raw_attachments
+            .iter()
+            .map(|raw| raw.attachment.clone())
+            .collect()
+    }
+
+    /// The images, raw attachments, and plugin chips the next prompt carries.
+    fn attachment_total(&self) -> usize {
+        self.attachments.len() + self.raw_attachments.len() + self.plugin_chips.len()
     }
 
     fn plugin_attachments(&self, cx: &App) -> Vec<serde_json::Value> {
@@ -790,7 +928,12 @@ impl Composer {
                     return;
                 }
                 match modes {
-                    Ok(modes) => draft.modes = modes,
+                    Ok(modes) => {
+                        if let Some(mode) = draft.seed_mode.take() {
+                            draft.mode_id = offered(Some(&mode), &modes);
+                        }
+                        draft.modes = modes;
+                    }
                     Err(error) => log::warn!("cannot list modes of {provider}: {error}"),
                 }
                 cx.notify();
@@ -804,7 +947,14 @@ impl Composer {
                     return;
                 }
                 match features {
-                    Ok(features) => draft.features = features,
+                    Ok(mut features) => {
+                        let seeded =
+                            seed_feature_values(draft.seed_features.take().as_ref(), &features);
+                        for (feature_id, value) in seeded {
+                            apply_feature(&mut features, &feature_id, &value);
+                        }
+                        draft.features = features;
+                    }
                     Err(error) => log::warn!("cannot list draft features: {error}"),
                 }
                 cx.notify();
@@ -824,6 +974,8 @@ impl Composer {
         };
         if draft.provider.as_deref() != Some(provider) {
             draft.mode_id = None;
+            draft.seed_mode = None;
+            draft.seed_features = None;
         }
         draft.provider = Some(provider.to_string());
         draft.model = Some(model.to_string());
@@ -832,6 +984,7 @@ impl Composer {
     }
 
     fn text_changed(&mut self, cx: &mut Context<Self>) {
+        self.request_mentions(cx);
         let value = self.value(cx);
         if slash_query(&value).is_some() {
             self.load_commands(cx);
@@ -899,7 +1052,8 @@ impl Composer {
 
     /// The menu rows for the text in the input; empty when the menu is closed.
     fn slash_matches(&self, cx: &App) -> Vec<SlashItem> {
-        if self.slash_dismissed {
+        // A file mention at the caret wins, as `resolveAutocompleteMode` picks "file" first.
+        if self.slash_dismissed || self.mention_open(cx) {
             return Vec::new();
         }
         let value = self.value(cx);
@@ -960,6 +1114,7 @@ impl Composer {
             input.set_value(text, window, cx);
             input.set_cursor_position(position, window, cx);
         });
+        self.request_mentions(cx);
     }
 
     /// Puts the command in the input and puts the caret after it.
@@ -969,10 +1124,281 @@ impl Composer {
         cx.notify();
     }
 
+    /// The folder file mentions resolve in: the draft's, or the agent's.
+    fn mention_cwd(&self, cx: &App) -> Option<String> {
+        match &self.draft {
+            Some(draft) => draft.cwd().map(String::from),
+            None => self
+                .client
+                .read(cx)
+                .agents()
+                .iter()
+                .find(|agent| agent.id == self.agent_id)
+                .map(|agent| agent.cwd.trim().to_string()),
+        }
+    }
+
+    /// The `@query` that ends at the caret.
+    fn active_mention(&self, cx: &App) -> Option<FileMention> {
+        let input = self.input.read(cx);
+        find_active_file_mention(&input.value(), input.cursor())
+    }
+
+    fn mention_open(&self, cx: &App) -> bool {
+        let mention = self.active_mention(cx);
+        self.mention
+            .open(self.mention_cwd(cx).as_deref(), mention.as_ref())
+    }
+
+    /// Asks for the files that match the mention at the caret once typing pauses. A newer
+    /// keystroke drops the waiting request, so a burst of keys sends one request.
+    fn request_mentions(&mut self, cx: &mut Context<Self>) {
+        let mention = self.active_mention(cx);
+        let cwd = self.mention_cwd(cx);
+        let Some(request) = self.mention.update(cwd.as_deref(), mention.as_ref()) else {
+            if mention.is_none() {
+                self.mention_fetch = None;
+            }
+            return;
+        };
+        self.mention_scroll.scroll_to_bottom();
+        self.mention_fetch = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(DEBOUNCE_MS))
+                .await;
+            let Ok(task) = this.update(cx, |this, cx| {
+                this.client.update(cx, |client, cx| {
+                    client.directory_suggestions(
+                        &request.cwd,
+                        &request.query,
+                        true,
+                        true,
+                        LIMIT,
+                        cx,
+                    )
+                })
+            }) else {
+                return;
+            };
+            let answer = task.await.map_err(|error| error.to_string());
+            let _ = this.update(cx, |this, cx| {
+                if this.mention.accept(request.generation, answer) {
+                    this.mention_scroll.scroll_to_bottom();
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    /// Up, Down, Tab, and Escape while the `@` menu is open. Returns whether it took the key.
+    fn mention_key(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.input.read(cx).focus_handle(cx).is_focused(window) {
+            return false;
+        }
+        let Some(mention) = self.active_mention(cx) else {
+            return false;
+        };
+        if !self
+            .mention
+            .open(self.mention_cwd(cx).as_deref(), Some(&mention))
+        {
+            return false;
+        }
+        let len = self.mention.items.len();
+        if let Some(delta) = arrow_delta(key) {
+            if len == 0 {
+                return false;
+            }
+            self.mention.active = step(self.mention.active.min(len - 1), len, delta);
+            // Rows draw worst first, as the slash menu does.
+            self.mention_scroll
+                .scroll_to_item(len - 1 - self.mention.active);
+            cx.notify();
+            return true;
+        }
+        match key {
+            "tab" => return self.pick_mention(self.mention.active, window, cx),
+            "escape" => self.mention.dismiss(&mention),
+            _ => return false,
+        }
+        cx.notify();
+        true
+    }
+
+    /// Replaces the `@query` with the quoted path of row `index`. Returns whether it picked.
+    fn pick_mention(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(mention) = self.active_mention(cx) else {
+            return false;
+        };
+        if !self
+            .mention
+            .open(self.mention_cwd(cx).as_deref(), Some(&mention))
+        {
+            return false;
+        }
+        let Some(item) = self
+            .mention
+            .items
+            .get(index.min(self.mention.items.len().saturating_sub(1)))
+        else {
+            return false;
+        };
+        let (text, caret) = apply_mention(&self.value(cx), &mention, &item.path);
+        self.set_text_at(text, caret, window, cx);
+        true
+    }
+
+    /// Puts `text` in the input with the caret at byte `caret`. `set_value` emits no change
+    /// event, so the mention menu reads the new text here.
+    fn set_text_at(
+        &mut self,
+        text: String,
+        caret: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.input.update(cx, |input, cx| {
+            input.set_value(text, window, cx);
+            input.set_selected_range(caret..caret, cx);
+            input.focus(window, cx);
+        });
+        self.request_mentions(cx);
+        cx.notify();
+    }
+
+    /// Puts `path` in at the caret as a quoted mention. A path inside the folder becomes
+    /// relative to it.
+    pub fn insert_path_mention(
+        &mut self,
+        path: &str,
+        window: &mut Window,
+        cx: &mut Context<Composer>,
+    ) {
+        let cwd = self.mention_cwd(cx);
+        let path = mention_path(Path::new(path), cwd.as_deref());
+        self.insert_mentions_at_caret(&[path], window, cx);
+    }
+
+    fn insert_mentions_at_caret(
+        &mut self,
+        paths: &[String],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let cursor = self.input.read(cx).cursor();
+        let (text, caret) = insert_mentions(&self.value(cx), cursor, paths);
+        self.set_text_at(text, caret, window, cx);
+    }
+
+    /// Files dropped from Finder: images attach, as a pasted file does; any other file or
+    /// folder goes in at the caret as a quoted path. A drop while the composer submits is
+    /// ignored.
+    fn drop_paths(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
+        if self.processing || self.locked() {
+            return;
+        }
+        let (images, others): (Vec<PathBuf>, Vec<PathBuf>) = paths
+            .iter()
+            .cloned()
+            .partition(|path| mime_for_path(path).is_some());
+        if !others.is_empty() {
+            let cwd = self.mention_cwd(cx);
+            let mentions: Vec<String> = others
+                .iter()
+                .map(|path| mention_path(path, cwd.as_deref()))
+                .collect();
+            self.insert_mentions_at_caret(&mentions, window, cx);
+        }
+        self.focus(window, cx);
+        if images.is_empty() {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let loaded = cx
+                .background_executor()
+                .spawn(async move { load_images(images) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.attachments.extend(loaded);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// A Finder drag moved somewhere in the window: the overlay shows while it is over the
+    /// composer and a drop would attach.
+    fn drag_move(&mut self, event: &DragMoveEvent<ExternalPaths>, cx: &mut Context<Self>) {
+        let accepts = !self.processing && !self.locked();
+        let over = drag_over(event.bounds, event.event.position, accepts);
+        if self.drop.set_over(over, Instant::now()) {
+            cx.notify();
+        }
+    }
+
+    /// `FileDropBackdrop`, faded by opacity. It has no listeners, so it takes no hitbox and the
+    /// root `on_drop` still gets the drop. `None` once it has faded out.
+    fn drop_backdrop(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Div> {
+        if self.drop.since.is_none() && !self.drop.over {
+            return None;
+        }
+        let now = Instant::now();
+        // A drag that left the window or ended clears the active drag and refreshes.
+        if !cx.has_active_drag() {
+            self.drop.set_over(false, now);
+        }
+        if self.drop.fading(now) {
+            window.request_animation_frame();
+        } else {
+            self.drop.since = None;
+            if !self.drop.over {
+                return None;
+            }
+        }
+        let t = tokens(cx);
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .opacity(self.drop.opacity(now))
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(t.surface0)
+                        .opacity(DROP_BACKDROP_OPACITY),
+                )
+                .child(
+                    v_flex()
+                        .items_center()
+                        .gap(px(SPACE_2))
+                        .child(
+                            icon(IconName::Upload)
+                                .with_size(px(DROP_GLYPH))
+                                .text_color(t.foreground),
+                        )
+                        .child(
+                            div()
+                                .text_size(ui_font_size(FONT_BASE, cx))
+                                .line_height(relative(1.2))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(t.foreground)
+                                .child(DROP_FILES_HERE),
+                        ),
+                ),
+        )
+    }
+
     /// Enter picks a menu row, or sends. Cmd+Enter (`secondary`) queues during a run. The
     /// textarea inserts the new line itself for Shift+Enter, and still reports it here.
     fn enter(&mut self, secondary: bool, shift: bool, window: &mut Window, cx: &mut Context<Self>) {
         if shift {
+            return;
+        }
+        if self.pick_mention(self.mention.active, window, cx) {
             return;
         }
         let matches = self.slash_matches(cx);
@@ -1003,7 +1429,7 @@ impl Composer {
             return;
         }
         let value = self.value(cx);
-        let attachment_count = self.attachments.len() + self.plugin_chips.len();
+        let attachment_count = self.attachment_total();
         if !self.is_draft()
             && let Some(command) = resolve_client_command(&value, attachment_count)
         {
@@ -1101,7 +1527,7 @@ impl Composer {
             return;
         }
         let attachments = std::mem::take(&mut self.attachments);
-        let chips = self.plugin_attachments(cx);
+        let chips = outgoing_attachments(&self.raw_json(), self.plugin_attachments(cx));
         let count = attachments.len();
         let message = OutgoingMessage {
             text: text.clone(),
@@ -1114,6 +1540,7 @@ impl Composer {
             SendPlan::Queue => client.enqueue_message(&agent_id, message, cx),
         });
         // Clear at once so the sent row and the input stay in step; a failure puts it back.
+        let raw_attachments = std::mem::take(&mut self.raw_attachments);
         let plugin_chips = std::mem::take(&mut self.plugin_chips);
         self.send_error = None;
         self.clear_input(window, cx);
@@ -1134,6 +1561,9 @@ impl Composer {
                 }
                 if this.attachments.is_empty() {
                     this.attachments = attachments;
+                }
+                if this.raw_attachments.is_empty() {
+                    this.raw_attachments = raw_attachments;
                 }
                 if this.plugin_chips.is_empty() {
                     this.plugin_chips = plugin_chips;
@@ -1162,6 +1592,7 @@ impl Composer {
     fn clear_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.request_mentions(cx);
         self.slash_dismissed = false;
         self.slash_active = 0;
         cx.notify();
@@ -1819,6 +2250,31 @@ fn spinner(cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// Where an autocomplete menu sits: above the card, as an overlay that takes no layout height.
+/// The gap is the `AutocompletePopover` `OFFSET_FROM_ANCHOR`.
+fn popup_anchor() -> Div {
+    v_flex()
+        .absolute()
+        .bottom_full()
+        .left_0()
+        .right_0()
+        .pb(px(SPACE_3))
+        .gap(px(SPACE_1))
+}
+
+/// The bordered box of an autocomplete menu.
+fn popup_box(cx: &App) -> Div {
+    let t = tokens(cx);
+    div()
+        .bg(t.surface1)
+        .border_1()
+        .border_color(t.border_accent)
+        .rounded(px(RADIUS_LG))
+        .shadow(vec![shadow(ShadowSize::Md, cx)])
+        .overflow_hidden()
+        .occlude()
+}
+
 impl Composer {
     fn slash_menu(
         &self,
@@ -1898,38 +2354,103 @@ impl Composer {
                         .child(selected.description.clone()),
                 )
         });
-        // Above the card, as an overlay: it takes no height from the layout. The gap is the
-        // `AutocompletePopover` `OFFSET_FROM_ANCHOR`.
         Some(
-            v_flex()
-                .absolute()
-                .bottom_full()
-                .left_0()
-                .right_0()
-                .pb(px(SPACE_3))
-                .gap(px(SPACE_1))
-                .children(detail)
+            popup_anchor().children(detail).child(
+                popup_box(cx).child(
+                    v_flex()
+                        .id("composer-slash-menu")
+                        .role(Role::Menu)
+                        .aria_label("Slash commands")
+                        .track_scroll(&self.slash_scroll)
+                        .max_h(px(SLASH_MAX_HEIGHT))
+                        .overflow_y_scroll()
+                        .py(px(SPACE_1))
+                        .children(rows),
+                ),
+            ),
+        )
+    }
+
+    /// The `@` file menu, in the slash menu's frame: a folder or file glyph and the path per
+    /// row, best match at the bottom, or the search status while it has no rows.
+    fn mention_menu(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        if !self.mention_open(cx) {
+            return None;
+        }
+        let t = tokens(cx);
+        let size = ui_font_size(FONT_BASE, cx);
+        let items = &self.mention.items;
+        let active = self.mention.active.min(items.len().saturating_sub(1));
+        let rows = items.iter().enumerate().rev().map(|(ix, item)| {
+            let glyph = if item.is_directory {
+                IconName::Folder
+            } else {
+                IconName::File
+            };
+            let pick = cx.listener(move |this, _, window, cx| {
+                this.pick_mention(ix, window, cx);
+            });
+            let weak = cx.weak_entity();
+            h_flex()
+                .id(("composer-mention-item", ix))
+                .role(Role::Button)
+                .aria_label(item.path.clone())
+                .aria_selected(ix == active)
+                .min_h(px(36.))
+                .px(px(SPACE_3))
+                .py(px(SPACE_2))
+                .gap(px(SPACE_2))
+                .items_center()
+                .cursor_pointer()
+                .text_size(size)
+                .line_height(relative(1.2))
+                .when(ix == active, |row| row.bg(t.surface2))
+                .hover(|row| row.bg(t.surface2))
+                .on_click(pick)
+                .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                    weak.update(cx, |this, cx| {
+                        this.pick_mention(ix, window, cx);
+                    })
+                    .ok();
+                })
+                .child(
+                    icon(glyph)
+                        .with_size(px(ICON_SM))
+                        .text_color(t.foreground_muted),
+                )
                 .child(
                     div()
-                        .bg(t.surface1)
-                        .border_1()
-                        .border_color(t.border_accent)
-                        .rounded(px(RADIUS_LG))
-                        .shadow(vec![shadow(ShadowSize::Md, cx)])
-                        .overflow_hidden()
-                        .occlude()
-                        .child(
-                            v_flex()
-                                .id("composer-slash-menu")
-                                .role(Role::Menu)
-                                .aria_label("Slash commands")
-                                .track_scroll(&self.slash_scroll)
-                                .max_h(px(SLASH_MAX_HEIGHT))
-                                .overflow_y_scroll()
-                                .py(px(SPACE_1))
-                                .children(rows),
-                        ),
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(t.foreground)
+                        .child(item.path.clone()),
+                )
+        });
+        let status = self.mention.status().map(|status| {
+            div()
+                .px(px(SPACE_3))
+                .py(px(SPACE_2))
+                .text_size(ui_font_size(FONT_SM, cx))
+                .line_height(relative(1.2))
+                .text_color(t.foreground_muted)
+                .child(status)
+        });
+        Some(
+            popup_anchor().child(
+                popup_box(cx).child(
+                    v_flex()
+                        .id("composer-mention-menu")
+                        .role(Role::Menu)
+                        .aria_label("Files")
+                        .track_scroll(&self.mention_scroll)
+                        .max_h(px(SLASH_MAX_HEIGHT))
+                        .overflow_y_scroll()
+                        .py(px(SPACE_1))
+                        .children(rows)
+                        .children(status),
                 ),
+            ),
         )
     }
 
@@ -2191,10 +2712,7 @@ impl Composer {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let t = tokens(cx);
-        let sendable = can_send(
-            &self.value(cx),
-            self.attachments.len() + self.plugin_chips.len(),
-        );
+        let sendable = can_send(&self.value(cx), self.attachment_total());
         if let Some(draft) = &self.draft {
             return match draft_primary(
                 &draft.options,
@@ -2286,7 +2804,7 @@ impl Composer {
         }
     }
 
-    /// The image chips, then the plugin chips.
+    /// The image chips, the raw attachment chips, then the plugin chips.
     fn tray(&self, index: &ContributionIndex, cx: &mut Context<Self>) -> Option<AnyElement> {
         let remove_weak = cx.weak_entity();
         let mut chips = image_chips(
@@ -2303,6 +2821,19 @@ impl Composer {
             },
             cx,
         );
+        for (at, raw) in self.raw_attachments.iter().enumerate() {
+            let weak = cx.weak_entity();
+            let remove = Rc::new(move |cx: &mut App| {
+                weak.update(cx, |this, cx| {
+                    if at < this.raw_attachments.len() {
+                        this.raw_attachments.remove(at);
+                        cx.notify();
+                    }
+                })
+                .ok();
+            });
+            chips.push(raw_chip(at, &raw.label, remove, cx));
+        }
         for (at, chip) in self.plugin_chips.iter().enumerate() {
             let on_open = index
                 .attachment_sources()
@@ -2338,6 +2869,57 @@ impl Composer {
         }
         attachment_tray(chips)
     }
+}
+
+/// A raw attachment chip (`AttachmentFrame` with the chat history label): a file glyph, the
+/// label, and its remove button. It is drawn like a plugin chip: 48 px tall, at most 280 wide.
+fn raw_chip(index: usize, label: &str, on_remove: Rc<dyn Fn(&mut App)>, cx: &App) -> AnyElement {
+    let t = tokens(cx);
+    let on_ax_remove = on_remove.clone();
+    h_flex()
+        .id(("composer-raw-chip", index))
+        .role(Role::ListItem)
+        .aria_label(format!("Attachment {label}"))
+        .items_center()
+        .gap(px(SPACE_2))
+        .h(px(48.))
+        .px(px(SPACE_2))
+        .max_w(px(280.))
+        .border_1()
+        .border_color(t.border_accent)
+        .rounded(px(RADIUS_MD))
+        .bg(t.surface1)
+        .child(
+            icon(IconName::FileText)
+                .with_size(px(ICON_SM))
+                .text_color(t.foreground_muted),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .truncate()
+                .text_size(ui_font_size(FONT_SM, cx))
+                .text_color(t.foreground)
+                .child(label.to_string()),
+        )
+        .child(
+            round_button(
+                ("composer-raw-chip-remove", index),
+                IconName::X,
+                "Remove attachment",
+                24.,
+                None,
+                t.foreground_muted,
+                t.surface3,
+            )
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                on_remove(cx);
+            })
+            .on_a11y_action(AccessibleAction::Click, move |_, _, cx| on_ax_remove(cx)),
+        )
+        .into_any_element()
 }
 
 /// The attach button as a menu trigger.
@@ -2442,6 +3024,8 @@ impl Render for Composer {
             .trailing(trailing)
             .primary(self.primary_button(&index, window, cx));
         let picker = self.picker_list(cx);
+        let mention_menu = self.mention_menu(cx);
+        let drop_backdrop = self.drop_backdrop(window, cx);
 
         // `inputAreaContainer`: 16 px at the sides and bottom, the content centered at 820 px.
         div()
@@ -2451,7 +3035,17 @@ impl Render for Composer {
             .justify_center()
             .px(px(SPACE_4))
             .pb(px(SPACE_4))
+            .relative()
             .when(self.locked(), |area| area.opacity(LOCKED_OPACITY))
+            .on_drag_move::<ExternalPaths>(
+                cx.listener(|this, event, _, cx| this.drag_move(event, cx)),
+            )
+            .on_drop::<ExternalPaths>(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                if this.drop.set_over(false, Instant::now()) {
+                    cx.notify();
+                }
+                this.drop_paths(paths.paths(), window, cx)
+            }))
             .child(
                 v_flex()
                     .w_full()
@@ -2464,11 +3058,13 @@ impl Render for Composer {
                             .relative()
                             .w_full()
                             .children(self.slash_menu(&matches, cx))
+                            .children(mention_menu)
                             .children(picker)
                             .children(draft_row)
                             .child(card),
                     ),
             )
+            .children(drop_backdrop)
     }
 }
 
@@ -2476,8 +3072,9 @@ impl Render for Composer {
 mod tests {
     // Named imports: `use super::*` would bring in GPUI's `test` macro over `#[test]`.
     use super::{
-        DraftPrimary, FOCUS_ACTION, LOCKED_OPACITY, Watched, draft_primary, focus_hint,
-        outgoing_text, restore_after_error, send_error_text, snapshot_changed,
+        DROP_FADE, DraftPrimary, DropOverlay, FOCUS_ACTION, LOCKED_OPACITY, Watched, draft_primary,
+        drag_over, focus_hint, outgoing_text, restore_after_error, send_error_text,
+        snapshot_changed,
     };
     use crate::draft::{DraftOptions, SubmitIcon};
     use bachuc_client::{
@@ -2485,6 +3082,8 @@ mod tests {
         SubagentKind, SubagentRow, TaskEntry, TaskStatus, TurnMetrics,
     };
     use bachuc_command::default_shortcuts;
+    use gpui_kit::{Bounds, point, px, size};
+    use std::time::{Duration, Instant};
 
     fn fast_mode(value: bool) -> AgentFeature {
         AgentFeature {
@@ -2660,5 +3259,45 @@ mod tests {
         };
         assert_eq!(draft_primary(&strict, false, false), DraftPrimary::None);
         assert_eq!(LOCKED_OPACITY, 0.6);
+    }
+
+    #[test]
+    fn the_drop_overlay_fades_in_over_the_composer_and_out_on_leave_or_drop() {
+        let zone = Bounds::new(point(px(0.), px(500.)), size(px(800.), px(120.)));
+        let inside = point(px(400.), px(560.));
+        let outside = point(px(400.), px(200.));
+        assert!(drag_over(zone, inside, true));
+        assert!(!drag_over(zone, outside, true));
+        // A drop while the composer submits is ignored, so no overlay.
+        assert!(!drag_over(zone, inside, false));
+
+        let start = Instant::now();
+        let half = start + DROP_FADE / 2;
+        let done = start + DROP_FADE;
+        let mut overlay = DropOverlay::default();
+        assert_eq!(overlay.opacity(start), 0.);
+        // Inside: it fades in over 150 ms. Further moves inside change nothing, so no render.
+        assert!(overlay.set_over(drag_over(zone, inside, true), start));
+        assert!(!overlay.set_over(drag_over(zone, inside, true), half));
+        assert_eq!(overlay.opacity(start), 0.);
+        assert!((overlay.opacity(half) - 0.5).abs() < 0.01);
+        assert!(overlay.fading(half));
+        assert_eq!(overlay.opacity(done), 1.);
+        assert!(!overlay.fading(done));
+
+        // Outside: it fades out from where it is.
+        let left = done + Duration::from_millis(10);
+        assert!(overlay.set_over(drag_over(zone, outside, true), left));
+        assert_eq!(overlay.opacity(left), 1.);
+        assert_eq!(overlay.opacity(left + DROP_FADE), 0.);
+
+        // Back inside, then a drop halfway through the fade in: it fades out from 0.5.
+        let back = left + DROP_FADE * 2;
+        assert!(overlay.set_over(true, back));
+        let dropped = back + DROP_FADE / 2;
+        assert!(overlay.set_over(false, dropped));
+        assert!((overlay.opacity(dropped) - 0.5).abs() < 0.01);
+        assert_eq!(overlay.opacity(dropped + DROP_FADE), 0.);
+        assert!(!overlay.fading(dropped + DROP_FADE));
     }
 }

@@ -16,6 +16,12 @@ use crate::model::{
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode, WorkspaceSummary,
     provider_label,
 };
+use crate::model::{DirectorySuggestion, MatchMode, NewEntryKind};
+use crate::model::{ForkBoundary, ForkContext, HistoryEntry, HistoryPage};
+use crate::model::{
+    GitAction, GitActionReply, GitStatus, GitStatusEvent, PrStatus, PrStatusReply, PrTimelineItem,
+    StashEntry, WorkspaceScript,
+};
 use crate::plugins::{self, PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite};
 use crate::terminal::{self, TerminalFrame, TerminalHandle};
 use crate::timeline::{FetchPlan, LiveRow, TimelineState, TimelineSync};
@@ -28,6 +34,26 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 type Reply<T> = oneshot::Sender<anyhow::Result<T>>;
+
+/// A receiver that already holds `Err(message)`, for a call that sends no request.
+fn failed<T>(message: &'static str) -> oneshot::Receiver<anyhow::Result<T>> {
+    let (reply, receiver) = oneshot::channel();
+    let _ = reply.send(Err(anyhow!(message)));
+    receiver
+}
+
+/// A `directory_suggestions_request` without `matchMode`; `limit` is clamped to 1 to 100.
+fn directory_suggestions_message(
+    cwd: &str,
+    query: &str,
+    include_files: bool,
+    include_directories: bool,
+    limit: u32,
+) -> Value {
+    json!({"type": "directory_suggestions_request", "cwd": cwd, "query": query,
+           "includeFiles": include_files, "includeDirectories": include_directories,
+           "limit": limit.clamp(1, 100)})
+}
 
 /// Takes a plugin RPC `output`, or the error, and answers the caller with its decoded form.
 type RpcFinish = Box<dyn FnOnce(anyhow::Result<Value>) + Send>;
@@ -110,6 +136,25 @@ enum Pending {
     AddProject(Reply<AddedProject>),
     Refresh(Reply<()>),
     RenameTerminal(Reply<()>),
+    GitAction(Reply<GitActionReply>),
+    /// The pull of a pull and push; the push follows when it succeeds.
+    PullThenPush {
+        cwd: String,
+        reply: Reply<GitActionReply>,
+    },
+    GitStatus(Reply<GitStatus>),
+    PrStatus(Reply<PrStatusReply>),
+    PrTimeline(Reply<Vec<PrTimelineItem>>),
+    StashList(Reply<Vec<StashEntry>>),
+    /// A checkout answer with only `success` and `error`.
+    CheckoutDone(Reply<()>),
+    StartScript(Reply<String>),
+    History(Reply<HistoryPage>),
+    FetchAgent(Reply<()>),
+    ForkContext(Reply<ForkContext>),
+    DirectorySuggestions(Reply<Vec<DirectorySuggestion>>),
+    /// An `fs.entry.*` answer with `success` and a string `error`.
+    FsEntry(Reply<()>),
 }
 
 impl Pending {
@@ -153,6 +198,18 @@ impl Pending {
             Pending::AddProject(reply) => send(reply, error),
             Pending::Refresh(reply) => send(reply, error),
             Pending::RenameTerminal(reply) => send(reply, error),
+            Pending::GitAction(reply) | Pending::PullThenPush { reply, .. } => send(reply, error),
+            Pending::GitStatus(reply) => send(reply, error),
+            Pending::PrStatus(reply) => send(reply, error),
+            Pending::PrTimeline(reply) => send(reply, error),
+            Pending::StashList(reply) => send(reply, error),
+            Pending::CheckoutDone(reply) => send(reply, error),
+            Pending::StartScript(reply) => send(reply, error),
+            Pending::History(reply) => send(reply, error),
+            Pending::FetchAgent(reply) => send(reply, error),
+            Pending::ForkContext(reply) => send(reply, error),
+            Pending::DirectorySuggestions(reply) => send(reply, error),
+            Pending::FsEntry(reply) => send(reply, error),
             _ => {}
         }
     }
@@ -263,13 +320,15 @@ struct TerminalStream {
 
 /// Session events this client subscribes to; with `explicit_event_subscriptions` the daemon
 /// sends them only on request.
-const SESSION_EVENTS: [&str; 6] = [
+const SESSION_EVENTS: [&str; 8] = [
     "agent_permission_request",
     "agent_permission_resolved",
     "project.update",
     "status.plugin_catalog_changed",
     "status.plugin_settings_changed",
     "agent.provider_subagents.update",
+    "checkout_status_update",
+    "script_status_update",
 ];
 
 /// Client state for one host.
@@ -282,6 +341,8 @@ pub struct ClientCore {
     pending: HashMap<String, Pending>,
     agents: Vec<AgentSummary>,
     extras: HashMap<String, AgentExtra>,
+    /// Archived agents seen in `agent_update` or the history; never in `agents`.
+    archived: HashMap<String, AgentSummary>,
     workspaces: Vec<WorkspaceSummary>,
     providers: Vec<ProviderSummary>,
     viewed: Vec<String>,
@@ -314,6 +375,9 @@ pub struct ClientCore {
     tasks: HashMap<String, TasksCache>,
     /// Provider-owned subagents by parent agent id.
     provider_subagents: HashMap<String, Vec<ProviderSubagent>>,
+    git_status_events: Vec<GitStatusEvent>,
+    /// By workspace id, from the workspace `scripts` and `script_status_update`.
+    workspace_scripts: HashMap<String, Vec<WorkspaceScript>>,
 }
 
 impl ClientCore {
@@ -331,6 +395,7 @@ impl ClientCore {
             pending: HashMap::new(),
             agents: Vec::new(),
             extras: HashMap::new(),
+            archived: HashMap::new(),
             workspaces: Vec::new(),
             providers: Vec::new(),
             viewed: Vec::new(),
@@ -357,7 +422,14 @@ impl ClientCore {
             plugin_events: Vec::new(),
             tasks: HashMap::new(),
             provider_subagents: HashMap::new(),
+            git_status_events: Vec::new(),
+            workspace_scripts: HashMap::new(),
         }
+    }
+
+    /// Git and script status events since the last call.
+    pub fn take_git_status_events(&mut self) -> Vec<GitStatusEvent> {
+        std::mem::take(&mut self.git_status_events)
     }
 
     /// Plugin events since the last call.
@@ -442,6 +514,11 @@ impl ClientCore {
 
     pub fn timeline(&self, agent_id: &str) -> Option<&TimelineState> {
         self.timelines.get(agent_id).map(|sync| &sync.state)
+    }
+
+    /// The epoch of the agent's current timeline window, for building fork cursors.
+    pub fn timeline_epoch(&self, agent_id: &str) -> Option<&str> {
+        self.timelines.get(agent_id)?.epoch()
     }
 
     /// Events since the last call, with one `AgentsChanged` for any directory change.
@@ -1151,6 +1228,212 @@ impl ClientCore {
         )
     }
 
+    /// The daemon unarchives the agent and restores its workspace on a refresh.
+    pub fn unarchive_agent(&mut self, agent_id: &str) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.refresh_agent(agent_id)
+    }
+
+    /// Fetches one agent by id. An archived agent fills the archived map: the agent subscription
+    /// has no `includeArchived`, so the daemon sends `remove` when an agent is archived.
+    pub fn fetch_agent(&mut self, agent_id: &str) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.request_reply(
+            json!({"type": "fetch_agent_request", "agentId": agent_id}),
+            Pending::FetchAgent,
+        )
+    }
+
+    pub fn archived_agent(&self, agent_id: &str) -> Option<&AgentSummary> {
+        self.archived.get(agent_id)
+    }
+
+    pub fn is_archived(&self, agent_id: &str) -> bool {
+        self.archived.contains_key(agent_id)
+    }
+
+    fn server_feature(&self, name: &str) -> bool {
+        self.server_info
+            .as_ref()
+            .is_some_and(|info| info["features"][name] == true)
+    }
+
+    /// Whether the host searches the history (`features.agentHistorySearch`).
+    pub fn history_search_supported(&self) -> bool {
+        self.server_feature("agentHistorySearch")
+    }
+
+    /// One history page, newest first. The search is left out when empty or unsupported.
+    pub fn fetch_agent_history(
+        &mut self,
+        search: Option<&str>,
+        cursor: Option<&str>,
+    ) -> oneshot::Receiver<anyhow::Result<HistoryPage>> {
+        let mut page = json!({"limit": 200});
+        if let Some(cursor) = cursor {
+            page["cursor"] = json!(cursor);
+        }
+        let mut message = json!({"type": "fetch_agent_history_request",
+                                 "sort": [{"key": "updated_at", "direction": "desc"}],
+                                 "page": page});
+        if let Some(search) = search.filter(|search| !search.is_empty())
+            && self.history_search_supported()
+        {
+            message["search"] = json!(search);
+        }
+        self.request_reply(message, Pending::History)
+    }
+
+    /// Whether the host builds fork contexts (`features.agentForkContext`).
+    pub fn fork_supported(&self) -> bool {
+        self.server_feature("agentForkContext")
+    }
+
+    /// Whether the host takes a fork boundary cursor (`features.agentForkContextCursor`).
+    pub fn fork_cursor_supported(&self) -> bool {
+        self.server_feature("agentForkContextCursor")
+    }
+
+    /// The chat history up to `boundary`, as an attachment for a new agent.
+    pub fn fork_context(
+        &mut self,
+        agent_id: &str,
+        boundary: ForkBoundary,
+    ) -> oneshot::Receiver<anyhow::Result<ForkContext>> {
+        if !self.fork_supported() {
+            return failed("Update the host to use this.");
+        }
+        let mut message = json!({"type": "agent.fork_context.request", "agentId": agent_id});
+        if let Some(cursor) = boundary.cursor
+            && self.fork_cursor_supported()
+        {
+            message["boundaryCursor"] = json!({"epoch": cursor.epoch, "seq": cursor.seq});
+        }
+        if let Some(message_id) = boundary.message_id {
+            message["boundaryMessageId"] = json!(message_id);
+        }
+        self.request_reply(message, Pending::ForkContext)
+    }
+
+    /// Files and folders under `cwd` that match `query`, at most `limit` (1 to 100).
+    pub fn directory_suggestions(
+        &mut self,
+        cwd: &str,
+        query: &str,
+        include_files: bool,
+        include_directories: bool,
+        limit: u32,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<DirectorySuggestion>>> {
+        self.request_reply(
+            directory_suggestions_message(cwd, query, include_files, include_directories, limit),
+            Pending::DirectorySuggestions,
+        )
+    }
+
+    /// `directory_suggestions` with an explicit `matchMode`.
+    pub fn directory_suggestions_matching(
+        &mut self,
+        cwd: &str,
+        query: &str,
+        include_files: bool,
+        include_directories: bool,
+        limit: u32,
+        mode: MatchMode,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<DirectorySuggestion>>> {
+        let mut message =
+            directory_suggestions_message(cwd, query, include_files, include_directories, limit);
+        message["matchMode"] = json!(mode.as_str());
+        self.request_reply(message, Pending::DirectorySuggestions)
+    }
+
+    /// Whether the host discards checkout changes (`features.checkoutDiscardChanges`).
+    pub fn discard_changes_supported(&self) -> bool {
+        self.server_feature("checkoutDiscardChanges")
+    }
+
+    /// Whether the host creates, renames, and deletes entries (`features.fsEntryOps`).
+    pub fn fs_entry_ops_supported(&self) -> bool {
+        self.server_feature("fsEntryOps")
+    }
+
+    /// Whether the host duplicates entries (`features.fsEntryDuplicate`).
+    pub fn fs_entry_duplicate_supported(&self) -> bool {
+        self.server_feature("fsEntryDuplicate")
+    }
+
+    /// Sends an `fs.entry.*` request, or fails without one when the host lacks the feature.
+    fn fs_entry(
+        &mut self,
+        supported: bool,
+        message: Value,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        if !supported {
+            return failed("Update the host to use this.");
+        }
+        self.request_reply(message, Pending::FsEntry)
+    }
+
+    pub fn create_entry(
+        &mut self,
+        cwd: &str,
+        parent_path: &str,
+        name: &str,
+        kind: NewEntryKind,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let supported = self.fs_entry_ops_supported();
+        self.fs_entry(
+            supported,
+            json!({"type": "fs.entry.create.request", "cwd": cwd, "parentPath": parent_path,
+                   "name": name, "kind": kind.wire()}),
+        )
+    }
+
+    pub fn rename_entry(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        name: &str,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let supported = self.fs_entry_ops_supported();
+        self.fs_entry(
+            supported,
+            json!({"type": "fs.entry.rename.request", "cwd": cwd, "path": path, "name": name}),
+        )
+    }
+
+    pub fn duplicate_entry(
+        &mut self,
+        cwd: &str,
+        path: &str,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let supported = self.fs_entry_duplicate_supported();
+        self.fs_entry(
+            supported,
+            json!({"type": "fs.entry.duplicate.request", "cwd": cwd, "path": path}),
+        )
+    }
+
+    pub fn delete_entry(&mut self, cwd: &str, path: &str) -> oneshot::Receiver<anyhow::Result<()>> {
+        let supported = self.fs_entry_ops_supported();
+        self.fs_entry(
+            supported,
+            json!({"type": "fs.entry.delete.request", "cwd": cwd, "path": path}),
+        )
+    }
+
+    /// Discards the changes of `paths`; the protocol needs at least one path.
+    pub fn discard_changes(
+        &mut self,
+        cwd: &str,
+        paths: Vec<String>,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        if paths.is_empty() {
+            return failed("No files to discard");
+        }
+        self.request_reply(
+            json!({"type": "checkout.discard_changes.request", "cwd": cwd, "paths": paths}),
+            Pending::CheckoutDone,
+        )
+    }
+
     /// The provider-native session id: `runtimeInfo.sessionId`, else `persistence.sessionId`.
     pub fn agent_provider_session_id(&self, agent_id: &str) -> Option<String> {
         self.extras.get(agent_id)?.session_id.clone()
@@ -1746,6 +2029,168 @@ impl ClientCore {
         );
     }
 
+    // ---- git, PR, stash, and script calls (TASK-204) ----
+
+    /// Runs a git or PR action as the app's `actions-store.ts` does: a commit adds every
+    /// change, and a pull and push pushes only after the pull succeeds.
+    pub fn git_action(
+        &mut self,
+        cwd: &str,
+        action: GitAction,
+    ) -> oneshot::Receiver<anyhow::Result<GitActionReply>> {
+        let message = match action {
+            GitAction::Commit => {
+                json!({"type": "checkout_commit_request", "cwd": cwd, "addAll": true})
+            }
+            GitAction::Pull | GitAction::PullAndPush => {
+                json!({"type": "checkout_pull_request", "cwd": cwd})
+            }
+            GitAction::Push => json!({"type": "checkout_push_request", "cwd": cwd}),
+            GitAction::CreatePr => json!({"type": "checkout_pr_create_request", "cwd": cwd}),
+            GitAction::MergePr(method) => json!({"type": "checkout_pr_merge_request", "cwd": cwd,
+                                                 "mergeMethod": method.wire()}),
+            GitAction::SetAutoMerge { enabled, method } => {
+                let Some(kind) = self.auto_merge_request() else {
+                    let (reply, receiver) = oneshot::channel();
+                    let _ = reply.send(Err(anyhow!("Update the host to use auto-merge actions.")));
+                    return receiver;
+                };
+                let mut message = json!({"type": kind, "cwd": cwd, "enabled": enabled});
+                if let Some(method) = method {
+                    message["mergeMethod"] = json!(method.wire());
+                }
+                message
+            }
+            // The daemon merges into the checkout's base ref when the request names none.
+            GitAction::MergeBranch => json!({"type": "checkout_merge_request", "cwd": cwd,
+                                             "strategy": "merge", "requireCleanTarget": true}),
+            GitAction::MergeFromBase => json!({"type": "checkout_merge_from_base_request",
+                                               "cwd": cwd, "requireCleanTarget": true}),
+            GitAction::Refresh => json!({"type": "checkout.refresh.request", "cwd": cwd}),
+        };
+        if action == GitAction::PullAndPush {
+            let cwd = cwd.to_string();
+            return self.request_reply(message, |reply| Pending::PullThenPush { cwd, reply });
+        }
+        self.request_reply(message, Pending::GitAction)
+    }
+
+    /// The auto-merge request type the host serves; `None` when it serves neither.
+    fn auto_merge_request(&self) -> Option<&'static str> {
+        let features = &self.server_info.as_ref()?["features"];
+        if features["checkoutForgeSetAutoMerge"] == true {
+            return Some("checkout.forge.set_auto_merge.request");
+        }
+        // COMPAT(githubAutoMergeRpc): added in v0.2.0-beta.1, remove after 2027-01-17
+        // once the supported daemon floor is >= v0.2.0.
+        (features["checkoutGithubSetAutoMerge"] == true)
+            .then_some("checkout.github.set_auto_merge.request")
+    }
+
+    /// The full git status of `cwd`. A folder outside git gives `is_git: false`.
+    pub fn git_status(&mut self, cwd: &str) -> oneshot::Receiver<anyhow::Result<GitStatus>> {
+        self.request_reply(
+            json!({"type": "checkout_status_request", "cwd": cwd}),
+            Pending::GitStatus,
+        )
+    }
+
+    pub fn pr_status(&mut self, cwd: &str) -> oneshot::Receiver<anyhow::Result<PrStatusReply>> {
+        self.request_reply(
+            json!({"type": "checkout_pr_status_request", "cwd": cwd}),
+            Pending::PrStatus,
+        )
+    }
+
+    pub fn pr_timeline(
+        &mut self,
+        cwd: &str,
+        number: u64,
+        repo_owner: &str,
+        repo_name: &str,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<PrTimelineItem>>> {
+        self.request_reply(
+            json!({"type": "pull_request_timeline_request", "cwd": cwd, "prNumber": number,
+                   "repoOwner": repo_owner, "repoName": repo_name}),
+            Pending::PrTimeline,
+        )
+    }
+
+    pub fn switch_branch(
+        &mut self,
+        cwd: &str,
+        branch: &str,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.request_reply(
+            json!({"type": "checkout_switch_branch_request", "cwd": cwd, "branch": branch}),
+            Pending::CheckoutDone,
+        )
+    }
+
+    /// Stashes every change, tagged with `branch` when set.
+    pub fn stash_save(
+        &mut self,
+        cwd: &str,
+        branch: Option<&str>,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let mut message = json!({"type": "stash_save_request", "cwd": cwd});
+        if let Some(branch) = branch {
+            message["branch"] = json!(branch);
+        }
+        self.request_reply(message, Pending::CheckoutDone)
+    }
+
+    pub fn stash_pop(&mut self, cwd: &str, index: u32) -> oneshot::Receiver<anyhow::Result<()>> {
+        self.request_reply(
+            json!({"type": "stash_pop_request", "cwd": cwd, "stashIndex": index}),
+            Pending::CheckoutDone,
+        )
+    }
+
+    pub fn stash_list(
+        &mut self,
+        cwd: &str,
+        paseo_only: bool,
+    ) -> oneshot::Receiver<anyhow::Result<Vec<StashEntry>>> {
+        self.request_reply(
+            json!({"type": "stash_list_request", "cwd": cwd, "paseoOnly": paseo_only}),
+            Pending::StashList,
+        )
+    }
+
+    /// The workspace's scripts, as the last descriptor or `script_status_update` gave them.
+    pub fn workspace_scripts(&self, workspace_id: &str) -> Vec<WorkspaceScript> {
+        self.workspace_scripts
+            .get(workspace_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Starts a workspace script and resolves to its terminal id.
+    pub fn start_workspace_script(
+        &mut self,
+        workspace_id: &str,
+        script_name: &str,
+    ) -> oneshot::Receiver<anyhow::Result<String>> {
+        self.request_reply(
+            json!({"type": "start_workspace_script_request", "workspaceId": workspace_id,
+                   "scriptName": script_name}),
+            Pending::StartScript,
+        )
+    }
+
+    /// Stores a workspace's scripts and reports a change.
+    fn set_workspace_scripts(&mut self, workspace_id: &str, scripts: Vec<WorkspaceScript>) {
+        if self.workspace_scripts.get(workspace_id) == Some(&scripts) {
+            return;
+        }
+        self.workspace_scripts
+            .insert(workspace_id.to_string(), scripts);
+        self.git_status_events.push(GitStatusEvent::ScriptsChanged {
+            workspace_id: workspace_id.to_string(),
+        });
+    }
+
     // ---- incoming ----
 
     fn binary(&mut self, bytes: &[u8]) {
@@ -1850,6 +2295,7 @@ impl ClientCore {
                     let id = payload["id"].as_str().unwrap_or_default();
                     self.workspaces.retain(|workspace| workspace.id != id);
                     self.workspace_meta.remove(id);
+                    self.workspace_scripts.remove(id);
                     self.directory_changed = true;
                 }
                 _ => {}
@@ -1882,6 +2328,19 @@ impl ClientCore {
                 if let Some(cwd) = cwd {
                     self.directory_events
                         .push(DirectoryEvent::CheckoutChanged { cwd });
+                }
+            }
+            "checkout_status_update" => {
+                if let Some(cwd) = payload["cwd"].as_str() {
+                    self.git_status_events.push(GitStatusEvent::Changed {
+                        cwd: cwd.to_string(),
+                    });
+                }
+            }
+            "script_status_update" => {
+                if let Some(workspace_id) = payload["workspaceId"].as_str() {
+                    let scripts = WorkspaceScript::parse_list(&payload["scripts"]);
+                    self.set_workspace_scripts(workspace_id, scripts);
                 }
             }
             "agent_stream" => self.stream(payload),
@@ -2519,6 +2978,139 @@ impl ClientCore {
                     Err(anyhow!("terminal rename failed"))
                 }
             }),
+            Pending::History(sender) => {
+                if error.is_none() {
+                    self.archive_history_rows(payload);
+                }
+                reply(sender, error, || Ok(history_page(payload)))
+            }
+            Pending::FetchAgent(sender) => {
+                let agent = &payload["agent"];
+                // A live agent comes through the subscription; only an archived one is stored.
+                if error.is_none() && !agent["archivedAt"].is_null() {
+                    self.upsert_agent(agent);
+                }
+                reply(sender, error, || {
+                    if agent.is_null() {
+                        Err(anyhow!("agent not found"))
+                    } else {
+                        Ok(())
+                    }
+                })
+            }
+            Pending::ForkContext(sender) => reply(sender, error, || {
+                let attachment = &payload["attachment"];
+                if attachment.is_null() {
+                    return Err(anyhow!("Nothing to fork"));
+                }
+                Ok(ForkContext {
+                    attachment: attachment.clone(),
+                    title: attachment["title"].as_str().map(str::to_string),
+                    item_count: payload["itemCount"].as_u64().unwrap_or_default() as u32,
+                })
+            }),
+            Pending::DirectorySuggestions(sender) => reply(sender, error, || {
+                Ok(DirectorySuggestion::parse_all(payload))
+            }),
+            Pending::FsEntry(sender) => reply(sender, error, || {
+                if payload["success"] == true {
+                    Ok(())
+                } else {
+                    Err(anyhow!("the file operation failed"))
+                }
+            }),
+            pending => self.git_response(pending, kind, payload, error),
+        }
+    }
+
+    /// Answers of the git, PR, stash, and script requests (TASK-204).
+    fn git_response(
+        &mut self,
+        pending: Pending,
+        kind: &str,
+        payload: &Value,
+        error: Option<String>,
+    ) {
+        // An `rpc_error` carries a string; a checkout answer carries `{code, message}`.
+        let checkout_error = match kind {
+            "rpc_error" => error.clone(),
+            _ => files::checkout_error(payload).map(|(_, message)| message),
+        };
+        fn send<T>(reply: Reply<T>, error: Option<String>, ok: impl FnOnce() -> T) {
+            let _ = reply.send(match error {
+                Some(error) => Err(anyhow!(error)),
+                None => Ok(ok()),
+            });
+        }
+        match pending {
+            Pending::GitAction(reply) => send(reply, checkout_error, || GitActionReply {
+                url: payload["url"].as_str().map(str::to_string),
+                number: payload["number"].as_u64(),
+            }),
+            Pending::PullThenPush { cwd, reply } => {
+                if let Some(error) = checkout_error {
+                    let _ = reply.send(Err(anyhow!(error)));
+                    return;
+                }
+                let message = json!({"type": "checkout_push_request", "cwd": cwd});
+                if let Err(pending) = self.request(message, Pending::GitAction(reply)) {
+                    pending.fail(anyhow!("not connected"));
+                }
+            }
+            Pending::GitStatus(reply) => {
+                let not_git = kind != "rpc_error"
+                    && files::checkout_error(payload)
+                        .is_some_and(|(code, _)| code == "NOT_GIT_REPO");
+                if not_git {
+                    let _ = reply.send(Ok(GitStatus::default()));
+                    return;
+                }
+                send(reply, checkout_error, || GitStatus::parse(payload));
+            }
+            Pending::PrStatus(reply) => send(reply, checkout_error, || PrStatusReply {
+                status: PrStatus::parse(&payload["status"]),
+                github_features_enabled: payload["githubFeaturesEnabled"] == true,
+            }),
+            Pending::PrTimeline(reply) => {
+                // A timeline error is `{kind, message}`; the message can be empty.
+                let failure = match &payload["error"] {
+                    _ if kind == "rpc_error" => error,
+                    failure if failure.is_object() => Some(
+                        failure["message"]
+                            .as_str()
+                            .filter(|message| !message.is_empty())
+                            .or_else(|| failure["kind"].as_str())
+                            .unwrap_or("unknown")
+                            .to_string(),
+                    ),
+                    _ => None,
+                };
+                send(reply, failure, || {
+                    payload["items"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(PrTimelineItem::parse)
+                        .collect()
+                });
+            }
+            Pending::StashList(reply) => send(reply, checkout_error, || {
+                payload["entries"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(StashEntry::parse)
+                    .collect()
+            }),
+            Pending::CheckoutDone(reply) => send(reply, checkout_error, || ()),
+            Pending::StartScript(reply) => {
+                let result = match (error, payload["terminalId"].as_str()) {
+                    (Some(error), _) => Err(anyhow!(error)),
+                    (None, Some(terminal_id)) => Ok(terminal_id.to_string()),
+                    (None, None) => Err(anyhow!("the script started without a terminal")),
+                };
+                let _ = reply.send(result);
+            }
             other => other.fail(anyhow!("unexpected response {kind}")),
         }
     }
@@ -2571,8 +3163,12 @@ impl ClientCore {
         };
         if !agent["archivedAt"].is_null() {
             self.remove_agent(id);
+            self.archived
+                .insert(id.to_string(), agent_summary(id, agent));
+            self.directory_changed = true;
             return;
         }
+        self.archived.remove(id);
         // The daemon can send an older snapshot after a newer one, for example `idle` after
         // `running` at agent start. ISO timestamps compare as strings.
         let updated_at = agent["updatedAt"].as_str().map(str::to_string);
@@ -2590,23 +3186,7 @@ impl ClientCore {
             .as_array()
             .cloned()
             .unwrap_or_default();
-        let summary = AgentSummary {
-            id: id.to_string(),
-            title: agent["title"]
-                .as_str()
-                .filter(|title| !title.is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| id.chars().take(8).collect()),
-            status: agent["status"].as_str().unwrap_or("unknown").to_string(),
-            cwd: agent["cwd"].as_str().unwrap_or_default().to_string(),
-            workspace_id: agent["workspaceId"].as_str().map(str::to_string),
-            provider: agent["provider"].as_str().unwrap_or_default().to_string(),
-            model: agent["model"]
-                .as_str()
-                .or_else(|| runtime["model"].as_str())
-                .map(str::to_string),
-            pending_permissions: permissions.len(),
-        };
+        let summary = agent_summary(id, agent);
         let modes = agent["availableModes"]
             .as_array()
             .into_iter()
@@ -2663,6 +3243,22 @@ impl ClientCore {
         extra.queue_held = agent["queue"]["held"] == true;
         self.set_permissions(id, permissions);
         self.directory_changed = true;
+    }
+
+    /// Archived history rows fill the archived map; a live agent stays where it is.
+    fn archive_history_rows(&mut self, payload: &Value) {
+        for entry in payload["entries"].as_array().into_iter().flatten() {
+            let agent = &entry["agent"];
+            let Some(id) = agent["id"].as_str() else {
+                continue;
+            };
+            if agent["archivedAt"].is_null() || self.agents.iter().any(|a| a.id == id) {
+                continue;
+            }
+            self.archived
+                .insert(id.to_string(), agent_summary(id, agent));
+            self.directory_changed = true;
+        }
     }
 
     fn remove_agent(&mut self, id: &str) {
@@ -2736,6 +3332,10 @@ impl ClientCore {
                 }),
             };
             self.workspace_meta.insert(id.to_string(), meta);
+        }
+        if workspace["scripts"].is_array() {
+            let scripts = WorkspaceScript::parse_list(&workspace["scripts"]);
+            self.set_workspace_scripts(id, scripts);
         }
         match self
             .workspaces
@@ -2958,6 +3558,68 @@ fn project_info(descriptor: &Value) -> Option<ProjectInfo> {
             .to_string(),
         key: descriptor["projectKey"].as_str().map(str::to_string),
     })
+}
+
+fn agent_title(id: &str, agent: &Value) -> String {
+    agent["title"]
+        .as_str()
+        .filter(|title| !title.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| id.chars().take(8).collect())
+}
+
+fn agent_summary(id: &str, agent: &Value) -> AgentSummary {
+    AgentSummary {
+        id: id.to_string(),
+        title: agent_title(id, agent),
+        status: agent["status"].as_str().unwrap_or("unknown").to_string(),
+        cwd: agent["cwd"].as_str().unwrap_or_default().to_string(),
+        workspace_id: agent["workspaceId"].as_str().map(str::to_string),
+        provider: agent["provider"].as_str().unwrap_or_default().to_string(),
+        model: agent["model"]
+            .as_str()
+            .or_else(|| agent["runtimeInfo"]["model"].as_str())
+            .map(str::to_string),
+        pending_permissions: agent["pendingPermissions"].as_array().map_or(0, Vec::len),
+    }
+}
+
+/// A `fetch_agent_history_response` payload as a page.
+fn history_page(payload: &Value) -> HistoryPage {
+    let text = |value: &Value| value.as_str().map(str::to_string);
+    let entries = payload["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let agent = &entry["agent"];
+            let id = agent["id"].as_str()?;
+            let project = &entry["project"];
+            Some(HistoryEntry {
+                agent_id: id.to_string(),
+                title: agent_title(id, agent),
+                provider: agent["provider"].as_str().unwrap_or_default().to_string(),
+                workspace_id: text(&agent["workspaceId"]),
+                workspace_name: text(&project["workspaceName"]),
+                project_name: project["projectName"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                branch: text(&project["checkout"]["currentBranch"]),
+                cwd: agent["cwd"].as_str().unwrap_or_default().to_string(),
+                archived: !agent["archivedAt"].is_null(),
+                last_activity_at: text(&agent["updatedAt"]),
+                pending_permissions: agent["pendingPermissions"].as_array().map_or(0, Vec::len),
+            })
+        })
+        .collect();
+    let page_info = &payload["pageInfo"];
+    HistoryPage {
+        entries,
+        next_cursor: text(&page_info["nextCursor"]),
+        has_more: page_info["hasMore"] == true,
+        search_truncated: payload["searchTruncated"] == true,
+    }
 }
 
 /// The snapshot `features`, decoded one by one through the generated union, so a feature type

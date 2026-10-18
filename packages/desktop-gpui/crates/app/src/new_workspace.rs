@@ -10,7 +10,9 @@ use bachuc_client::{
     BranchSuggestion, BranchValidation, Client, ClientEvent, CreateWorkspace, CreatedWorkspace,
     DirectoryEvent, InitialAgent, ProjectNode, WorkspaceSource, WorktreeAction,
 };
-use bachuc_composer::{Composer, ComposerEvent, DraftOptions, DraftSubmission, composer_dock};
+use bachuc_composer::{
+    Composer, ComposerEvent, DraftOptions, DraftSeed, DraftSubmission, composer_dock,
+};
 use bachuc_icons::{IconName, icon};
 use bachuc_plugin_host::{NewWorkspacePanelInput, PluginHostEvent, ViewFactory};
 use bachuc_theme::metrics::{
@@ -572,6 +574,24 @@ impl NewWorkspaceScreen {
 
     pub fn composer(&self) -> Entity<Composer> {
         self.composer.clone()
+    }
+
+    /// A fork draft: the source agent's settings, when it has a provider, and the chat history
+    /// chip. The source folder comes in the preset.
+    pub fn seed_fork(
+        &mut self,
+        seed: Option<DraftSeed>,
+        label: String,
+        attachment: serde_json::Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.composer.update(cx, |composer, cx| {
+            if let Some(seed) = seed {
+                composer.set_draft_seed(seed, window, cx);
+            }
+            composer.add_raw_attachment(label, attachment, cx);
+        });
     }
 
     /// The chosen project id and its folder, for the New workspace side panel.

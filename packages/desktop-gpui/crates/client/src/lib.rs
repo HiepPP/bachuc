@@ -33,6 +33,12 @@ pub use model::{
     ChangedFile, CheckoutStatus, DirectoryEvent, FileContent, FileEntry, FileKind, ProjectNode,
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
 };
+pub use model::{DirectorySuggestion, MatchMode, NewEntryKind};
+pub use model::{ForkBoundary, ForkContext, ForkCursor, HistoryEntry, HistoryPage};
+pub use model::{
+    GitAction, GitActionReply, GitStatus, GitStatusEvent, MergeMethod, PrCheck, PrMergeCapability,
+    PrStatus, PrStatusReply, PrTimelineItem, StashEntry, WorkspaceScript,
+};
 pub use plugins::{
     PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite, PluginStatus,
 };
@@ -59,6 +65,7 @@ pub struct Client {
 impl EventEmitter<ClientEvent> for Client {}
 impl EventEmitter<DirectoryEvent> for Client {}
 impl EventEmitter<PluginEvent> for Client {}
+impl EventEmitter<GitStatusEvent> for Client {}
 
 /// Waits for a core reply on the background executor.
 fn reply_task<T: Send + 'static>(
@@ -120,6 +127,7 @@ impl Client {
         let events = self.core.take_events();
         let directory_events = self.core.take_directory_events();
         let plugin_events = self.core.take_plugin_events();
+        let git_status_events = self.core.take_git_status_events();
         let changed = !events.is_empty() || !directory_events.is_empty();
         for event in events {
             cx.emit(event);
@@ -128,6 +136,9 @@ impl Client {
             cx.emit(event);
         }
         for event in plugin_events {
+            cx.emit(event);
+        }
+        for event in git_status_events {
             cx.emit(event);
         }
         if self.core.has_dirty_timelines() && self.flush_task.is_none() {
@@ -195,6 +206,11 @@ impl Client {
 
     pub fn timeline(&self, agent_id: &str) -> Option<&TimelineState> {
         self.core.timeline(agent_id)
+    }
+
+    /// The epoch of the agent's current timeline window; `None` before its first page.
+    pub fn timeline_epoch(&self, agent_id: &str) -> Option<&str> {
+        self.core.timeline_epoch(agent_id)
     }
 
     /// Fetches the page before the first entry when `has_older` is set.
@@ -900,6 +916,73 @@ impl Client {
         reply_task(receiver, cx)
     }
 
+    /// Unarchives the agent; the daemon also restores its workspace.
+    pub fn unarchive_agent(
+        &mut self,
+        agent_id: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.unarchive_agent(agent_id);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Fetches one agent; an archived agent then shows in `archived_agent`.
+    pub fn fetch_agent(
+        &mut self,
+        agent_id: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.fetch_agent(agent_id);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// An archived agent this client has seen; archived agents are never in `agents`.
+    pub fn archived_agent(&self, agent_id: &str) -> Option<&AgentSummary> {
+        self.core.archived_agent(agent_id)
+    }
+
+    pub fn is_archived(&self, agent_id: &str) -> bool {
+        self.core.is_archived(agent_id)
+    }
+
+    pub fn history_search_supported(&self) -> bool {
+        self.core.history_search_supported()
+    }
+
+    /// One page of the agent history, archived agents included.
+    pub fn fetch_agent_history(
+        &mut self,
+        search: Option<&str>,
+        cursor: Option<&str>,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<HistoryPage>> {
+        let receiver = self.core.fetch_agent_history(search, cursor);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn fork_supported(&self) -> bool {
+        self.core.fork_supported()
+    }
+
+    pub fn fork_cursor_supported(&self) -> bool {
+        self.core.fork_cursor_supported()
+    }
+
+    /// The chat history to fork. A host without `agentForkContextCursor` gets no cursor.
+    pub fn fork_context(
+        &mut self,
+        agent_id: &str,
+        boundary: ForkBoundary,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<ForkContext>> {
+        let receiver = self.core.fork_context(agent_id, boundary);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
     pub fn agent_provider_session_id(&self, agent_id: &str) -> Option<String> {
         self.core.agent_provider_session_id(agent_id)
     }
@@ -927,6 +1010,232 @@ impl Client {
         cx: &mut Context<Client>,
     ) -> Task<anyhow::Result<Vec<FileDiff>>> {
         let receiver = self.core.checkout_diff_with(cwd, compare);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    // ---- git, PR, stash, and script calls (TASK-204) ----
+
+    /// Runs a git or PR action. Auto-merge fails with "Update the host to use auto-merge
+    /// actions." when the host serves no auto-merge request.
+    pub fn git_action(
+        &mut self,
+        cwd: &str,
+        action: GitAction,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<GitActionReply>> {
+        let receiver = self.core.git_action(cwd, action);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// The full git status of `cwd`. `GitStatusEvent::Changed` follows each change.
+    pub fn git_status(
+        &mut self,
+        cwd: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<GitStatus>> {
+        let receiver = self.core.git_status(cwd);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn pr_status(
+        &mut self,
+        cwd: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<PrStatusReply>> {
+        let receiver = self.core.pr_status(cwd);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn pr_timeline(
+        &mut self,
+        cwd: &str,
+        number: u64,
+        repo_owner: &str,
+        repo_name: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<PrTimelineItem>>> {
+        let receiver = self.core.pr_timeline(cwd, number, repo_owner, repo_name);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn switch_branch(
+        &mut self,
+        cwd: &str,
+        branch: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.switch_branch(cwd, branch);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn stash_save(
+        &mut self,
+        cwd: &str,
+        branch: Option<&str>,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.stash_save(cwd, branch);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn stash_pop(
+        &mut self,
+        cwd: &str,
+        index: u32,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.stash_pop(cwd, index);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn stash_list(
+        &mut self,
+        cwd: &str,
+        paseo_only: bool,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<StashEntry>>> {
+        let receiver = self.core.stash_list(cwd, paseo_only);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// The workspace's scripts. `GitStatusEvent::ScriptsChanged` follows each change.
+    pub fn workspace_scripts(&self, workspace_id: &str) -> Vec<WorkspaceScript> {
+        self.core.workspace_scripts(workspace_id)
+    }
+
+    /// Starts a workspace script and resolves to its terminal id.
+    pub fn start_workspace_script(
+        &mut self,
+        workspace_id: &str,
+        script_name: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<String>> {
+        let receiver = self.core.start_workspace_script(workspace_id, script_name);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    // ---- file suggestion, entry, and discard calls (TASK-206) ----
+
+    /// Files and folders under `cwd` that match `query`, at most `limit` (1 to 100).
+    pub fn directory_suggestions(
+        &mut self,
+        cwd: &str,
+        query: &str,
+        include_files: bool,
+        include_directories: bool,
+        limit: u32,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<DirectorySuggestion>>> {
+        let receiver =
+            self.core
+                .directory_suggestions(cwd, query, include_files, include_directories, limit);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// `directory_suggestions` with an explicit `matchMode`, such as `suffix` for file links.
+    #[allow(clippy::too_many_arguments)]
+    pub fn directory_suggestions_matching(
+        &mut self,
+        cwd: &str,
+        query: &str,
+        include_files: bool,
+        include_directories: bool,
+        limit: u32,
+        mode: MatchMode,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<Vec<DirectorySuggestion>>> {
+        let receiver = self.core.directory_suggestions_matching(
+            cwd,
+            query,
+            include_files,
+            include_directories,
+            limit,
+            mode,
+        );
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn discard_changes_supported(&self) -> bool {
+        self.core.discard_changes_supported()
+    }
+
+    pub fn fs_entry_ops_supported(&self) -> bool {
+        self.core.fs_entry_ops_supported()
+    }
+
+    pub fn fs_entry_duplicate_supported(&self) -> bool {
+        self.core.fs_entry_duplicate_supported()
+    }
+
+    /// Fails with "Update the host to use this." when `fs_entry_ops_supported` is false.
+    pub fn create_entry(
+        &mut self,
+        cwd: &str,
+        parent_path: &str,
+        name: &str,
+        kind: NewEntryKind,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.create_entry(cwd, parent_path, name, kind);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn rename_entry(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        name: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.rename_entry(cwd, path, name);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Needs `fs_entry_duplicate_supported`.
+    pub fn duplicate_entry(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.duplicate_entry(cwd, path);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    pub fn delete_entry(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.delete_entry(cwd, path);
+        self.publish(cx);
+        reply_task(receiver, cx)
+    }
+
+    /// Fails without a request when `paths` is empty.
+    pub fn discard_changes(
+        &mut self,
+        cwd: &str,
+        paths: Vec<String>,
+        cx: &mut Context<Client>,
+    ) -> Task<anyhow::Result<()>> {
+        let receiver = self.core.discard_changes(cwd, paths);
         self.publish(cx);
         reply_task(receiver, cx)
     }

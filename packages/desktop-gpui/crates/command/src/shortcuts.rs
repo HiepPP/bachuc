@@ -23,82 +23,223 @@ pub struct Shortcut {
     pub chord: Option<String>,
 }
 
-/// Action, label, and default chord, in the order of the Electron help sections.
-const DEFAULTS: &[(&str, &str, &str)] = &[
-    // General
-    ("command-center.toggle", "Toggle command center", "Cmd+K"),
-    ("settings.toggle", "Toggle settings", "Cmd+,"),
-    ("theme.cycle", "Cycle theme", "Cmd+Alt+T"),
-    ("host.cycle", "Switch to next host", "Cmd+`"),
-    // Projects & Workspaces
-    ("workspace.navigate.prev", "Previous workspace", "Cmd+["),
-    ("workspace.navigate.next", "Next workspace", "Cmd+]"),
+/// The help sections of the Electron shortcuts page (`ShortcutSectionId`), in its order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShortcutSection {
+    General,
+    Workspaces,
+    TabsPanes,
+    Layout,
+    AgentInput,
+}
+
+impl ShortcutSection {
+    pub const ALL: [ShortcutSection; 5] = [
+        ShortcutSection::General,
+        ShortcutSection::Workspaces,
+        ShortcutSection::TabsPanes,
+        ShortcutSection::Layout,
+        ShortcutSection::AgentInput,
+    ];
+
+    /// `settings.shortcuts.sections.*` of the Electron app.
+    pub fn title(self) -> &'static str {
+        match self {
+            ShortcutSection::General => "General",
+            ShortcutSection::Workspaces => "Projects & Workspaces",
+            ShortcutSection::TabsPanes => "Tabs & Panes",
+            ShortcutSection::Layout => "Layout",
+            ShortcutSection::AgentInput => "Agent Input",
+        }
+    }
+}
+
+use ShortcutSection::{AgentInput, General, Layout, TabsPanes, Workspaces};
+
+/// Section, action, label, and default chord. Rows follow `SHORTCUT_HELP_ROW_ORDER`, so a
+/// section lists its rows in this order.
+const DEFAULTS: &[(ShortcutSection, &str, &str, &str)] = &[
     (
+        General,
+        "command-center.toggle",
+        "Toggle command center",
+        "Cmd+K",
+    ),
+    (General, "command-center.files", "Search files", "Cmd+P"),
+    // Electron binds it only while focus is not in a text field or terminal; the app gives
+    // it a key context that excludes those.
+    (
+        General,
+        "shortcuts.dialog.toggle",
+        "Show keyboard shortcuts",
+        "Shift+?",
+    ),
+    (General, "settings.toggle", "Toggle settings", "Cmd+,"),
+    (General, "theme.cycle", "Cycle theme", "Cmd+Alt+T"),
+    (General, "host.cycle", "Switch to next host", "Cmd+`"),
+    (Workspaces, "agent.new", "Open project", "Cmd+O"),
+    (Workspaces, "workspace.new", "New workspace", "Cmd+N"),
+    (
+        Workspaces,
+        "workspace.navigate.prev",
+        "Previous workspace",
+        "Cmd+[",
+    ),
+    (
+        Workspaces,
+        "workspace.navigate.next",
+        "Next workspace",
+        "Cmd+]",
+    ),
+    (Workspaces, "workspace.pin", "Pin chat", "Cmd+Shift+P"),
+    (
+        Workspaces,
         "workspace.archive",
         "Archive workspace",
         "Cmd+Shift+Backspace",
     ),
-    // Tabs & Panes
-    ("workspace.tab.menu.open", "New tab", "Cmd+T"),
-    ("workspace.tab.target.agent", "New agent", "Cmd+Shift+A"),
-    ("workspace.terminal.new", "New terminal", "Cmd+Shift+T"),
-    ("workspace.tab.target.changes", "Changes", "Cmd+Shift+G"),
-    ("workspace.tab.target.files", "Files", "Cmd+Shift+E"),
-    ("workspace.tab.close.current", "Close current tab", "Cmd+W"),
+    (TabsPanes, "workspace.tab.menu.open", "New tab", "Cmd+T"),
     (
+        TabsPanes,
+        "workspace.tab.target.agent",
+        "New agent",
+        "Cmd+Shift+A",
+    ),
+    (
+        TabsPanes,
+        "workspace.terminal.new",
+        "New terminal",
+        "Cmd+Shift+T",
+    ),
+    (
+        TabsPanes,
+        "workspace.tab.target.changes",
+        "Changes",
+        "Cmd+Shift+G",
+    ),
+    (
+        TabsPanes,
+        "workspace.tab.target.files",
+        "Files",
+        "Cmd+Shift+E",
+    ),
+    (
+        TabsPanes,
+        "workspace.tab.close.current",
+        "Close current tab",
+        "Cmd+W",
+    ),
+    (
+        TabsPanes,
         "workspace.tab.navigate.index",
         "Jump to tab",
         "Cmd+Alt+Digit",
     ),
-    ("workspace.tab.navigate.prev", "Previous tab", "Alt+Shift+["),
-    ("workspace.tab.navigate.next", "Next tab", "Alt+Shift+]"),
-    ("workspace.pane.split.right", "Split pane right", "Cmd+\\"),
     (
+        TabsPanes,
+        "workspace.tab.navigate.prev",
+        "Previous tab",
+        "Alt+Shift+[",
+    ),
+    (
+        TabsPanes,
+        "workspace.tab.navigate.next",
+        "Next tab",
+        "Alt+Shift+]",
+    ),
+    (
+        TabsPanes,
+        "workspace.pane.split.right",
+        "Split pane right",
+        "Cmd+\\",
+    ),
+    (
+        TabsPanes,
         "workspace.pane.split.down",
         "Split pane down",
         "Cmd+Shift+\\",
     ),
     (
+        TabsPanes,
         "workspace.pane.focus.left",
         "Focus pane left",
         "Cmd+Shift+ArrowLeft",
     ),
     (
+        TabsPanes,
         "workspace.pane.focus.right",
         "Focus pane right",
         "Cmd+Shift+ArrowRight",
     ),
     (
+        TabsPanes,
         "workspace.pane.focus.up",
         "Focus pane up",
         "Cmd+Shift+ArrowUp",
     ),
     (
+        TabsPanes,
         "workspace.pane.focus.down",
         "Focus pane down",
         "Cmd+Shift+ArrowDown",
     ),
-    ("workspace.pane.close", "Close pane", "Cmd+Shift+W"),
-    // Layout
-    ("sidebar.toggle.left", "Toggle left sidebar", "Cmd+B"),
-    ("sidebar.toggle.right", "Toggle Explorer sidebar", "Cmd+E"),
-    ("sidebar.toggle.both", "Toggle both sidebars", "Cmd+."),
-    // Agent Input
-    ("message-input.focus", "Focus message input", "Cmd+L"),
-    ("message-input.mode-cycle", "Cycle agent mode", "Shift+Tab"),
-    ("agent.interrupt", "Interrupt agent", "Escape"),
+    (
+        TabsPanes,
+        "workspace.pane.close",
+        "Close pane",
+        "Cmd+Shift+W",
+    ),
+    (
+        Layout,
+        "sidebar.toggle.left",
+        "Toggle left sidebar",
+        "Cmd+B",
+    ),
+    (
+        Layout,
+        "sidebar.toggle.right",
+        "Toggle Explorer sidebar",
+        "Cmd+E",
+    ),
+    (
+        Layout,
+        "sidebar.toggle.both",
+        "Toggle both sidebars",
+        "Cmd+.",
+    ),
+    (
+        AgentInput,
+        "message-input.focus",
+        "Focus message input",
+        "Cmd+L",
+    ),
+    (
+        AgentInput,
+        "message-input.mode-cycle",
+        "Cycle agent mode",
+        "Shift+Tab",
+    ),
+    (AgentInput, "agent.interrupt", "Interrupt agent", "Escape"),
 ];
 
 /// The Electron defaults.
 pub fn default_shortcuts() -> Vec<Shortcut> {
     DEFAULTS
         .iter()
-        .map(|(action, label, chord)| Shortcut {
+        .map(|(_, action, label, chord)| Shortcut {
             action: (*action).to_string(),
             label: (*label).to_string(),
             chord: Some((*chord).to_string()),
         })
         .collect()
+}
+
+/// The help section of an action. An unknown action is General.
+pub fn shortcut_section(action: &str) -> ShortcutSection {
+    DEFAULTS
+        .iter()
+        .find(|(_, id, _, _)| *id == action)
+        .map_or(General, |(section, ..)| *section)
 }
 
 /// The folder of `shortcuts.json`: `~/Library/Application Support/BachucGpui`.

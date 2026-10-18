@@ -1,15 +1,27 @@
 //! The terminal pane: it owns an emulator, feeds it the daemon's frames, sizes it to the pane,
-//! and turns keys, the mouse, and the clipboard into terminal input.
+//! and turns keys, the mouse, and the clipboard into terminal input. Cmd+F opens a find bar, and
+//! a Cmd-click opens a URL or a file path.
 
 use crate::emulator::{Emulator, Palette};
+use crate::find::{self, Search};
 use crate::keys::{key_bytes, paste_bytes};
+use crate::links::{self, LinkTarget};
 use crate::size::{PADDING, cell_at, grid_size};
 use alacritty_terminal::term::TermMode;
-use bachuc_client::{Client, TerminalFrame, TerminalHandle};
+use bachuc_client::{Client, MatchMode, TerminalFrame, TerminalHandle};
+use bachuc_icons::{IconName, icon};
+use bachuc_theme::metrics::{
+    BORDER_WIDTH_2, FONT_SM, ICON_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3,
+};
+use bachuc_theme::{ShadowSize, Tokens, shadow, tokens, ui_font_size};
 use futures::StreamExt;
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::theme::Theme;
+use gpui_kit::component::{Sizable as _, h_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::cell::Cell;
+use std::ops::Range;
 use std::rc::Rc;
 
 /// The Electron terminal font list (`terminal-font.ts`), in order; the first installed one wins.
@@ -33,6 +45,18 @@ const INITIAL_ROWS: usize = 24;
 const INITIAL_COLS: usize = 80;
 /// Frames fed to the emulator before the view draws again, so a flood of output costs one draw.
 const FRAMES_PER_BATCH: usize = 256;
+/// Suggestions asked for a file link. The client sends at most 100.
+const LOOKUP_LIMIT: u32 = 100;
+/// `FIND_WIDGET_WIDTH` and `COLLAPSED_FIELD_HEIGHT` of `pane-find`, as the agent pane's bar.
+const FIND_WIDTH: f32 = 340.;
+const FIELD_HEIGHT: f32 = 28.;
+/// The find field's focus outline: 2 px wide, 1 px outside the field (`control-geometry.ts`).
+const RING_WIDTH: f32 = BORDER_WIDTH_2;
+const RING_OFFSET: f32 = 1.;
+/// Electron marks matches with the theme's yellow and the current match with its blue. GPUI
+/// spans have no border, so they fill the cells, faded to keep the text readable.
+const MATCH_ALPHA: f32 = 0.35;
+const CURRENT_MATCH_ALPHA: f32 = 0.6;
 
 /// What a terminal view tells its owner.
 #[derive(Clone, Debug, PartialEq)]
@@ -41,6 +65,13 @@ pub enum TerminalEvent {
     Opened { id: String },
     /// The terminal process ended or the terminal was killed.
     Exited,
+    /// A Cmd-click on a file path the daemon found, as `TimelineEvent::OpenFile`: `path` is
+    /// relative to `cwd`, or absolute for a file outside it.
+    OpenFile {
+        cwd: String,
+        path: String,
+        line: Option<u32>,
+    },
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
@@ -48,6 +79,21 @@ impl EventEmitter<TerminalEvent> for TerminalView {}
 enum Source {
     Create(String),
     Attach(String),
+}
+
+/// The open find bar. Its search lives in the view, so the query outlives the bar.
+struct Finder {
+    input: Entity<InputState>,
+    _subscriptions: Vec<Subscription>,
+}
+
+/// The link under the pointer while Cmd is held: its screen cell and its byte range in each row
+/// it covers, as a wrapped link covers several.
+#[derive(Clone, PartialEq)]
+struct Hover {
+    row: usize,
+    col: usize,
+    spans: Vec<(usize, Range<usize>)>,
 }
 
 #[derive(Clone, Copy)]
@@ -106,6 +152,8 @@ impl Typeface {
 pub struct TerminalView {
     client: Entity<Client>,
     name: String,
+    /// The folder the terminal opened in, for file links. Empty for an attached terminal.
+    cwd: String,
     emulator: Emulator,
     terminal_id: Option<String>,
     exited: bool,
@@ -126,6 +174,13 @@ pub struct TerminalView {
     dragging: bool,
     wheel_remainder: f32,
     reader: Option<Task<()>>,
+    finder: Option<Finder>,
+    search: Search,
+    hover: Option<Hover>,
+    /// The last pointer position, so a Cmd press can underline the link under it.
+    pointer: Option<Point<Pixels>>,
+    /// The daemon lookup of the last clicked file link.
+    link_lookup: Option<Task<()>>,
 }
 
 impl TerminalView {
@@ -164,6 +219,10 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<TerminalView>,
     ) -> TerminalView {
+        let cwd = match &source {
+            Source::Create(cwd) => cwd.clone(),
+            Source::Attach(_) => String::new(),
+        };
         let opening = client.update(cx, |client, cx| match &source {
             Source::Create(cwd) => client.create_terminal(cwd, cx),
             Source::Attach(id) => client.attach_terminal(id, cx),
@@ -208,6 +267,7 @@ impl TerminalView {
         TerminalView {
             client,
             name,
+            cwd,
             emulator,
             terminal_id: None,
             exited: false,
@@ -224,6 +284,11 @@ impl TerminalView {
             dragging: false,
             wheel_remainder: 0.0,
             reader: Some(reader),
+            finder: None,
+            search: Search::default(),
+            hover: None,
+            pointer: None,
+            link_lookup: None,
         }
     }
 
@@ -293,6 +358,9 @@ impl TerminalView {
                     }
                 }
             }
+        }
+        if self.finder.is_some() {
+            self.search.stale = true;
         }
         let replies = self.emulator.take_replies();
         if !replies.is_empty() {
@@ -407,14 +475,23 @@ impl TerminalView {
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.focus.focus(window, cx);
         let (row, col, right) = self.cell_under(event.position);
+        if event.modifiers.platform
+            && let Some(link) = self.link_under(row, col)
+        {
+            self.open_link(link.target, cx);
+            return;
+        }
         self.emulator
             .start_selection(row, col, right, event.click_count);
         self.dragging = true;
         cx.notify();
     }
 
-    fn mouse_moved(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+    fn mouse_moved(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let position = event.position;
         if !self.dragging {
+            self.pointer = Some(position);
+            self.update_hover(position, event.modifiers.platform, cx);
             return;
         }
         // Dragging above or below the pane scrolls the history under the selection.
@@ -468,22 +545,466 @@ impl TerminalView {
     }
 }
 
+/// The find field's outline, drawn as a border on a box that reaches past the field. GPUI has no
+/// outline, and the box takes no pointer events because it has no handler.
+fn focus_ring(color: Hsla) -> Div {
+    let reach = RING_WIDTH + RING_OFFSET;
+    div()
+        .absolute()
+        .top(px(-reach))
+        .right(px(-reach))
+        .bottom(px(-reach))
+        .left(px(-reach))
+        .border(px(RING_WIDTH))
+        .border_color(color)
+        .rounded(px(RADIUS_MD + reach))
+}
+
+type BarAction = fn(&mut TerminalView, &mut Window, &mut Context<TerminalView>);
+
+impl TerminalView {
+    /// Opens the find bar, or focuses it and selects its text when it is open. A new bar shows
+    /// the last query and searches it again.
+    fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let opening = self.finder.is_none();
+        if opening {
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find in pane"));
+            let weak = cx.weak_entity();
+            let input_focus = input.focus_handle(cx);
+            let subscriptions =
+                vec![
+                    // The focus ring shows while the field has focus.
+                    cx.on_focus_in(&input_focus, window, |_, _, cx| cx.notify()),
+                    cx.on_focus_out(&input_focus, window, |_, _, _, cx| cx.notify()),
+                    cx.subscribe_in(&input, window, |this, input, event: &InputEvent, _, cx| {
+                        match event {
+                            InputEvent::Change => {
+                                let query = input.read(cx).value().to_string();
+                                this.set_query(query, cx);
+                            }
+                            InputEvent::PressEnter { shift, .. } => this.step_find(!*shift, cx),
+                            _ => {}
+                        }
+                    }),
+                    // The field keeps Escape for itself, so the pane reads it first while the field
+                    // has focus.
+                    cx.intercept_keystrokes(move |event, window, cx| {
+                        if event.keystroke.key != "escape" {
+                            return;
+                        }
+                        let closed = weak
+                            .update(cx, |this, cx| {
+                                let focused = this.finder.as_ref().is_some_and(|finder| {
+                                    finder.input.focus_handle(cx).is_focused(window)
+                                });
+                                if focused {
+                                    this.close_find(window, cx);
+                                }
+                                focused
+                            })
+                            .unwrap_or(false);
+                        if closed {
+                            cx.stop_propagation();
+                        }
+                    }),
+                ];
+            // `set_value` sends no change event, so the kept query is searched below.
+            let query = self.search.query.clone();
+            input.update(cx, |input, cx| input.set_value(query, window, cx));
+            self.finder = Some(Finder {
+                input,
+                _subscriptions: subscriptions,
+            });
+        }
+        if let Some(finder) = &self.finder {
+            finder.input.update(cx, |input, cx| {
+                input.focus(window, cx);
+                input.select_all(window, cx);
+            });
+        }
+        if opening && !self.search.query.is_empty() {
+            self.find_first(cx);
+        }
+        cx.notify();
+    }
+
+    fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.finder.take().is_some() {
+            self.search.close();
+            self.focus.focus(window, cx);
+            cx.notify();
+        }
+    }
+
+    /// Cmd+F, from the pane or from the find field.
+    fn find_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let keystroke = &event.keystroke;
+        let modifiers = keystroke.modifiers;
+        if keystroke.key == "f"
+            && modifiers.platform
+            && !modifiers.control
+            && !modifiers.alt
+            && !modifiers.shift
+        {
+            self.open_find(window, cx);
+            cx.stop_propagation();
+        }
+    }
+
+    /// A new query searches again and shows the first match from the top of the screen down.
+    fn set_query(&mut self, query: String, cx: &mut Context<Self>) {
+        if self.finder.is_none() || self.search.query == query {
+            return;
+        }
+        self.search.query = query;
+        self.find_first(cx);
+    }
+
+    /// Searches the query and shows the first match from the top of the screen down.
+    fn find_first(&mut self, cx: &mut Context<Self>) {
+        self.search(cx);
+        let top = find::top_line(self.emulator.history_size(), self.emulator.display_offset());
+        self.search.current = find::first_from(&self.search.matches, top);
+        self.reveal_current(cx);
+    }
+
+    fn step_find(&mut self, forward: bool, cx: &mut Context<Self>) {
+        if self.finder.is_none() {
+            return;
+        }
+        if self.search.stale {
+            self.search(cx);
+        }
+        let top = find::top_line(self.emulator.history_size(), self.emulator.display_offset());
+        let search = &mut self.search;
+        let count = search.matches.len();
+        search.current = match search.current {
+            Some(current) => (count > 0).then(|| find::step(current, count, forward)),
+            None => find::first_from(&search.matches, top),
+        };
+        self.reveal_current(cx);
+    }
+
+    /// Finds the query in the history and the screen. It runs on a query change, on opening the
+    /// bar, and on a step after new output, never per output frame.
+    fn search(&mut self, cx: &mut Context<Self>) {
+        let lines = if self.search.query.is_empty() {
+            Vec::new()
+        } else {
+            find::buffer_lines(&mut self.emulator)
+        };
+        self.search.run(&lines);
+        cx.notify();
+    }
+
+    /// Scrolls the history so the current match is on screen.
+    fn reveal_current(&mut self, cx: &mut Context<Self>) {
+        let Some(line) = self
+            .search
+            .current
+            .and_then(|current| self.search.matches.get(current))
+            .map(|found| found.line)
+        else {
+            cx.notify();
+            return;
+        };
+        let offset = self.emulator.display_offset();
+        let target = find::reveal_offset(
+            line,
+            self.emulator.history_size(),
+            self.emulator.rows(),
+            offset,
+        );
+        self.emulator.scroll(target as i32 - offset as i32);
+        cx.notify();
+    }
+
+    /// The link drawn in a screen cell, joined across the rows it wraps over.
+    fn link_under(&mut self, row: usize, col: usize) -> Option<links::RowLink> {
+        let rows: Vec<(&str, bool)> = self
+            .emulator
+            .lines()
+            .map(|line| (line.text.as_ref(), line.wrapped))
+            .collect();
+        links::link_in_rows(&rows, row, col)
+    }
+
+    /// Opens a URL in the browser. A file link asks the daemon for the file and opens it only
+    /// when the path exists exactly or has a single match (Q-112).
+    fn open_link(&mut self, target: LinkTarget, cx: &mut Context<Self>) {
+        match target {
+            LinkTarget::Url(url) => cx.open_url(&url),
+            LinkTarget::File { path, line } => {
+                let Some(lookup) = links::lookup(&self.cwd, &path) else {
+                    return;
+                };
+                // The daemon matches by path suffix; `resolve` still checks the suffix.
+                let found = self.client.update(cx, |client, cx| {
+                    client.directory_suggestions_matching(
+                        &lookup.cwd,
+                        &lookup.query,
+                        true,
+                        false,
+                        LOOKUP_LIMIT,
+                        MatchMode::Suffix,
+                        cx,
+                    )
+                });
+                let cwd = self.cwd.clone();
+                self.link_lookup = Some(cx.spawn(async move |this, cx| {
+                    let Ok(found) = found.await else {
+                        return;
+                    };
+                    let Some(path) = links::resolve(&lookup, &found) else {
+                        return;
+                    };
+                    let _ = this.update(cx, |_, cx| {
+                        cx.emit(TerminalEvent::OpenFile { cwd, path, line })
+                    });
+                }));
+            }
+        }
+    }
+
+    /// Underlines the link under the pointer while Cmd is held.
+    fn update_hover(&mut self, position: Point<Pixels>, platform: bool, cx: &mut Context<Self>) {
+        if !platform && self.hover.is_none() {
+            return;
+        }
+        let hover = if platform && self.bounds.get().contains(&position) {
+            let (row, col, _) = self.cell_under(position);
+            self.link_under(row, col).map(|link| Hover {
+                row,
+                col,
+                spans: link.spans,
+            })
+        } else {
+            None
+        };
+        let moved = |a: &Option<Hover>, b: &Option<Hover>| match (a, b) {
+            (Some(a), Some(b)) => a.spans != b.spans,
+            (a, b) => a.is_some() != b.is_some(),
+        };
+        if moved(&self.hover, &hover) {
+            cx.notify();
+        }
+        self.hover = hover;
+    }
+
+    fn bar_button(
+        id: &'static str,
+        label: &'static str,
+        icon_name: IconName,
+        enabled: bool,
+        run: BarAction,
+        t: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let fill = t.interaction_highlight;
+        let weak = cx.weak_entity();
+        div()
+            .id(id)
+            .role(Role::Button)
+            .aria_label(label)
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .p(px(SPACE_1))
+            .rounded(px(RADIUS_MD))
+            .cursor_pointer()
+            .hover(move |button| button.bg(fill))
+            .when(!enabled, |button| button.opacity(0.5))
+            .on_click(cx.listener(move |this, _, window, cx| run(this, window, cx)))
+            .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
+                weak.update(cx, |this, cx| run(this, window, cx)).ok();
+            })
+            .child(
+                icon(icon_name)
+                    .with_size(px(ICON_SM))
+                    .text_color(t.foreground_muted),
+            )
+    }
+
+    /// The bar over the top right of the pane, as `PaneFind`.
+    fn render_find_bar(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let finder = self.finder.as_ref()?;
+        let search = &self.search;
+        let t = tokens(cx);
+        let focused = finder.input.focus_handle(cx).is_focused(window);
+        let count = search.matches.len();
+        let text = find::status(&search.query, count, search.current, search.limited);
+        let size = ui_font_size(FONT_SM, cx);
+        let line_height = px((f32::from(size) * 4. / 3.).round());
+        let can_step = count > 0;
+        let previous: BarAction = |this, _, cx| this.step_find(false, cx);
+        let next: BarAction = |this, _, cx| this.step_find(true, cx);
+        let close: BarAction = |this, window, cx| this.close_find(window, cx);
+        Some(
+            div()
+                .absolute()
+                .top(px(SPACE_2))
+                .right(px(SPACE_3))
+                .occlude()
+                .child(
+                    h_flex()
+                        .id("terminal-find")
+                        .role(Role::Search)
+                        .aria_label("Find")
+                        .w(px(FIND_WIDTH))
+                        .max_w_full()
+                        .p(px(SPACE_1_5))
+                        .gap(px(SPACE_1))
+                        .items_center()
+                        .text_size(size)
+                        .line_height(line_height)
+                        .bg(t.surface1)
+                        .border_1()
+                        .border_color(t.border)
+                        .rounded(px(RADIUS_LG))
+                        .shadow(vec![shadow(ShadowSize::Md, cx)])
+                        .child(
+                            h_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .h(px(FIELD_HEIGHT))
+                                .gap(px(SPACE_2))
+                                .items_center()
+                                .px(px(SPACE_2))
+                                .relative()
+                                .bg(t.surface2)
+                                .rounded(px(RADIUS_MD))
+                                .when(focused, |field| field.child(focus_ring(t.accent)))
+                                .child(
+                                    div().flex_1().min_w_0().child(
+                                        Input::new(&finder.input)
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .focus_bordered(false)
+                                            .px_0()
+                                            .py_0()
+                                            .text_size(size)
+                                            .aria_label("Find in pane"),
+                                    ),
+                                )
+                                .child(
+                                    div()
+                                        .id("terminal-find-status")
+                                        .role(Role::Status)
+                                        .aria_label(if text.is_empty() {
+                                            "Find matches".to_string()
+                                        } else {
+                                            text.clone()
+                                        })
+                                        .flex_none()
+                                        .text_color(t.foreground_muted)
+                                        .child(text),
+                                ),
+                        )
+                        .child(Self::bar_button(
+                            "terminal-find-previous",
+                            "Previous match",
+                            IconName::ArrowUp,
+                            can_step,
+                            previous,
+                            &t,
+                            cx,
+                        ))
+                        .child(Self::bar_button(
+                            "terminal-find-next",
+                            "Next match",
+                            IconName::ArrowDown,
+                            can_step,
+                            next,
+                            &t,
+                            cx,
+                        ))
+                        .child(Self::bar_button(
+                            "terminal-find-close",
+                            "Close Find",
+                            IconName::X,
+                            true,
+                            close,
+                            &t,
+                            cx,
+                        )),
+                )
+                .into_any_element(),
+        )
+    }
+}
+
 impl Render for TerminalView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Metrics {
             cell_width,
             line_height,
         } = self.metrics;
-        let lines: Vec<AnyElement> = self
-            .emulator
-            .lines()
-            .map(|line| {
+        // Find marks and the link underline are found in each drawn row, so they follow output
+        // that arrived after the search.
+        let top = find::top_line(self.emulator.history_size(), self.emulator.display_offset());
+        let open = self.finder.is_some();
+        let query = Some(self.search.query.clone()).filter(|query| open && !query.is_empty());
+        let current = find::current_place(&self.search.matches, self.search.current);
+        let hover = self.hover.clone();
+        let mark = |color: Hsla, alpha: f32| HighlightStyle {
+            background_color: Some(color.opacity(alpha)),
+            ..Default::default()
+        };
+        let other_mark = mark(self.palette.ansi[3], MATCH_ALPHA);
+        let current_mark = mark(self.palette.ansi[4], CURRENT_MATCH_ALPHA);
+        let underline = HighlightStyle {
+            underline: Some(UnderlineStyle {
+                thickness: px(1.),
+                color: None,
+                wavy: false,
+            }),
+            ..Default::default()
+        };
+        let drawn: Vec<&crate::emulator::RenderedLine> = self.emulator.lines().collect();
+        // The hovered link is found again in the drawn rows, so it follows new output.
+        let hover_spans = hover
+            .and_then(|hover| {
+                let rows: Vec<(&str, bool)> = drawn
+                    .iter()
+                    .map(|line| (line.text.as_ref(), line.wrapped))
+                    .collect();
+                links::link_in_rows(&rows, hover.row, hover.col)
+            })
+            .map_or_else(Vec::new, |link| link.spans);
+        let lines: Vec<AnyElement> = drawn
+            .into_iter()
+            .enumerate()
+            .map(|(row, line)| {
+                let mut overlays = Vec::new();
+                if let Some(query) = &query {
+                    for (place, range) in find::match_ranges(&line.text, query)
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let style = if current == Some((top + row, place)) {
+                            current_mark
+                        } else {
+                            other_mark
+                        };
+                        overlays.push((range, style));
+                    }
+                }
+                if let Some((_, range)) = hover_spans.iter().find(|(span_row, _)| *span_row == row)
+                {
+                    overlays.push((range.clone(), underline));
+                }
+                let runs = if overlays.is_empty() {
+                    line.runs.clone()
+                } else {
+                    find::paint(&line.runs, &overlays)
+                };
                 div()
                     .h(px(line_height))
                     .w_full()
                     .flex_none()
                     .whitespace_nowrap()
-                    .child(StyledText::new(line.text.clone()).with_highlights(line.runs.clone()))
+                    .child(StyledText::new(line.text.clone()).with_highlights(runs))
                     .into_any_element()
             })
             .collect();
@@ -515,7 +1036,7 @@ impl Render for TerminalView {
                     let view = view.clone();
                     move |event: &MouseMoveEvent, phase, _, cx| {
                         if phase.bubble() {
-                            view.update(cx, |this, cx| this.mouse_moved(event.position, cx));
+                            view.update(cx, |this, cx| this.mouse_moved(event, cx));
                         }
                     }
                 });
@@ -532,7 +1053,7 @@ impl Render for TerminalView {
         .absolute()
         .size_full();
 
-        div()
+        let terminal = div()
             .id("terminal")
             .role(Role::Terminal)
             .aria_label(format!("Terminal {}", self.name))
@@ -546,6 +1067,7 @@ impl Render for TerminalView {
             .font_family(self.typeface.family)
             .text_size(px(self.typeface.size))
             .line_height(px(line_height))
+            .when(self.hover.is_some(), |pane| pane.cursor_pointer())
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key_down(event, cx)))
             .on_mouse_down(
                 MouseButton::Left,
@@ -564,6 +1086,22 @@ impl Render for TerminalView {
                     .p(px(PADDING))
                     .size_full()
                     .children(lines),
-            )
+            );
+
+        // The bar sits beside the pane, not in it, so keys typed in its field never reach the
+        // terminal.
+        div()
+            .relative()
+            .size_full()
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.find_key(event, window, cx)
+            }))
+            .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _, cx| {
+                if let Some(pointer) = this.pointer {
+                    this.update_hover(pointer, event.modifiers.platform, cx);
+                }
+            }))
+            .child(terminal)
+            .children(self.render_find_bar(window, cx))
     }
 }

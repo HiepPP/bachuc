@@ -6,8 +6,11 @@ mod common;
 use bachuc_client::{
     AgentFeature, AgentFeatureKind, AgentFeatureOption, AttentionReason, ChangedFile,
     ChangedFileDetails, CheckoutDetails, CheckoutStatus, CommitFile, CommitList, CommitSummary,
-    DiffStat, DirectoryEvent, FileDiff, FileDiffStatus, FileKind, ProjectNode, QueuedPrompt,
-    TurnBehavior, WorkspaceNode,
+    DiffStat, DirectoryEvent, DirectorySuggestion, FileDiff, FileDiffStatus, FileKind,
+    ForkBoundary, ForkCursor, GitAction, GitActionReply, GitStatus, GitStatusEvent, HistoryEntry,
+    HistoryPage, MatchMode, MergeMethod, NewEntryKind, PrCheck, PrMergeCapability, PrStatus,
+    PrTimelineItem, ProjectNode, QueuedPrompt, StashEntry, TurnBehavior, WorkspaceNode,
+    WorkspaceScript,
 };
 use bachuc_protocol::generated::ServerInfoPermissionsItem;
 use common::{FakeServer, Harness, agent_snapshot, session};
@@ -1195,4 +1198,1449 @@ fn commit_file_diff_renders_a_file_or_gives_none_for_null() {
 
     let reply = harness.core.commit_file_diff("/repo", "abc123", "logo.png");
     assert_eq!(harness.wait(reply, WAIT).unwrap(), None);
+}
+
+// ---- git, PR, stash, and script calls (TASK-204) ----
+
+/// A fake daemon whose checkout requests succeed; `reply_kinds` maps request to response.
+fn checkout_server(reply_kinds: &[(&str, &str)]) -> FakeServer {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    for (request, response) in reply_kinds {
+        server.reply(
+            request,
+            response,
+            json!({"cwd": "/repo", "success": true, "error": null}),
+        );
+    }
+    server
+}
+
+fn checkout_failure(message: &str) -> Value {
+    json!({"cwd": "/repo", "success": false, "error": {"code": "UNKNOWN", "message": message}})
+}
+
+#[test]
+fn git_action_sends_each_request_with_its_fields() {
+    let cases = [
+        (
+            GitAction::Commit,
+            "checkout_commit_request",
+            "checkout_commit_response",
+        ),
+        (
+            GitAction::Pull,
+            "checkout_pull_request",
+            "checkout_pull_response",
+        ),
+        (
+            GitAction::Push,
+            "checkout_push_request",
+            "checkout_push_response",
+        ),
+        (
+            GitAction::MergePr(MergeMethod::Squash),
+            "checkout_pr_merge_request",
+            "checkout_pr_merge_response",
+        ),
+        (
+            GitAction::MergeBranch,
+            "checkout_merge_request",
+            "checkout_merge_response",
+        ),
+        (
+            GitAction::MergeFromBase,
+            "checkout_merge_from_base_request",
+            "checkout_merge_from_base_response",
+        ),
+        (
+            GitAction::Refresh,
+            "checkout.refresh.request",
+            "checkout.refresh.response",
+        ),
+    ];
+    let kinds: Vec<(&str, &str)> = cases.iter().map(|(_, req, res)| (*req, *res)).collect();
+    let server = checkout_server(&kinds);
+    let mut harness = connect(&server);
+    for (action, request, _) in cases {
+        let reply = harness.core.git_action("/repo", action);
+        assert_eq!(
+            harness.wait(reply, WAIT).unwrap(),
+            GitActionReply::default(),
+            "{request}"
+        );
+    }
+    let field = |kind: &str, key: &str| server.requests_of(kind)[0][key].clone();
+    assert_eq!(field("checkout_commit_request", "addAll"), json!(true));
+    assert_eq!(field("checkout_commit_request", "message"), Value::Null);
+    assert_eq!(
+        field("checkout_pr_merge_request", "mergeMethod"),
+        json!("squash")
+    );
+    assert_eq!(field("checkout_merge_request", "strategy"), json!("merge"));
+    assert_eq!(
+        field("checkout_merge_request", "requireCleanTarget"),
+        json!(true)
+    );
+    assert_eq!(
+        field("checkout_merge_from_base_request", "requireCleanTarget"),
+        json!(true)
+    );
+    for (_, request, _) in cases {
+        assert_eq!(field(request, "cwd"), json!("/repo"), "{request}");
+    }
+}
+
+#[test]
+fn git_action_fails_with_the_daemon_message() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "checkout_push_request",
+        "checkout_push_response",
+        checkout_failure("rejected: non-fast-forward"),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.git_action("/repo", GitAction::Push);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "rejected: non-fast-forward"
+    );
+}
+
+#[test]
+fn pull_and_push_pushes_only_after_the_pull_succeeds() {
+    let server = checkout_server(&[
+        ("checkout_pull_request", "checkout_pull_response"),
+        ("checkout_push_request", "checkout_push_response"),
+    ]);
+    let mut harness = connect(&server);
+    let reply = harness.core.git_action("/repo", GitAction::PullAndPush);
+    harness.wait(reply, WAIT).unwrap();
+    let order: Vec<Value> = server
+        .messages()
+        .into_iter()
+        .map(|m| m["type"].clone())
+        .filter(|kind| kind == "checkout_pull_request" || kind == "checkout_push_request")
+        .collect();
+    assert_eq!(
+        order,
+        [
+            json!("checkout_pull_request"),
+            json!("checkout_push_request")
+        ]
+    );
+
+    server.reply(
+        "checkout_pull_request",
+        "checkout_pull_response",
+        checkout_failure("merge conflict"),
+    );
+    let reply = harness.core.git_action("/repo", GitAction::PullAndPush);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "merge conflict"
+    );
+    harness.pump_for(Duration::from_millis(100));
+    assert_eq!(
+        server.requests_of("checkout_push_request").len(),
+        1,
+        "no second push"
+    );
+}
+
+#[test]
+fn create_pr_sends_no_title_and_returns_the_url_and_number() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "checkout_pr_create_request",
+        "checkout_pr_create_response",
+        json!({"cwd": "/repo", "url": "https://github.com/o/r/pull/7", "number": 7,
+               "error": null}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.git_action("/repo", GitAction::CreatePr);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        GitActionReply {
+            url: Some("https://github.com/o/r/pull/7".into()),
+            number: Some(7),
+        }
+    );
+    let request = &server.requests_of("checkout_pr_create_request")[0];
+    assert!(request.get("title").is_none() && request.get("body").is_none());
+}
+
+#[test]
+fn auto_merge_uses_the_forge_request_and_the_github_one_only_without_it() {
+    let reply_kinds = [
+        (
+            "checkout.forge.set_auto_merge.request",
+            "checkout.forge.set_auto_merge.response",
+        ),
+        (
+            "checkout.github.set_auto_merge.request",
+            "checkout.github.set_auto_merge.response",
+        ),
+    ];
+    let enable = GitAction::SetAutoMerge {
+        enabled: true,
+        method: Some(MergeMethod::Rebase),
+    };
+    let disable = GitAction::SetAutoMerge {
+        enabled: false,
+        method: None,
+    };
+
+    let server = checkout_server(&reply_kinds);
+    server.with(|s| {
+        s.features
+            .insert("checkoutForgeSetAutoMerge".into(), json!(true));
+        s.features
+            .insert("checkoutGithubSetAutoMerge".into(), json!(true));
+    });
+    let mut harness = connect(&server);
+    let reply = harness.core.git_action("/repo", enable);
+    harness.wait(reply, WAIT).unwrap();
+    let reply = harness.core.git_action("/repo", disable);
+    harness.wait(reply, WAIT).unwrap();
+    let sent = server.requests_of("checkout.forge.set_auto_merge.request");
+    assert_eq!(
+        (sent[0]["enabled"].clone(), sent[0]["mergeMethod"].clone()),
+        (json!(true), json!("rebase"))
+    );
+    assert_eq!(sent[1]["enabled"], json!(false));
+    assert!(sent[1].get("mergeMethod").is_none());
+    assert!(
+        server
+            .requests_of("checkout.github.set_auto_merge.request")
+            .is_empty()
+    );
+
+    let legacy = checkout_server(&reply_kinds);
+    legacy.with(|s| {
+        s.features
+            .insert("checkoutGithubSetAutoMerge".into(), json!(true));
+    });
+    let mut harness = connect(&legacy);
+    let reply = harness.core.git_action("/repo", enable);
+    harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        legacy
+            .requests_of("checkout.github.set_auto_merge.request")
+            .len(),
+        1
+    );
+
+    let old = checkout_server(&reply_kinds);
+    let mut harness = connect(&old);
+    let reply = harness.core.git_action("/repo", enable);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Update the host to use auto-merge actions."
+    );
+}
+
+#[test]
+fn git_status_of_a_folder_outside_git_is_not_git() {
+    let server = git_server();
+    let mut harness = connect(&server);
+    let reply = harness.core.git_status("/plain");
+    assert_eq!(harness.wait(reply, WAIT).unwrap(), GitStatus::default());
+
+    server.reply(
+        "checkout_status_request",
+        "checkout_status_response",
+        json!({"cwd": "/gone", "isGit": false, "isPaseoOwnedWorktree": false, "hasRemote": false,
+               "error": {"code": "NOT_GIT_REPO", "message": "not a git repository"}}),
+    );
+    let reply = harness.core.git_status("/gone");
+    assert!(
+        !harness.wait(reply, WAIT).unwrap().is_git,
+        "NOT_GIT_REPO is no error"
+    );
+}
+
+#[test]
+fn git_status_maps_a_null_ahead_behind_to_zero() {
+    let server = git_server();
+    let mut harness = connect(&server);
+    let reply = harness.core.git_status("/repo");
+    let status = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        status,
+        GitStatus {
+            is_git: true,
+            branch: Some("main".into()),
+            is_dirty: true,
+            ..GitStatus::default()
+        }
+    );
+    assert_eq!(
+        server.requests_of("checkout_status_request")[0]["cwd"],
+        json!("/repo")
+    );
+}
+
+#[test]
+fn git_status_reads_counts_remote_and_upstream() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "checkout_status_request",
+        "checkout_status_response",
+        json!({"cwd": "/wt", "isGit": true, "isPaseoOwnedWorktree": true, "repoRoot": "/wt",
+               "mainRepoRoot": "/repo", "currentBranch": "feat/x", "isDirty": false,
+               "baseRef": "main", "aheadBehind": {"ahead": 3, "behind": 1},
+               "aheadOfOrigin": 2, "behindOfOrigin": 0, "hasRemote": true,
+               "remoteUrl": "git@github.com:o/r.git", "error": null}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.git_status("/wt");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        GitStatus {
+            is_git: true,
+            branch: Some("feat/x".into()),
+            is_dirty: false,
+            base_ref: Some("main".into()),
+            ahead: 3,
+            behind: 1,
+            ahead_of_origin: 2,
+            behind_of_origin: 0,
+            has_remote: true,
+            remote_url: Some("git@github.com:o/r.git".into()),
+            is_paseo_owned_worktree: true,
+            has_upstream: true,
+        }
+    );
+
+    server.reply(
+        "checkout_status_request",
+        "checkout_status_response",
+        checkout_failure("git failed"),
+    );
+    let reply = harness.core.git_status("/wt");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "git failed"
+    );
+}
+
+fn pr_status_payload() -> Value {
+    json!({"cwd": "/repo", "githubFeaturesEnabled": true, "forge": "github", "error": null,
+        "status": {"url": "https://github.com/o/r/pull/9", "title": "Add git", "state": "open",
+            "baseRefName": "main", "headRefName": "feat/git", "isMerged": false,
+            "isDraft": true, "mergeable": "MERGEABLE", "reviewDecision": "APPROVED",
+            "repoOwner": "o", "repoName": "r",
+            "checks": [
+                {"name": "build", "status": "success", "url": "https://ci/1",
+                 "workflow": "CI"},
+                {"name": "lint", "status": "pending", "url": null}
+            ],
+            "github": {"mergeStateStatus": "BLOCKED",
+                "autoMergeRequest": {"mergeMethod": "SQUASH", "enabledAt": null,
+                                     "enabledBy": null},
+                "viewerCanEnableAutoMerge": true, "viewerCanDisableAutoMerge": true,
+                "repository": {"autoMergeAllowed": true, "mergeCommitAllowed": false,
+                    "squashMergeAllowed": true, "rebaseMergeAllowed": true}}}})
+}
+
+#[test]
+fn pr_status_parses_the_pr_checks_and_merge_capability() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "checkout_pr_status_request",
+        "checkout_pr_status_response",
+        pr_status_payload(),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.pr_status("/repo");
+    let answer = harness.wait(reply, WAIT).unwrap();
+    assert!(answer.github_features_enabled);
+    assert_eq!(
+        answer.status,
+        Some(PrStatus {
+            number: None,
+            url: "https://github.com/o/r/pull/9".into(),
+            title: "Add git".into(),
+            state: "open".into(),
+            is_merged: false,
+            is_draft: true,
+            mergeable: Some("MERGEABLE".into()),
+            checks: vec![
+                PrCheck {
+                    name: "build".into(),
+                    status: "success".into(),
+                    url: Some("https://ci/1".into()),
+                    workflow: Some("CI".into()),
+                    duration: None,
+                    traits: vec![],
+                },
+                PrCheck {
+                    name: "lint".into(),
+                    status: "pending".into(),
+                    url: None,
+                    workflow: None,
+                    duration: None,
+                    traits: vec![],
+                },
+            ],
+            review_decision: Some("APPROVED".into()),
+            repo_owner: "o".into(),
+            repo_name: "r".into(),
+            merge: PrMergeCapability {
+                auto_merge_enabled: true,
+                auto_merge_method: Some(MergeMethod::Squash),
+                can_enable_auto_merge: true,
+                can_disable_auto_merge: true,
+                allowed_methods: vec![MergeMethod::Squash, MergeMethod::Rebase],
+                merge_state_status: Some("BLOCKED".into()),
+            },
+        })
+    );
+    assert_eq!(
+        server.requests_of("checkout_pr_status_request")[0]["cwd"],
+        json!("/repo")
+    );
+}
+
+#[test]
+fn pr_status_without_a_pr_or_github_facts() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut payload = pr_status_payload();
+    payload["status"]["number"] = json!(9);
+    payload["status"]["github"] = Value::Null;
+    payload["status"]["mergeable"] = Value::Null;
+    server.reply(
+        "checkout_pr_status_request",
+        "checkout_pr_status_response",
+        payload,
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.pr_status("/repo");
+    let status = harness.wait(reply, WAIT).unwrap().status.expect("a PR");
+    assert_eq!(status.number, Some(9));
+    assert_eq!(status.mergeable, None);
+    assert_eq!(status.merge, PrMergeCapability::default());
+
+    server.reply(
+        "checkout_pr_status_request",
+        "checkout_pr_status_response",
+        json!({"cwd": "/repo", "status": null, "githubFeaturesEnabled": false, "error": null}),
+    );
+    let reply = harness.core.pr_status("/repo");
+    let answer = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        (answer.status, answer.github_features_enabled),
+        (None, false)
+    );
+}
+
+#[test]
+fn pr_timeline_sends_the_pr_and_parses_reviews_and_comments() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "pull_request_timeline_request",
+        "pull_request_timeline_response",
+        json!({"cwd": "/repo", "prNumber": 9, "truncated": false, "error": null, "items": [
+            {"id": "r1", "kind": "review", "author": "ann", "body": "LGTM",
+             "createdAt": 1760000000000_i64, "url": "https://github.com/o/r/pull/9#r1",
+             "reviewState": "approved"},
+            {"id": "c1", "kind": "comment", "author": "bob", "body": "nit",
+             "createdAt": 1760000001000_i64, "url": "",
+             "location": {"path": "src/a.rs", "line": 12}},
+            {"id": "x1", "kind": "event", "body": "?"}
+        ]}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.pr_timeline("/repo", 9, "o", "r");
+    let items = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        items,
+        [
+            PrTimelineItem::Review {
+                author: "ann".into(),
+                body: "LGTM".into(),
+                created_at_ms: 1_760_000_000_000,
+                url: Some("https://github.com/o/r/pull/9#r1".into()),
+                state: "approved".into(),
+            },
+            PrTimelineItem::Comment {
+                author: "bob".into(),
+                body: "nit".into(),
+                created_at_ms: 1_760_000_001_000,
+                url: None,
+                path: Some("src/a.rs".into()),
+                line: Some(12),
+            },
+            PrTimelineItem::Comment {
+                author: "unknown".into(),
+                body: "?".into(),
+                created_at_ms: 0,
+                url: None,
+                path: None,
+                line: None,
+            },
+        ]
+    );
+    let request = &server.requests_of("pull_request_timeline_request")[0];
+    // The generated schema types `prNumber` as f64, so it goes out as `9.0`.
+    assert_eq!(
+        (
+            &request["cwd"],
+            request["prNumber"].as_f64(),
+            &request["repoOwner"],
+            &request["repoName"]
+        ),
+        (&json!("/repo"), Some(9.0), &json!("o"), &json!("r"))
+    );
+
+    server.reply(
+        "pull_request_timeline_request",
+        "pull_request_timeline_response",
+        json!({"items": [], "error": {"kind": "forbidden", "message": "no access"}}),
+    );
+    let reply = harness.core.pr_timeline("/repo", 9, "o", "r");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "no access"
+    );
+}
+
+#[test]
+fn switch_branch_sends_the_branch_and_reports_errors() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "checkout_switch_branch_request",
+        "checkout_switch_branch_response",
+        json!({"cwd": "/repo", "success": true, "branch": "dev", "error": null}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.switch_branch("/repo", "dev");
+    harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("checkout_switch_branch_request")[0];
+    assert_eq!(
+        (&request["cwd"], &request["branch"]),
+        (&json!("/repo"), &json!("dev"))
+    );
+
+    let mut failure = checkout_failure("local changes would be overwritten");
+    failure["branch"] = json!("dev");
+    server.reply(
+        "checkout_switch_branch_request",
+        "checkout_switch_branch_response",
+        failure,
+    );
+    let reply = harness.core.switch_branch("/repo", "dev");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "local changes would be overwritten"
+    );
+}
+
+#[test]
+fn stash_save_pop_and_list_send_their_fields() {
+    let server = checkout_server(&[
+        ("stash_save_request", "stash_save_response"),
+        ("stash_pop_request", "stash_pop_response"),
+    ]);
+    server.reply(
+        "stash_list_request",
+        "stash_list_response",
+        json!({"cwd": "/repo", "error": null, "entries": [
+            {"index": 0, "message": "paseo: main", "branch": "main", "isPaseo": true},
+            {"index": 1, "message": "WIP", "branch": null, "isPaseo": false}
+        ]}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.stash_save("/repo", Some("main"));
+    harness.wait(reply, WAIT).unwrap();
+    let reply = harness.core.stash_save("/repo", None);
+    harness.wait(reply, WAIT).unwrap();
+    let reply = harness.core.stash_pop("/repo", 1);
+    harness.wait(reply, WAIT).unwrap();
+    let reply = harness.core.stash_list("/repo", false);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        [
+            StashEntry {
+                index: 0,
+                message: "paseo: main".into(),
+                branch: Some("main".into()),
+                is_paseo: true,
+            },
+            StashEntry {
+                index: 1,
+                message: "WIP".into(),
+                branch: None,
+                is_paseo: false,
+            },
+        ]
+    );
+    let saves = server.requests_of("stash_save_request");
+    assert_eq!(saves[0]["branch"], json!("main"));
+    assert!(saves[1].get("branch").is_none());
+    assert_eq!(
+        server.requests_of("stash_pop_request")[0]["stashIndex"],
+        json!(1)
+    );
+    assert_eq!(
+        server.requests_of("stash_list_request")[0]["paseoOnly"],
+        json!(false)
+    );
+
+    server.reply(
+        "stash_pop_request",
+        "stash_pop_response",
+        checkout_failure("conflict"),
+    );
+    let reply = harness.core.stash_pop("/repo", 0);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "conflict"
+    );
+}
+
+#[test]
+fn start_workspace_script_returns_the_terminal_id() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.on("start_workspace_script_request", |request| {
+        let ok = request["scriptName"] == "web";
+        vec![session(
+            "start_workspace_script_response",
+            json!({"requestId": request["requestId"], "workspaceId": request["workspaceId"],
+                   "scriptName": request["scriptName"],
+                   "terminalId": if ok { json!("t1") } else { Value::Null },
+                   "error": if ok { Value::Null } else { json!("unknown script") }}),
+        )]
+    });
+    let mut harness = connect(&server);
+    let reply = harness.core.start_workspace_script("w1", "web");
+    assert_eq!(harness.wait(reply, WAIT).unwrap(), "t1");
+    let request = &server.requests_of("start_workspace_script_request")[0];
+    assert_eq!(
+        (&request["workspaceId"], &request["scriptName"]),
+        (&json!("w1"), &json!("web"))
+    );
+    let reply = harness.core.start_workspace_script("w1", "nope");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "unknown script"
+    );
+}
+
+#[test]
+fn pr_checks_parse_duration_and_traits() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut payload = pr_status_payload();
+    payload["status"]["checks"] = json!([
+        {"name": "build", "status": "success", "url": null, "duration": "2m 5s",
+         "traits": ["required", "future-trait"]}
+    ]);
+    server.reply(
+        "checkout_pr_status_request",
+        "checkout_pr_status_response",
+        payload,
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.pr_status("/repo");
+    let checks = harness.wait(reply, WAIT).unwrap().status.unwrap().checks;
+    assert_eq!(
+        checks,
+        [PrCheck {
+            name: "build".into(),
+            status: "success".into(),
+            url: None,
+            workflow: None,
+            duration: Some("2m 5s".into()),
+            traits: vec!["required".into(), "future-trait".into()],
+        }]
+    );
+}
+
+#[test]
+fn workspace_scripts_parse_their_proxy_urls() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut described = workspace("w1", "p1", Some("main"), Value::Null);
+    described["scripts"] = json!([{"scriptName": "web", "type": "service", "hostname": "web",
+        "port": 3000, "lifecycle": "running", "health": "healthy",
+        "proxyUrl": "https://web.example.test", "localProxyUrl": "http://web.localhost:6767",
+        "publicProxyUrl": "https://web.example.test", "exitCode": null, "terminalId": "t1"}]);
+    server.reply(
+        "fetch_workspaces_request",
+        "fetch_workspaces_response",
+        json!({"subscriptionId": "sub-w", "entries": [described], "pageInfo": page_info()}),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| !h.core.workspace_scripts("w1").is_empty()));
+    assert_eq!(
+        harness.core.workspace_scripts("w1"),
+        [WorkspaceScript {
+            name: "web".into(),
+            kind: "service".into(),
+            lifecycle: "running".into(),
+            health: Some("healthy".into()),
+            terminal_id: Some("t1".into()),
+            exit_code: None,
+            proxy_url: Some("https://web.example.test".into()),
+            local_proxy_url: Some("http://web.localhost:6767".into()),
+            public_proxy_url: Some("https://web.example.test".into()),
+        }]
+    );
+}
+
+#[test]
+fn status_updates_are_subscribed_and_emit_git_status_events() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut described = workspace("w1", "p1", Some("main"), Value::Null);
+    described["scripts"] = json!([{"scriptName": "web", "type": "service", "hostname": "web",
+        "port": 3000, "lifecycle": "stopped", "health": null}]);
+    server.reply(
+        "fetch_workspaces_request",
+        "fetch_workspaces_response",
+        json!({"subscriptionId": "sub-w", "entries": [described], "pageInfo": page_info()}),
+    );
+    let mut harness = connect(&server);
+    let events = sent(
+        &server,
+        &mut harness,
+        "session.events.set_subscription.request",
+    )["events"]
+        .clone();
+    let events = events.as_array().unwrap();
+    assert!(events.contains(&json!("checkout_status_update")));
+    assert!(events.contains(&json!("script_status_update")));
+
+    let mut seen = Vec::new();
+    assert!(harness.pump_until(WAIT, |h| {
+        seen.extend(h.core.take_git_status_events());
+        !h.core.workspace_scripts("w1").is_empty()
+    }));
+    assert_eq!(
+        harness.core.workspace_scripts("w1"),
+        [WorkspaceScript {
+            name: "web".into(),
+            kind: "service".into(),
+            lifecycle: "stopped".into(),
+            health: None,
+            terminal_id: None,
+            exit_code: None,
+            proxy_url: None,
+            local_proxy_url: None,
+            public_proxy_url: None,
+        }]
+    );
+    assert!(seen.contains(&GitStatusEvent::ScriptsChanged {
+        workspace_id: "w1".into()
+    }));
+
+    seen.clear();
+    server.broadcast(json!({"type": "checkout_status_update", "payload": {
+        "cwd": "/repo", "isGit": true, "isPaseoOwnedWorktree": false, "repoRoot": "/repo",
+        "currentBranch": "main", "isDirty": false, "baseRef": null, "aheadBehind": null,
+        "aheadOfOrigin": null, "behindOfOrigin": null, "hasRemote": false, "remoteUrl": null,
+        "error": null, "requestId": "daemon-1"}}));
+    server.broadcast(json!({"type": "script_status_update", "payload": {
+        "workspaceId": "w1", "scripts": [{"scriptName": "web", "type": "service",
+        "hostname": "web", "port": 3000, "lifecycle": "running", "health": "healthy",
+        "exitCode": null, "terminalId": "t9"}]}}));
+    assert!(harness.pump_until(WAIT, |h| {
+        seen.extend(h.core.take_git_status_events());
+        seen.len() >= 2
+    }));
+    assert_eq!(
+        seen,
+        [
+            GitStatusEvent::Changed {
+                cwd: "/repo".into()
+            },
+            GitStatusEvent::ScriptsChanged {
+                workspace_id: "w1".into()
+            },
+        ]
+    );
+    let script = &harness.core.workspace_scripts("w1")[0];
+    assert_eq!(
+        (
+            script.lifecycle.as_str(),
+            script.health.as_deref(),
+            script.terminal_id.as_deref()
+        ),
+        ("running", Some("healthy"), Some("t9"))
+    );
+}
+
+fn with_features(server: &FakeServer, features: &[&str]) {
+    server.with(|s| {
+        for feature in features {
+            s.features.insert((*feature).into(), json!(true));
+        }
+    });
+}
+
+fn history_row(id: &str, archived_at: Value) -> Value {
+    let mut agent = agent_snapshot(id, "idle");
+    agent["archivedAt"] = archived_at;
+    agent["updatedAt"] = json!("2026-10-17T00:00:00.000Z");
+    json!({"agent": agent, "project": {"projectKey": "p1", "projectName": "Project p1",
+        "workspaceName": "ws one", "checkout": {"cwd": "/tmp/fake", "isGit": true,
+        "currentBranch": "main", "remoteUrl": null, "isPaseoOwnedWorktree": false}}})
+}
+
+#[test]
+fn agent_history_sends_the_search_page_and_sort_and_parses_the_page() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["agentHistorySearch"]);
+    server.reply(
+        "fetch_agent_history_request",
+        "fetch_agent_history_response",
+        json!({"entries": [history_row("a1", Value::Null),
+                           history_row("old", json!("2026-10-01T00:00:00.000Z"))],
+               "pageInfo": {"nextCursor": "c2", "prevCursor": null, "hasMore": true},
+               "searchTruncated": true}),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.core.history_search_supported());
+    let reply = harness.core.fetch_agent_history(Some("bug"), Some("c1"));
+    let page = harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("fetch_agent_history_request")[0];
+    assert_eq!(request["search"], json!("bug"));
+    assert_eq!(
+        request["sort"],
+        json!([{"key": "updated_at", "direction": "desc"}])
+    );
+    assert_eq!(request["page"], json!({"limit": 200, "cursor": "c1"}));
+    assert!(request.get("filter").is_none());
+
+    let entry = |id: &str, archived: bool| HistoryEntry {
+        agent_id: id.into(),
+        title: format!("agent {id}"),
+        provider: "mock".into(),
+        workspace_id: Some("ws1".into()),
+        workspace_name: Some("ws one".into()),
+        project_name: "Project p1".into(),
+        branch: Some("main".into()),
+        cwd: "/tmp/fake".into(),
+        archived,
+        last_activity_at: Some("2026-10-17T00:00:00.000Z".into()),
+        pending_permissions: 0,
+    };
+    assert_eq!(
+        page,
+        HistoryPage {
+            entries: vec![entry("a1", false), entry("old", true)],
+            next_cursor: Some("c2".into()),
+            has_more: true,
+            search_truncated: true,
+        }
+    );
+    // The archived row fills the archived map; the live directory keeps only a1.
+    assert!(harness.core.is_archived("old"));
+    assert!(!harness.core.is_archived("a1"));
+    let ids: Vec<&str> = harness
+        .core
+        .agents()
+        .iter()
+        .map(|a| a.id.as_str())
+        .collect();
+    assert_eq!(ids, ["a1"]);
+}
+
+#[test]
+fn agent_history_sends_no_search_when_empty_or_unsupported() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "fetch_agent_history_request",
+        "fetch_agent_history_response",
+        json!({"entries": [], "pageInfo": page_info()}),
+    );
+    let mut harness = connect(&server);
+    assert!(!harness.core.history_search_supported());
+    let reply = harness.core.fetch_agent_history(Some("bug"), None);
+    let page = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(page, HistoryPage::default());
+    let request = &server.requests_of("fetch_agent_history_request")[0];
+    assert!(request.get("search").is_none());
+    assert_eq!(request["page"], json!({"limit": 200}));
+
+    with_features(&server, &["agentHistorySearch"]);
+    let mut harness = connect(&server);
+    let reply = harness.core.fetch_agent_history(Some(""), None);
+    harness.wait(reply, WAIT).unwrap();
+    let request = server
+        .requests_of("fetch_agent_history_request")
+        .pop()
+        .unwrap();
+    assert!(request.get("search").is_none());
+}
+
+#[test]
+fn archived_upserts_move_to_the_archived_map_and_back() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.add_agent("a2", "idle");
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.agents().len() == 2));
+    let live_a2 = harness.core.agents()[1].clone();
+
+    let mut archived = agent_snapshot("a1", "idle");
+    archived["archivedAt"] = json!("2026-10-17T00:00:00.000Z");
+    server.broadcast(json!({"type": "agent_update",
+                            "payload": {"kind": "upsert", "agent": archived}}));
+    assert!(harness.pump_until(WAIT, |h| h.core.is_archived("a1")));
+    let ids: Vec<&str> = harness
+        .core
+        .agents()
+        .iter()
+        .map(|a| a.id.as_str())
+        .collect();
+    assert_eq!(ids, ["a2"]);
+    assert_eq!(harness.core.agents()[0], live_a2);
+    assert_eq!(
+        harness.core.archived_agent("a1").map(|a| a.title.as_str()),
+        Some("agent a1")
+    );
+
+    server.broadcast(json!({"type": "agent_update",
+                            "payload": {"kind": "upsert", "agent": agent_snapshot("a1", "idle")}}));
+    assert!(harness.pump_until(WAIT, |h| !h.core.is_archived("a1")));
+    assert!(harness.core.archived_agent("a1").is_none());
+    assert!(harness.core.agents().iter().any(|a| a.id == "a1"));
+}
+
+/// The daemon sends `remove`, not an archived upsert, to a subscription without
+/// `includeArchived`, so only a fetch fills the archived map (a stale Board card).
+#[test]
+fn an_archived_remove_needs_a_fetch_to_fill_the_archived_map() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut archived = agent_snapshot("a1", "idle");
+    archived["archivedAt"] = json!("2026-10-17T00:00:00.000Z");
+    archived["workspaceId"] = json!("ws1");
+    server.reply(
+        "fetch_agent_request",
+        "fetch_agent_response",
+        json!({"agent": archived, "project": null, "error": null}),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.agents().len() == 1));
+
+    server.broadcast(json!({"type": "agent_update",
+                            "payload": {"kind": "remove", "agentId": "a1"}}));
+    assert!(harness.pump_until(WAIT, |h| h.core.agents().is_empty()));
+    assert!(!harness.core.is_archived("a1"));
+
+    let reply = harness.core.fetch_agent("a1");
+    harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        server.requests_of("fetch_agent_request")[0]["agentId"],
+        json!("a1")
+    );
+    assert_eq!(
+        harness
+            .core
+            .archived_agent("a1")
+            .and_then(|a| a.workspace_id.as_deref()),
+        Some("ws1")
+    );
+    assert!(harness.core.agents().is_empty());
+}
+
+#[test]
+fn a_fetch_of_a_missing_agent_fails() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "fetch_agent_request",
+        "fetch_agent_response",
+        json!({"agent": null, "project": null, "error": "Agent not found: gone"}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.fetch_agent("gone");
+    let error = harness.wait(reply, WAIT).unwrap_err();
+    assert_eq!(error.to_string(), "Agent not found: gone");
+    assert!(!harness.core.is_archived("gone"));
+}
+
+#[test]
+fn unarchive_sends_a_refresh() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "refresh_agent_request",
+        "status",
+        json!({"status": "agent_refreshed", "agentId": "old", "timelineSize": 0}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.unarchive_agent("old");
+    harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        server.requests_of("refresh_agent_request")[0]["agentId"],
+        json!("old")
+    );
+}
+
+fn fork_reply(attachment: Value, error: Value) -> Value {
+    json!({"agentId": "a1", "attachment": attachment, "itemCount": 4,
+           "boundaryMessageId": null, "error": error})
+}
+
+#[test]
+fn fork_context_keeps_the_raw_attachment_and_gates_the_cursor() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["agentForkContext"]);
+    let attachment = json!({"type": "text", "mimeType": "text/plain",
+                            "contextKind": "chat_history", "title": "Chat", "text": "hi"});
+    server.reply(
+        "agent.fork_context.request",
+        "agent.fork_context.response",
+        fork_reply(attachment.clone(), Value::Null),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.core.fork_supported());
+    assert!(!harness.core.fork_cursor_supported());
+    let boundary = ForkBoundary {
+        cursor: Some(ForkCursor {
+            epoch: "e1".into(),
+            seq: 5,
+        }),
+        message_id: Some("m1".into()),
+    };
+    let reply = harness.core.fork_context("a1", boundary.clone());
+    let context = harness.wait(reply, WAIT).unwrap();
+    assert_eq!(context.attachment, attachment);
+    assert_eq!(context.title.as_deref(), Some("Chat"));
+    assert_eq!(context.item_count, 4);
+    let request = &server.requests_of("agent.fork_context.request")[0];
+    assert_eq!(request["agentId"], json!("a1"));
+    assert_eq!(request["boundaryMessageId"], json!("m1"));
+    assert!(request.get("boundaryCursor").is_none());
+
+    server.reply(
+        "agent.fork_context.request",
+        "agent.fork_context.response",
+        fork_reply(Value::Null, json!("Agent not found")),
+    );
+    let failed = harness.core.fork_context("a1", ForkBoundary::default());
+    assert_eq!(
+        harness.wait(failed, WAIT).unwrap_err().to_string(),
+        "Agent not found"
+    );
+    server.reply(
+        "agent.fork_context.request",
+        "agent.fork_context.response",
+        fork_reply(Value::Null, Value::Null),
+    );
+    let empty = harness.core.fork_context("a1", ForkBoundary::default());
+    assert_eq!(
+        harness.wait(empty, WAIT).unwrap_err().to_string(),
+        "Nothing to fork"
+    );
+
+    with_features(&server, &["agentForkContextCursor"]);
+    server.reply(
+        "agent.fork_context.request",
+        "agent.fork_context.response",
+        fork_reply(attachment, Value::Null),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.fork_context("a1", boundary);
+    harness.wait(reply, WAIT).unwrap();
+    let request = server
+        .requests_of("agent.fork_context.request")
+        .pop()
+        .unwrap();
+    assert_eq!(request["boundaryCursor"], json!({"epoch": "e1", "seq": 5}));
+}
+
+#[test]
+fn timeline_epoch_follows_the_page_and_a_reset_page() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.append(
+        "a1",
+        json!({"type": "user_message", "text": "hi", "messageId": "u1"}),
+        "t1",
+        false,
+    );
+    let mut harness = connect(&server);
+    assert_eq!(harness.core.timeline_epoch("a1"), None);
+    assert_eq!(harness.core.timeline_epoch("nobody"), None);
+    harness.core.view_agent("a1");
+    assert!(harness.pump_until(WAIT, |h| h.core.timeline_epoch("a1") == Some("e1")));
+
+    // A new epoch makes the resume cursor stale, so the daemon answers with a reset page.
+    server.with(|s| s.timelines.get_mut("a1").unwrap().epoch = "e2".into());
+    server.drop_connections();
+    assert!(harness.pump_until(WAIT, |h| !h.core.is_connected()));
+    assert!(harness.pump_until(WAIT, |h| h.core.timeline_epoch("a1") == Some("e2")));
+    let resume = server
+        .requests_of("fetch_agent_timeline_request")
+        .pop()
+        .unwrap();
+    assert_eq!(resume["cursor"]["epoch"], json!("e1"));
+}
+
+#[test]
+fn discard_changes_supported_follows_the_host_feature() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let harness = connect(&server);
+    assert!(!harness.core.discard_changes_supported());
+
+    with_features(&server, &["checkoutDiscardChanges"]);
+    let harness = connect(&server);
+    assert!(harness.core.discard_changes_supported());
+}
+
+#[test]
+fn fork_context_without_the_feature_fails_without_a_request() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    assert!(!harness.core.fork_supported());
+    let reply = harness.core.fork_context("a1", ForkBoundary::default());
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Update the host to use this."
+    );
+    assert!(server.requests_of("agent.fork_context.request").is_empty());
+}
+
+// ---- file suggestion, entry, and discard calls (TASK-206) ----
+
+#[test]
+fn directory_suggestions_send_their_fields_and_read_entries_or_directories() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "directory_suggestions_request",
+        "directory_suggestions_response",
+        json!({"directories": ["src"], "error": null, "entries": [
+            {"path": "src", "kind": "directory"},
+            {"path": "src/main.rs", "kind": "file"},
+            {"path": "odd", "kind": "socket"}
+        ]}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness
+        .core
+        .directory_suggestions("/repo", "ma", true, false, 50);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        [
+            DirectorySuggestion {
+                path: "src".into(),
+                is_directory: true,
+            },
+            DirectorySuggestion {
+                path: "src/main.rs".into(),
+                is_directory: false,
+            },
+        ]
+    );
+    let request = &server.requests_of("directory_suggestions_request")[0];
+    assert_eq!(request["cwd"], json!("/repo"));
+    assert_eq!(request["query"], json!("ma"));
+    assert_eq!(request["includeFiles"], json!(true));
+    assert_eq!(request["includeDirectories"], json!(false));
+    assert_eq!(request["limit"].as_f64(), Some(50.0));
+    assert!(request.get("matchMode").is_none());
+
+    // A host without `entries` gives only folders.
+    server.reply(
+        "directory_suggestions_request",
+        "directory_suggestions_response",
+        json!({"directories": ["docs"], "error": null}),
+    );
+    let reply = harness
+        .core
+        .directory_suggestions("/repo", "do", true, true, 500);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        [DirectorySuggestion {
+            path: "docs".into(),
+            is_directory: true,
+        }]
+    );
+    let request = server
+        .requests_of("directory_suggestions_request")
+        .pop()
+        .unwrap();
+    assert_eq!(request["limit"].as_f64(), Some(100.0));
+
+    server.reply(
+        "directory_suggestions_request",
+        "directory_suggestions_response",
+        json!({"directories": [], "entries": [], "error": "cwd not found"}),
+    );
+    let reply = harness
+        .core
+        .directory_suggestions("/gone", "", true, true, 10);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "cwd not found"
+    );
+}
+
+#[test]
+fn directory_suggestions_matching_sends_the_match_mode() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "directory_suggestions_request",
+        "directory_suggestions_response",
+        json!({"directories": [], "error": null, "entries": [
+            {"path": "src/main.rs", "kind": "file"}
+        ]}),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.directory_suggestions_matching(
+        "/repo",
+        "main.rs",
+        true,
+        false,
+        5,
+        MatchMode::Suffix,
+    );
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        [DirectorySuggestion {
+            path: "src/main.rs".into(),
+            is_directory: false,
+        }]
+    );
+    let request = &server.requests_of("directory_suggestions_request")[0];
+    assert_eq!(request["matchMode"], json!("suffix"));
+    assert_eq!(request["query"], json!("main.rs"));
+    assert_eq!(request["includeFiles"], json!(true));
+    assert_eq!(request["includeDirectories"], json!(false));
+    assert_eq!(request["limit"].as_f64(), Some(5.0));
+}
+
+fn entry_reply(success: bool, error: Value) -> Value {
+    json!({"cwd": "/repo", "path": "src/a.rs", "parentPath": "src", "renamedPath": null,
+           "duplicatedPath": null, "success": success, "error": error})
+}
+
+#[test]
+fn create_entry_sends_its_fields_and_reports_the_error() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["fsEntryOps"]);
+    server.reply(
+        "fs.entry.create.request",
+        "fs.entry.create.response",
+        entry_reply(true, Value::Null),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.core.fs_entry_ops_supported());
+    let reply = harness
+        .core
+        .create_entry("/repo", "src", "a.rs", NewEntryKind::File);
+    harness.wait(reply, WAIT).unwrap();
+    let reply = harness
+        .core
+        .create_entry("/repo", "", "lib", NewEntryKind::Directory);
+    harness.wait(reply, WAIT).unwrap();
+    let requests = server.requests_of("fs.entry.create.request");
+    assert_eq!(requests[0]["cwd"], json!("/repo"));
+    assert_eq!(requests[0]["parentPath"], json!("src"));
+    assert_eq!(requests[0]["name"], json!("a.rs"));
+    assert_eq!(requests[0]["kind"], json!("file"));
+    assert_eq!(requests[1]["parentPath"], json!(""));
+    assert_eq!(requests[1]["kind"], json!("directory"));
+
+    server.reply(
+        "fs.entry.create.request",
+        "fs.entry.create.response",
+        entry_reply(false, json!("An entry named a.rs already exists")),
+    );
+    let reply = harness
+        .core
+        .create_entry("/repo", "src", "a.rs", NewEntryKind::File);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "An entry named a.rs already exists"
+    );
+}
+
+#[test]
+fn rename_entry_sends_its_fields_and_reports_the_error() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["fsEntryOps"]);
+    server.reply(
+        "fs.entry.rename.request",
+        "fs.entry.rename.response",
+        entry_reply(true, Value::Null),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.rename_entry("/repo", "src/a.rs", "b.rs");
+    harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("fs.entry.rename.request")[0];
+    assert_eq!(request["cwd"], json!("/repo"));
+    assert_eq!(request["path"], json!("src/a.rs"));
+    assert_eq!(request["name"], json!("b.rs"));
+
+    server.reply(
+        "fs.entry.rename.request",
+        "fs.entry.rename.response",
+        entry_reply(false, json!("Invalid name")),
+    );
+    let reply = harness.core.rename_entry("/repo", "src/a.rs", "../b");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Invalid name"
+    );
+}
+
+#[test]
+fn duplicate_entry_needs_its_own_feature() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["fsEntryOps"]);
+    let mut harness = connect(&server);
+    assert!(!harness.core.fs_entry_duplicate_supported());
+    let reply = harness.core.duplicate_entry("/repo", "src/a.rs");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Update the host to use this."
+    );
+    assert!(server.requests_of("fs.entry.duplicate.request").is_empty());
+
+    with_features(&server, &["fsEntryDuplicate"]);
+    server.reply(
+        "fs.entry.duplicate.request",
+        "fs.entry.duplicate.response",
+        entry_reply(true, Value::Null),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.core.fs_entry_duplicate_supported());
+    let reply = harness.core.duplicate_entry("/repo", "src/a.rs");
+    harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("fs.entry.duplicate.request")[0];
+    assert_eq!(request["cwd"], json!("/repo"));
+    assert_eq!(request["path"], json!("src/a.rs"));
+
+    server.reply(
+        "fs.entry.duplicate.request",
+        "fs.entry.duplicate.response",
+        entry_reply(false, json!("Not found")),
+    );
+    let reply = harness.core.duplicate_entry("/repo", "src/gone.rs");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Not found"
+    );
+}
+
+#[test]
+fn delete_entry_sends_its_fields_and_reports_a_failure() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["fsEntryOps"]);
+    server.reply(
+        "fs.entry.delete.request",
+        "fs.entry.delete.response",
+        entry_reply(true, Value::Null),
+    );
+    let mut harness = connect(&server);
+    let reply = harness.core.delete_entry("/repo", "src/a.rs");
+    harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("fs.entry.delete.request")[0];
+    assert_eq!(request["cwd"], json!("/repo"));
+    assert_eq!(request["path"], json!("src/a.rs"));
+
+    server.reply(
+        "fs.entry.delete.request",
+        "fs.entry.delete.response",
+        entry_reply(false, Value::Null),
+    );
+    let reply = harness.core.delete_entry("/repo", "src/a.rs");
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "the file operation failed"
+    );
+}
+
+#[test]
+fn entry_calls_without_fs_entry_ops_fail_without_a_request() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    assert!(!harness.core.fs_entry_ops_supported());
+    let replies = [
+        harness
+            .core
+            .create_entry("/repo", "", "a", NewEntryKind::File),
+        harness.core.rename_entry("/repo", "a", "b"),
+        harness.core.delete_entry("/repo", "a"),
+    ];
+    for reply in replies {
+        assert_eq!(
+            harness.wait(reply, WAIT).unwrap_err().to_string(),
+            "Update the host to use this."
+        );
+    }
+    for kind in [
+        "fs.entry.create.request",
+        "fs.entry.rename.request",
+        "fs.entry.delete.request",
+    ] {
+        assert!(server.requests_of(kind).is_empty(), "{kind} is not sent");
+    }
+}
+
+#[test]
+fn discard_changes_sends_the_paths_and_needs_one() {
+    let server = checkout_server(&[(
+        "checkout.discard_changes.request",
+        "checkout.discard_changes.response",
+    )]);
+    let mut harness = connect(&server);
+    let reply = harness.core.discard_changes("/repo", Vec::new());
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "No files to discard"
+    );
+    assert!(
+        server
+            .requests_of("checkout.discard_changes.request")
+            .is_empty()
+    );
+
+    let reply = harness
+        .core
+        .discard_changes("/repo", vec!["a.rs".into(), "src/b.rs".into()]);
+    harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("checkout.discard_changes.request")[0];
+    assert_eq!(request["cwd"], json!("/repo"));
+    assert_eq!(request["paths"], json!(["a.rs", "src/b.rs"]));
+
+    server.reply(
+        "checkout.discard_changes.request",
+        "checkout.discard_changes.response",
+        checkout_failure("pathspec did not match"),
+    );
+    let reply = harness
+        .core
+        .discard_changes("/repo", vec!["gone.rs".into()]);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "pathspec did not match"
+    );
 }

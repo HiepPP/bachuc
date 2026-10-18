@@ -28,7 +28,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bachuc_client::{Client, ClientEvent};
+use bachuc_client::{Client, ClientEvent, ForkBoundary, ForkCursor};
 use bachuc_diagram::{DiagramReady, DiagramRenderer, image_size};
 use bachuc_explorer::syntax::Run;
 use bachuc_icons::{IconName, icon};
@@ -39,11 +39,12 @@ use bachuc_theme::metrics::{
     SPACE_3, SPACE_4, SPACE_6, SPACE_8,
 };
 use bachuc_theme::{
-    TurnLabel, code_font_size, content_font_size, mono_font_family, scheme, syntax_colors, tokens,
-    turn_label_colors, ui_font_size,
+    ShadowSize, TurnLabel, code_font_size, content_font_size, mono_font_family, scheme, shadow,
+    syntax_colors, tokens, turn_label_colors, ui_font_size,
 };
 use gpui_kit::base::text::{CodeBlock, TextView as RichText, TextViewStyle as RichTextStyle};
 use gpui_kit::component::text::{TextView, TextViewState};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -68,6 +69,25 @@ pub enum TimelineEvent {
         cwd: String,
         path: String,
         line: Option<u32>,
+    },
+}
+
+/// Where a fork opens: the footer menu's "Fork in a new tab" and "Fork in a new workspace".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForkTarget {
+    Tab,
+    Workspace,
+}
+
+/// A fork the user picked in a turn footer. The app calls `Client::fork_context` with the
+/// boundary and opens the draft. A separate type, because the app reads `TimelineEvent` with an
+/// irrefutable `let`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TimelineForkEvent {
+    Fork {
+        agent_id: String,
+        target: ForkTarget,
+        boundary: ForkBoundary,
     },
 }
 
@@ -110,16 +130,12 @@ const USER_TRAILING_ROW: f32 = SPACE_2 + 24.;
 /// The space between two markdown blocks: the paragraph's `marginBottom: 12` and the block
 /// container's 12.
 const BLOCK_GAP: f32 = SPACE_6;
-/// GPUI's default line height over the font size (`phi`). It gives a line box of
-/// `round(15 * 1.618)` = 24 at the content size, as a whole number, where the web's line boxes
-/// are fractional.
-const BODY_LINE_HEIGHT: f32 = 1.618;
-/// The 1 px that GPUI's whole-pixel line box adds to each paragraph over the web's (a pitch of
-/// 48 against 47 at the content size, which drifted reply text 1 px per block). It comes out of
-/// the paragraph gap, so every block boundary moves up as much as the line box moved it down.
-const LINE_BOX_ROUNDING: f32 = 1.;
-/// The gap under a paragraph in the text view: `BLOCK_GAP` less the line box rounding.
-const PARAGRAPH_GAP: f32 = BLOCK_GAP - LINE_BOX_ROUNDING;
+/// The prose line height over the font size, as the markdown `body`:
+/// `Math.round(fontSize.content * 1.4)`, a line box of 21 at the content size.
+const BODY_LINE_HEIGHT: f32 = 1.4;
+/// The gap under a paragraph in the text view. Both line boxes are whole pixels, so the gap is
+/// the web's block gap with no rounding to take back.
+const PARAGRAPH_GAP: f32 = BLOCK_GAP;
 /// A fence's line height over its size, as `splitFenceStyle`.
 const FENCE_LINE_HEIGHT: f32 = 1.45;
 /// `STREAM_METADATA_FONT_SIZE`, the compaction marker and turn footer text.
@@ -133,6 +149,18 @@ const HEADING_LINE_HEIGHT: f32 = 1.3;
 /// `TURN_FOOTER_BOTTOM_SPACING` below.
 const FOOTER_TOP: f32 = SPACE_2 + 5.;
 const FOOTER_HEIGHT: f32 = 24.;
+/// The fork menu of `assistant-fork-menu.tsx`: `minWidth={220}`, with the item size of the
+/// other GPUI dropdowns.
+const FORK_MENU_WIDTH: f32 = 220.;
+const MENU_ITEM_HEIGHT: f32 = 28.;
+const MENU_LINE_HEIGHT: f32 = 1.5;
+/// `theme.opacity[50]`, the fork trigger while a fork runs.
+const DISABLED_OPACITY: f32 = 0.5;
+/// `message.actions.forkMenu`: the fork trigger's tooltip and label.
+const FORK_MENU_LABEL: &str = "Fork chat from here";
+/// A press on the fork trigger first closes its open menu through the menu's outside-press
+/// handler; a click this soon after that close keeps the menu shut instead of opening it again.
+const MENU_DISMISS_GRACE: Duration = Duration::from_millis(500);
 /// How long the turn copy button shows its check, as `TurnCopyButton`.
 const COPIED_FOR: Duration = Duration::from_millis(1500);
 
@@ -278,10 +306,17 @@ pub struct TimelineView {
     toolbar_size: Rc<Cell<Size<Pixels>>>,
     pending_reveal: Option<PendingReveal>,
     reveal_highlight: Option<Task<()>>,
+    /// The footer whose fork menu is open, by the response's last entry.
+    fork_menu: Option<u64>,
+    /// The footer whose fork menu an outside press closed, and when.
+    fork_menu_dismissed: Option<(u64, Instant)>,
+    /// A fork runs: the app set it, and every fork trigger is disabled.
+    fork_pending: bool,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<TimelineEvent> for TimelineView {}
+impl EventEmitter<TimelineForkEvent> for TimelineView {}
 
 impl Focusable for TimelineView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -407,6 +442,9 @@ impl TimelineView {
             toolbar_size: Rc::new(Cell::new(Size::default())),
             pending_reveal: None,
             reveal_highlight: None,
+            fork_menu: None,
+            fork_menu_dismissed: None,
+            fork_pending: false,
             _subscriptions: subscriptions,
         };
         this.sync(cx);
@@ -415,6 +453,77 @@ impl TimelineView {
 
     pub fn agent_id(&self) -> &str {
         &self.agent_id
+    }
+
+    /// Locks the fork triggers while the app forks, as the web menu locks while `onFork` runs.
+    pub fn set_fork_pending(&mut self, pending: bool, cx: &mut Context<TimelineView>) {
+        if self.fork_pending != pending {
+            self.fork_pending = pending;
+            if pending {
+                self.fork_menu = None;
+            }
+            cx.notify();
+        }
+    }
+
+    /// Where a fork of the response that ends at `end` stops, or `None` when it cannot fork.
+    fn footer_fork_boundary(
+        &self,
+        start: Option<usize>,
+        end: usize,
+        cx: &App,
+    ) -> Option<ForkBoundary> {
+        let client = self.client.read(cx);
+        if !client.fork_supported() {
+            return None;
+        }
+        let epoch = client.timeline_epoch(&self.agent_id);
+        latest_assistant(&self.entries, start, end)
+            .and_then(|entry| fork_boundary(entry, epoch, client.fork_cursor_supported()))
+    }
+
+    fn toggle_fork_menu(&mut self, key: u64, cx: &mut Context<Self>) {
+        if self.fork_pending {
+            return;
+        }
+        let dismissed = self
+            .fork_menu_dismissed
+            .take()
+            .is_some_and(|(dismissed, at)| dismissed == key && at.elapsed() < MENU_DISMISS_GRACE);
+        self.fork_menu = if dismissed || self.fork_menu == Some(key) {
+            None
+        } else {
+            Some(key)
+        };
+        cx.notify();
+    }
+
+    fn dismiss_fork_menu(&mut self, cx: &mut Context<Self>) {
+        if let Some(key) = self.fork_menu.take() {
+            self.fork_menu_dismissed = Some((key, Instant::now()));
+            cx.notify();
+        }
+    }
+
+    fn pick_fork(
+        &mut self,
+        target: ForkTarget,
+        start: Option<usize>,
+        end: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.fork_menu = None;
+        cx.notify();
+        if self.fork_pending {
+            return;
+        }
+        if let Some(boundary) = self.footer_fork_boundary(start, end, cx) {
+            cx.emit(TimelineForkEvent::Fork {
+                agent_id: self.agent_id.clone(),
+                target,
+                boundary,
+            });
+        }
     }
 
     fn load_older(&mut self, cx: &mut Context<Self>) {
@@ -1443,7 +1552,7 @@ impl TimelineView {
     ///
     /// Spacing follows the app's block model: a message splits into blocks at blank lines, a
     /// paragraph keeps `marginBottom: 12` and each block 12 more (`message.tsx`), so blocks sit
-    /// 24 apart, less the 1 px that GPUI's whole-pixel line box adds (`PARAGRAPH_GAP`). A fence adds 12 above (`fence_spacing`), padding 12, and a 1.45 line height
+    /// 24 apart (`PARAGRAPH_GAP`). A fence adds 12 above (`fence_spacing`), padding 12, and a 1.45 line height
     /// (`highlighted-code-block.tsx`). Also returns the fence highlighter, one `Arc` per theme,
     /// so a code block highlights once rather than on every frame.
     fn markdown_style(&self, cx: &App) -> (RichTextStyle, CodeHighlighter) {
@@ -1501,9 +1610,9 @@ impl TimelineView {
         style
     }
 
-    /// `AssistantTurnFooter`: the copy button and "Worked for N". Fork is out of scope (rewind
-    /// and fork), and the end time needs the user message, so a response whose user message
-    /// is on an older page shows only the copy button.
+    /// `AssistantTurnFooter`: the copy button, the fork menu, and "Worked for N". The end time
+    /// needs the user message, so a response whose user message is on an older page shows no
+    /// label. The fork menu shows when the host can fork and the response has a boundary.
     fn render_footer(
         &self,
         start: Option<usize>,
@@ -1550,12 +1659,132 @@ impl TimelineView {
                     )
                     .on_click(cx.listener(move |this, _, _, cx| this.copy_turn(start, end, cx))),
             )
+            .children(
+                self.footer_fork_boundary(start, end, cx)
+                    .map(|_| self.render_fork_menu(key, start, end, cx)),
+            )
             .children(label.map(|label| {
                 div()
                     .text_size(ui_font_size(METADATA_SIZE, cx))
                     .text_color(t.foreground_muted)
                     .child(label)
             }))
+            .into_any_element()
+    }
+
+    /// `AssistantForkMenu`: a split icon that opens "Fork in a new tab" and "Fork in a new
+    /// workspace" below it, disabled while a fork runs.
+    fn render_fork_menu(
+        &self,
+        key: u64,
+        start: Option<usize>,
+        end: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let t = tokens(cx);
+        let open = self.fork_menu == Some(key);
+        let locked = self.fork_pending;
+        let view = cx.weak_entity();
+        let trigger = div()
+            .id(("fork-turn", key))
+            .role(Role::Button)
+            .aria_label(FORK_MENU_LABEL)
+            .p(px(SPACE_1))
+            .when(locked, |trigger| trigger.opacity(DISABLED_OPACITY))
+            .when(!locked, |trigger| {
+                trigger
+                    .cursor_pointer()
+                    .tooltip(|window, cx| Tooltip::new(FORK_MENU_LABEL).build(window, cx))
+                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_fork_menu(key, cx)))
+                    .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                        view.update(cx, |this, cx| this.toggle_fork_menu(key, cx))
+                            .ok();
+                    })
+            })
+            .child(
+                icon(IconName::Split)
+                    .with_size(px(ICON_SM))
+                    .text_color(if open {
+                        t.foreground
+                    } else {
+                        t.foreground_muted
+                    }),
+            );
+        let menu = open.then(|| {
+            let items = [
+                (ForkTarget::Tab, "Fork in a new tab"),
+                (ForkTarget::Workspace, "Fork in a new workspace"),
+            ]
+            .into_iter()
+            .map(|(target, label)| {
+                let view = cx.weak_entity();
+                let text_size = ui_font_size(FONT_BASE, cx);
+                div()
+                    .id(SharedString::from(format!("fork-{label}")))
+                    .role(Role::MenuItem)
+                    .aria_label(label)
+                    .min_h(px(MENU_ITEM_HEIGHT))
+                    .mx(px(SPACE_1))
+                    .px(px(SPACE_2))
+                    .py(px(SPACE_1))
+                    .flex()
+                    .items_center()
+                    .gap(px(SPACE_2))
+                    .rounded(px(RADIUS_MD))
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(t.surface2))
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.pick_fork(target, start, end, cx)),
+                    )
+                    .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                        view.update(cx, |this, cx| this.pick_fork(target, start, end, cx))
+                            .ok();
+                    })
+                    .child(
+                        icon(IconName::Split)
+                            .with_size(px(ICON_SM))
+                            .text_color(t.foreground),
+                    )
+                    .child(
+                        div()
+                            .text_size(text_size)
+                            .line_height(text_size * MENU_LINE_HEIGHT)
+                            .text_color(t.foreground)
+                            .whitespace_nowrap()
+                            .child(label),
+                    )
+            });
+            div().absolute().top(px(FOOTER_HEIGHT)).left_0().child(
+                deferred(
+                    anchored()
+                        .anchor(Anchor::TopLeft)
+                        .snap_to_window_with_margin(px(8.))
+                        .child(
+                            v_flex()
+                                .id(("fork-menu", key))
+                                .role(Role::Menu)
+                                .aria_label(FORK_MENU_LABEL)
+                                .min_w(px(FORK_MENU_WIDTH))
+                                .py(px(SPACE_1))
+                                .bg(t.popover)
+                                .border_1()
+                                .border_color(t.border_accent)
+                                .rounded(px(RADIUS_LG))
+                                .shadow(vec![shadow(ShadowSize::Md, cx)])
+                                .occlude()
+                                .on_mouse_down_out(
+                                    cx.listener(|this, _, _, cx| this.dismiss_fork_menu(cx)),
+                                )
+                                .children(items),
+                        ),
+                )
+                .with_priority(gpui_kit::base::POPUP_PRIORITY),
+            )
+        });
+        div()
+            .relative()
+            .child(trigger)
+            .children(menu)
             .into_any_element()
     }
 
@@ -2194,6 +2423,46 @@ fn heading_style(level: u8, content: Pixels, border: Hsla) -> StyleRefinement {
     }
 }
 
+/// The latest assistant message of a response, after its user message and up to `end`, as
+/// `findLatestAssistantInResponse` finds the footer's message.
+fn latest_assistant(entries: &[Value], start: Option<usize>, end: usize) -> Option<&Value> {
+    let first = start.map_or(0, |start| start + 1);
+    entries
+        .get(first..=end)?
+        .iter()
+        .rev()
+        .find(|entry| item_type(entry) == "assistant_message")
+}
+
+/// `resolveAssistantTurnForkBoundary`: an assistant message forks at its timeline cursor when
+/// it has one and the host takes cursors, with its message id when it has one; else at its
+/// message id alone. A message with neither cannot fork. The cursor's `seq` is the entry's
+/// `seqEnd`, as the web hydrates `timelineCursor`.
+fn fork_boundary(
+    entry: &Value,
+    epoch: Option<&str>,
+    cursor_supported: bool,
+) -> Option<ForkBoundary> {
+    if item_type(entry) != "assistant_message" {
+        return None;
+    }
+    let message_id = entry["item"]["messageId"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
+    let cursor = epoch
+        .filter(|_| cursor_supported)
+        .zip(entry["seqEnd"].as_u64())
+        .map(|(epoch, seq)| ForkCursor {
+            epoch: epoch.to_string(),
+            seq,
+        });
+    if cursor.is_none() && message_id.is_none() {
+        return None;
+    }
+    Some(ForkBoundary { cursor, message_id })
+}
+
 /// `formatDuration` of `utils/time.ts`, the turn footer's duration: "47s", "2m 12s", "1h 5m".
 fn format_elapsed(ms: i64) -> String {
     let seconds = (ms / 1000).max(0);
@@ -2235,8 +2504,10 @@ mod tests {
     use super::tool_view::{code_styles, fence_language};
     use super::{
         BLOCK_GAP, PARAGRAPH_GAP, StepCounts, body_line_height, counts_text, fence_spacing,
-        format_clock, format_duration, format_elapsed, heading_style, paragraph_pitch, toggle,
+        fork_boundary, format_clock, format_duration, format_elapsed, heading_style,
+        latest_assistant, paragraph_pitch, toggle,
     };
+    use bachuc_client::{ForkBoundary, ForkCursor};
     use bachuc_theme::metrics::FONT_CONTENT;
     use bachuc_theme::metrics::SPACE_3;
     use bachuc_theme::{Scheme, SyntaxThemeId, syntax_colors_for};
@@ -2307,13 +2578,13 @@ mod tests {
         );
     }
 
-    /// The web's paragraph pitch at the content size is 47; the whole-pixel line box of GPUI
-    /// gave 48, which drifted reply text 1 px per block.
+    /// The web's prose at the content size: a 21 line box (`round(15 * 1.4)`) and paragraphs
+    /// 45 apart, the line box, the paragraph's `marginBottom: 12`, and the block's 12.
     #[test]
     fn paragraph_pitch_matches_the_web_stream() {
-        assert_eq!(body_line_height(FONT_CONTENT), 24.);
-        assert_eq!(PARAGRAPH_GAP, BLOCK_GAP - 1.);
-        assert_eq!(paragraph_pitch(FONT_CONTENT), 47.);
+        assert_eq!(body_line_height(FONT_CONTENT), 21.);
+        assert_eq!(PARAGRAPH_GAP, BLOCK_GAP);
+        assert_eq!(paragraph_pitch(FONT_CONTENT), 45.);
     }
 
     #[test]
@@ -2395,6 +2666,84 @@ mod tests {
         let h3 = heading_style(3, px(15.), border);
         assert_eq!(h3.text.font_weight, Some(FontWeight::SEMIBOLD));
         assert_eq!(h3.border_color, None);
+    }
+
+    fn assistant(seq: u64, message_id: Option<&str>) -> serde_json::Value {
+        let mut item = serde_json::json!({"type": "assistant_message", "text": "hi"});
+        if let Some(id) = message_id {
+            item["messageId"] = id.into();
+        }
+        serde_json::json!({"item": item, "seqStart": seq, "seqEnd": seq})
+    }
+
+    /// `resolveAssistantTurnForkBoundary`: the cursor when the item has one and the host takes
+    /// cursors, plus the message id; else the message id alone; else no fork.
+    #[test]
+    fn fork_boundary_follows_the_turn_boundary_rule() {
+        let cursor = Some(ForkCursor {
+            epoch: "e1".into(),
+            seq: 7,
+        });
+        let entry = assistant(7, Some("m1"));
+        assert_eq!(
+            fork_boundary(&entry, Some("e1"), true),
+            Some(ForkBoundary {
+                cursor: cursor.clone(),
+                message_id: Some("m1".into()),
+            })
+        );
+        assert_eq!(
+            fork_boundary(&assistant(7, None), Some("e1"), true),
+            Some(ForkBoundary {
+                cursor,
+                message_id: None,
+            })
+        );
+        let by_id = Some(ForkBoundary {
+            cursor: None,
+            message_id: Some("m1".into()),
+        });
+        assert_eq!(
+            fork_boundary(&entry, Some("e1"), false),
+            by_id,
+            "no cursor support"
+        );
+        assert_eq!(
+            fork_boundary(&entry, None, true),
+            by_id,
+            "no cursor on the item"
+        );
+        assert_eq!(fork_boundary(&assistant(7, None), None, true), None);
+        assert_eq!(
+            fork_boundary(&assistant(7, Some("")), Some("e1"), false),
+            None
+        );
+        let user = serde_json::json!({"item": {"type": "user_message", "messageId": "u1"}});
+        assert_eq!(fork_boundary(&user, Some("e1"), true), None);
+    }
+
+    /// The footer forks at the response's latest assistant message, never before its user
+    /// message.
+    #[test]
+    fn the_footer_forks_at_the_latest_assistant_message() {
+        let tool = serde_json::json!({"item": {"type": "tool_call"}});
+        let user = serde_json::json!({"item": {"type": "user_message"}});
+        let entries = vec![
+            assistant(1, Some("old")),
+            user,
+            assistant(3, Some("a")),
+            tool.clone(),
+            assistant(5, Some("b")),
+            tool,
+        ];
+        let found = |start, end| {
+            latest_assistant(&entries, start, end).map(|entry| entry["seqEnd"].as_u64())
+        };
+        assert_eq!(found(Some(1), 5), Some(Some(5)));
+        assert_eq!(found(Some(1), 3), Some(Some(3)));
+        assert_eq!(found(Some(1), 1), None, "an empty response");
+        assert_eq!(found(None, 0), Some(Some(1)), "no user message loaded");
+        assert_eq!(found(Some(1), 9), None, "an end past the entries");
     }
 
     #[test]

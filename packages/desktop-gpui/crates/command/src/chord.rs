@@ -93,12 +93,18 @@ pub fn is_valid_chord(chord: &str) -> bool {
     parse_chord(chord).is_some()
 }
 
+/// Keys that only a shifted key types. macOS reports them to GPUI as the typed character
+/// without shift: Shift+/ arrives as `?` (`gpui-pre-macos` `events.rs`, the `chars_with_shift`
+/// branch), so Electron's `Shift+?` must bind as `?`.
+const SHIFTED_SYMBOLS: &str = "?";
+
 fn keystroke_for(combo: &Combo, key: &str) -> String {
+    let shift = combo.shift && !SHIFTED_SYMBOLS.contains(key);
     let mut text = String::new();
     for (on, name) in [
         (combo.ctrl, "ctrl"),
         (combo.alt, "alt"),
-        (combo.shift, "shift"),
+        (shift, "shift"),
         (combo.cmd, "cmd"),
     ] {
         if on {
@@ -217,5 +223,21 @@ mod tests {
             gpui_keystrokes("Cmd+Shift+Backspace"),
             ["shift-cmd-backspace"]
         );
+    }
+
+    #[test]
+    fn chord_shift_question_mark_binds_the_key_gpui_reports() {
+        // macOS reports Shift+/ as key `?` with no shift modifier.
+        assert_eq!(gpui_keystrokes("Shift+?"), ["?"]);
+        assert_eq!(gpui_keystrokes("?"), ["?"]);
+        assert_eq!(display_combos("Shift+?"), ["?"]);
+        let typed = Keystroke {
+            modifiers: Default::default(),
+            key: "?".into(),
+            key_char: Some("?".into()),
+        };
+        let bound = Keystroke::parse(&gpui_keystrokes("Shift+?")[0]).unwrap();
+        assert_eq!(bound.modifiers, typed.modifiers);
+        assert_eq!(bound.key, typed.key);
     }
 }

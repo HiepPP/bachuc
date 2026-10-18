@@ -74,6 +74,9 @@ impl Shell {
                 println!("terminal exited");
                 cx.notify();
             }
+            TerminalEvent::OpenFile { cwd, path, line } => {
+                println!("open file: {cwd} {path} {line:?}")
+            }
         })
         .detach();
         self.terminal = Some(view);

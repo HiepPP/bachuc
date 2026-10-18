@@ -76,6 +76,75 @@ impl DraftSubmission {
     }
 }
 
+/// The source agent settings a draft starts from, as `buildForkDraftSetup` in
+/// `use-fork-agent.ts`. `features` is a JSON object of feature values by feature id.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DraftSeed {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub mode: Option<String>,
+    pub thinking_option_id: Option<String>,
+    pub features: Option<Value>,
+}
+
+/// The provider and model a seed sets. A seed with no provider keeps `current`. `None` when
+/// that provider is not available: the other fields belong to it, so the whole seed is
+/// ignored. A model the provider does not list is dropped.
+pub fn seed_provider_model(
+    seed: &DraftSeed,
+    current: Option<&str>,
+    providers: &[ProviderSummary],
+) -> Option<(String, Option<String>)> {
+    let id = seed.provider.as_deref().or(current)?;
+    let provider = providers
+        .iter()
+        .find(|provider| provider.available && provider.id == id)?;
+    Some((
+        provider.id.clone(),
+        offered(seed.model.as_deref(), &provider.models),
+    ))
+}
+
+/// `wanted` when `choices` holds it: a seeded mode or thinking option the provider does not
+/// offer is ignored.
+pub fn offered(wanted: Option<&str>, choices: &[(String, String)]) -> Option<String> {
+    let wanted = wanted?;
+    choices
+        .iter()
+        .any(|(id, _)| id == wanted)
+        .then(|| wanted.to_string())
+}
+
+/// The seeded values the draft's features take: a known feature id and a value of its type.
+/// A select value must be one of the feature's options.
+pub fn seed_feature_values(
+    values: Option<&Value>,
+    features: &[AgentFeature],
+) -> Vec<(String, Value)> {
+    let Some(Value::Object(values)) = values else {
+        return Vec::new();
+    };
+    features
+        .iter()
+        .filter_map(|feature| {
+            let value = values.get(&feature.id)?;
+            let fits = match (&feature.kind, value) {
+                (AgentFeatureKind::Toggle { .. }, Value::Bool(_)) => true,
+                (AgentFeatureKind::Select { options, .. }, Value::String(value)) => {
+                    options.iter().any(|option| option.id == *value)
+                }
+                _ => false,
+            };
+            fits.then(|| (feature.id.clone(), value.clone()))
+        })
+        .collect()
+}
+
+/// The attachments a prompt sends: the raw attachments as given, then the plugin chips.
+pub fn outgoing_attachments(raw: &[Value], chips: Vec<Value>) -> Vec<Value> {
+    raw.iter().cloned().chain(chips).collect()
+}
+
 /// The input is at least `lines` lines tall: 5 lines of 21 px is 105 px.
 pub fn min_input_height(lines: usize, line_height: f32) -> f32 {
     line_height * lines.max(1) as f32
@@ -265,6 +334,150 @@ mod tests {
         apply_feature(&mut features, "fast", &Value::Bool(true));
         assert_eq!(feature_value(&features[0]), Value::Bool(true));
         apply_feature(&mut features, "missing", &Value::Bool(false));
+    }
+
+    fn select(id: &str, options: &[&str]) -> AgentFeature {
+        AgentFeature {
+            id: id.into(),
+            label: id.into(),
+            description: None,
+            tooltip: None,
+            icon: None,
+            kind: AgentFeatureKind::Select {
+                value: None,
+                options: options
+                    .iter()
+                    .map(|option| bachuc_client::AgentFeatureOption {
+                        id: (*option).into(),
+                        label: (*option).into(),
+                        description: None,
+                        is_default: None,
+                        metadata: serde_json::Map::new(),
+                    })
+                    .collect(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_seed_field_the_provider_does_not_offer_is_ignored() {
+        let providers = vec![provider("pi", false), provider("claude", true)];
+        let seed = |provider: Option<&str>, model: &str| DraftSeed {
+            provider: provider.map(String::from),
+            model: Some(model.into()),
+            ..DraftSeed::default()
+        };
+        assert_eq!(
+            seed_provider_model(&seed(Some("claude"), "claude-1"), None, &providers),
+            Some(("claude".into(), Some("claude-1".into())))
+        );
+        // An unknown model is dropped; the provider still applies.
+        assert_eq!(
+            seed_provider_model(&seed(Some("claude"), "gone"), Some("pi"), &providers),
+            Some(("claude".into(), None))
+        );
+        // An unavailable or unknown provider ignores the whole seed.
+        assert_eq!(
+            seed_provider_model(&seed(Some("pi"), "pi-1"), None, &providers),
+            None
+        );
+        assert_eq!(
+            seed_provider_model(&seed(Some("x"), "x-1"), None, &providers),
+            None
+        );
+        // No provider in the seed: the draft's provider takes the model.
+        assert_eq!(
+            seed_provider_model(&seed(None, "claude-1"), Some("claude"), &providers),
+            Some(("claude".into(), Some("claude-1".into())))
+        );
+        assert_eq!(
+            seed_provider_model(&seed(None, "claude-1"), None, &providers),
+            None
+        );
+
+        let modes = vec![("plan".to_string(), "Plan".to_string())];
+        assert_eq!(offered(Some("plan"), &modes).as_deref(), Some("plan"));
+        assert_eq!(offered(Some("yolo"), &modes), None);
+        assert_eq!(offered(None, &modes), None);
+
+        let features = vec![
+            AgentFeature {
+                id: "fast".into(),
+                label: "Fast".into(),
+                description: None,
+                tooltip: None,
+                icon: None,
+                kind: AgentFeatureKind::Toggle { value: false },
+            },
+            select("effort", &["low", "high"]),
+        ];
+        let values = serde_json::json!({
+            "fast": true,
+            "effort": "max",
+            "gone": true,
+        });
+        assert_eq!(
+            seed_feature_values(Some(&values), &features),
+            [("fast".to_string(), Value::Bool(true))]
+        );
+        let values = serde_json::json!({"fast": "yes", "effort": "high"});
+        assert_eq!(
+            seed_feature_values(Some(&values), &features),
+            [("effort".to_string(), Value::String("high".into()))]
+        );
+        assert!(seed_feature_values(None, &features).is_empty());
+        assert!(seed_feature_values(Some(&Value::Null), &features).is_empty());
+    }
+
+    #[test]
+    fn raw_attachments_go_out_unchanged_before_the_chips() {
+        let history = serde_json::json!({"type": "text", "contextKind": "chat_history"});
+        let chip = serde_json::json!({"type": "text", "title": "#1 Bug"});
+        assert_eq!(
+            outgoing_attachments(std::slice::from_ref(&history), vec![chip.clone()]),
+            [history, chip.clone()]
+        );
+        assert_eq!(outgoing_attachments(&[], vec![chip.clone()]), [chip]);
+    }
+
+    /// Tripwire: a draft with no seed and no raw attachment sends this exact payload.
+    #[test]
+    fn a_plain_draft_payload_is_unchanged() {
+        let mut plugin_draft = ComposerDraft::default();
+        plugin_draft.set("routes", serde_json::json!("fast"));
+        let features = vec![AgentFeature {
+            id: "fast".into(),
+            label: "Fast".into(),
+            description: None,
+            tooltip: None,
+            icon: None,
+            kind: AgentFeatureKind::Toggle { value: true },
+        }];
+        let image = serde_json::json!({"data": "aGk=", "mimeType": "image/png"});
+        let chip = serde_json::json!({"type": "text", "title": "#1 Bug", "text": "body"});
+        let config = draft_config(Some("claude"), Some("/repo"), Some("opus"), None, None);
+        let submission = DraftSubmission::build(
+            "fix it".into(),
+            vec![image.clone()],
+            vec![chip.clone()],
+            config.clone(),
+            &features,
+            &plugin_draft,
+        );
+        assert_eq!(
+            submission,
+            DraftSubmission {
+                text: "fix it".into(),
+                images: vec![image],
+                attachments: vec![chip],
+                config,
+                feature_values: BTreeMap::from([("fast".to_string(), Value::Bool(true))]),
+                environment: BTreeMap::from([(
+                    "PASEO_PLUGIN_COMPOSER_routes".to_string(),
+                    r#""fast""#.to_string()
+                )]),
+            }
+        );
     }
 
     #[test]

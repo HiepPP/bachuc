@@ -534,6 +534,7 @@ dependencies = [
  "bachuc-composer",
  "bachuc-diagram",
  "bachuc-explorer",
+ "bachuc-history",
  "bachuc-icons",
  "bachuc-plugin-assistant-cite",
  "bachuc-plugin-board",
@@ -655,6 +656,17 @@ dependencies = [
  "raw-window-handle",
  "serde_json",
  "tungstenite",
+]
+
+[[package]]
+name = "bachuc-history"
+version = "0.1.0"
+dependencies = [
+ "bachuc-client",
+ "bachuc-icons",
+ "bachuc-theme",
+ "chrono",
+ "gpui-kit",
 ]
 
 [[package]]
@@ -938,6 +950,7 @@ version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
  "bachuc-client",
+ "bachuc-icons",
  "bachuc-theme",
  "futures",
  "gpui-kit",

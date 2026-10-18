@@ -6,7 +6,7 @@
 use crate::actions::{
     BindingSpec, JumpToTab, RunAction, SHELL_CONTEXT, binding_specs, rebind, settings_key_context,
 };
-use crate::chrome::{ExplorerResize, HANDLE_WIDTH, NoPreview};
+use crate::chrome::{ExplorerResize, HANDLE_WIDTH, HeaderMenu, NoPreview};
 use crate::dock;
 use crate::new_workspace::{self, NewWorkspacePreset, NewWorkspaceScreen, SidePanelChanged};
 use crate::panes::{
@@ -19,33 +19,44 @@ use crate::plugins::{
     keystroke_text, panel_identity, panel_location, plugin_shortcut, surface_heading,
 };
 use crate::state::{
-    Connection, LayoutPrefs, LogoFill, absolute_path, agent_icon, agent_key, agent_of_key,
-    agent_title, all_diffs_key, badge_count, badge_label, command_items, commit_diff_key,
-    commit_diff_title, diff_key, explorer_width, file_key, file_name, file_of_key, find_workspace,
-    initial_host, next_mode, notification_for, step_index, step_workspace, workspace_agents,
-    workspace_order,
+    Connection, EditorTarget, LayoutPrefs, LogoFill, absolute_path, agent_icon, agent_key,
+    agent_of_key, agent_title, all_diffs_key, badge_count, badge_label, command_items,
+    commit_diff_key, commit_diff_title, diff_key, editor_targets, explorer_width, file_key,
+    file_name, file_of_key, find_workspace, initial_host, load_ship_default, next_mode,
+    notification_for, pull_request_key, save_ship_default, step_index, step_workspace,
+    workspace_agents, workspace_order,
 };
+use crate::toast::{ToastStack, render_toasts};
 use crate::workspace_draft::{self, WorkspaceDraftPane};
 use bachuc_client::{
-    Client, ClientEvent, CreatedWorkspace, DirectoryEvent, HostConfig, load_hosts, resume_command,
+    AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, Client, ClientEvent,
+    CreatedWorkspace, DirectoryEvent, GitStatusEvent, HostConfig, PrStatus, ProjectNode,
+    ThinkingControls, TimelineState, load_hosts, resume_command,
 };
-use bachuc_command::{CommandCenter, CommandEvent, Shortcut, data_dir, load_shortcuts};
-use bachuc_composer::ComposerEvent;
+use bachuc_command::{
+    CommandCenter, CommandEvent, CommandFileEvent, FileResult, Shortcut, ShortcutsDialog,
+    ShortcutsDialogEvent, data_dir, load_shortcuts,
+};
+use bachuc_composer::{ComposerEvent, DraftSeed};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_explorer::{
-    DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerTab, FileView,
+    DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerFileEvent, ExplorerNoticeEvent,
+    ExplorerTab, FileView, GitActionsButton, GitActionsEvent, PullRequestEvent,
+    PullRequestNoticeEvent, PullRequestView, file_icons::file_icon,
 };
+use bachuc_history::{HistoryEvent, HistoryScreen};
 use bachuc_icons::{IconName, provider_logo};
 use bachuc_plugin_host::{
-    PanelInput, PanelTarget, PluginHost, PluginHostEvent, SurfacePresentation,
+    AgentAnchor, PanelInput, PanelTarget, PluginHost, PluginHostEvent, SurfacePresentation,
 };
 use bachuc_settings::{Settings, SettingsEvent};
 use bachuc_sidebar::model::archive_prompt;
-use bachuc_sidebar::{Sidebar, SidebarEvent, SidebarPluginEvent};
+use bachuc_sidebar::{Sidebar, SidebarEvent, SidebarNavEvent, SidebarPluginEvent};
 use bachuc_terminal::{TerminalEvent, TerminalView};
 use bachuc_theme::metrics::TRAFFIC_LIGHT_WIDTH;
 use bachuc_theme::tokens;
-use bachuc_timeline::{TimelineEvent, TimelineView};
+use bachuc_timeline::grouping::{item_type, message_key};
+use bachuc_timeline::{ForkTarget, TimelineEvent, TimelineForkEvent, TimelineView};
 use bachuc_workspace::model::Rect;
 use bachuc_workspace::{PaneEvent, PaneItem, SplitAxis, TabKind, TabMenuEvent, Workspace};
 use gpui_kit::component::button::ButtonVariant;
@@ -59,7 +70,7 @@ use gpui_kit::*;
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The old client lives this long after a host switch, so a queued terminal kill reaches the
 /// old daemon before its socket closes.
@@ -67,6 +78,13 @@ const RETIRE_AFTER: Duration = Duration::from_secs(2);
 
 /// The workspace view shown while no workspace is selected, for example with zero projects.
 const HOME: &str = "";
+
+/// The identity of the History tab in the home view, so a second open shows the same tab.
+const HISTORY: &str = "history";
+
+/// A git status change checks the PR of a workspace at most this often, so a busy agent's
+/// edits do not ask the daemon for the PR on every file write.
+const PR_RECHECK: Duration = Duration::from_secs(10);
 
 /// What a tab shows. Dropping an agent pane stops its timeline sync.
 pub(crate) enum PaneContent {
@@ -77,6 +95,12 @@ pub(crate) enum PaneContent {
     Draft(Entity<WorkspaceDraftPane>),
     /// The New workspace screen, in a tab of the home view.
     NewWorkspace(Entity<NewWorkspaceScreen>),
+    /// The History screen, in a tab of the home view. It has no focus handle, so it gets a
+    /// `PaneFrame`.
+    History(Entity<HistoryScreen>),
+    /// The Pull request tab of a workspace folder. It has no focus handle, so it gets a
+    /// `PaneFrame`.
+    PullRequest(Entity<PullRequestView>),
     NewTab(Entity<NewTabPane>),
     Terminal(Entity<TerminalView>),
     File(Entity<FileView>),
@@ -92,6 +116,8 @@ impl PaneContent {
             PaneContent::LazyAgent(view) => view.clone().into(),
             PaneContent::Draft(view) => view.clone().into(),
             PaneContent::NewWorkspace(view) => view.clone().into(),
+            PaneContent::History(view) => view.clone().into(),
+            PaneContent::PullRequest(view) => view.clone().into(),
             PaneContent::NewTab(view) => view.clone().into(),
             PaneContent::Terminal(view) => view.clone().into(),
             PaneContent::File(view) => view.clone().into(),
@@ -101,7 +127,7 @@ impl PaneContent {
     }
 
     /// Whether the pane has its own focusable element with a role: a composer, a prompt, or a
-    /// terminal. Other panes get a `PaneFrame`.
+    /// terminal. Other panes, such as History and Pull request, get a `PaneFrame`.
     fn owns_focus(&self) -> bool {
         matches!(
             self,
@@ -127,6 +153,7 @@ impl PaneContent {
                     .unwrap_or_default(),
             },
             PaneContent::File(_) => TabKind::File,
+            // History, Pull request, and the other panes have no tab menu of their own.
             _ => TabKind::Other,
         }
     }
@@ -165,6 +192,8 @@ struct PendingOpen {
 pub(crate) struct OpenWorkspace {
     cwd: Option<String>,
     view: Entity<Workspace>,
+    /// The header's git split button, made on the first open of a workspace with a folder.
+    git_actions: Option<Entity<GitActionsButton>>,
     panes: HashMap<String, Pane>,
     _subscriptions: Vec<Subscription>,
 }
@@ -191,7 +220,13 @@ pub struct Shell {
     known_agents: HashSet<String>,
     next_pane: u64,
     pub(crate) hosts_open: bool,
-    command: Option<(Entity<CommandCenter>, Subscription)>,
+    command: Option<(Entity<CommandCenter>, Vec<Subscription>)>,
+    /// The generation of the last Files scope query, so an answer to an older one is dropped.
+    file_query: u64,
+    shortcuts_dialog: Option<(Entity<ShortcutsDialog>, Subscription)>,
+    /// A file that "Open to the side" puts in the group a split just made: (workspace, cwd,
+    /// path). The split's `PaneEvent::NewTab` opens it in place of a new tab.
+    side_file: Option<(String, String, String)>,
     settings: Option<(Entity<Settings>, Subscription)>,
     pub(crate) dragging_window: bool,
     /// A workspace the New workspace screen created, opened once the client lists it.
@@ -202,9 +237,30 @@ pub struct Shell {
     plugin_active: (Option<String>, Option<String>),
     /// The plugin surface on screen, as a page or an overlay.
     surface: Option<OpenSurface>,
+    /// An agent opened at its latest prompt before its timeline loaded.
+    pending_prompt: Option<String>,
     plugin_views: PluginViews,
     /// The New workspace side panel choice, kept for the session.
     side_panel_open: bool,
+    toasts: ToastStack,
+    /// Workspaces whose PR was found once this session; their PR tab never opens by itself
+    /// again, so a closed one stays closed.
+    pr_tab_opened: HashSet<String>,
+    /// Workspaces with a PR request in flight, and when each was last asked.
+    pr_inflight: HashSet<String>,
+    pr_checked: HashMap<String, Instant>,
+    /// The header menu that shows, if any.
+    pub(crate) header_menu: Option<HeaderMenu>,
+    /// The Open in editor apps, read once at start, and the last pick of the session.
+    pub(crate) editor_targets: Vec<EditorTarget>,
+    pub(crate) editor_choice: Option<EditorTarget>,
+    /// The GitHub page of a folder, read when the Open in editor menu opens: (cwd, url).
+    pub(crate) editor_github: Option<(String, String)>,
+    /// Scripts with a start or stop in flight, as `workspace_id/name`.
+    pub(crate) scripts_busy: HashSet<String>,
+    /// Scripts that Restart stopped, as `workspace_id/name`; each starts again once the daemon
+    /// reports it stopped.
+    pub(crate) scripts_restart: HashSet<String>,
     focus: FocusHandle,
     /// Subscriptions to the client and the views that hold it; a host switch replaces them.
     host_subscriptions: Vec<Subscription>,
@@ -262,14 +318,28 @@ impl Shell {
             next_pane: 0,
             hosts_open: false,
             command: None,
+            file_query: 0,
+            shortcuts_dialog: None,
+            side_file: None,
             settings: None,
             dragging_window: false,
             pending_open: None,
             plugin_host,
             plugin_active: (None, None),
             surface: None,
+            pending_prompt: None,
             plugin_views: PluginViews::default(),
             side_panel_open: false,
+            toasts: ToastStack::default(),
+            pr_tab_opened: HashSet::new(),
+            pr_inflight: HashSet::new(),
+            pr_checked: HashMap::new(),
+            header_menu: None,
+            editor_targets: editor_targets(|path| std::path::Path::new(path).exists()),
+            editor_choice: None,
+            editor_github: None,
+            scripts_busy: HashSet::new(),
+            scripts_restart: HashSet::new(),
             focus,
             host_subscriptions: Vec::new(),
             _subscriptions: subscriptions,
@@ -293,6 +363,19 @@ impl Shell {
                 },
             ),
             cx.subscribe_in(
+                &self.client,
+                window,
+                |this: &mut Shell, _, event: &GitStatusEvent, window, cx| match event {
+                    GitStatusEvent::ScriptsChanged { workspace_id } => {
+                        this.restart_stopped_scripts(workspace_id, cx);
+                        if *workspace_id == this.selected {
+                            cx.notify();
+                        }
+                    }
+                    GitStatusEvent::Changed { cwd } => this.on_git_changed(cwd, window, cx),
+                },
+            ),
+            cx.subscribe_in(
                 &self.sidebar,
                 window,
                 |this: &mut Shell, _, event: &SidebarEvent, window, cx| match event {
@@ -301,6 +384,16 @@ impl Shell {
                     }
                     SidebarEvent::OpenSettings => this.open_settings(window, cx),
                     SidebarEvent::OpenCommandCenter => this.open_command_center(window, cx),
+                },
+            ),
+            cx.subscribe_in(
+                &self.sidebar,
+                window,
+                |this: &mut Shell, _, event: &SidebarNavEvent, window, cx| match event {
+                    SidebarNavEvent::OpenHistory => this.open_history(window, cx),
+                    SidebarNavEvent::NewWorkspace { project_id } => {
+                        this.new_workspace(project_id.clone(), window, cx)
+                    }
                 },
             ),
             cx.subscribe_in(
@@ -351,6 +444,16 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(agent_id) = self.pending_prompt.clone()
+            && matches!(event, ClientEvent::TimelineChanged { agent_id: id } if *id == agent_id)
+        {
+            self.pending_prompt = None;
+            // The shell subscribed to the client before the timeline view, so the view has not
+            // synced this change yet; the reveal runs once every subscriber has.
+            cx.defer_in(window, move |this, window, cx| {
+                this.reveal_latest_prompt(&agent_id, window, cx)
+            });
+        }
         // Timeline views follow their own changes; the shell has nothing to redraw.
         if matches!(event, ClientEvent::TimelineChanged { .. }) {
             return;
@@ -370,6 +473,11 @@ impl Shell {
         match event {
             ClientEvent::Connected => {
                 self.known_agents = self.agent_ids(cx);
+                // A PR request sent while the client connected failed; ask again.
+                let open: Vec<String> = self.workspaces.keys().cloned().collect();
+                for workspace_id in open {
+                    self.check_pull_request(&workspace_id, window, cx);
+                }
             }
             ClientEvent::AgentsChanged => self.on_agents_changed(window, cx),
             _ => {}
@@ -416,12 +524,14 @@ impl Shell {
         self.complete_logos(cx);
     }
 
+    /// A live agent's title, else an archived one's, which is never in `agents`.
     fn agent_tab_title(&self, agent_id: &str, cx: &App) -> String {
-        self.client
-            .read(cx)
+        let client = self.client.read(cx);
+        client
             .agents()
             .iter()
             .find(|agent| agent.id == agent_id)
+            .or_else(|| client.archived_agent(agent_id))
             .map(agent_title)
             .unwrap_or_else(|| "Agent".to_string())
     }
@@ -505,6 +615,13 @@ impl Shell {
         self.known_agents.clear();
         self.command = None;
         self.pending_open = None;
+        self.pending_prompt = None;
+        self.pr_tab_opened.clear();
+        self.pr_inflight.clear();
+        self.pr_checked.clear();
+        self.header_menu = None;
+        self.editor_github = None;
+        self.scripts_busy.clear();
         self.connection = Connection::Connecting;
         let client = Client::connect(self.hosts[self.host_index].clone(), cx);
         self.retired = Some(std::mem::replace(&mut self.client, client.clone()));
@@ -553,6 +670,11 @@ impl Shell {
 
     // ----- workspaces -----
 
+    /// The header's git split button of an open workspace.
+    pub(crate) fn git_actions(&self, workspace_id: &str) -> Option<Entity<GitActionsButton>> {
+        self.workspaces.get(workspace_id)?.git_actions.clone()
+    }
+
     pub(crate) fn selected_cwd(&self) -> Option<&str> {
         self.workspaces.get(&self.selected)?.cwd.as_deref()
     }
@@ -595,6 +717,7 @@ impl Shell {
             OpenWorkspace {
                 cwd,
                 view,
+                git_actions: None,
                 panes: HashMap::new(),
                 _subscriptions: subscriptions,
             },
@@ -626,6 +749,8 @@ impl Shell {
         let first_open = !self.workspaces.contains_key(&id);
         if first_open {
             self.create_workspace(id.clone(), Some(cwd), window, cx);
+            self.attach_git_actions(&id, window, cx);
+            self.check_pull_request(&id, window, cx);
         }
         let active = self.workspace_active_key(&id, cx);
         let mut opened = false;
@@ -649,6 +774,7 @@ impl Shell {
         } else if opened && let Some(key) = active {
             self.activate_key(&id, &key, window, cx);
         }
+        self.close_page_surface(cx);
         self.select(id, window, cx);
     }
 
@@ -672,6 +798,7 @@ impl Shell {
 
     /// Tells the plugin host the selected workspace and the focused agent tab, on a change.
     fn sync_plugin_active(&mut self, cx: &mut Context<Self>) {
+        self.sync_chat_target(cx);
         let workspace = (self.selected != HOME).then(|| self.selected.clone());
         let active = (workspace, self.active_agent(cx));
         if active == self.plugin_active {
@@ -729,9 +856,30 @@ impl Shell {
                         }
                     },
                 );
+                let file_subscription = cx.subscribe_in(
+                    &explorer,
+                    window,
+                    |this: &mut Shell, _, event: &ExplorerFileEvent, window, cx| match event {
+                        ExplorerFileEvent::OpenToSide { cwd, path } => {
+                            this.open_file_to_side(cwd, path, window, cx)
+                        }
+                        ExplorerFileEvent::AddToChat { cwd, path } => {
+                            this.add_file_to_chat(cwd, path, window, cx)
+                        }
+                    },
+                );
+                let notice_subscription = cx.subscribe(
+                    &explorer,
+                    |this: &mut Shell, _, event: &ExplorerNoticeEvent, cx| {
+                        this.show_toast(event.ok, event.message.clone(), cx)
+                    },
+                );
                 self.host_subscriptions.push(subscription);
                 self.host_subscriptions.push(diff_subscription);
+                self.host_subscriptions.push(file_subscription);
+                self.host_subscriptions.push(notice_subscription);
                 self.explorer = Some(explorer);
+                self.sync_chat_target(cx);
             }
             (None, _) => {}
         }
@@ -850,7 +998,12 @@ impl Shell {
                 self.sync_plugin_active(cx);
                 cx.notify();
             }
-            PaneEvent::NewTab => self.open_new_tab(workspace_id, None, window, cx),
+            PaneEvent::NewTab => match self.side_file.take() {
+                Some((workspace, cwd, path)) if workspace == workspace_id => {
+                    self.open_file(&cwd, &path, None, window, cx)
+                }
+                _ => self.open_new_tab(workspace_id, None, window, cx),
+            },
         }
     }
 
@@ -946,15 +1099,19 @@ impl Shell {
             workspace.set_item_kind(&key, kind, cx);
             workspace.set_item_logo(&key, logo, cx);
         });
+        // A tab replaced in place (a new tab that becomes a draft) emits no `Activated`.
+        self.sync_chat_target(cx);
         cx.notify();
     }
 
+    /// A live agent's provider, else an archived one's.
     fn agent_provider(&self, agent_id: &str, cx: &App) -> Option<String> {
-        self.client
-            .read(cx)
+        let client = self.client.read(cx);
+        client
             .agents()
             .iter()
             .find(|agent| agent.id == agent_id)
+            .or_else(|| client.archived_agent(agent_id))
             .map(|agent| agent.provider.clone())
     }
 
@@ -1263,6 +1420,18 @@ impl Shell {
             self.open_new_workspace_screen(workspace_id, replace, preset, window, cx);
             return;
         };
+        self.open_draft_pane(workspace_id, replace, cwd, window, cx);
+    }
+
+    /// A workspace draft tab in `cwd`; its submit replaces it with the agent tab.
+    fn open_draft_pane(
+        &mut self,
+        workspace_id: &str,
+        replace: Option<String>,
+        cwd: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<WorkspaceDraftPane> {
         let key = replace.unwrap_or_else(|| self.next_key());
         let client = self.client.clone();
         let pane_key = key.clone();
@@ -1294,6 +1463,7 @@ impl Shell {
             cx,
         );
         view.update(cx, |pane, cx| pane.focus(window, cx));
+        view
     }
 
     /// Opens the New workspace screen in a new tab of the home view and shows it.
@@ -1302,9 +1472,48 @@ impl Shell {
         preset: NewWorkspacePreset,
         window: &mut Window,
         cx: &mut Context<Shell>,
-    ) {
+    ) -> Entity<NewWorkspaceScreen> {
         self.ensure_home(window, cx);
-        self.open_new_workspace_screen(HOME, None, preset, window, cx);
+        let screen = self.open_new_workspace_screen(HOME, None, preset, window, cx);
+        self.select(HOME.to_string(), window, cx);
+        screen
+    }
+
+    /// Shows the History screen in a tab of the home view, as `open_new_workspace` does. A
+    /// second open shows the same tab. A page surface closes, as for a route change.
+    fn open_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ensure_home(window, cx);
+        match self.find_identity(HOME, HISTORY) {
+            Some(key) => self.activate_key(HOME, &key, window, cx),
+            None => {
+                let client = self.client.clone();
+                let view = cx.new(|cx| HistoryScreen::new(client, window, cx));
+                let subscription = cx.subscribe_in(
+                    &view,
+                    window,
+                    |this: &mut Shell, _, event: &HistoryEvent, window, cx| {
+                        let HistoryEvent::OpenAgent {
+                            agent_id,
+                            workspace_id,
+                        } = event;
+                        this.open_agent_in(agent_id, workspace_id.as_deref(), window, cx);
+                    },
+                );
+                let key = self.next_key();
+                self.put_pane(
+                    HOME,
+                    key,
+                    Some(HISTORY.to_string()),
+                    "History".into(),
+                    IconName::History,
+                    PaneContent::History(view),
+                    vec![subscription],
+                    window,
+                    cx,
+                );
+            }
+        }
+        self.close_page_surface(cx);
         self.select(HOME.to_string(), window, cx);
     }
 
@@ -1315,7 +1524,7 @@ impl Shell {
         preset: NewWorkspacePreset,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Entity<NewWorkspaceScreen> {
         let key = replace.unwrap_or_else(|| self.next_key());
         let client = self.client.clone();
         let pane_key = key.clone();
@@ -1359,6 +1568,7 @@ impl Shell {
             cx,
         );
         view.update(cx, |screen, cx| screen.focus(window, cx));
+        view
     }
 
     /// Opens the workspace the New workspace screen created once the client lists it, then its
@@ -1413,6 +1623,292 @@ impl Shell {
             self.open_workspace(workspace_id.to_string(), window, cx);
         }
         self.open_all_diffs(&cwd, None, window, cx);
+    }
+
+    // ----- toasts, git actions, and the Pull request tab -----
+
+    /// Shows a success or error note at the top center for its own duration (`toast_duration`).
+    pub(crate) fn show_toast(&mut self, ok: bool, message: String, cx: &mut Context<Self>) {
+        let Some((id, duration)) = self
+            .toasts
+            .push(ok, message)
+            .map(|toast| (toast.id, toast.duration))
+        else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(duration).await;
+            let _ = this.update(cx, |shell, cx| {
+                if shell.toasts.dismiss(id) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// A fork picked in a turn footer, as `useForkAgent`: asks the chat history, then opens a
+    /// draft seeded from the source agent, in a new tab of the same workspace or on the New
+    /// workspace screen. Nothing runs until the user sends.
+    fn fork(
+        &mut self,
+        workspace_id: &str,
+        timeline: Entity<TimelineView>,
+        event: &TimelineForkEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let TimelineForkEvent::Fork {
+            agent_id,
+            target,
+            boundary,
+        } = event;
+        let client = self.client.read(cx);
+        let agent = client
+            .agents()
+            .iter()
+            .find(|agent| agent.id == *agent_id)
+            .or_else(|| client.archived_agent(agent_id));
+        let seed = fork_draft_seed(
+            agent,
+            client.agent_controls(agent_id).as_ref(),
+            client.agent_thinking(agent_id).as_ref(),
+            &client.agent_features(agent_id),
+        );
+        let agent_cwd = agent.map(|agent| agent.cwd.clone()).unwrap_or_default();
+        let open = match target {
+            ForkTarget::Tab => {
+                let workspace_cwd = self
+                    .workspaces
+                    .get(workspace_id)
+                    .and_then(|open| open.cwd.as_deref());
+                match fork_tab_cwd(workspace_id, &agent_cwd, workspace_cwd) {
+                    Ok(cwd) => ForkOpen::Tab(cwd),
+                    Err(message) => {
+                        self.show_toast(false, message.to_string(), cx);
+                        return;
+                    }
+                }
+            }
+            ForkTarget::Workspace => {
+                let source_workspace = agent
+                    .and_then(|agent| agent.workspace_id.clone())
+                    .or_else(|| (workspace_id != HOME).then(|| workspace_id.to_string()));
+                ForkOpen::Workspace(fork_workspace_preset(
+                    client.projects(),
+                    source_workspace.as_deref(),
+                    &agent_cwd,
+                ))
+            }
+        };
+        timeline.update(cx, |timeline, cx| timeline.set_fork_pending(true, cx));
+        let task = self.client.update(cx, |client, cx| {
+            client.fork_context(agent_id, boundary.clone(), cx)
+        });
+        let workspace = workspace_id.to_string();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            let _ = this.update_in(cx, |shell, window, cx| {
+                timeline.update(cx, |timeline, cx| timeline.set_fork_pending(false, cx));
+                let context = match result {
+                    Ok(context) => context,
+                    Err(error) => {
+                        shell.show_toast(false, fork_error(&format!("{error:#}")), cx);
+                        return;
+                    }
+                };
+                let label = fork_attachment_label(context.title.as_deref());
+                let attachment = context.attachment;
+                match open {
+                    ForkOpen::Tab(cwd) => {
+                        let draft = shell.open_draft_pane(&workspace, None, cwd, window, cx);
+                        draft.update(cx, |draft, cx| {
+                            draft.seed_fork(seed, label, attachment, window, cx)
+                        });
+                    }
+                    ForkOpen::Workspace(preset) => {
+                        let screen = shell.open_new_workspace(preset, window, cx);
+                        screen.update(cx, |screen, cx| {
+                            screen.seed_fork(seed, label, attachment, window, cx)
+                        });
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Makes the header's git split button of a workspace with a folder, with the repo's saved
+    /// ship default (Q-111).
+    fn attach_git_actions(
+        &mut self,
+        workspace_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(cwd) = self
+            .workspaces
+            .get(workspace_id)
+            .and_then(|open| open.cwd.clone())
+        else {
+            return;
+        };
+        let saved = load_ship_default(&data_dir(), &cwd);
+        let client = self.client.clone();
+        let button = cx.new(|cx| {
+            let mut button = GitActionsButton::new(client, cwd, cx);
+            button.set_ship_default(saved, cx);
+            button
+        });
+        let id = workspace_id.to_string();
+        let subscription = cx.subscribe_in(
+            &button,
+            window,
+            move |this: &mut Shell, _, event: &GitActionsEvent, window, cx| {
+                this.on_git_actions_event(&id, event, window, cx)
+            },
+        );
+        if let Some(open) = self.workspaces.get_mut(workspace_id) {
+            open.git_actions = Some(button);
+            open._subscriptions.push(subscription);
+        }
+    }
+
+    fn on_git_actions_event(
+        &mut self,
+        workspace_id: &str,
+        event: &GitActionsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            GitActionsEvent::Finished { ok, message } => {
+                self.show_toast(*ok, message.clone(), cx);
+                // Create PR finds the PR at once, without waiting for the status throttle.
+                if *ok {
+                    self.check_pull_request(workspace_id, window, cx);
+                }
+            }
+            GitActionsEvent::OpenUrl { url } => cx.open_url(url),
+            GitActionsEvent::ArchiveWorkspace => {
+                self.archive_workspace_id(workspace_id, window, cx)
+            }
+            GitActionsEvent::ShipDefaultChanged { cwd, default } => {
+                if let Err(error) = save_ship_default(&data_dir(), cwd, *default) {
+                    log::warn!("cannot save the git ship default: {error}");
+                }
+            }
+        }
+    }
+
+    /// A git status change may come with a new PR; checks each open workspace on that folder
+    /// whose PR was not found yet, at most once per `PR_RECHECK`.
+    fn on_git_changed(&mut self, cwd: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        let due: Vec<String> = self
+            .workspaces
+            .iter()
+            .filter(|(id, open)| {
+                open.cwd.as_deref() == Some(cwd)
+                    && !self.pr_tab_opened.contains(*id)
+                    && self
+                        .pr_checked
+                        .get(*id)
+                        .is_none_or(|last| now.duration_since(*last) >= PR_RECHECK)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for workspace_id in due {
+            self.check_pull_request(&workspace_id, window, cx);
+        }
+    }
+
+    /// Asks for the workspace's PR, then opens its Pull request tab once by itself when the
+    /// rule allows, as `usePullRequestAutoAdd` does.
+    fn check_pull_request(
+        &mut self,
+        workspace_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(cwd) = self
+            .workspaces
+            .get(workspace_id)
+            .and_then(|open| open.cwd.clone())
+        else {
+            return;
+        };
+        if self.pr_tab_opened.contains(workspace_id)
+            || !self.client.read(cx).is_connected()
+            || !self.pr_inflight.insert(workspace_id.to_string())
+        {
+            return;
+        }
+        self.pr_checked
+            .insert(workspace_id.to_string(), Instant::now());
+        let task = self
+            .client
+            .update(cx, |client, cx| client.pr_status(&cwd, cx));
+        let id = workspace_id.to_string();
+        cx.spawn_in(window, async move |this, cx| {
+            let status = task.await.ok().and_then(|reply| reply.status);
+            let _ = this.update_in(cx, |shell, window, cx| {
+                shell.pr_inflight.remove(&id);
+                let has_tab = shell.find_identity(&id, &pull_request_key(&cwd)).is_some();
+                let opened = shell.pr_tab_opened.contains(&id);
+                if has_pull_request(status.as_ref()) {
+                    shell.pr_tab_opened.insert(id.clone());
+                }
+                if auto_opens_pr_tab(status.as_ref(), opened, has_tab) {
+                    shell.open_pull_request(&id, &cwd, window, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Opens the Pull request tab of a folder behind the active tab, as Electron's background
+    /// open does.
+    fn open_pull_request(
+        &mut self,
+        workspace_id: &str,
+        cwd: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous = self.workspace_active_key(workspace_id, cx);
+        let client = self.client.clone();
+        let folder = cwd.to_string();
+        let view = cx.new(|cx| PullRequestView::new(client, folder, cx));
+        let subscription =
+            cx.subscribe(
+                &view,
+                |_: &mut Shell, _, event: &PullRequestEvent, cx| match event {
+                    PullRequestEvent::OpenUrl { url } => cx.open_url(url),
+                },
+            );
+        let notice_subscription = cx.subscribe(
+            &view,
+            |this: &mut Shell, _, event: &PullRequestNoticeEvent, cx| {
+                this.show_toast(event.ok, event.message.clone(), cx)
+            },
+        );
+        let key = self.next_key();
+        self.put_pane(
+            workspace_id,
+            key,
+            Some(pull_request_key(cwd)),
+            "Pull request".into(),
+            IconName::GitPullRequest,
+            PaneContent::PullRequest(view),
+            vec![subscription, notice_subscription],
+            window,
+            cx,
+        );
+        if let Some(previous) = previous {
+            self.activate_key(workspace_id, &previous, window, cx);
+        }
     }
 
     // ----- plugins -----
@@ -1476,8 +1972,17 @@ impl Shell {
                 self.open_new_workspace(preset, window, cx);
             }
             PluginHostEvent::OpenAgent { agent_id }
-            | PluginHostEvent::OpenAgentAt { agent_id, .. } => {
-                self.open_agent(agent_id, window, cx)
+            | PluginHostEvent::OpenAgentAt {
+                agent_id,
+                anchor: AgentAnchor::Latest,
+            } => self.open_agent(agent_id, window, cx),
+            // Electron opens a Board card at `latest-prompt`.
+            PluginHostEvent::OpenAgentAt {
+                agent_id,
+                anchor: AgentAnchor::LatestPrompt,
+            } => {
+                self.open_agent(agent_id, window, cx);
+                self.reveal_latest_prompt(agent_id, window, cx);
             }
             PluginHostEvent::OpenWorkspace { workspace_id } => {
                 self.open_workspace(workspace_id.clone(), window, cx)
@@ -1518,6 +2023,48 @@ impl Shell {
         self.surface = surface;
         self.sidebar
             .update(cx, |sidebar, cx| sidebar.set_active_surface(active, cx));
+    }
+
+    /// Closes a page surface, so a workspace or agent that opens shows in front of it.
+    fn close_page_surface(&mut self, cx: &mut Context<Self>) {
+        if self
+            .surface
+            .as_ref()
+            .is_some_and(|open| closes_surface_on_open(open.presentation))
+        {
+            self.set_surface(None, cx);
+        }
+    }
+
+    /// Scrolls the agent's open tab to its last user message. Before the tab is built or its
+    /// timeline loads, the reveal waits for the agent's next timeline change; with no user
+    /// message the tail stays.
+    fn reveal_latest_prompt(
+        &mut self,
+        agent_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A lazy tab is built on the activation event, after this update.
+        let Some(timeline) = self.agent_timeline(agent_id, cx) else {
+            let identity = agent_key(agent_id);
+            let has_tab = self.workspaces.values().any(|open| {
+                open.panes
+                    .values()
+                    .any(|pane| pane.identity.as_deref() == Some(identity.as_str()))
+            });
+            if has_tab {
+                self.pending_prompt = Some(agent_id.to_string());
+            }
+            return;
+        };
+        match latest_prompt_reveal(self.client.read(cx).timeline(agent_id)) {
+            PromptReveal::Wait => self.pending_prompt = Some(agent_id.to_string()),
+            PromptReveal::Tail => {}
+            PromptReveal::Reveal(message_id) => timeline.update(cx, |timeline, cx| {
+                timeline.reveal_passage(&message_id, None, window, cx)
+            }),
+        }
     }
 
     /// The timeline of the open tab for an agent, in any workspace.
@@ -1788,6 +2335,12 @@ impl Shell {
                     this.open_file(cwd, path, *line, window, cx);
                 },
             ),
+            cx.subscribe_in(&timeline, window, {
+                let workspace = workspace.clone();
+                move |this: &mut Shell, timeline, event: &TimelineForkEvent, window, cx| {
+                    this.fork(&workspace, timeline.clone(), event, window, cx)
+                }
+            }),
             cx.subscribe_in(&composer, window, {
                 let key = key.clone();
                 move |this: &mut Shell, _, event: &ComposerEvent, window, cx| match event {
@@ -1890,15 +2443,17 @@ impl Shell {
         let subscription = cx.subscribe_in(
             &view,
             window,
-            move |this: &mut Shell, _, event: &TerminalEvent, _, cx| {
-                if let TerminalEvent::Opened { id } = event {
-                    this.set_pane_kind(
-                        &workspace,
-                        &pane_key,
-                        TabKind::Terminal { id: id.clone() },
-                        cx,
-                    );
+            move |this: &mut Shell, _, event: &TerminalEvent, window, cx| match event {
+                TerminalEvent::Opened { id } => this.set_pane_kind(
+                    &workspace,
+                    &pane_key,
+                    TabKind::Terminal { id: id.clone() },
+                    cx,
+                ),
+                TerminalEvent::OpenFile { cwd, path, line } => {
+                    this.open_file(cwd, path, *line, window, cx)
                 }
+                TerminalEvent::Exited => {}
             },
         );
         self.put_pane(
@@ -1906,6 +2461,73 @@ impl Shell {
             key,
             None,
             title.into(),
+            IconName::SquareTerminal,
+            PaneContent::Terminal(view),
+            vec![subscription],
+            window,
+            cx,
+        );
+    }
+
+    /// Scripts "View terminal": shows the tab of the script's daemon terminal, or attaches a new
+    /// tab to it in the selected workspace.
+    pub(crate) fn view_script_terminal(
+        &mut self,
+        name: &str,
+        terminal_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let workspace_id = self.selected.clone();
+        self.header_menu = None;
+        let open_key = self.workspaces.get(&workspace_id).and_then(|open| {
+            open.panes
+                .iter()
+                .find_map(|(key, pane)| match &pane.content {
+                    PaneContent::Terminal(view)
+                        if view.read(cx).terminal_id() == Some(terminal_id) =>
+                    {
+                        Some(key.clone())
+                    }
+                    _ => None,
+                })
+        });
+        if let Some(key) = open_key {
+            self.activate_key(&workspace_id, &key, window, cx);
+            cx.notify();
+            return;
+        }
+        let key = self.next_key();
+        let client = self.client.clone();
+        let (id, title) = (terminal_id.to_string(), name.to_string());
+        let view = cx.new(|cx| {
+            let mut terminal = TerminalView::attach(client, id, window, cx);
+            terminal.set_name(title, cx);
+            terminal
+        });
+        let workspace = workspace_id.clone();
+        let pane_key = key.clone();
+        let subscription = cx.subscribe_in(
+            &view,
+            window,
+            move |this: &mut Shell, _, event: &TerminalEvent, window, cx| match event {
+                TerminalEvent::Opened { id } => this.set_pane_kind(
+                    &workspace,
+                    &pane_key,
+                    TabKind::Terminal { id: id.clone() },
+                    cx,
+                ),
+                TerminalEvent::OpenFile { cwd, path, line } => {
+                    this.open_file(cwd, path, *line, window, cx)
+                }
+                TerminalEvent::Exited => {}
+            },
+        );
+        self.put_pane(
+            &workspace_id,
+            key,
+            None,
+            name.to_string().into(),
             IconName::SquareTerminal,
             PaneContent::Terminal(view),
             vec![subscription],
@@ -2040,29 +2662,89 @@ impl Shell {
         );
     }
 
-    /// Opens an agent's tab in its workspace, from the command center or a notification.
+    /// Opens an agent's tab in its workspace, from the command center, a notification, or a
+    /// plugin such as the Board. An open page surface closes, as `open_workspace` does.
     pub(crate) fn open_agent(
         &mut self,
         agent_id: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let workspace_id = {
+        let (live, archived) = {
             let client = self.client.read(cx);
-            client
-                .projects()
-                .iter()
-                .flat_map(|project| &project.workspaces)
-                .find(|workspace| workspace.agent_ids.iter().any(|id| id == agent_id))
-                .map(|workspace| workspace.id.clone())
+            (
+                agent_workspace(client.projects(), client.agents(), agent_id),
+                client
+                    .archived_agent(agent_id)
+                    .map(|agent| agent.workspace_id.clone()),
+            )
         };
-        let Some(workspace_id) = workspace_id else {
-            return;
+        match agent_open(live, archived) {
+            AgentOpen::In(workspace_id) => {
+                self.open_agent_in(agent_id, workspace_id.as_deref(), window, cx)
+            }
+            AgentOpen::Fetch => {
+                self.pending_prompt = None;
+                self.open_fetched_agent(agent_id, window, cx);
+            }
+        }
+    }
+
+    /// Fetches an agent the client does not know and opens it when it is archived. The agent
+    /// subscription has no `includeArchived`, so the daemon sends `remove` on an archive and the
+    /// client never sees the archived agent; a stale Board card of that agent lands here.
+    fn open_fetched_agent(&mut self, agent_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let task = self
+            .client
+            .update(cx, |client, cx| client.fetch_agent(agent_id, cx));
+        let agent_id = agent_id.to_string();
+        cx.spawn_in(window, async move |this, cx| {
+            if let Err(error) = task.await {
+                return log::warn!("cannot open agent {agent_id}: {error:#}");
+            }
+            let _ = this.update_in(cx, |shell, window, cx| {
+                let archived = shell
+                    .client
+                    .read(cx)
+                    .archived_agent(&agent_id)
+                    .map(|agent| agent.workspace_id.clone());
+                if let Some(workspace_id) = archived {
+                    shell.open_agent_in(&agent_id, workspace_id.as_deref(), window, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Opens an agent's tab in `workspace_id` without the tree lookup, as a History row does
+    /// in Electron. A workspace the tree does not list, or none, opens the tab in the home view.
+    pub(crate) fn open_agent_in(
+        &mut self,
+        agent_id: &str,
+        workspace_id: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A later open cancels a reveal that still waits.
+        self.pending_prompt = None;
+        let target = agent_target(self.client.read(cx).projects(), workspace_id);
+        let workspace_id = match target {
+            Some(workspace_id) => {
+                self.open_workspace(workspace_id.clone(), window, cx);
+                workspace_id
+            }
+            None => {
+                self.ensure_home(window, cx);
+                self.close_page_surface(cx);
+                HOME.to_string()
+            }
         };
-        self.open_workspace(workspace_id.clone(), window, cx);
         match self.find_identity(&workspace_id, &agent_key(agent_id)) {
             Some(key) => self.activate_key(&workspace_id, &key, window, cx),
             None => self.open_agent_pane(&workspace_id, None, agent_id, window, cx),
+        }
+        if workspace_id == HOME {
+            self.select(HOME.to_string(), window, cx);
         }
     }
 
@@ -2126,9 +2808,20 @@ impl Shell {
 
     /// `workspace.archive`: the sidebar's archive flow, with a confirm when files changed.
     fn archive_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self.selected.clone();
+        self.archive_workspace_id(&selected, window, cx);
+    }
+
+    /// The archive flow for one workspace, also run by the git split button.
+    fn archive_workspace_id(
+        &mut self,
+        workspace_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some((id, name, cwd)) = ({
             let client = self.client.read(cx);
-            find_workspace(client.projects(), &self.selected)
+            find_workspace(client.projects(), workspace_id)
                 .map(|(_, w)| (w.id.clone(), w.name.clone(), w.cwd.clone()))
         }) else {
             return;
@@ -2215,20 +2908,257 @@ impl Shell {
         center.update(cx, |center, cx| {
             center.set_plugin_context(workspace, agent, cx)
         });
-        let subscription = cx.subscribe_in(
-            &center,
-            window,
-            |this: &mut Shell, _, event: &CommandEvent, window, cx| {
-                this.command = None;
-                match event {
-                    CommandEvent::Run { id } => this.run_command(id, window, cx),
-                    CommandEvent::Dismissed => this.refocus(window, cx),
+        let subscriptions = vec![
+            cx.subscribe_in(
+                &center,
+                window,
+                |this: &mut Shell, _, event: &CommandEvent, window, cx| {
+                    this.command = None;
+                    match event {
+                        CommandEvent::Run { id } => this.run_command(id, window, cx),
+                        CommandEvent::Dismissed => this.refocus(window, cx),
+                    }
+                    cx.notify();
+                },
+            ),
+            cx.subscribe_in(
+                &center,
+                window,
+                |this: &mut Shell, center, event: &CommandFileEvent, window, cx| match event {
+                    CommandFileEvent::FileQuery { query } => {
+                        this.query_files(center.clone(), query, cx)
+                    }
+                    CommandFileEvent::OpenFile { path } => {
+                        this.command = None;
+                        if let Some(cwd) = this.selected_cwd().map(str::to_string) {
+                            this.open_file(&cwd, path, None, window, cx);
+                        }
+                        cx.notify();
+                    }
+                },
+            ),
+        ];
+        self.command = Some((center, subscriptions));
+        cx.notify();
+    }
+
+    /// Answers a file query with the files of the selected workspace, each with its file icon.
+    /// An answer to an older query, or to a closed command center, is dropped.
+    fn query_files(&mut self, center: Entity<CommandCenter>, query: &str, cx: &mut Context<Self>) {
+        self.file_query += 1;
+        let generation = self.file_query;
+        let Some(cwd) = self.selected_cwd().map(str::to_string) else {
+            center.update(cx, |center, cx| center.set_file_rows(Vec::new(), cx));
+            return;
+        };
+        let task = self.client.update(cx, |client, cx| {
+            client.directory_suggestions(&cwd, query, true, false, 100, cx)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |shell, cx| {
+                let open = shell
+                    .command
+                    .as_ref()
+                    .is_some_and(|(open, _)| *open == center);
+                if shell.file_query != generation || !open {
+                    return;
                 }
+                center.update(cx, |center, cx| match result {
+                    Ok(found) => {
+                        let rows = found
+                            .into_iter()
+                            .filter(|entry| !entry.is_directory)
+                            .map(|entry| FileResult {
+                                icon: file_icon(&file_name(&entry.path)),
+                                path: entry.path,
+                            })
+                            .collect();
+                        center.set_file_rows(rows, cx)
+                    }
+                    Err(error) => center.set_file_error(Some(format!("{error:#}")), cx),
+                });
+            });
+        })
+        .detach();
+    }
+
+    /// `shortcuts.dialog.toggle`: shows the shortcuts dialog, or hides it when it shows.
+    fn toggle_shortcuts_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcuts_dialog.take().is_some() {
+            self.refocus(window, cx);
+            return;
+        }
+        let dialog = cx.new(|cx| ShortcutsDialog::new(window, cx));
+        let subscription = cx.subscribe_in(
+            &dialog,
+            window,
+            |this: &mut Shell, _, event: &ShortcutsDialogEvent, window, cx| {
+                let ShortcutsDialogEvent::Dismissed = event;
+                this.shortcuts_dialog = None;
+                this.refocus(window, cx);
                 cx.notify();
             },
         );
-        self.command = Some((center, subscription));
-        cx.notify();
+        self.shortcuts_dialog = Some((dialog, subscription));
+    }
+
+    /// The New workspace screen, on the project when one is given. A page surface closes, as
+    /// for a route change.
+    fn new_workspace(
+        &mut self,
+        project_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let preset = NewWorkspacePreset {
+            project_id,
+            ..NewWorkspacePreset::default()
+        };
+        self.open_new_workspace(preset, window, cx);
+        self.close_page_surface(cx);
+    }
+
+    /// `agent.new` ("Open project"): a folder dialog, then `add_project`, then the New
+    /// workspace screen on the added project, as Electron's add project flow ends.
+    fn open_project(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Open project".into()),
+        });
+        let client = self.client.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else {
+                return;
+            };
+            let Some(path) = paths.first().map(|path| path.to_string_lossy().to_string()) else {
+                return;
+            };
+            let Ok(task) = cx.update(|_, cx| client.update(cx, |c, cx| c.add_project(&path, cx)))
+            else {
+                return;
+            };
+            let result = task.await;
+            let _ = this.update_in(cx, |shell, window, cx| match result {
+                Ok(added) => shell.new_workspace(Some(added.id), window, cx),
+                Err(error) => shell.show_toast(false, format!("{error:#}"), cx),
+            });
+        })
+        .detach();
+    }
+
+    /// `workspace.pin`: pins the selected workspace, or unpins it.
+    fn toggle_pin(&mut self, cx: &mut Context<Self>) {
+        let pinned = find_workspace(self.client.read(cx).projects(), &self.selected)
+            .map(|(_, workspace)| workspace.pinned);
+        if let Some(pinned) = pinned {
+            let id = self.selected.clone();
+            self.client
+                .update(cx, |client, cx| client.pin_workspace(&id, !pinned, cx));
+        }
+    }
+
+    /// Explorer "Open to the side": the file in the group right of the focused one, or in a
+    /// new group split to the right. An open file tab only shows.
+    fn open_file_to_side(
+        &mut self,
+        cwd: &str,
+        path: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selected = self.selected.clone();
+        if self
+            .find_identity(&selected, &file_key(cwd, path))
+            .is_some()
+        {
+            self.open_file(cwd, path, None, window, cx);
+            return;
+        }
+        let right = self
+            .workspaces
+            .get(&selected)
+            .and_then(|open| neighbor_active_key(open.view.read(cx), "right"));
+        match right {
+            Some(key) => {
+                self.activate_key(&selected, &key, window, cx);
+                self.open_file(cwd, path, None, window, cx);
+            }
+            None => {
+                self.side_file = Some((selected.clone(), cwd.to_string(), path.to_string()));
+                self.with_workspace(
+                    &selected,
+                    cx,
+                    |workspace, window, cx| workspace.split(SplitAxis::Right, window, cx),
+                    window,
+                );
+            }
+        }
+    }
+
+    /// Explorer "Add to chat", as Electron's `useAddFileToChat`: a workspace-file chip in the
+    /// composer of the chat target (`chat_target`), then that tab takes the focus. A lazy agent
+    /// tab gets its composer first. With no chat target the menu hides the item.
+    fn add_file_to_chat(
+        &mut self,
+        _cwd: &str,
+        path: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let workspace_id = self.selected.clone();
+        let Some(key) = self.chat_target_key(cx) else {
+            return;
+        };
+        self.materialize(&workspace_id, &key, window, cx);
+        let (label, attachment) = workspace_file_attachment(path);
+        match self.pane(&workspace_id, &key).map(|pane| &pane.content) {
+            Some(PaneContent::Agent(view)) => {
+                let composer = view.read(cx).composer.clone();
+                composer.update(cx, |composer, cx| {
+                    composer.add_raw_attachment(label, attachment, cx)
+                });
+            }
+            // The draft pane keeps its composer private; `seed_fork` without a seed only adds
+            // the chip through `Composer::add_raw_attachment`.
+            Some(PaneContent::Draft(view)) => view.update(cx, |draft, cx| {
+                draft.seed_fork(None, label, attachment, window, cx)
+            }),
+            _ => return,
+        }
+        self.activate_key(&workspace_id, &key, window, cx);
+        self.focus_pane(&workspace_id, &key, window, cx);
+    }
+
+    /// The tab key of the selected workspace's chat target, from its focused tab and the active
+    /// tab of each group.
+    fn chat_target_key(&self, cx: &App) -> Option<String> {
+        let open = self.workspaces.get(&self.selected)?;
+        let workspace = open.view.read(cx);
+        let layout = workspace.layout();
+        let actives: Vec<&str> = layout
+            .groups()
+            .into_iter()
+            .filter_map(|group| group.active_item().map(|item| item.key.as_str()))
+            .collect();
+        let is_chat = |key: &str| {
+            matches!(
+                open.panes.get(key).map(|pane| &pane.content),
+                Some(PaneContent::Agent(_) | PaneContent::LazyAgent(_) | PaneContent::Draft(_))
+            )
+        };
+        chat_target(layout.active_key(), &actives, is_chat).map(str::to_string)
+    }
+
+    /// Tells the Explorer whether "Add to chat" has a target; it ignores an unchanged value.
+    fn sync_chat_target(&mut self, cx: &mut Context<Self>) {
+        let Some(explorer) = self.explorer.clone() else {
+            return;
+        };
+        let available = self.chat_target_key(cx).is_some();
+        explorer.update(cx, |explorer, cx| explorer.set_chat_target(available, cx));
     }
 
     fn run_command(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -2308,6 +3238,16 @@ impl Shell {
                 Some(_) => self.refocus(window, cx),
                 None => self.open_command_center(window, cx),
             },
+            "workspace.new" => self.new_workspace(None, window, cx),
+            "agent.new" => self.open_project(window, cx),
+            "command-center.files" => {
+                self.open_command_center(window, cx);
+                if let Some(center) = self.command.as_ref().map(|(center, _)| center.clone()) {
+                    center.update(cx, |center, cx| center.open_files_scope(window, cx));
+                }
+            }
+            "workspace.pin" => self.toggle_pin(cx),
+            "shortcuts.dialog.toggle" => self.toggle_shortcuts_dialog(window, cx),
             "settings.toggle" => match self.settings.take() {
                 Some(_) => self.refocus(window, cx),
                 None => self.open_settings(window, cx),
@@ -2591,6 +3531,9 @@ impl Render for Shell {
                 .bg(t.surface0)
                 .text_color(t.foreground)
                 .child(self.render_settings(settings, cx))
+                .when_some(self.shortcuts_dialog.as_ref(), |root, (dialog, _)| {
+                    root.child(dialog.clone())
+                })
                 .into_any_element();
         }
         let sidebar = self
@@ -2687,6 +3630,10 @@ impl Render for Shell {
             .when_some(self.command.as_ref(), |root, (center, _)| {
                 root.child(center.clone())
             })
+            .when_some(self.shortcuts_dialog.as_ref(), |root, (dialog, _)| {
+                root.child(dialog.clone())
+            })
+            .children(render_toasts(&self.toasts, cx))
             .into_any_element()
     }
 }
@@ -2737,13 +3684,395 @@ pub(crate) fn reload_error(message: &str) -> String {
     }
 }
 
+/// A page surface replaces the workspace, so opening a workspace or an agent closes it, as an
+/// Electron route change does. An overlay floats over the workspace and stays.
+pub(crate) fn closes_surface_on_open(presentation: SurfacePresentation) -> bool {
+    presentation == SurfacePresentation::Page
+}
+
+/// The workspace that holds an agent: the tree's, else the agent's own `workspace_id` when the
+/// tree lists that workspace.
+pub(crate) fn agent_workspace(
+    projects: &[ProjectNode],
+    agents: &[AgentSummary],
+    agent_id: &str,
+) -> Option<String> {
+    let workspaces = || projects.iter().flat_map(|project| &project.workspaces);
+    if let Some(workspace) =
+        workspaces().find(|workspace| workspace.agent_ids.iter().any(|id| id == agent_id))
+    {
+        return Some(workspace.id.clone());
+    }
+    let own = agents
+        .iter()
+        .find(|agent| agent.id == agent_id)?
+        .workspace_id
+        .as_deref()?;
+    workspaces()
+        .any(|workspace| workspace.id == own)
+        .then(|| own.to_string())
+}
+
+/// How `open_agent` opens an agent.
+#[derive(Debug, PartialEq)]
+pub(crate) enum AgentOpen {
+    /// In this workspace; `None` or a workspace the tree lacks is the home view.
+    In(Option<String>),
+    /// The client knows neither a live nor an archived agent: fetch it first.
+    Fetch,
+}
+
+/// A live agent opens in its tree workspace; an archived agent opens in its own workspace. An
+/// agent the client does not know is fetched, because an archived one may only be stale.
+pub(crate) fn agent_open(live: Option<String>, archived: Option<Option<String>>) -> AgentOpen {
+    match (live, archived) {
+        (Some(workspace_id), _) => AgentOpen::In(Some(workspace_id)),
+        (None, Some(workspace_id)) => AgentOpen::In(workspace_id),
+        (None, None) => AgentOpen::Fetch,
+    }
+}
+
+/// Where `open_agent_in` opens a tab: the given workspace when the tree lists it, else the
+/// home view (`None`), the Q-114 rule.
+pub(crate) fn agent_target(projects: &[ProjectNode], workspace_id: Option<&str>) -> Option<String> {
+    let workspace_id = workspace_id?;
+    find_workspace(projects, workspace_id).map(|_| workspace_id.to_string())
+}
+
+/// `getPullRequestIdentity`: a status with a URL or a number is a PR.
+pub(crate) fn has_pull_request(status: Option<&PrStatus>) -> bool {
+    status.is_some_and(|status| !status.url.trim().is_empty() || status.number.is_some())
+}
+
+/// The Pull request tab opens by itself only for the first PR found in a workspace this
+/// session, and only when no PR tab is open there. A closed tab does not come back.
+pub(crate) fn auto_opens_pr_tab(
+    status: Option<&PrStatus>,
+    found_before: bool,
+    has_tab: bool,
+) -> bool {
+    has_pull_request(status) && !found_before && !has_tab
+}
+
+/// `message.actions.forkFailed`.
+pub(crate) const FORK_FAILED: &str = "Failed to fork chat";
+/// `message.actions.forkMissingWorkspace`.
+pub(crate) const FORK_MISSING_WORKSPACE: &str = "This agent is not in a workspace.";
+/// The chip label of a chat history without a title, as Electron's text attachment.
+pub(crate) const FORK_ATTACHMENT_LABEL: &str = "Text attachment";
+
+/// Where a fork draft opens, decided before the chat history request.
+enum ForkOpen {
+    /// A draft tab in this folder, in the source tab's workspace.
+    Tab(String),
+    Workspace(NewWorkspacePreset),
+}
+
+/// `buildForkDraftSetup`: the draft settings of a fork, from the source agent. An agent with no
+/// provider gives none, and the draft keeps its own.
+pub(crate) fn fork_draft_seed(
+    agent: Option<&AgentSummary>,
+    controls: Option<&AgentControls>,
+    thinking: Option<&ThinkingControls>,
+    features: &[AgentFeature],
+) -> Option<DraftSeed> {
+    let agent = agent.filter(|agent| !agent.provider.is_empty())?;
+    let values = features
+        .iter()
+        .map(|feature| {
+            let value = match &feature.kind {
+                AgentFeatureKind::Toggle { value } => serde_json::json!(value),
+                AgentFeatureKind::Select { value, .. } => serde_json::json!(value),
+            };
+            (feature.id.clone(), value)
+        })
+        .collect();
+    Some(DraftSeed {
+        provider: Some(agent.provider.clone()),
+        model: agent
+            .model
+            .clone()
+            .or_else(|| controls.and_then(|controls| controls.current_model.clone())),
+        mode: controls.and_then(|controls| controls.current_mode.clone()),
+        thinking_option_id: thinking.and_then(|thinking| thinking.current.clone()),
+        features: Some(serde_json::Value::Object(values)),
+    })
+}
+
+/// The folder of a fork draft tab: the agent's own, as the draft setup's `cwd`, else the
+/// workspace's. A tab outside a workspace gets `forkMissingWorkspace`.
+pub(crate) fn fork_tab_cwd(
+    workspace_id: &str,
+    agent_cwd: &str,
+    workspace_cwd: Option<&str>,
+) -> Result<String, &'static str> {
+    if workspace_id == HOME {
+        return Err(FORK_MISSING_WORKSPACE);
+    }
+    [Some(agent_cwd), workspace_cwd]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|cwd| !cwd.is_empty())
+        .map(str::to_string)
+        .ok_or(FORK_MISSING_WORKSPACE)
+}
+
+/// The New workspace screen of a fork: the source workspace's folder and project, else the
+/// agent's folder (`checkout.cwd || cwd`). The route's display name is the project's name, which
+/// the screen shows from the project, so the title stays unset.
+pub(crate) fn fork_workspace_preset(
+    projects: &[ProjectNode],
+    workspace_id: Option<&str>,
+    agent_cwd: &str,
+) -> NewWorkspacePreset {
+    let found = workspace_id.and_then(|id| find_workspace(projects, id));
+    let cwd = [
+        found.map(|(_, workspace)| workspace.cwd.as_str()),
+        Some(agent_cwd),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .find(|cwd| !cwd.is_empty())
+    .map(str::to_string);
+    NewWorkspacePreset {
+        cwd,
+        project_id: found.map(|(project, _)| project.id.clone()),
+        title: None,
+    }
+}
+
+/// The chip label of a fork's chat history: the attachment title, else the fallback.
+pub(crate) fn fork_attachment_label(title: Option<&str>) -> String {
+    title
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .unwrap_or(FORK_ATTACHMENT_LABEL)
+        .to_string()
+}
+
+/// The tab that "Add to chat" attaches to, as Electron's `resolveFocusedChatTarget`: the focused
+/// tab when it is a chat (agent, lazy agent, or draft), else the active tab of the first group in
+/// reading order that is a chat. GPUI tabs record no parent tab, so Electron's middle step (the
+/// chat a file was opened beside) has nothing to read.
+pub(crate) fn chat_target<'a>(
+    focused: Option<&'a str>,
+    group_actives: &[&'a str],
+    is_chat: impl Fn(&str) -> bool,
+) -> Option<&'a str> {
+    focused
+        .filter(|key| is_chat(key))
+        .or_else(|| group_actives.iter().copied().find(|key| is_chat(key)))
+}
+
+/// The chip label and attachment of a workspace file, as Electron's
+/// `workspaceFileAttachmentToAgentAttachment` for a whole file.
+pub(crate) fn workspace_file_attachment(path: &str) -> (String, serde_json::Value) {
+    let name = path.rsplit('/').next().unwrap_or(path).to_string();
+    let attachment = serde_json::json!({
+        "type": "text",
+        "mimeType": "text/plain",
+        "title": name,
+        "text": format!("Workspace file: {path}"),
+    });
+    (name, attachment)
+}
+
+/// The toast of a failed fork: the error, as `toErrorMessage`, but `forkFailed` for an empty
+/// context (the client's "Nothing to fork") or an empty text.
+pub(crate) fn fork_error(message: &str) -> String {
+    let message = message.trim();
+    if message.is_empty() || message == "Nothing to fork" {
+        FORK_FAILED.to_string()
+    } else {
+        message.to_string()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PromptReveal {
+    /// The timeline has no entries yet; try again on its next change.
+    Wait,
+    /// No user message is loaded; keep the tail view.
+    Tail,
+    /// Scroll to this message key.
+    Reveal(String),
+}
+
+/// Where `AgentAnchor::LatestPrompt` scrolls: the last loaded user message. A state with no
+/// entries waits, because a permission change can come before the first page.
+pub(crate) fn latest_prompt_reveal(state: Option<&TimelineState>) -> PromptReveal {
+    let Some(state) = state.filter(|state| state.version > 0 && !state.entries.is_empty()) else {
+        return PromptReveal::Wait;
+    };
+    state
+        .entries
+        .iter()
+        .rev()
+        .find(|entry| item_type(entry) == "user_message")
+        .map_or(PromptReveal::Tail, |entry| {
+            PromptReveal::Reveal(message_key(entry))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     // Not `super::*`: the gpui glob brings a `test` macro that shadows the std one.
     use super::{
-        CANNOT_RENAME, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE, RESUME_ID_UNAVAILABLE,
-        RenameTarget, TERMINAL_NOT_OPEN, reload_error, rename_target, resume_text,
+        AgentOpen, CANNOT_RENAME, FORK_ATTACHMENT_LABEL, FORK_FAILED, FORK_MISSING_WORKSPACE,
+        PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE, RESUME_ID_UNAVAILABLE,
+        RenameTarget, TERMINAL_NOT_OPEN, agent_open, agent_target, agent_workspace,
+        auto_opens_pr_tab, chat_target, closes_surface_on_open, fork_attachment_label,
+        fork_draft_seed, fork_error, fork_tab_cwd, fork_workspace_preset, has_pull_request,
+        latest_prompt_reveal, reload_error, rename_target, resume_text, workspace_file_attachment,
     };
+    use bachuc_client::{
+        AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, PrMergeCapability, PrStatus,
+        ProjectNode, ThinkingControls, TimelineState, WorkspaceNode,
+    };
+    use bachuc_composer::DraftSeed;
+
+    fn pr(url: &str, number: Option<u64>) -> PrStatus {
+        PrStatus {
+            number,
+            url: url.into(),
+            title: "t".into(),
+            state: "open".into(),
+            is_merged: false,
+            is_draft: false,
+            mergeable: None,
+            checks: Vec::new(),
+            review_decision: None,
+            repo_owner: "o".into(),
+            repo_name: "r".into(),
+            merge: PrMergeCapability::default(),
+        }
+    }
+
+    #[test]
+    fn the_pr_tab_opens_once_for_the_first_pr_found() {
+        let found = pr("https://github.com/o/r/pull/1", Some(1));
+        assert!(auto_opens_pr_tab(Some(&found), false, false));
+        // Found before this session: a closed tab stays closed.
+        assert!(!auto_opens_pr_tab(Some(&found), true, false));
+        // A PR tab is already open in the workspace.
+        assert!(!auto_opens_pr_tab(Some(&found), false, true));
+        assert!(!auto_opens_pr_tab(None, false, false));
+        // A URL or a number alone names a PR; neither is no PR.
+        assert!(has_pull_request(Some(&pr("", Some(3)))));
+        assert!(has_pull_request(Some(&pr("https://x/pull/3", None))));
+        assert!(!has_pull_request(Some(&pr("  ", None))));
+        assert!(!auto_opens_pr_tab(Some(&pr("", None)), false, false));
+    }
+    use bachuc_plugin_host::SurfacePresentation;
+    use serde_json::json;
+
+    #[test]
+    fn only_a_page_surface_closes_when_an_agent_or_workspace_opens() {
+        assert!(closes_surface_on_open(SurfacePresentation::Page));
+        assert!(!closes_surface_on_open(SurfacePresentation::Overlay));
+    }
+
+    fn workspace(id: &str, agent_ids: &[&str]) -> WorkspaceNode {
+        WorkspaceNode {
+            id: id.into(),
+            name: id.into(),
+            cwd: format!("/{id}"),
+            branch: None,
+            pinned: false,
+            agent_ids: agent_ids.iter().map(|id| id.to_string()).collect(),
+        }
+    }
+
+    fn agent(id: &str, workspace_id: Option<&str>) -> AgentSummary {
+        AgentSummary {
+            id: id.into(),
+            title: id.into(),
+            status: "idle".into(),
+            cwd: "/w".into(),
+            workspace_id: workspace_id.map(str::to_string),
+            provider: "claude".into(),
+            model: None,
+            pending_permissions: 0,
+        }
+    }
+
+    #[test]
+    fn an_agent_opens_in_the_tree_workspace_else_its_own() {
+        let projects = vec![ProjectNode {
+            id: "p".into(),
+            name: "p".into(),
+            root: "/p".into(),
+            workspaces: vec![workspace("w1", &["a1"]), workspace("w2", &[])],
+        }];
+        let agents = vec![
+            agent("a1", Some("w2")),
+            agent("a2", Some("w2")),
+            agent("a3", Some("gone")),
+            agent("a4", None),
+        ];
+        assert_eq!(
+            agent_workspace(&projects, &agents, "a1").as_deref(),
+            Some("w1")
+        );
+        assert_eq!(
+            agent_workspace(&projects, &agents, "a2").as_deref(),
+            Some("w2")
+        );
+        assert_eq!(agent_workspace(&projects, &agents, "a3"), None);
+        assert_eq!(agent_workspace(&projects, &agents, "a4"), None);
+        assert_eq!(agent_workspace(&projects, &agents, "missing"), None);
+    }
+
+    #[test]
+    fn a_history_row_opens_in_its_tree_workspace_else_the_home_view() {
+        let projects = vec![ProjectNode {
+            id: "p".into(),
+            name: "p".into(),
+            root: "/p".into(),
+            workspaces: vec![workspace("w1", &[])],
+        }];
+        assert_eq!(agent_target(&projects, Some("w1")).as_deref(), Some("w1"));
+        assert_eq!(agent_target(&projects, Some("gone")), None);
+        assert_eq!(agent_target(&projects, None), None);
+        assert_eq!(agent_target(&[], Some("w1")), None);
+    }
+
+    #[test]
+    fn an_unknown_agent_is_fetched_before_it_opens() {
+        let ws = |id: &str| Some(id.to_string());
+        assert_eq!(
+            agent_open(ws("w1"), Some(ws("w2"))),
+            AgentOpen::In(ws("w1"))
+        );
+        assert_eq!(agent_open(None, Some(ws("w2"))), AgentOpen::In(ws("w2")));
+        assert_eq!(agent_open(None, Some(None)), AgentOpen::In(None));
+        // An agent archived while its Board card still shows is in neither map.
+        assert_eq!(agent_open(None, None), AgentOpen::Fetch);
+    }
+
+    #[test]
+    fn the_latest_prompt_is_the_last_user_message() {
+        assert_eq!(latest_prompt_reveal(None), PromptReveal::Wait);
+        let mut state = TimelineState::default();
+        assert_eq!(latest_prompt_reveal(Some(&state)), PromptReveal::Wait);
+        // A permission can change the state before the first page arrives.
+        state.version = 1;
+        assert_eq!(latest_prompt_reveal(Some(&state)), PromptReveal::Wait);
+        state.entries = vec![json!({"seqStart": 1, "item": {"type": "assistant_message"}})];
+        assert_eq!(latest_prompt_reveal(Some(&state)), PromptReveal::Tail);
+        state.entries = vec![
+            json!({"seqStart": 1, "item": {"type": "user_message", "messageId": "m1"}}),
+            json!({"seqStart": 2, "item": {"type": "assistant_message"}}),
+            json!({"seqStart": 3, "item": {"type": "user_message"}}),
+            json!({"seqStart": 4, "item": {"type": "tool_call"}}),
+        ];
+        assert_eq!(
+            latest_prompt_reveal(Some(&state)),
+            PromptReveal::Reveal("seq:3".into())
+        );
+    }
 
     #[test]
     fn rename_follows_the_tab_kind() {
@@ -2791,5 +4120,164 @@ mod tests {
         assert_eq!(reload_error("not connected"), "not connected");
         assert_eq!(reload_error(""), RELOAD_FAILED);
         assert_eq!(reload_error("  "), RELOAD_FAILED);
+    }
+
+    fn feature(id: &str, kind: AgentFeatureKind) -> AgentFeature {
+        AgentFeature {
+            id: id.into(),
+            label: id.into(),
+            description: None,
+            tooltip: None,
+            icon: None,
+            kind,
+        }
+    }
+
+    #[test]
+    fn a_fork_seed_carries_the_source_agent_settings() {
+        let mut source = agent("a", Some("w1"));
+        source.model = Some("opus".into());
+        let controls = AgentControls {
+            modes: Vec::new(),
+            current_mode: Some("plan".into()),
+            models: Vec::new(),
+            current_model: Some("sonnet".into()),
+            running: false,
+        };
+        let thinking = ThinkingControls {
+            options: Vec::new(),
+            current: Some("high".into()),
+        };
+        let features = vec![
+            feature("fast", AgentFeatureKind::Toggle { value: true }),
+            feature(
+                "tier",
+                AgentFeatureKind::Select {
+                    value: Some("pro".into()),
+                    options: Vec::new(),
+                },
+            ),
+            feature(
+                "unset",
+                AgentFeatureKind::Select {
+                    value: None,
+                    options: Vec::new(),
+                },
+            ),
+        ];
+        let seed =
+            fork_draft_seed(Some(&source), Some(&controls), Some(&thinking), &features).unwrap();
+        assert_eq!(
+            seed,
+            DraftSeed {
+                provider: Some("claude".into()),
+                // The agent's model wins over the runtime one, as `agent.model ?? runtimeInfo`.
+                model: Some("opus".into()),
+                mode: Some("plan".into()),
+                thinking_option_id: Some("high".into()),
+                features: Some(json!({"fast": true, "tier": "pro", "unset": null})),
+            }
+        );
+        // No agent model: the runtime model.
+        source.model = None;
+        let seed = fork_draft_seed(Some(&source), Some(&controls), None, &[]).unwrap();
+        assert_eq!(seed.model.as_deref(), Some("sonnet"));
+        assert_eq!(seed.thinking_option_id, None);
+        assert_eq!(seed.features, Some(json!({})));
+        // No controls loaded yet: provider only.
+        let seed = fork_draft_seed(Some(&source), None, None, &[]).unwrap();
+        assert_eq!((seed.model, seed.mode), (None, None));
+        // No provider or no agent: no seed, so the draft keeps its own settings.
+        source.provider = String::new();
+        assert_eq!(
+            fork_draft_seed(Some(&source), Some(&controls), None, &[]),
+            None
+        );
+        assert_eq!(fork_draft_seed(None, None, None, &[]), None);
+    }
+
+    #[test]
+    fn a_fork_tab_needs_a_workspace_and_a_folder() {
+        assert_eq!(fork_tab_cwd("w1", "/agent", Some("/ws")).unwrap(), "/agent");
+        assert_eq!(fork_tab_cwd("w1", "  ", Some("/ws")).unwrap(), "/ws");
+        assert_eq!(
+            fork_tab_cwd("w1", "", None).unwrap_err(),
+            FORK_MISSING_WORKSPACE
+        );
+        // The home view is no workspace.
+        assert_eq!(
+            fork_tab_cwd("", "/agent", None).unwrap_err(),
+            FORK_MISSING_WORKSPACE
+        );
+    }
+
+    #[test]
+    fn a_fork_workspace_opens_on_the_source_folder_and_project() {
+        let projects = vec![ProjectNode {
+            id: "p1".into(),
+            name: "Project".into(),
+            root: "/p1".into(),
+            workspaces: vec![workspace("w1", &["a"])],
+        }];
+        let preset = fork_workspace_preset(&projects, Some("w1"), "/agent");
+        assert_eq!(preset.cwd.as_deref(), Some("/w1"));
+        assert_eq!(preset.project_id.as_deref(), Some("p1"));
+        assert_eq!(preset.title, None);
+        // An unknown workspace: the agent's folder, no project.
+        let preset = fork_workspace_preset(&projects, Some("gone"), " /agent ");
+        assert_eq!(preset.cwd.as_deref(), Some("/agent"));
+        assert_eq!(preset.project_id, None);
+        assert_eq!(fork_workspace_preset(&projects, None, "").cwd, None);
+    }
+
+    #[test]
+    fn a_fork_labels_its_chip_and_names_its_failure() {
+        assert_eq!(fork_attachment_label(Some("Chat history")), "Chat history");
+        assert_eq!(fork_attachment_label(Some(" ")), FORK_ATTACHMENT_LABEL);
+        assert_eq!(fork_attachment_label(None), FORK_ATTACHMENT_LABEL);
+        // An empty context fails with `forkFailed`; other errors show their text.
+        assert_eq!(fork_error("Nothing to fork"), FORK_FAILED);
+        assert_eq!(fork_error(""), FORK_FAILED);
+        assert_eq!(
+            fork_error("Update the host to use this."),
+            "Update the host to use this."
+        );
+    }
+
+    #[test]
+    fn the_chat_target_is_the_focused_chat_else_the_first_group_with_a_chat() {
+        let chats = ["agent", "draft"];
+        let is_chat = |key: &str| chats.contains(&key);
+        // The focused tab wins when it is a chat.
+        assert_eq!(
+            chat_target(Some("draft"), &["agent", "draft"], is_chat),
+            Some("draft")
+        );
+        // A focused file falls back to the first group whose active tab is a chat.
+        assert_eq!(
+            chat_target(Some("file"), &["terminal", "agent", "draft"], is_chat),
+            Some("agent")
+        );
+        assert_eq!(
+            chat_target(Some("file"), &["file", "terminal"], is_chat),
+            None
+        );
+        assert_eq!(chat_target(None, &[], is_chat), None);
+    }
+
+    #[test]
+    fn a_workspace_file_attaches_as_electron_text_attachment() {
+        let (label, attachment) = workspace_file_attachment("src/lib/main.rs");
+        assert_eq!(label, "main.rs");
+        assert_eq!(
+            attachment,
+            serde_json::json!({
+                "type": "text",
+                "mimeType": "text/plain",
+                "title": "main.rs",
+                "text": "Workspace file: src/lib/main.rs",
+            })
+        );
+        assert_eq!(workspace_file_attachment("README.md").0, "README.md");
     }
 }

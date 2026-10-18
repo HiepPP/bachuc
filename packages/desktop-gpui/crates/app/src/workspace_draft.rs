@@ -6,7 +6,7 @@
 use crate::new_workspace::{SELECT_MODEL, SubmitGuard};
 use bachuc_client::{Client, InitialAgent};
 use bachuc_composer::{
-    Composer, ComposerEvent, DraftOptions, DraftSubmission, SubmitIcon, composer_dock,
+    Composer, ComposerEvent, DraftOptions, DraftSeed, DraftSubmission, SubmitIcon, composer_dock,
 };
 use bachuc_theme::metrics::{FONT_BASE, SPACE_2, SPACE_4};
 use bachuc_theme::{tokens, ui_font_size};
@@ -91,6 +91,24 @@ impl WorkspaceDraftPane {
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         self.composer
             .update(cx, |composer, cx| composer.focus(window, cx));
+    }
+
+    /// A fork draft: the source agent's settings, when it has a provider, and the chat history
+    /// chip.
+    pub fn seed_fork(
+        &mut self,
+        seed: Option<DraftSeed>,
+        label: String,
+        attachment: serde_json::Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.composer.update(cx, |composer, cx| {
+            if let Some(seed) = seed {
+                composer.set_draft_seed(seed, window, cx);
+            }
+            composer.add_raw_attachment(label, attachment, cx);
+        });
     }
 
     fn submit(&mut self, cx: &mut Context<Self>) {

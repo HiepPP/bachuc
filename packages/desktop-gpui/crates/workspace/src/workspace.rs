@@ -988,6 +988,19 @@ impl Workspace {
                 MouseButton::Left,
                 cx.listener(move |this, _, _, cx| this.activate_tab(group, index, cx)),
             )
+            // An AX press does what a left mouse-down does, with the group focus that the
+            // group's capture mouse-down gives a click. GPUI's default replays a mouse click
+            // at the node centre, which the UI checks saw do nothing.
+            .on_a11y_action(AccessibleAction::Click, {
+                let view = cx.weak_entity();
+                move |_, _, cx| {
+                    view.update(cx, |this, cx| {
+                        this.focus_group(group, cx);
+                        this.activate_tab(group, index, cx);
+                    })
+                    .ok();
+                }
+            })
             .on_mouse_down(
                 MouseButton::Middle,
                 cx.listener(move |this, _, window, cx| this.close(&middle_key, window, cx)),

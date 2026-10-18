@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 bachuc-client = { path = "../client" }
+bachuc-icons = { path = "../icons" }
 bachuc-theme = { path = "../theme" }
 gpui-kit.workspace = true
 alacritty_terminal = "0.26"

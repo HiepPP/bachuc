@@ -118,7 +118,12 @@ impl TimelineView {
         }) else {
             return false;
         };
-        self.list.scroll_to_reveal_item(row);
+        // `scroll_to` stops tail follow and puts the message at the top. `scroll_to_reveal_item`
+        // keeps tail follow on, so the next layout of a new view moved back to the end.
+        self.list.scroll_to(ListOffset {
+            item_ix: row,
+            offset_in_item: px(0.),
+        });
         if let Some(text) = text {
             let states: Vec<Entity<TextViewState>> = (0..self.entries.len())
                 .filter(|&index| {

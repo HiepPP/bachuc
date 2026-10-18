@@ -509,3 +509,479 @@ pub(crate) fn provider_label(id: &str) -> String {
         }
     }
 }
+
+// ---- git, PR, stash, and script calls (TASK-204) ----
+
+/// A pull request merge method (`mergeMethod`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+impl MergeMethod {
+    pub(crate) fn wire(self) -> &'static str {
+        match self {
+            Self::Merge => "merge",
+            Self::Squash => "squash",
+            Self::Rebase => "rebase",
+        }
+    }
+
+    /// GitHub's upper-case method name, as `viewerDefaultMergeMethod` and
+    /// `autoMergeRequest.mergeMethod` carry it.
+    fn from_github(value: &str) -> Option<Self> {
+        match value {
+            "MERGE" => Some(Self::Merge),
+            "SQUASH" => Some(Self::Squash),
+            "REBASE" => Some(Self::Rebase),
+            _ => None,
+        }
+    }
+}
+
+/// A git or PR action of the checkout header, as the app's `actions-store.ts` runs it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GitAction {
+    /// Commits every change (`addAll`).
+    Commit,
+    Pull,
+    Push,
+    /// Pull, then push.
+    PullAndPush,
+    /// A PR with the daemon's title and body.
+    CreatePr,
+    MergePr(MergeMethod),
+    SetAutoMerge {
+        enabled: bool,
+        method: Option<MergeMethod>,
+    },
+    /// Merges the branch into its base; the base checkout must be clean.
+    MergeBranch,
+    MergeFromBase,
+    Refresh,
+}
+
+/// What a git action gives back; only `CreatePr` sets the fields.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GitActionReply {
+    pub url: Option<String>,
+    pub number: Option<u64>,
+}
+
+/// The full git status of a folder. A folder outside git has `is_git: false`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GitStatus {
+    pub is_git: bool,
+    pub branch: Option<String>,
+    pub is_dirty: bool,
+    pub base_ref: Option<String>,
+    /// Commits ahead of and behind the base; 0 when the daemon sends no counts.
+    pub ahead: u32,
+    pub behind: u32,
+    pub ahead_of_origin: u32,
+    pub behind_of_origin: u32,
+    pub has_remote: bool,
+    pub remote_url: Option<String>,
+    pub is_paseo_owned_worktree: bool,
+    /// The branch tracks an upstream. The daemon sends a null `aheadOfOrigin` without one,
+    /// also for a deleted upstream branch, and the app's git policy reads it that way.
+    pub has_upstream: bool,
+}
+
+impl GitStatus {
+    pub(crate) fn parse(payload: &serde_json::Value) -> Self {
+        let count = |value: &serde_json::Value| value.as_u64().unwrap_or(0) as u32;
+        let text = |value: &serde_json::Value| value.as_str().map(str::to_string);
+        Self {
+            is_git: payload["isGit"] == true,
+            branch: text(&payload["currentBranch"]),
+            is_dirty: payload["isDirty"] == true,
+            base_ref: text(&payload["baseRef"]),
+            ahead: count(&payload["aheadBehind"]["ahead"]),
+            behind: count(&payload["aheadBehind"]["behind"]),
+            ahead_of_origin: count(&payload["aheadOfOrigin"]),
+            behind_of_origin: count(&payload["behindOfOrigin"]),
+            has_remote: payload["hasRemote"] == true,
+            remote_url: text(&payload["remoteUrl"]),
+            is_paseo_owned_worktree: payload["isPaseoOwnedWorktree"] == true,
+            has_upstream: payload["aheadOfOrigin"].is_number(),
+        }
+    }
+}
+
+/// What the git policy may do with a PR, from the `github` facts as the app's
+/// `deriveGithubMergeCapability` reads them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PrMergeCapability {
+    pub auto_merge_enabled: bool,
+    pub auto_merge_method: Option<MergeMethod>,
+    pub can_enable_auto_merge: bool,
+    pub can_disable_auto_merge: bool,
+    /// In the order merge, squash, rebase.
+    pub allowed_methods: Vec<MergeMethod>,
+    pub merge_state_status: Option<String>,
+}
+
+impl PrMergeCapability {
+    /// A PR without a `github` block (another forge) gets no capability.
+    pub(crate) fn parse(github: &serde_json::Value) -> Self {
+        let repository = &github["repository"];
+        let allowed_methods = [
+            ("mergeCommitAllowed", MergeMethod::Merge),
+            ("squashMergeAllowed", MergeMethod::Squash),
+            ("rebaseMergeAllowed", MergeMethod::Rebase),
+        ]
+        .into_iter()
+        .filter(|(key, _)| repository[*key] == true)
+        .map(|(_, method)| method)
+        .collect();
+        let merge_state_status = github["mergeStateStatus"].as_str().map(str::to_string);
+        let auto_merge = &github["autoMergeRequest"];
+        Self {
+            auto_merge_enabled: auto_merge.is_object(),
+            auto_merge_method: auto_merge["mergeMethod"]
+                .as_str()
+                .and_then(MergeMethod::from_github),
+            can_enable_auto_merge: merge_state_status.as_deref() == Some("BLOCKED")
+                && repository["autoMergeAllowed"] == true
+                && github["viewerCanEnableAutoMerge"] == true,
+            can_disable_auto_merge: github["viewerCanDisableAutoMerge"] == true,
+            allowed_methods,
+            merge_state_status,
+        }
+    }
+}
+
+/// One CI check of a PR.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrCheck {
+    pub name: String,
+    pub status: String,
+    pub url: Option<String>,
+    pub workflow: Option<String>,
+    /// The forge's display text, such as `2m 5s`.
+    pub duration: Option<String>,
+    /// Forge-neutral refinements, such as `required`; unknown ones are kept.
+    pub traits: Vec<String>,
+}
+
+/// The PR of a checkout's branch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrStatus {
+    /// Optional on the wire.
+    pub number: Option<u64>,
+    pub url: String,
+    pub title: String,
+    pub state: String,
+    pub is_merged: bool,
+    pub is_draft: bool,
+    /// `MERGEABLE`, `CONFLICTING`, or `UNKNOWN`.
+    pub mergeable: Option<String>,
+    pub checks: Vec<PrCheck>,
+    pub review_decision: Option<String>,
+    pub repo_owner: String,
+    pub repo_name: String,
+    pub merge: PrMergeCapability,
+}
+
+impl PrStatus {
+    pub(crate) fn parse(status: &serde_json::Value) -> Option<Self> {
+        let text = |value: &serde_json::Value| value.as_str().map(str::to_string);
+        let checks = status["checks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|check| {
+                Some(PrCheck {
+                    name: check["name"].as_str()?.to_string(),
+                    status: check["status"].as_str().unwrap_or_default().to_string(),
+                    url: text(&check["url"]),
+                    workflow: text(&check["workflow"]),
+                    duration: text(&check["duration"]),
+                    traits: check["traits"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|item| item.as_str().map(str::to_string))
+                        .collect(),
+                })
+            })
+            .collect();
+        Some(Self {
+            number: status["number"].as_u64(),
+            url: status["url"].as_str()?.to_string(),
+            title: status["title"].as_str().unwrap_or_default().to_string(),
+            state: status["state"].as_str().unwrap_or_default().to_string(),
+            is_merged: status["isMerged"] == true,
+            is_draft: status["isDraft"] == true,
+            mergeable: text(&status["mergeable"]),
+            checks,
+            review_decision: text(&status["reviewDecision"]),
+            repo_owner: status["repoOwner"].as_str().unwrap_or_default().to_string(),
+            repo_name: status["repoName"].as_str().unwrap_or_default().to_string(),
+            merge: PrMergeCapability::parse(&status["github"]),
+        })
+    }
+}
+
+/// A `checkout_pr_status` answer. `status` is `None` when the branch has no PR.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrStatusReply {
+    pub status: Option<PrStatus>,
+    pub github_features_enabled: bool,
+}
+
+/// One review or comment of a PR timeline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PrTimelineItem {
+    Review {
+        author: String,
+        body: String,
+        created_at_ms: i64,
+        url: Option<String>,
+        /// `approved`, `changes_requested`, or `commented`.
+        state: String,
+    },
+    Comment {
+        author: String,
+        body: String,
+        created_at_ms: i64,
+        url: Option<String>,
+        /// The file and line of an inline review comment.
+        path: Option<String>,
+        line: Option<u32>,
+    },
+}
+
+impl PrTimelineItem {
+    /// An item of another kind reads as a comment, as the protocol schema does.
+    pub(crate) fn parse(item: &serde_json::Value) -> Self {
+        let author = item["author"].as_str().unwrap_or("unknown").to_string();
+        let body = item["body"].as_str().unwrap_or_default().to_string();
+        let created_at_ms = item["createdAt"].as_f64().unwrap_or_default() as i64;
+        let url = item["url"]
+            .as_str()
+            .filter(|url| !url.is_empty())
+            .map(str::to_string);
+        if item["kind"] == "review" {
+            return Self::Review {
+                author,
+                body,
+                created_at_ms,
+                url,
+                state: item["reviewState"]
+                    .as_str()
+                    .unwrap_or("commented")
+                    .to_string(),
+            };
+        }
+        Self::Comment {
+            author,
+            body,
+            created_at_ms,
+            url,
+            path: item["location"]["path"].as_str().map(str::to_string),
+            line: item["location"]["line"].as_u64().map(|line| line as u32),
+        }
+    }
+}
+
+/// One `git stash` entry; `index` is the zero-based stash index.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StashEntry {
+    pub index: u32,
+    pub message: String,
+    pub branch: Option<String>,
+    /// Paseo made the stash.
+    pub is_paseo: bool,
+}
+
+impl StashEntry {
+    pub(crate) fn parse(entry: &serde_json::Value) -> Option<Self> {
+        Some(Self {
+            index: entry["index"].as_u64()? as u32,
+            message: entry["message"].as_str().unwrap_or_default().to_string(),
+            branch: entry["branch"].as_str().map(str::to_string),
+            is_paseo: entry["isPaseo"] == true,
+        })
+    }
+}
+
+/// One script or service of a workspace's `paseo.json`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceScript {
+    pub name: String,
+    /// `script` or `service`.
+    pub kind: String,
+    /// `running` or `stopped`.
+    pub lifecycle: String,
+    /// `healthy` or `unhealthy`; `None` while unknown.
+    pub health: Option<String>,
+    pub terminal_id: Option<String>,
+    pub exit_code: Option<i32>,
+    pub proxy_url: Option<String>,
+    pub local_proxy_url: Option<String>,
+    pub public_proxy_url: Option<String>,
+}
+
+impl WorkspaceScript {
+    pub(crate) fn parse_list(scripts: &serde_json::Value) -> Vec<Self> {
+        scripts
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|script| {
+                Some(Self {
+                    name: script["scriptName"].as_str()?.to_string(),
+                    kind: script["type"].as_str().unwrap_or("service").to_string(),
+                    lifecycle: script["lifecycle"]
+                        .as_str()
+                        .unwrap_or("stopped")
+                        .to_string(),
+                    health: script["health"].as_str().map(str::to_string),
+                    terminal_id: script["terminalId"].as_str().map(str::to_string),
+                    exit_code: script["exitCode"].as_i64().map(|code| code as i32),
+                    proxy_url: script["proxyUrl"].as_str().map(str::to_string),
+                    local_proxy_url: script["localProxyUrl"].as_str().map(str::to_string),
+                    public_proxy_url: script["publicProxyUrl"].as_str().map(str::to_string),
+                })
+            })
+            .collect()
+    }
+}
+
+/// Git and script status changes. `Client` emits these next to `DirectoryEvent`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GitStatusEvent {
+    /// The git status of `cwd` changed (`checkout_status_update`).
+    Changed { cwd: String },
+    /// The scripts of a workspace changed (`script_status_update` or a workspace update).
+    ScriptsChanged { workspace_id: String },
+}
+
+/// One agent row of the agent history, archived agents included.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HistoryEntry {
+    pub agent_id: String,
+    pub title: String,
+    pub provider: String,
+    pub workspace_id: Option<String>,
+    pub workspace_name: Option<String>,
+    pub project_name: String,
+    pub branch: Option<String>,
+    pub cwd: String,
+    pub archived: bool,
+    /// The snapshot `updatedAt`, as the app's history list reads it.
+    pub last_activity_at: Option<String>,
+    pub pending_permissions: usize,
+}
+
+/// One page of `fetch_agent_history_request`, newest first.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HistoryPage {
+    pub entries: Vec<HistoryEntry>,
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
+    /// An older daemon cut a search short instead of giving a cursor.
+    pub search_truncated: bool,
+}
+
+/// A timeline position, as `AgentTimelineCursorSchema`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForkCursor {
+    pub epoch: String,
+    pub seq: u64,
+}
+
+/// Where a fork ends; both `None` forks the whole chat.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ForkBoundary {
+    pub cursor: Option<ForkCursor>,
+    pub message_id: Option<String>,
+}
+
+/// The chat history of a fork. Send `attachment` unchanged with the new agent's prompt.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ForkContext {
+    pub attachment: serde_json::Value,
+    pub title: Option<String>,
+    pub item_count: u32,
+}
+
+/// How `directory_suggestions_request` matches `query`: `suffix` matches the end of a path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchMode {
+    Fuzzy,
+    Suffix,
+}
+
+impl MatchMode {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Fuzzy => "fuzzy",
+            Self::Suffix => "suffix",
+        }
+    }
+}
+
+/// One `directory_suggestions_request` match; `path` is as the daemon gives it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DirectorySuggestion {
+    pub path: String,
+    pub is_directory: bool,
+}
+
+impl DirectorySuggestion {
+    /// The `entries`, or the `directories` of a host that sends only those, as the app reads
+    /// them (`use-agent-autocomplete.ts` `mapDirectorySuggestionsToEntries`).
+    pub(crate) fn parse_all(payload: &serde_json::Value) -> Vec<Self> {
+        let entries: Vec<Self> = payload["entries"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| {
+                let is_directory = match entry["kind"].as_str()? {
+                    "file" => false,
+                    "directory" => true,
+                    _ => return None,
+                };
+                Some(Self {
+                    path: entry["path"].as_str()?.to_string(),
+                    is_directory,
+                })
+            })
+            .collect();
+        if !entries.is_empty() {
+            return entries;
+        }
+        payload["directories"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|path| {
+                Some(Self {
+                    path: path.as_str()?.to_string(),
+                    is_directory: true,
+                })
+            })
+            .collect()
+    }
+}
+
+/// What `fs.entry.create.request` makes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NewEntryKind {
+    File,
+    Directory,
+}
+
+impl NewEntryKind {
+    pub(crate) fn wire(self) -> &'static str {
+        match self {
+            NewEntryKind::File => "file",
+            NewEntryKind::Directory => "directory",
+        }
+    }
+}

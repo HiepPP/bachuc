@@ -1,0 +1,13 @@
+[package]
+name = "bachuc-history"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bachuc-client = { path = "../client" }
+bachuc-icons = { path = "../icons" }
+bachuc-theme = { path = "../theme" }
+# Local dates for the date groups and the time ago; the same entry the board plugin uses.
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+gpui-kit.workspace = true

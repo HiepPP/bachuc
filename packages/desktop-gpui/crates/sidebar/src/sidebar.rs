@@ -57,6 +57,9 @@ const LINE_HEIGHT: f32 = 20.;
 const WORKSPACE_KEBAB: f32 = 18.;
 /// The project kebab: 24 px, pulled 6 px past the row padding.
 const PROJECT_KEBAB: f32 = 24.;
+/// `projectTrailingActions`: the "+" and the kebab, 2 px apart; the "+" glyph is 15 px.
+const PROJECT_ACTION_GAP: f32 = 2.;
+const PROJECT_PLUS_GLYPH: f32 = 15.;
 /// `TrailingActionScrim`: 48 px wide, solid after 55%.
 const SCRIM_WIDTH: f32 = 48.;
 const SCRIM_SOLID: f32 = 0.55;
@@ -96,6 +99,19 @@ pub enum SidebarPluginEvent {
 }
 
 impl EventEmitter<SidebarPluginEvent> for Sidebar {}
+
+/// What the built-in nav rows and the project "+" ask the app to do. A third type keeps the
+/// match on [`SidebarEvent`] exhaustive in the app.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SidebarNavEvent {
+    /// The History row asks for the sessions screen.
+    OpenHistory,
+    /// The New workspace row (`None`) or a project "+" (`Some`) asks for the new workspace
+    /// screen.
+    NewWorkspace { project_id: Option<String> },
+}
+
+impl EventEmitter<SidebarNavEvent> for Sidebar {}
 
 /// A click and an AX press run the same handler. GPUI's default AX press replays a mouse click
 /// at the node centre, which the 2026-10-17 UI check saw do nothing on the sidebar rows.
@@ -877,8 +893,11 @@ impl Sidebar {
             .w_full()
             .min_h(px(ROW_HEIGHT))
             .p(px(SPACE_2))
-            // The kebab sits on the right rail: 24 px pulled 6 px out, then the row gap.
-            .pr(px(SPACE_2 + PROJECT_KEBAB - 6. + SPACE_2))
+            // The "+" and the kebab sit on the right rail: 24 px each pulled 6 px out, then the
+            // row gap.
+            .pr(px(
+                SPACE_2 + PROJECT_KEBAB * 2. + PROJECT_ACTION_GAP - 6. + SPACE_2
+            ))
             .rounded(px(RADIUS_LG))
             .flex()
             .flex_row()
@@ -926,6 +945,8 @@ impl Sidebar {
                 add_plugin_items(menu, items, window, cx)
             },
         );
+        let plus =
+            new_workspace_button(ix, &project.name, project.id.clone(), group.clone(), t, cx);
         div()
             .relative()
             .group(group)
@@ -936,6 +957,11 @@ impl Sidebar {
                     .absolute()
                     .top(px((ROW_HEIGHT - PROJECT_KEBAB) / 2.))
                     .right(px(SPACE_2 - 6.))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(PROJECT_ACTION_GAP))
+                    .child(plus)
                     .child(kebab),
             )
             .into_any_element()
@@ -1154,8 +1180,8 @@ impl Sidebar {
     // ---- chrome ----
 
     fn render_nav(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
-        // `sidebarHeaderGroup` holds the rows. The sidebar keeps the one whose target is in
-        // scope: Search, which opens the command center.
+        // `sidebarHeaderGroup` holds the rows in Electron's default order
+        // (`BUILTIN_SIDEBAR_NAV_IDS`): New workspace, History, Search, then the plugin rows.
         div()
             .flex()
             .flex_col()
@@ -1165,30 +1191,30 @@ impl Sidebar {
             .pb(px(SPACE_1_5))
             .border_b_1()
             .border_color(t.border)
-            .child(
-                div().px(px(SPACE_2)).child(
-                    div()
-                        .id("sidebar-search")
-                        .role(Role::Button)
-                        .aria_label("Search")
-                        .min_h(px(NAV_ROW_MIN))
-                        .px(px(SPACE_2))
-                        .py(px(SPACE_1))
-                        .rounded(px(RADIUS_LG))
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(SPACE_2))
-                        .cursor_pointer()
-                        .text_size(ui_font_size(FONT_BASE, cx))
-                        .line_height(px(LABEL_LINE))
-                        .text_color(t.foreground_muted)
-                        .hover(|style| style.bg(t.surface_sidebar_hover).text_color(t.foreground))
-                        .on_press(cx, |_, _, cx| cx.emit(SidebarEvent::OpenCommandCenter))
-                        .child(icon(IconName::Search).with_size(px(ICON_SM)))
-                        .child("Search"),
-                ),
-            )
+            .child(builtin_nav_row(
+                "sidebar-global-new-workspace",
+                "New workspace",
+                IconName::Plus,
+                t,
+                cx,
+                |_, _, cx| cx.emit(SidebarNavEvent::NewWorkspace { project_id: None }),
+            ))
+            .child(builtin_nav_row(
+                "sidebar-sessions",
+                "History",
+                IconName::History,
+                t,
+                cx,
+                |_, _, cx| cx.emit(SidebarNavEvent::OpenHistory),
+            ))
+            .child(builtin_nav_row(
+                "sidebar-search",
+                "Search",
+                IconName::Search,
+                t,
+                cx,
+                |_, _, cx| cx.emit(SidebarEvent::OpenCommandCenter),
+            ))
             .children(self.render_plugin_nav(t, cx))
     }
 
@@ -1386,6 +1412,39 @@ fn ring_key(row: &Row) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// A built-in nav row (`SidebarHeaderRow`, compact variant).
+fn builtin_nav_row(
+    id: &'static str,
+    label: &'static str,
+    glyph: IconName,
+    t: &Tokens,
+    cx: &mut Context<Sidebar>,
+    handler: impl Fn(&mut Sidebar, &mut Window, &mut Context<Sidebar>) + 'static,
+) -> impl IntoElement {
+    div().px(px(SPACE_2)).child(
+        div()
+            .id(id)
+            .role(Role::Button)
+            .aria_label(label)
+            .min_h(px(NAV_ROW_MIN))
+            .px(px(SPACE_2))
+            .py(px(SPACE_1))
+            .rounded(px(RADIUS_LG))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(SPACE_2))
+            .cursor_pointer()
+            .text_size(ui_font_size(FONT_BASE, cx))
+            .line_height(px(LABEL_LINE))
+            .text_color(t.foreground_muted)
+            .hover(|style| style.bg(t.surface_sidebar_hover).text_color(t.foreground))
+            .on_press(cx, handler)
+            .child(icon(glyph).with_size(px(ICON_SM)))
+            .child(label),
+    )
 }
 
 fn render_section_title(title: SharedString, t: &Tokens, cx: &mut Context<Sidebar>) -> AnyElement {
@@ -1737,6 +1796,41 @@ fn workspace_menu(menu: PopupMenu, weak: &WeakEntity<Sidebar>, row: &WorkspaceRo
 }
 
 /// A hover kebab with its menu. `group` is the row's group, which shows the button.
+/// `NewWorktreeButton`: a 24 px "+" that fades in on row hover. Opacity keeps its slot, so the
+/// row never shifts, and the pointer reaches it only through the hovered row.
+fn new_workspace_button(
+    ix: usize,
+    project_name: &str,
+    project_id: String,
+    group: SharedString,
+    t: &Tokens,
+    cx: &mut Context<Sidebar>,
+) -> impl IntoElement {
+    let fg = t.foreground;
+    div()
+        .id(("project-new-workspace", ix))
+        .role(Role::Button)
+        .aria_label(format!("Create a new workspace for {project_name}"))
+        .w(px(PROJECT_KEBAB))
+        .h(px(PROJECT_KEBAB))
+        .flex_shrink_0()
+        .rounded(px(RADIUS_MD))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .text_color(t.foreground_muted)
+        .opacity(0.)
+        .group_hover(group, |style| style.opacity(1.))
+        .hover(move |style| style.bg(t.surface_sidebar_hover).text_color(fg))
+        .on_press(cx, move |_, _, cx| {
+            cx.emit(SidebarNavEvent::NewWorkspace {
+                project_id: Some(project_id.clone()),
+            })
+        })
+        .child(icon(IconName::Plus).with_size(px(PROJECT_PLUS_GLYPH)))
+}
+
 fn kebab(
     id: (&'static str, usize),
     label: &'static str,

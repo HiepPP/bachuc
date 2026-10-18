@@ -96,11 +96,13 @@ impl EventListener for Replies {
     }
 }
 
-/// One drawn screen line: its text and the styled spans over it.
+/// One drawn screen line: its text, the styled spans over it, and whether its text goes on in
+/// the next row because it wrapped at the right edge.
 #[derive(Clone, Debug)]
 pub struct RenderedLine {
     pub text: SharedString,
     pub runs: Vec<(Range<usize>, HighlightStyle)>,
+    pub wrapped: bool,
 }
 
 pub struct Emulator {
@@ -409,9 +411,14 @@ fn build_line(
             _ => runs.push((start..text.len(), style)),
         }
     }
+    // Alacritty marks the last cell of a row that wrapped, and damages that row when it does.
+    let wrapped = term.grid()[Point::new(line, Column(cols - 1))]
+        .flags
+        .contains(Flags::WRAPLINE);
     RenderedLine {
         text: text.into(),
         runs,
+        wrapped,
     }
 }
 
@@ -502,6 +509,14 @@ mod tests {
         let spans: Vec<_> = line.runs.iter().map(|(range, _)| range.clone()).collect();
         assert_eq!(spans, [0..3, 10..15]);
         assert_eq!(&line.text[..15], "red plain green");
+    }
+
+    #[test]
+    fn a_row_that_wraps_is_marked_and_a_line_break_is_not() {
+        let mut emulator = Emulator::new(4, 5);
+        emulator.feed(b"abcdefgh\r\nxy");
+        let wrapped: Vec<bool> = emulator.lines().map(|line| line.wrapped).collect();
+        assert_eq!(wrapped, [true, false, false, false]);
     }
 
     #[test]

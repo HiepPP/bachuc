@@ -5,7 +5,9 @@
 //! because a subscription holds its emitter weakly.
 
 mod emulator;
+mod find;
 mod keys;
+mod links;
 mod size;
 mod snapshot;
 mod view;
