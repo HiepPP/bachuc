@@ -1169,7 +1169,7 @@ fn subagent_body(
 }
 
 /// The row that collapses or expands a cluster's subagents.
-fn toggle_row(p: &Paint, tree: &RunTree, nested: bool, seen: bool) -> AnyElement {
+fn toggle_row(p: &Paint, tree: &RunTree, nested: bool, seen: bool, cx: &App) -> AnyElement {
     let (run, t) = (&tree.run, &p.t);
     let expanded = !p.collapsed.contains(&run.agent_id);
     let group: SharedString = format!("board-toggle-{}", run.id).into();
@@ -1229,7 +1229,7 @@ fn toggle_row(p: &Paint, tree: &RunTree, nested: bool, seen: bool) -> AnyElement
     .flex_row()
     .items_center()
     .gap(p.s(8.))
-    .min_h(px(32.))
+    .min_h(bachuc_theme::zoomed(32., cx))
     .py(p.s(6.))
     .px(p.s(if nested { 6. } else { 12. }))
     .map(|row| {
@@ -1322,7 +1322,7 @@ pub(crate) fn column_card(
             window,
             cx,
         ))
-        .child(toggle_row(p, tree, false, seen))
+        .child(toggle_row(p, tree, false, seen, cx))
         .into_any_element()
 }
 
@@ -1413,7 +1413,7 @@ fn nested_cluster(
     v_flex()
         .w_full()
         .child(run_card(p, card, window, cx))
-        .child(toggle_row(p, tree, true, seen))
+        .child(toggle_row(p, tree, true, seen, cx))
         .when(expanded, |cluster| {
             cluster.child(
                 h_flex()

@@ -265,13 +265,13 @@ impl ProgressCard {
             .id("wt-progress")
             .role(Role::Group)
             .aria_label(SharedString::from(progress_label(&summary)))
-            .gap(px(PROGRESS_GAP))
+            .gap(bachuc_theme::zoomed(PROGRESS_GAP, cx))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_baseline()
-                    .gap(px(SPACE_3))
+                    .gap(bachuc_theme::zoomed(SPACE_3, cx))
                     .child(
                         div()
                             .text_size(ui_font_size(PERCENT_SIZE, cx))
@@ -289,16 +289,16 @@ impl ProgressCard {
             )
             .child(
                 div()
-                    .h(px(STRIP_HEIGHT))
+                    .h(bachuc_theme::zoomed(STRIP_HEIGHT, cx))
                     .flex()
                     .flex_row()
-                    .gap(px(STRIP_GAP))
+                    .gap(bachuc_theme::zoomed(STRIP_GAP, cx))
                     .children(tasks.iter().map(|task| {
                         div()
                             .flex_1()
-                            .min_w(px(SEGMENT_MIN_WIDTH))
+                            .min_w(bachuc_theme::zoomed(SEGMENT_MIN_WIDTH, cx))
                             .h_full()
-                            .rounded(px(SEGMENT_RADIUS))
+                            .rounded(bachuc_theme::zoomed(SEGMENT_RADIUS, cx))
                             .bg(segment(task_group(&task.status)))
                     })),
             )
@@ -342,14 +342,14 @@ impl WaitingCard {
             .flex_col()
             .child(
                 div()
-                    .mb(px(SPACE_1_5))
+                    .mb(bachuc_theme::zoomed(SPACE_1_5, cx))
                     .text_size(ui_font_size(FONT_SM, cx))
                     .text_color(colors.foreground_muted)
                     .child(waiting_line(questions.len(), proposed_adrs)),
             )
             .children(questions.iter().map(|question| {
                 div()
-                    .mt(px(SPACE_1))
+                    .mt(bachuc_theme::zoomed(SPACE_1, cx))
                     .flex()
                     .flex_col()
                     .child(
@@ -366,7 +366,7 @@ impl WaitingCard {
                     .child(
                         div()
                             .text_size(ui_font_size(QUESTION_SIZE, cx))
-                            .line_height(px(QUESTION_LINE))
+                            .line_height(bachuc_theme::zoomed(QUESTION_LINE, cx))
                             .text_color(colors.foreground)
                             .child(question.question.clone()),
                     )
@@ -479,7 +479,7 @@ impl AutorunLogCard {
         let muted = |text: String, cx: &App| {
             div()
                 .text_size(ui_font_size(FONT_SM, cx))
-                .line_height(px(LOG_LINE))
+                .line_height(bachuc_theme::zoomed(LOG_LINE, cx))
                 .text_color(colors.foreground_muted)
                 .child(text)
         };
@@ -490,7 +490,7 @@ impl AutorunLogCard {
                 cx,
             ))
             .child(muted(runner_line(run), cx))
-            .child(muted(started_line(run), cx).mb(px(SPACE_1_5)))
+            .child(muted(started_line(run), cx).mb(bachuc_theme::zoomed(SPACE_1_5, cx)))
             .when(empty_log, |this| {
                 this.child(empty("No iterations logged yet.", cx))
             })
@@ -503,11 +503,11 @@ impl AutorunLogCard {
             div()
                 .font_family(mono_font_family(cx))
                 .text_size(ui_font_size(MONO_SIZE, cx))
-                .line_height(px(LOG_LINE))
+                .line_height(bachuc_theme::zoomed(LOG_LINE, cx))
                 .text_color(colors.foreground_muted)
         };
         div()
-            .py(px(LOG_ROW_PADDING))
+            .py(bachuc_theme::zoomed(LOG_ROW_PADDING, cx))
             .border_t_1()
             .border_color(colors.border)
             .flex()
@@ -516,11 +516,19 @@ impl AutorunLogCard {
                 div()
                     .flex()
                     .flex_row()
-                    .gap(px(SPACE_1_5))
-                    .child(mono(cx).w(px(CLOCK_WIDTH)).child(log_clock(&row.start)))
-                    .child(mono(cx).w(px(CLOCK_WIDTH)).child(log_clock(&row.end)))
+                    .gap(bachuc_theme::zoomed(SPACE_1_5, cx))
                     .child(
-                        mono(cx).w(px(TASK_WIDTH)).child(
+                        mono(cx)
+                            .w(bachuc_theme::zoomed(CLOCK_WIDTH, cx))
+                            .child(log_clock(&row.start)),
+                    )
+                    .child(
+                        mono(cx)
+                            .w(bachuc_theme::zoomed(CLOCK_WIDTH, cx))
+                            .child(log_clock(&row.end)),
+                    )
+                    .child(
+                        mono(cx).w(bachuc_theme::zoomed(TASK_WIDTH, cx)).child(
                             row.task
                                 .strip_prefix("TASK-")
                                 .unwrap_or(&row.task)

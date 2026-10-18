@@ -169,13 +169,16 @@ impl BoardPage {
 
     fn view_switch(&self, cx: &mut Context<Self>) -> AnyElement {
         let t = bachuc_theme::tokens(cx);
+        let z = |value: f32| bachuc_theme::zoomed(value, cx);
+        let (segment, segment_pad, segment_radius) = (z(SEGMENT_HEIGHT), z(12.), z(CONTROL_RADIUS));
+        let (text, line) = (z(13.), z(16.));
         h_flex()
             .id("board-views")
             .role(Role::TabList)
             .aria_label("Board view")
-            .p(px(2.))
-            .gap(px(2.))
-            .rounded(px(TRACK_RADIUS))
+            .p(z(2.))
+            .gap(z(2.))
+            .rounded(z(TRACK_RADIUS))
             .bg(t.surface2)
             .children(VIEWS.into_iter().map(|(view, label)| {
                 let selected = self.view == view;
@@ -187,12 +190,12 @@ impl BoardPage {
                     .focusable()
                     .focus_visible(move |style| style.shadow(crate::card::ring(t.accent, false)))
                     .cursor_pointer()
-                    .h(px(SEGMENT_HEIGHT))
-                    .px(px(12.))
+                    .h(segment)
+                    .px(segment_pad)
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(CONTROL_RADIUS))
+                    .rounded(segment_radius)
                     .border_1()
                     .map(|tab| {
                         if selected {
@@ -208,8 +211,8 @@ impl BoardPage {
                     }))
                     .child(
                         div()
-                            .text_size(px(13.))
-                            .line_height(px(16.))
+                            .text_size(text)
+                            .line_height(line)
                             .font_weight(if selected {
                                 FontWeight::SEMIBOLD
                             } else {
@@ -228,6 +231,8 @@ impl BoardPage {
 
     fn size_control(&self, size: u16, cx: &mut Context<Self>) -> AnyElement {
         let t = bachuc_theme::tokens(cx);
+        let z = |value: f32| bachuc_theme::zoomed(value, cx);
+        let (segment, segment_radius) = (z(SEGMENT_HEIGHT), z(CONTROL_RADIUS));
         let steps = [
             (
                 "Decrease Board UI size".to_string(),
@@ -254,7 +259,7 @@ impl BoardPage {
             .role(Role::Group)
             .aria_label("Board UI size")
             .items_center()
-            .gap(px(2.))
+            .gap(z(2.))
             .children(
                 steps
                     .into_iter()
@@ -273,12 +278,12 @@ impl BoardPage {
                             "Affects only Board"
                         })
                         .flex_none()
-                        .w(px(if middle { 48. } else { 28. }))
-                        .h(px(SEGMENT_HEIGHT))
+                        .w(z(if middle { 48. } else { 28. }))
+                        .h(segment)
                         .flex()
                         .items_center()
                         .justify_center()
-                        .rounded(px(CONTROL_RADIUS))
+                        .rounded(segment_radius)
                         .map(|step| {
                             if disabled {
                                 step.opacity(0.35)
@@ -294,8 +299,8 @@ impl BoardPage {
                         })
                         .child(
                             div()
-                                .text_size(px(if middle { 12.5 } else { 17. }))
-                                .line_height(px(if middle { 17. } else { 20. }))
+                                .text_size(z(if middle { 12.5 } else { 17. }))
+                                .line_height(z(if middle { 17. } else { 20. }))
                                 .font_weight(FontWeight::MEDIUM)
                                 .font_features(tabular())
                                 .text_color(if middle {
@@ -321,15 +326,22 @@ impl Render for BoardPage {
                 .role(Role::Note)
                 .aria_label("Board is off on this host.")
                 .size_full()
-                .p(px(GUTTER))
+                .p(bachuc_theme::zoomed(GUTTER, cx))
                 .bg(t.surface0)
                 .text_color(t.foreground_muted)
                 .child("Board is off on this host.")
                 .into_any_element();
         };
         let size = store.read(cx).size();
-        let scale = board_scale(size);
+        // The Board size multiplies with the whole-UI zoom: every measure below follows both.
+        let scale = board_scale(size) * bachuc_theme::zoom(cx);
         let s = |value: f32| px(value * scale);
+        let (gutter, toolbar_gap) = (
+            bachuc_theme::zoomed(GUTTER, cx),
+            bachuc_theme::zoomed(TOOLBAR_GAP, cx),
+        );
+        let (toolbar_top, toolbar_bottom) =
+            (bachuc_theme::zoomed(12., cx), bachuc_theme::zoomed(6., cx));
         let now = now_ms();
         let body = match self.view {
             BoardView::Runs => self.render_runs(&store, scale, now, cx),
@@ -346,10 +358,10 @@ impl Render for BoardPage {
                     .flex_wrap()
                     .items_center()
                     .justify_between()
-                    .gap(px(TOOLBAR_GAP))
-                    .px(px(GUTTER))
-                    .pt(px(12.))
-                    .pb(px(6.))
+                    .gap(toolbar_gap)
+                    .px(gutter)
+                    .pt(toolbar_top)
+                    .pb(toolbar_bottom)
                     .child(self.view_switch(cx))
                     .child(self.size_control(size, cx)),
             )
@@ -357,9 +369,9 @@ impl Render for BoardPage {
                 v_flex()
                     .flex_1()
                     .min_h_0()
-                    .px(px(GUTTER))
+                    .px(gutter)
                     .pt(s(8.))
-                    .pb(px(GUTTER))
+                    .pb(gutter)
                     .gap(s(28.))
                     .child(body)
                     .when(self.view == BoardView::Runs, |page| {

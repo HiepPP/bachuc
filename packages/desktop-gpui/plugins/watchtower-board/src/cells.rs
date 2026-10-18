@@ -112,11 +112,11 @@ fn phase_state_label(state: PhaseState) -> &'static str {
 fn implement_segments(counts: StatusCounts, cx: &App) -> Div {
     let colors = tokens(cx);
     div()
-        .mt(px(SEGMENT_TOP))
-        .h(px(SEGMENT_HEIGHT))
+        .mt(bachuc_theme::zoomed(SEGMENT_TOP, cx))
+        .h(bachuc_theme::zoomed(SEGMENT_HEIGHT, cx))
         .flex()
         .flex_row()
-        .gap(px(SEGMENT_GAP))
+        .gap(bachuc_theme::zoomed(SEGMENT_GAP, cx))
         .children(segments(counts).into_iter().map(|(kind, value)| {
             let (color, opacity) = match kind {
                 SegmentKind::Done => (colors.status_success, 1.),
@@ -128,7 +128,7 @@ fn implement_segments(counts: StatusCounts, cx: &App) -> Div {
                 .flex_grow(value as f32)
                 .flex_basis(px(0.))
                 .h_full()
-                .rounded(px(SEGMENT_RADIUS))
+                .rounded(bachuc_theme::zoomed(SEGMENT_RADIUS, cx))
                 .bg(color.opacity(opacity))
         }))
 }
@@ -150,7 +150,7 @@ pub(crate) fn lifecycle_stepper(
         .flex_row()
         .border_1()
         .border_color(colors.border)
-        .rounded(px(STEPPER_RADIUS))
+        .rounded(bachuc_theme::zoomed(STEPPER_RADIUS, cx))
         .overflow_hidden()
         .line_height(relative(LINE_HEIGHT))
         .children(phases.iter().enumerate().map(|(index, phase)| {
@@ -171,21 +171,30 @@ pub(crate) fn lifecycle_stepper(
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .px(px(if compact {
-                    STEP_PADDING_X_COMPACT
-                } else {
-                    STEP_PADDING_X
-                }))
-                .pt(px(if compact {
-                    STEP_PADDING_TOP_COMPACT
-                } else {
-                    STEP_PADDING_TOP
-                }))
-                .pb(px(if compact {
-                    STEP_PADDING_BOTTOM_COMPACT
-                } else {
-                    STEP_PADDING_BOTTOM
-                }))
+                .px(bachuc_theme::zoomed(
+                    if compact {
+                        STEP_PADDING_X_COMPACT
+                    } else {
+                        STEP_PADDING_X
+                    },
+                    cx,
+                ))
+                .pt(bachuc_theme::zoomed(
+                    if compact {
+                        STEP_PADDING_TOP_COMPACT
+                    } else {
+                        STEP_PADDING_TOP
+                    },
+                    cx,
+                ))
+                .pb(bachuc_theme::zoomed(
+                    if compact {
+                        STEP_PADDING_BOTTOM_COMPACT
+                    } else {
+                        STEP_PADDING_BOTTOM
+                    },
+                    cx,
+                ))
                 .when(index > 0, |this| {
                     this.border_l_1().border_color(colors.border)
                 })
@@ -204,7 +213,7 @@ pub(crate) fn lifecycle_stepper(
                             .left_0()
                             .right_0()
                             .bottom_0()
-                            .h(px(STEP_BAR))
+                            .h(bachuc_theme::zoomed(STEP_BAR, cx))
                             .bg(colors.accent),
                     )
                 })
@@ -229,14 +238,14 @@ pub(crate) fn lifecycle_stepper(
                                 .flex()
                                 .flex_row()
                                 .items_center()
-                                .gap(px(ROW_GAP))
+                                .gap(bachuc_theme::zoomed(ROW_GAP, cx))
                                 .child(
                                     icon(if phase.state == PhaseState::Done {
                                         IconName::CircleCheck
                                     } else {
                                         phase_icon(phase.name)
                                     })
-                                    .with_size(px(STEP_ICON))
+                                    .with_size(bachuc_theme::zoomed(STEP_ICON, cx))
                                     .text_color(color),
                                 )
                                 .child(
@@ -249,7 +258,7 @@ pub(crate) fn lifecycle_stepper(
                         )
                         .child(
                             div()
-                                .pt(px(STEP_META_GAP))
+                                .pt(bachuc_theme::zoomed(STEP_META_GAP, cx))
                                 .truncate()
                                 .text_size(ui_font_size(STEP_META, cx))
                                 .text_color(colors.foreground_muted)
@@ -281,8 +290,8 @@ fn list_row(first: bool, cx: &App) -> Div {
         .flex()
         .flex_row()
         .items_start()
-        .gap(px(ROW_GAP))
-        .py(px(ROW_PADDING))
+        .gap(bachuc_theme::zoomed(ROW_GAP, cx))
+        .py(bachuc_theme::zoomed(ROW_PADDING, cx))
         .when(!first, |this| {
             this.border_t_1().border_color(tokens(cx).border)
         })
@@ -309,11 +318,11 @@ pub(crate) fn manual_checks_cell(
             list_row(index == 0, cx)
                 .child(
                     div()
-                        .mt(px(ICON_TOP))
+                        .mt(bachuc_theme::zoomed(ICON_TOP, cx))
                         .flex_shrink_0()
-                        .size(px(CHECKBOX))
-                        .rounded(px(CHECKBOX_RADIUS))
-                        .border(px(CHECKBOX_BORDER))
+                        .size(bachuc_theme::zoomed(CHECKBOX, cx))
+                        .rounded(bachuc_theme::zoomed(CHECKBOX_RADIUS, cx))
+                        .border(bachuc_theme::zoomed(CHECKBOX_BORDER, cx))
                         .border_color(colors.foreground_muted.opacity(CHECKBOX_OPACITY)),
                 )
                 .child(
@@ -326,14 +335,14 @@ pub(crate) fn manual_checks_cell(
                             div()
                                 .line_clamp(2)
                                 .text_size(ui_font_size(ROW_TEXT, cx))
-                                .line_height(px(ROW_LINE))
+                                .line_height(bachuc_theme::zoomed(ROW_LINE, cx))
                                 .text_color(colors.foreground)
                                 .child(check.text.clone()),
                         )
                         .when(!check.tasks.is_empty(), |this| {
                             this.child(
                                 div()
-                                    .pt(px(META_GAP))
+                                    .pt(bachuc_theme::zoomed(META_GAP, cx))
                                     .text_size(ui_font_size(META_TEXT, cx))
                                     .text_color(colors.foreground_muted)
                                     .child(check.tasks.join(", ")),
@@ -367,9 +376,13 @@ fn history_row(
     let content = list_row(first, cx)
         .child(
             div()
-                .mt(px(ICON_TOP))
+                .mt(bachuc_theme::zoomed(ICON_TOP, cx))
                 .flex_shrink_0()
-                .child(icon(glyph).with_size(px(ROW_ICON)).text_color(glyph_color)),
+                .child(
+                    icon(glyph)
+                        .with_size(bachuc_theme::zoomed(ROW_ICON, cx))
+                        .text_color(glyph_color),
+                ),
         )
         .child(
             div()
@@ -386,7 +399,7 @@ fn history_row(
                 )
                 .child(
                     div()
-                        .pt(px(META_GAP))
+                        .pt(bachuc_theme::zoomed(META_GAP, cx))
                         .truncate()
                         .text_size(ui_font_size(META_TEXT, cx))
                         .text_color(colors.foreground_muted)
@@ -519,9 +532,9 @@ pub(crate) fn pace_line(items: &[PaceItem], cx: &App) -> Option<AnyElement> {
             .flex()
             .flex_row()
             .flex_wrap()
-            .gap_x(px(PACE_COLUMN_GAP))
-            .gap_y(px(PACE_ROW_GAP))
-            .pb(px(PACE_BOTTOM))
+            .gap_x(bachuc_theme::zoomed(PACE_COLUMN_GAP, cx))
+            .gap_y(bachuc_theme::zoomed(PACE_ROW_GAP, cx))
+            .pb(bachuc_theme::zoomed(PACE_BOTTOM, cx))
             .children(items.iter().map(|item| {
                 div()
                     .flex()
@@ -536,7 +549,7 @@ pub(crate) fn pace_line(items: &[PaceItem], cx: &App) -> Option<AnyElement> {
                     )
                     .child(
                         div()
-                            .pt(px(META_GAP))
+                            .pt(bachuc_theme::zoomed(META_GAP, cx))
                             .text_size(ui_font_size(META_TEXT, cx))
                             .text_color(colors.foreground_muted)
                             .child(item.label),
@@ -560,9 +573,9 @@ pub(crate) fn outline_button(
         .role(Role::Button)
         .aria_label(aria)
         .flex_shrink_0()
-        .px(px(BUTTON_PADDING_X))
-        .py(px(BUTTON_PADDING_Y))
-        .rounded(px(BUTTON_RADIUS))
+        .px(bachuc_theme::zoomed(BUTTON_PADDING_X, cx))
+        .py(bachuc_theme::zoomed(BUTTON_PADDING_Y, cx))
+        .rounded(bachuc_theme::zoomed(BUTTON_RADIUS, cx))
         .border_1()
         .border_color(colors.border)
         .cursor_pointer()
@@ -586,15 +599,15 @@ pub(crate) fn error_box(message: &str, on_retry: OnClick, cx: &App) -> AnyElemen
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(ERROR_GAP))
-        .p(px(ERROR_PADDING))
-        .rounded(px(ERROR_RADIUS))
+        .gap(bachuc_theme::zoomed(ERROR_GAP, cx))
+        .p(bachuc_theme::zoomed(ERROR_PADDING, cx))
+        .rounded(bachuc_theme::zoomed(ERROR_RADIUS, cx))
         .border_1()
         .border_color(colors.status_danger)
         .line_height(relative(LINE_HEIGHT))
         .child(
             icon(IconName::CircleAlert)
-                .with_size(px(ERROR_ICON))
+                .with_size(bachuc_theme::zoomed(ERROR_ICON, cx))
                 .text_color(colors.status_danger),
         )
         .child(
@@ -620,17 +633,17 @@ fn placeholder(height: f32, cx: &App) -> Div {
     div()
         .flex_1()
         .min_w_0()
-        .h(px(height))
-        .rounded(px(PLACEHOLDER_RADIUS))
+        .h(bachuc_theme::zoomed(height, cx))
+        .rounded(bachuc_theme::zoomed(PLACEHOLDER_RADIUS, cx))
         .border_1()
         .border_color(colors.border)
-        .p(px(PLACEHOLDER_PADDING))
+        .p(bachuc_theme::zoomed(PLACEHOLDER_PADDING, cx))
         .children([0.5, 0.8, 0.65].map(|fraction| {
             div()
                 .w(relative(fraction))
-                .h(px(BAR_HEIGHT))
-                .mb(px(BAR_GAP))
-                .rounded(px(BAR_RADIUS))
+                .h(bachuc_theme::zoomed(BAR_HEIGHT, cx))
+                .mb(bachuc_theme::zoomed(BAR_GAP, cx))
+                .rounded(bachuc_theme::zoomed(BAR_RADIUS, cx))
                 .bg(colors.foreground_muted.opacity(BAR_OPACITY))
         }))
 }
@@ -641,7 +654,7 @@ pub(crate) fn skeleton(cx: &App) -> AnyElement {
         div()
             .flex()
             .flex_row()
-            .gap(px(GAP))
+            .gap(bachuc_theme::zoomed(GAP, cx))
             .child(placeholder(left, cx))
             .child(placeholder(right, cx))
     };
@@ -651,7 +664,7 @@ pub(crate) fn skeleton(cx: &App) -> AnyElement {
         .aria_label("Loading Watchtower overview")
         .flex()
         .flex_col()
-        .gap(px(GAP))
+        .gap(bachuc_theme::zoomed(GAP, cx))
         .child(div().flex().child(placeholder(58., cx)))
         .child(row(240., 240., cx))
         .child(row(200., 200., cx))
@@ -666,27 +679,27 @@ pub(crate) fn no_plan(message: &str, cx: &App) -> AnyElement {
         .id("wt-no-plan")
         .role(Role::Status)
         .aria_label(SharedString::from(format!("No plan yet. {message}")))
-        .py(px(NO_PLAN_PADDING))
+        .py(bachuc_theme::zoomed(NO_PLAN_PADDING, cx))
         .flex()
         .flex_col()
         .line_height(relative(LINE_HEIGHT))
         .child(
             div()
-                .size(px(NO_PLAN_BOX))
-                .rounded(px(NO_PLAN_RADIUS))
+                .size(bachuc_theme::zoomed(NO_PLAN_BOX, cx))
+                .rounded(bachuc_theme::zoomed(NO_PLAN_RADIUS, cx))
                 .flex()
                 .items_center()
                 .justify_center()
                 .bg(colors.surface2)
                 .child(
                     icon(IconName::ListChecks)
-                        .with_size(px(NO_PLAN_ICON))
+                        .with_size(bachuc_theme::zoomed(NO_PLAN_ICON, cx))
                         .text_color(colors.foreground_muted),
                 ),
         )
         .child(
             div()
-                .pt(px(NO_PLAN_TITLE_GAP))
+                .pt(bachuc_theme::zoomed(NO_PLAN_TITLE_GAP, cx))
                 .text_size(ui_font_size(NO_PLAN_TITLE, cx))
                 .font_weight(FontWeight(WEIGHT_SEMIBOLD))
                 .text_color(colors.foreground)
@@ -694,8 +707,8 @@ pub(crate) fn no_plan(message: &str, cx: &App) -> AnyElement {
         )
         .child(
             div()
-                .pt(px(NO_PLAN_TEXT_GAP))
-                .max_w(px(NO_PLAN_TEXT_WIDTH))
+                .pt(bachuc_theme::zoomed(NO_PLAN_TEXT_GAP, cx))
+                .max_w(bachuc_theme::zoomed(NO_PLAN_TEXT_WIDTH, cx))
                 .text_size(ui_font_size(NO_PLAN_TEXT, cx))
                 .text_color(colors.foreground_muted)
                 .child(message.to_string()),

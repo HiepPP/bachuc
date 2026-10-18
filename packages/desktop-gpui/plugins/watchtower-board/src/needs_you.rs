@@ -131,7 +131,7 @@ fn action_button(
         .id(SharedString::from(format!("wt-needs-{label}-{subject}")))
         .role(Role::Button)
         .aria_label(SharedString::from(format!("{label} {subject}")))
-        .py(px(BUTTON_PADDING))
+        .py(bachuc_theme::zoomed(BUTTON_PADDING, cx))
         .text_size(ui_font_size(FONT_SM, cx))
         .font_weight(FontWeight(if tone == Tone::Primary {
             WEIGHT_SEMIBOLD
@@ -269,9 +269,9 @@ fn answer_form(
     let subject = action_subject(row).to_string();
     let field = state.input.as_ref().map(|input| {
         div()
-            .px(px(FIELD_PADDING_X))
-            .py(px(FIELD_PADDING_Y))
-            .rounded(px(FIELD_RADIUS))
+            .px(bachuc_theme::zoomed(FIELD_PADDING_X, cx))
+            .py(bachuc_theme::zoomed(FIELD_PADDING_Y, cx))
+            .rounded(bachuc_theme::zoomed(FIELD_RADIUS, cx))
             .border_1()
             .border_color(colors.border)
             .child(
@@ -286,16 +286,16 @@ fn answer_form(
             )
     });
     div()
-        .mt(px(FORM_GAP))
+        .mt(bachuc_theme::zoomed(FORM_GAP, cx))
         .flex()
         .flex_col()
-        .gap(px(FORM_GAP))
+        .gap(bachuc_theme::zoomed(FORM_GAP, cx))
         .children(field)
         .child(
             div()
                 .flex()
                 .flex_row()
-                .gap(px(BUTTON_COLUMN_GAP))
+                .gap(bachuc_theme::zoomed(BUTTON_COLUMN_GAP, cx))
                 .child(action_button(
                     "Send",
                     &subject,
@@ -342,9 +342,9 @@ pub(crate) fn needs_row(
                 ..HighlightStyle::default()
             };
             div()
-                .pt(px(DEFAULT_GAP))
+                .pt(bachuc_theme::zoomed(DEFAULT_GAP, cx))
                 .text_size(ui_font_size(DEFAULT_TEXT, cx))
-                .line_height(px(DEFAULT_LINE))
+                .line_height(bachuc_theme::zoomed(DEFAULT_LINE, cx))
                 .text_color(colors.foreground)
                 .child(StyledText::new(text).with_highlights([(0.."Default:".len(), bold)]))
         });
@@ -352,12 +352,12 @@ pub(crate) fn needs_row(
         answer_form(index, row, state, target, cx)
     } else {
         div()
-            .mt(px(BUTTONS_TOP))
+            .mt(bachuc_theme::zoomed(BUTTONS_TOP, cx))
             .flex()
             .flex_row()
             .flex_wrap()
-            .gap_x(px(BUTTON_COLUMN_GAP))
-            .gap_y(px(BUTTON_ROW_GAP))
+            .gap_x(bachuc_theme::zoomed(BUTTON_COLUMN_GAP, cx))
+            .gap_y(bachuc_theme::zoomed(BUTTON_ROW_GAP, cx))
             .children(buttons(index, row, state, target, cx))
             .into_any_element()
     };
@@ -366,16 +366,20 @@ pub(crate) fn needs_row(
         .flex()
         .flex_row()
         .items_start()
-        .gap(px(ROW_GAP))
-        .py(px(ROW_PADDING))
+        .gap(bachuc_theme::zoomed(ROW_GAP, cx))
+        .py(bachuc_theme::zoomed(ROW_PADDING, cx))
         .when(index > 0, |this| {
             this.border_t_1().border_color(colors.border)
         })
         .child(
             div()
-                .mt(px(ICON_TOP))
+                .mt(bachuc_theme::zoomed(ICON_TOP, cx))
                 .flex_shrink_0()
-                .child(icon(glyph).with_size(px(ROW_ICON)).text_color(glyph_color)),
+                .child(
+                    icon(glyph)
+                        .with_size(bachuc_theme::zoomed(ROW_ICON, cx))
+                        .text_color(glyph_color),
+                ),
         )
         .child(
             div()
@@ -400,7 +404,7 @@ pub(crate) fn needs_row(
                             div()
                                 .when(!open, |this| this.line_clamp(2))
                                 .text_size(ui_font_size(TITLE_TEXT, cx))
-                                .line_height(px(TITLE_LINE))
+                                .line_height(bachuc_theme::zoomed(TITLE_LINE, cx))
                                 .text_color(colors.foreground)
                                 .child(row.title.clone()),
                         )
@@ -408,7 +412,7 @@ pub(crate) fn needs_row(
                 )
                 .child(
                     div()
-                        .pt(px(META_GAP))
+                        .pt(bachuc_theme::zoomed(META_GAP, cx))
                         .truncate()
                         .text_size(ui_font_size(META_TEXT, cx))
                         .text_color(colors.foreground_muted)
@@ -454,7 +458,7 @@ fn needs_note(
                     "Open {name}, the thread that receives these actions"
                 )))
                 .self_start()
-                .pb(px(NOTE_GAP))
+                .pb(bachuc_theme::zoomed(NOTE_GAP, cx))
                 .cursor_pointer()
                 .active(|style| style.opacity(0.6))
                 .on_click(listener(NeedsAction::OpenAgent(id.clone()), cx))
@@ -467,7 +471,7 @@ fn needs_note(
     let (text, warning) = agent_note(target);
     Some(
         div()
-            .pb(px(NOTE_GAP))
+            .pb(bachuc_theme::zoomed(NOTE_GAP, cx))
             .truncate()
             .text_size(ui_font_size(NOTE_TEXT, cx))
             .text_color(if warning {

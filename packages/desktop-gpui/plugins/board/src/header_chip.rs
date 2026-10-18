@@ -59,6 +59,7 @@ impl Render for HeaderChip {
             .upgrade()
             .and_then(|store| store.read(cx).hues().get(&self.input.project_id).copied());
         let colors = chip_colors(hue, &t);
+        let z = |value: f32| bachuc_theme::zoomed(value, cx);
         let mark = mark_size(FONT_SIZE);
         let name = self.input.project_display_name.clone();
         let request = chip_request(&self.input);
@@ -77,27 +78,27 @@ impl Render for HeaderChip {
             .child(
                 h_flex()
                     .items_center()
-                    .gap(px(6.))
+                    .gap(z(6.))
                     .flex_shrink(1.)
                     .min_w_0()
-                    .py(px(1.))
-                    .pl(px(4.))
-                    .pr(px(8.))
-                    .rounded(px(6.))
+                    .py(z(1.))
+                    .pl(z(4.))
+                    .pr(z(8.))
+                    .rounded(z(6.))
                     .border_1()
                     .border_color(colors.border)
                     .bg(colors.background)
                     .child(
                         div()
                             .flex_none()
-                            .size(px(mark))
-                            .rounded(px(mark * 0.35))
+                            .size(z(mark))
+                            .rounded(z(mark * 0.35))
                             .bg(colors.mark_background)
                             .flex()
                             .items_center()
                             .justify_center()
-                            .text_size(px(FONT_SIZE * 0.75))
-                            .line_height(px(mark))
+                            .text_size(z(FONT_SIZE * 0.75))
+                            .line_height(z(mark))
                             .font_weight(FontWeight::BOLD)
                             .text_color(colors.mark_text)
                             .child(project_initial(&name)),
@@ -107,7 +108,7 @@ impl Render for HeaderChip {
                             .min_w_0()
                             .flex_shrink(1.)
                             .truncate()
-                            .text_size(px(FONT_SIZE))
+                            .text_size(z(FONT_SIZE))
                             .font_weight(FontWeight::BOLD)
                             .text_color(t.foreground_muted)
                             .child(name),

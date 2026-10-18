@@ -634,12 +634,15 @@ impl WatchtowerPage {
             PageItem::Body(item) => render_body(self, item, cx),
         };
         item_frame()
-            .px(px(pad))
+            .px(bachuc_theme::zoomed(pad, cx))
             .when(index == 0, |this| {
-                this.pt(px(if stacked { pad } else { MAIN_PADDING_TOP }))
+                this.pt(bachuc_theme::zoomed(
+                    if stacked { pad } else { MAIN_PADDING_TOP },
+                    cx,
+                ))
             })
-            .when(gap, |this| this.pt(px(GAP)))
-            .when(last, |this| this.pb(px(pad)))
+            .when(gap, |this| this.pt(bachuc_theme::zoomed(GAP, cx)))
+            .when(last, |this| this.pb(bachuc_theme::zoomed(pad, cx)))
             .child(body)
             .into_any_element()
     }
@@ -655,10 +658,14 @@ impl WatchtowerPage {
         };
         let last = index + 1 == self.rail_items.len();
         item_frame()
-            .px(px(RAIL_PADDING))
-            .when(index == 0, |this| this.pt(px(RAIL_PADDING)))
-            .when(index > 0 && starts_card(&item), |this| this.pt(px(GAP)))
-            .when(last, |this| this.pb(px(RAIL_PADDING)))
+            .px(bachuc_theme::zoomed(RAIL_PADDING, cx))
+            .when(index == 0, |this| {
+                this.pt(bachuc_theme::zoomed(RAIL_PADDING, cx))
+            })
+            .when(index > 0 && starts_card(&item), |this| {
+                this.pt(bachuc_theme::zoomed(GAP, cx))
+            })
+            .when(last, |this| this.pb(bachuc_theme::zoomed(RAIL_PADDING, cx)))
             .child(self.rail.render_item(&item, cx))
             .into_any_element()
     }
@@ -671,8 +678,8 @@ impl WatchtowerPage {
             .flex()
             .flex_row()
             .items_start()
-            .gap(px(SPACE_4))
-            .mb(px(HEADER_GAP))
+            .gap(bachuc_theme::zoomed(SPACE_4, cx))
+            .mb(bachuc_theme::zoomed(HEADER_GAP, cx))
             .child(
                 div()
                     .flex_1()
@@ -692,7 +699,7 @@ impl WatchtowerPage {
                     )
                     .child(
                         div()
-                            .mt(px(SUBTITLE_GAP))
+                            .mt(bachuc_theme::zoomed(SUBTITLE_GAP, cx))
                             .truncate()
                             .text_size(ui_font_size(FONT_SM, cx))
                             .text_color(colors.foreground_muted)
@@ -704,11 +711,11 @@ impl WatchtowerPage {
                     .id("wt-page-refresh")
                     .role(Role::Button)
                     .aria_label("Refresh Watchtower overview")
-                    .size(px(REFRESH_SIZE))
+                    .size(bachuc_theme::zoomed(REFRESH_SIZE, cx))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(REFRESH_RADIUS))
+                    .rounded(bachuc_theme::zoomed(REFRESH_RADIUS, cx))
                     .when(fetching, |this| this.opacity(0.5))
                     .when(!fetching, |this| {
                         this.cursor_pointer()
@@ -716,7 +723,7 @@ impl WatchtowerPage {
                     })
                     .child(
                         icon(IconName::RefreshCw)
-                            .with_size(px(REFRESH_ICON))
+                            .with_size(bachuc_theme::zoomed(REFRESH_ICON, cx))
                             .text_color(colors.foreground_muted),
                     ),
             )
@@ -743,7 +750,8 @@ impl Render for WatchtowerPage {
         let width = self.width;
         let measure = canvas(
             move |bounds, _, cx| {
-                let next = f32::from(bounds.size.width);
+                // The breakpoints are in unzoomed px: a zoomed page has proportionally fewer.
+                let next = f32::from(bounds.size.width) / bachuc_theme::zoom(cx);
                 if (next - width).abs() >= 0.5 {
                     cx.defer(move |cx| {
                         weak.update(cx, |page, cx| page.set_width(next, cx)).ok();
@@ -770,7 +778,7 @@ impl Render for WatchtowerPage {
                     .id("wt-page-message")
                     .role(Role::Status)
                     .aria_label(*message)
-                    .p(px(self.layout.padding()))
+                    .p(bachuc_theme::zoomed(self.layout.padding(), cx))
                     .text_size(ui_font_size(FONT_BASE, cx))
                     .text_color(colors.foreground_muted)
                     .child(*message),
@@ -790,7 +798,7 @@ impl Render for WatchtowerPage {
                                 .id("wt-rail")
                                 .role(Role::Complementary)
                                 .aria_label("Board")
-                                .w(px(RAIL_WIDTH))
+                                .w(bachuc_theme::zoomed(RAIL_WIDTH, cx))
                                 .flex_shrink_0()
                                 .h_full()
                                 .border_r_1()

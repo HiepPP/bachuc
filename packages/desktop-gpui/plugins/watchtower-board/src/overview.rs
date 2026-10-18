@@ -86,17 +86,17 @@ fn column(
         .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(GAP))
+        .gap(bachuc_theme::zoomed(GAP, cx))
         .children(cells)
 }
 
-fn grid_row(columns: Vec<Div>) -> AnyElement {
+fn grid_row(columns: Vec<Div>, cx: &App) -> AnyElement {
     div()
         .w_full()
         .flex()
         .flex_row()
         .items_stretch()
-        .gap(px(GAP))
+        .gap(bachuc_theme::zoomed(GAP, cx))
         .children(columns)
         .into_any_element()
 }
@@ -128,7 +128,7 @@ pub(crate) fn render_body(
         BodyItem::Row3 => {
             let columns = [CellKind::Needs, CellKind::Decisions, CellKind::Archived]
                 .map(|kind| column(page, &[kind], overview, derived, cx));
-            grid_row(columns.into())
+            grid_row(columns.into(), cx)
         }
         BodyItem::Stepper => lifecycle_stepper(
             &derived.phases,
@@ -190,7 +190,7 @@ pub(crate) fn render_body(
                 column(page, left, overview, derived, cx),
                 column(page, right, overview, derived, cx),
             ];
-            grid_row(columns)
+            grid_row(columns, cx)
         }
         BodyItem::Cell(kind) => cell(page, *kind, overview, derived, cx),
         BodyItem::NeedsTop => needs_top(rows, &page.target, Slice::Top, cx).into_any_element(),
