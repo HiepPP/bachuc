@@ -15,7 +15,7 @@ use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, HEADER_HEIGHT, ICON_SM, RADIUS_LG, RADIUS_MD, SETTINGS_SIDEBAR_WIDTH,
     SPACE_1, SPACE_2, SPACE_3, SPACE_6, TRAFFIC_LIGHT_WIDTH, WEIGHT_MEDIUM,
 };
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size, zoomed};
+use bachuc_theme::{ShadowSize, popup_offset, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -430,7 +430,7 @@ impl Shell {
             .child(button)
             .when_some(menu, |slot, menu| {
                 slot.child(
-                    div().absolute().top(px(28. + SPACE_1)).right_0().child(
+                    div().absolute().top(px(popup_offset(28.))).right_0().child(
                         deferred(
                             anchored()
                                 .anchor(Anchor::TopRight)
@@ -1332,7 +1332,7 @@ fn header_popover(
     let t = tokens(cx);
     div()
         .absolute()
-        .top(px(28. + SPACE_1))
+        .top(px(popup_offset(28.)))
         .right_0()
         .child(
             deferred(

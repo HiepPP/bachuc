@@ -61,8 +61,8 @@ use bachuc_plugin_host::{
     SendKey, SlashInput, StopButtonProps, decode_attachment_search,
 };
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, RADIUS_LG, RADIUS_MD, SPACE_1,
-    SPACE_2, SPACE_3, SPACE_4,
+    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, POPUP_GAP, RADIUS_LG, RADIUS_MD,
+    SPACE_1, SPACE_2, SPACE_3, SPACE_4,
 };
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
 use gpui_kit::component::input::{
@@ -2718,6 +2718,7 @@ impl Composer {
         let weak = cx.weak_entity();
         Popover::new("composer-attach-menu")
             .anchor(Anchor::BottomLeft)
+            .offset(px(POPUP_GAP))
             .p_1()
             .trigger(AttachTrigger { open: false })
             .content(move |_, _, cx| {

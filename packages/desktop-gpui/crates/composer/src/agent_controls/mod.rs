@@ -10,7 +10,9 @@ pub mod layout;
 use crate::draft::{ModelGroup, model_key};
 use bachuc_client::{AgentFeature, AgentFeatureKind, ThinkingControls};
 use bachuc_icons::{IconName, icon, provider_fallback_icon, provider_logo};
-use bachuc_theme::metrics::{FONT_BASE, FONT_SM, ICON_SM, RADIUS_2XL, RADIUS_MD, SPACE_2};
+use bachuc_theme::metrics::{
+    FONT_BASE, FONT_SM, ICON_SM, POPUP_GAP, RADIUS_2XL, RADIUS_MD, SPACE_2,
+};
 use bachuc_theme::{tokens, ui_font_size};
 use control::{GLYPH, Glyph, PillTrigger, TriggerLook};
 use features::{
@@ -117,6 +119,7 @@ pub fn choice_pill(
     let on_pick: PickFn = Rc::new(on_pick);
     Popover::new(id)
         .anchor(Anchor::BottomLeft)
+        .offset(px(POPUP_GAP))
         .p_1()
         .trigger(trigger)
         .content(move |_, _, cx| {
@@ -227,6 +230,7 @@ fn features_menu(features: &[AgentFeature], handlers: &FeatureHandlers) -> AnyEl
     let handlers = handlers.clone();
     Popover::new("agent-controls-features")
         .anchor(Anchor::BottomLeft)
+        .offset(px(POPUP_GAP))
         .p_1()
         .trigger(PillTrigger {
             id: "agent-controls-features-trigger".into(),
@@ -369,6 +373,7 @@ fn grouped_model_pill(
     let groups = Rc::new(groups);
     Popover::new("composer-model")
         .anchor(Anchor::BottomLeft)
+        .offset(px(POPUP_GAP))
         .p_1()
         .trigger(trigger)
         .content(move |_, _, cx| {

@@ -17,7 +17,9 @@ use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_LG, ICON_SM, ICON_XS, RADIUS_BASE, RADIUS_LG, RADIUS_MD, RADIUS_SM,
     SPACE_0_5, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
-use bachuc_theme::{ShadowSize, Tokens, mono_font_family, shadow, tokens, ui_font_size};
+use bachuc_theme::{
+    ShadowSize, Tokens, mono_font_family, popup_offset, shadow, tokens, ui_font_size,
+};
 use gpui_kit::component::text::TextView;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -42,6 +44,8 @@ const CHECK_ROW_HEIGHT: f32 = 32.;
 const ENTRY_HEADER_MIN_HEIGHT: f32 = 36.;
 const AVATAR_SIZE: f32 = 20.;
 const KEBAB_SLOT: f32 = 22.;
+/// The kebab button: the icon with 2 px of padding on each side.
+const KEBAB_TRIGGER_HEIGHT: f32 = ICON_SM + 4.;
 const MENU_WIDTH: f32 = 200.;
 const MENU_ITEM_HEIGHT: f32 = 28.;
 const TEXT_LINE_FACTOR: f32 = 1.4;
@@ -1362,33 +1366,37 @@ impl PullRequestView {
                     move |this, cx| this.open_url(url.clone(), cx),
                 ));
             }
-            div().absolute().top(px(KEBAB_SLOT)).right_0().child(
-                deferred(
-                    anchored()
-                        .anchor(Anchor::TopRight)
-                        .snap_to_window_with_margin(px(8.))
-                        .child(
-                            v_flex()
-                                .id(("pr-view-item-menu-list", index))
-                                .role(Role::Menu)
-                                .aria_label("Comment actions")
-                                .w(px(MENU_WIDTH))
-                                .py(px(SPACE_1))
-                                .bg(colors.popover)
-                                .border_1()
-                                .border_color(colors.border_accent)
-                                .rounded(px(RADIUS_LG))
-                                .shadow(vec![shadow(ShadowSize::Md, cx)])
-                                .occlude()
-                                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                                    this.menu_open = None;
-                                    cx.notify();
-                                }))
-                                .children(items),
-                        ),
+            div()
+                .absolute()
+                .top(px(popup_offset(KEBAB_TRIGGER_HEIGHT)))
+                .right_0()
+                .child(
+                    deferred(
+                        anchored()
+                            .anchor(Anchor::TopRight)
+                            .snap_to_window_with_margin(px(8.))
+                            .child(
+                                v_flex()
+                                    .id(("pr-view-item-menu-list", index))
+                                    .role(Role::Menu)
+                                    .aria_label("Comment actions")
+                                    .w(px(MENU_WIDTH))
+                                    .py(px(SPACE_1))
+                                    .bg(colors.popover)
+                                    .border_1()
+                                    .border_color(colors.border_accent)
+                                    .rounded(px(RADIUS_LG))
+                                    .shadow(vec![shadow(ShadowSize::Md, cx)])
+                                    .occlude()
+                                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                                        this.menu_open = None;
+                                        cx.notify();
+                                    }))
+                                    .children(items),
+                            ),
+                    )
+                    .with_priority(gpui_kit::base::POPUP_PRIORITY),
                 )
-                .with_priority(gpui_kit::base::POPUP_PRIORITY),
-            )
         });
         div()
             .relative()

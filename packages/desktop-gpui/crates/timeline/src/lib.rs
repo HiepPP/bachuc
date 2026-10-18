@@ -39,8 +39,8 @@ use bachuc_theme::metrics::{
     SPACE_3, SPACE_4, SPACE_6, SPACE_8,
 };
 use bachuc_theme::{
-    ShadowSize, TurnLabel, code_font_size, content_font_size, mono_font_family, scheme, shadow,
-    syntax_colors, tokens, turn_label_colors, ui_font_size,
+    ShadowSize, TurnLabel, code_font_size, content_font_size, mono_font_family, popup_offset,
+    scheme, shadow, syntax_colors, tokens, turn_label_colors, ui_font_size,
 };
 use gpui_kit::base::text::{CodeBlock, TextView as RichText, TextViewStyle as RichTextStyle};
 use gpui_kit::component::text::{TextView, TextViewState};
@@ -150,6 +150,8 @@ const FOOTER_HEIGHT: f32 = 24.;
 /// The fork menu of `assistant-fork-menu.tsx`: `minWidth={220}`, with the item size of the
 /// other GPUI dropdowns.
 const FORK_MENU_WIDTH: f32 = 220.;
+/// The fork button: the icon with `SPACE_1` of padding on each side.
+const FORK_TRIGGER_HEIGHT: f32 = ICON_SM + SPACE_1 * 2.;
 const MENU_ITEM_HEIGHT: f32 = 28.;
 const MENU_LINE_HEIGHT: f32 = 1.5;
 /// `theme.opacity[50]`, the fork trigger while a fork runs.
@@ -1763,32 +1765,36 @@ impl TimelineView {
                             .child(label),
                     )
             });
-            div().absolute().top(px(FOOTER_HEIGHT)).left_0().child(
-                deferred(
-                    anchored()
-                        .anchor(Anchor::TopLeft)
-                        .snap_to_window_with_margin(px(8.))
-                        .child(
-                            v_flex()
-                                .id(("fork-menu", key))
-                                .role(Role::Menu)
-                                .aria_label(FORK_MENU_LABEL)
-                                .min_w(px(FORK_MENU_WIDTH))
-                                .py(px(SPACE_1))
-                                .bg(t.popover)
-                                .border_1()
-                                .border_color(t.border_accent)
-                                .rounded(px(RADIUS_LG))
-                                .shadow(vec![shadow(ShadowSize::Md, cx)])
-                                .occlude()
-                                .on_mouse_down_out(
-                                    cx.listener(|this, _, _, cx| this.dismiss_fork_menu(cx)),
-                                )
-                                .children(items),
-                        ),
+            div()
+                .absolute()
+                .top(px(popup_offset(FORK_TRIGGER_HEIGHT)))
+                .left_0()
+                .child(
+                    deferred(
+                        anchored()
+                            .anchor(Anchor::TopLeft)
+                            .snap_to_window_with_margin(px(8.))
+                            .child(
+                                v_flex()
+                                    .id(("fork-menu", key))
+                                    .role(Role::Menu)
+                                    .aria_label(FORK_MENU_LABEL)
+                                    .min_w(px(FORK_MENU_WIDTH))
+                                    .py(px(SPACE_1))
+                                    .bg(t.popover)
+                                    .border_1()
+                                    .border_color(t.border_accent)
+                                    .rounded(px(RADIUS_LG))
+                                    .shadow(vec![shadow(ShadowSize::Md, cx)])
+                                    .occlude()
+                                    .on_mouse_down_out(
+                                        cx.listener(|this, _, _, cx| this.dismiss_fork_menu(cx)),
+                                    )
+                                    .children(items),
+                            ),
+                    )
+                    .with_priority(gpui_kit::base::POPUP_PRIORITY),
                 )
-                .with_priority(gpui_kit::base::POPUP_PRIORITY),
-            )
         });
         div()
             .relative()

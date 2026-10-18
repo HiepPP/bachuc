@@ -17,6 +17,10 @@ pub const SPACE_4: f32 = 16.;
 pub const SPACE_6: f32 = 24.;
 pub const SPACE_8: f32 = 32.;
 
+/// The gap between a trigger and its open menu or popover, like the Electron menus' 4 px
+/// `sideOffset`. Every dropdown uses this one value.
+pub const POPUP_GAP: f32 = SPACE_1;
+
 pub const RADIUS_SM: f32 = 2.;
 pub const RADIUS_BASE: f32 = 4.;
 pub const RADIUS_MD: f32 = 6.;

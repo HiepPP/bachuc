@@ -21,7 +21,7 @@ use bachuc_theme::metrics::{
     CONTROL_XS, FONT_BASE, ICON_SM, ICON_XS, RADIUS_MD, RADIUS_SM, SPACE_0_5, SPACE_1,
     TAB_BAR_HEIGHT,
 };
-use bachuc_theme::{TabClosePosition, Tokens, tokens, ui_font_size, zoomed};
+use bachuc_theme::{TabClosePosition, Tokens, popup_offset, tokens, ui_font_size, zoomed};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Selectable, Sizable as _, h_flex, v_flex};
@@ -1326,7 +1326,7 @@ impl Workspace {
                 slot.child(
                     div()
                         .absolute()
-                        .top(px(TOOLBAR_BUTTON + SPACE_1))
+                        .top(px(popup_offset(TOOLBAR_BUTTON)))
                         .right_0()
                         .child(
                             deferred(

@@ -24,7 +24,7 @@ const NO_VIEW_KEY: &str = "Project unavailable. Reopen its menu.";
 /// The menu's width, its gap above the tab, and its distance from the window edge
 /// (`space-menu.tsx:19-21`).
 pub(crate) const MENU_WIDTH: f32 = 220.;
-pub(crate) const MENU_GAP: f32 = 6.;
+pub(crate) const MENU_GAP: f32 = bachuc_theme::metrics::POPUP_GAP;
 pub(crate) const MENU_EDGE: f32 = 8.;
 
 // ---- state (shared/spaces.ts) ----
@@ -693,7 +693,7 @@ pub(crate) fn menu_left(anchor_x: f32, window_width: f32) -> f32 {
         .max(MENU_EDGE)
 }
 
-/// The y of the menu's bottom edge: 6 px above the tab.
+/// The y of the menu's bottom edge: one theme popup gap above the tab.
 pub(crate) fn menu_bottom(anchor_y: f32) -> f32 {
     anchor_y - MENU_GAP
 }
@@ -1477,7 +1477,7 @@ mod tests {
         assert_eq!(menu_left(100., 1000.), 100.);
         assert_eq!(menu_left(2., 1000.), 8.);
         assert_eq!(menu_left(950., 1000.), 1000. - 220. - 8.);
-        assert_eq!(menu_bottom(500.), 494.);
+        assert_eq!(menu_bottom(500.), 496.);
     }
 
     #[test]

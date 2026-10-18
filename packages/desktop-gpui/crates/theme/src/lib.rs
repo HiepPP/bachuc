@@ -206,6 +206,13 @@ pub fn zoomed(base: f32, cx: &App) -> Pixels {
     px(base * zoom(cx))
 }
 
+/// The distance from the top of a trigger to the top of the menu under it: the trigger height
+/// plus [`metrics::POPUP_GAP`]. Place the menu there and add no margin of its own, or the gap
+/// doubles.
+pub fn popup_offset(trigger_height: f32) -> f32 {
+    trigger_height + metrics::POPUP_GAP
+}
+
 /// The rem size for the window, with the zoom applied. The root view sets it on each draw
 /// with `Window::set_rem_size`, which only stores the value.
 pub fn rem_size(cx: &App) -> Pixels {
@@ -627,6 +634,13 @@ pub fn turn_label_colors(label: TurnLabel, scheme: Scheme) -> TurnLabelColors {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn popup_offset_is_the_trigger_height_plus_one_gap() {
+        assert_eq!(metrics::POPUP_GAP, 4.);
+        assert_eq!(popup_offset(28.), 32.);
+        assert_eq!(popup_offset(0.), metrics::POPUP_GAP);
+    }
 
     #[test]
     fn mono_family_prefers_sf_mono_and_falls_back_to_menlo() {

@@ -19,7 +19,7 @@ use bachuc_theme::metrics::{
     FONT_2XL, FONT_BASE, ICON_MD, ICON_SM, RADIUS_2XL, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2,
     SPACE_4, SPACE_6, SPACE_8, WEIGHT_NORMAL,
 };
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, popup_offset, shadow, tokens, ui_font_size};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
@@ -1084,32 +1084,38 @@ impl NewWorkspaceScreen {
             Picker::Isolation => "Isolation",
             Picker::Base => "Start from",
         };
-        deferred(
-            anchored().snap_to_window_with_margin(px(8.)).child(
-                v_flex()
-                    .id("new-workspace-picker")
-                    .role(Role::Menu)
-                    .aria_label(title)
-                    .mt(px(BADGE_HEIGHT + SPACE_1))
-                    .w(px(PICKER_WIDTH))
-                    .max_h(px(PICKER_MAX_HEIGHT))
-                    .overflow_y_scroll()
-                    .p(px(SPACE_1))
-                    .bg(t.popover)
-                    .border_1()
-                    .border_color(t.border)
-                    .rounded(px(RADIUS_LG))
-                    .shadow(vec![shadow(ShadowSize::Md, cx)])
-                    .occlude()
-                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                        this.picker = None;
-                        cx.notify();
-                    }))
-                    .children(rows),
-            ),
-        )
-        .with_priority(gpui_kit::base::POPUP_PRIORITY)
-        .into_any_element()
+        // The wrapper sits one gap under the chip; the anchored list opens at its origin.
+        div()
+            .absolute()
+            .top(px(popup_offset(BADGE_HEIGHT)))
+            .left_0()
+            .child(
+                deferred(
+                    anchored().snap_to_window_with_margin(px(8.)).child(
+                        v_flex()
+                            .id("new-workspace-picker")
+                            .role(Role::Menu)
+                            .aria_label(title)
+                            .w(px(PICKER_WIDTH))
+                            .max_h(px(PICKER_MAX_HEIGHT))
+                            .overflow_y_scroll()
+                            .p(px(SPACE_1))
+                            .bg(t.popover)
+                            .border_1()
+                            .border_color(t.border)
+                            .rounded(px(RADIUS_LG))
+                            .shadow(vec![shadow(ShadowSize::Md, cx)])
+                            .occlude()
+                            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                                this.picker = None;
+                                cx.notify();
+                            }))
+                            .children(rows),
+                    ),
+                )
+                .with_priority(gpui_kit::base::POPUP_PRIORITY),
+            )
+            .into_any_element()
     }
 
     /// The chip with its list when open.
