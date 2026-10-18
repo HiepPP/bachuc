@@ -10,7 +10,7 @@
 use std::cell::Cell;
 use std::f32::consts::PI;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bachuc_client::PromptEntry;
 use bachuc_theme::metrics::{FONT_SM, RADIUS_LG, SPACE_1, SPACE_2, SPACE_3};
@@ -28,6 +28,8 @@ pub const MIN_PROMPTS: usize = 2;
 pub const INITIAL_ACTIVATION_DELAY: Duration = Duration::from_millis(150);
 /// A horizontal move this long, wider than it is tall, restarts the activation timer.
 pub const HORIZONTAL_TRANSIT_PX: f32 = 4.;
+/// A bar eases to a new size or color over this long (`rail.web.tsx`: `transitionDuration`).
+pub const BAR_EASE: Duration = Duration::from_millis(140);
 
 const RAIL_WIDTH: f32 = 36.;
 const SLOT_HEIGHT: f32 = 8.;
@@ -76,6 +78,117 @@ pub fn pill_size(is_active: bool, magnification: f32) -> (f32, f32) {
         resting + magnification * (MAGNIFIED_PILL_WIDTH - resting),
         RESTING_PILL_HEIGHT + magnification * (MAGNIFIED_PILL_HEIGHT - RESTING_PILL_HEIGHT),
     )
+}
+
+/// CSS `ease-out`, `cubic-bezier(0, 0, 0.58, 1)`: 0 at `t = 0`, 1 at `t = 1`, never decreasing.
+pub fn ease_out(t: f32) -> f32 {
+    if !t.is_finite() {
+        return if t > 0. { 1. } else { 0. };
+    }
+    if t <= 0. || t >= 1. {
+        return t.clamp(0., 1.);
+    }
+    let x = t;
+    // Solve x(s) = x for the curve parameter by bisection; x(s) rises with s.
+    let (mut low, mut high) = (0_f32, 1_f32);
+    for _ in 0..24 {
+        let s = (low + high) / 2.;
+        let at = 3. * (1. - s) * s * s * 0.58 + s * s * s;
+        if at < x {
+            low = s;
+        } else {
+            high = s;
+        }
+    }
+    let s = (low + high) / 2.;
+    3. * (1. - s) * s * s + s * s * s
+}
+
+fn lerp(from: f32, to: f32, t: f32) -> f32 {
+    from + (to - from) * t
+}
+
+/// How a bar looks: size in px at 100% zoom, and color.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarLook {
+    pub width: f32,
+    pub height: f32,
+    pub color: Rgba,
+}
+
+impl BarLook {
+    /// The look `t` of the way from `self` to `to`, per channel (`t` is not clamped).
+    pub fn lerp(self, to: Self, t: f32) -> Self {
+        Self {
+            width: lerp(self.width, to.width, t),
+            height: lerp(self.height, to.height, t),
+            color: Rgba {
+                r: lerp(self.color.r, to.color.r, t),
+                g: lerp(self.color.g, to.color.g, t),
+                b: lerp(self.color.b, to.color.b, t),
+                a: lerp(self.color.a, to.color.a, t),
+            },
+        }
+    }
+}
+
+/// A bar easing toward a target look over [`BAR_EASE`] (Electron's 140 ms `ease-out` on width,
+/// height, and background color). `elapsed` is the time since the last [`BarEase::retarget`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarEase {
+    from: BarLook,
+    to: BarLook,
+    generation: u64,
+}
+
+impl BarEase {
+    /// A bar at rest at `look`.
+    pub fn new(look: BarLook) -> Self {
+        Self {
+            from: look,
+            to: look,
+            generation: 0,
+        }
+    }
+
+    pub fn from(&self) -> BarLook {
+        self.from
+    }
+
+    pub fn to(&self) -> BarLook {
+        self.to
+    }
+
+    /// Counts the targets taken; a new value starts a new animation in the view.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// The drawn look `elapsed` after the last retarget.
+    pub fn look_at(&self, elapsed: Duration) -> BarLook {
+        self.from.lerp(self.to, ease_out(progress(elapsed)))
+    }
+
+    /// Whether the ease has ended: the bar draws `to`.
+    pub fn settled(&self, elapsed: Duration) -> bool {
+        elapsed >= BAR_EASE
+    }
+
+    /// Aims at `target`. A new target starts from the drawn look, not from rest, so a change in
+    /// mid-ease does not jump. Returns whether the target changed.
+    pub fn retarget(&mut self, target: BarLook, elapsed: Duration) -> bool {
+        if target == self.to {
+            return false;
+        }
+        self.from = self.look_at(elapsed);
+        self.to = target;
+        self.generation += 1;
+        true
+    }
+}
+
+fn progress(elapsed: Duration) -> f32 {
+    elapsed.as_secs_f32() / BAR_EASE.as_secs_f32()
 }
 
 /// Whether the rail shows: enough prompts and a panel at least [`MIN_PANEL_WIDTH`] wide at
@@ -216,12 +329,24 @@ pub enum OutlineEvent {
     Jump(u64),
 }
 
+/// The ease of one bar, kept by prompt seq so it survives a new prompt index.
+struct BarState {
+    seq: u64,
+    /// `None` until the bar is first drawn, and again after the rail hides: the bar then
+    /// shows its target at once.
+    ease: Option<BarEase>,
+    /// When the ease last retargeted.
+    started: Instant,
+}
+
 /// The rail view. The timeline feeds it the prompt index and the reading position.
 pub struct OutlineRail {
     /// The timeline's bounds at its last paint, shared with the timeline.
     bounds: Rc<Cell<Bounds<Pixels>>>,
     prompts: Vec<PromptEntry>,
     handles: Vec<FocusHandle>,
+    /// One per prompt, in the same order.
+    bars: Vec<BarState>,
     anchor: Option<u64>,
     active: Option<u64>,
     hovered: Option<usize>,
@@ -237,6 +362,7 @@ impl OutlineRail {
             bounds,
             prompts: Vec::new(),
             handles: Vec::new(),
+            bars: Vec::new(),
             anchor: None,
             active: None,
             hovered: None,
@@ -251,6 +377,21 @@ impl OutlineRail {
             return;
         }
         self.prompts = prompts;
+        let mut old = std::mem::take(&mut self.bars);
+        self.bars = self
+            .prompts
+            .iter()
+            .map(|prompt| {
+                old.iter()
+                    .position(|bar| bar.seq == prompt.seq)
+                    .map(|at| old.swap_remove(at))
+                    .unwrap_or_else(|| BarState {
+                        seq: prompt.seq,
+                        ease: None,
+                        started: Instant::now(),
+                    })
+            })
+            .collect();
         self.handles.truncate(self.prompts.len());
         while self.handles.len() < self.prompts.len() {
             self.handles.push(cx.focus_handle().tab_stop(true));
@@ -336,6 +477,56 @@ impl OutlineRail {
         cx.emit(OutlineEvent::Jump(seq));
     }
 
+    /// The look the bar at `index` heads to.
+    fn target_look(
+        &self,
+        index: usize,
+        attention: Option<usize>,
+        reduce_motion: bool,
+        cx: &Context<Self>,
+    ) -> BarLook {
+        let t = tokens(cx);
+        let is_active = self.active == Some(self.prompts[index].seq);
+        let magnification = match attention {
+            Some(at) if !reduce_motion => prompt_tick_magnification(index as f32 - at as f32),
+            _ => 0.,
+        };
+        let (width, height) = pill_size(is_active, magnification);
+        let color = if attention == Some(index) {
+            t.foreground
+        } else if is_active {
+            t.foreground_extra_muted
+        } else {
+            t.border_accent
+        };
+        BarLook {
+            width,
+            height,
+            color: color.into(),
+        }
+    }
+
+    /// Aims every bar at its target look. A bar whose target changed starts to ease from the
+    /// look it draws now.
+    fn retarget_bars(&mut self, attention: Option<usize>, reduce_motion: bool, cx: &Context<Self>) {
+        let now = Instant::now();
+        for index in 0..self.prompts.len() {
+            let target = self.target_look(index, attention, reduce_motion, cx);
+            let bar = &mut self.bars[index];
+            match bar.ease.as_mut() {
+                Some(ease) => {
+                    if ease.retarget(target, now.saturating_duration_since(bar.started)) {
+                        bar.started = now;
+                    }
+                }
+                None => {
+                    bar.ease = Some(BarEase::new(target));
+                    bar.started = now;
+                }
+            }
+        }
+    }
+
     fn tick(
         &self,
         index: usize,
@@ -346,19 +537,30 @@ impl OutlineRail {
         let t = tokens(cx);
         let prompt = &self.prompts[index];
         let seq = prompt.seq;
-        let is_active = self.active == Some(seq);
         let has_attention = attention == Some(index);
-        let magnification = match attention {
-            Some(at) if !reduce_motion => prompt_tick_magnification(index as f32 - at as f32),
-            _ => 0.,
-        };
-        let (width, height) = pill_size(is_active, magnification);
-        let color = if has_attention {
-            t.foreground
-        } else if is_active {
-            t.foreground_extra_muted
+        let bar = &self.bars[index];
+        let ease = bar.ease.expect("retarget_bars ran before tick");
+        let pill = div().rounded_full();
+        // Only a running ease draws frames; a settled bar is a plain element.
+        let pill = if reduce_motion || ease.settled(bar.started.elapsed()) {
+            let look = ease.to();
+            pill.w(zoomed(look.width, cx))
+                .h(zoomed(look.height, cx))
+                .bg(Hsla::from(look.color))
+                .into_any_element()
         } else {
-            t.border_accent
+            let (from, to, scale) = (ease.from(), ease.to(), zoom(cx));
+            pill.with_animation(
+                ("outline-pill", ease.generation()),
+                Animation::new(BAR_EASE).with_easing(ease_out),
+                move |pill, progress| {
+                    let look = from.lerp(to, progress);
+                    pill.w(px(look.width * scale))
+                        .h(px(look.height * scale))
+                        .bg(Hsla::from(look.color))
+                },
+            )
+            .into_any_element()
         };
         let label = format!(
             "{} of {}: {}",
@@ -391,13 +593,7 @@ impl OutlineRail {
             .on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
                 weak.update(cx, |this, cx| this.jump(seq, window, cx)).ok();
             })
-            .child(
-                div()
-                    .w(zoomed(width, cx))
-                    .h(zoomed(height, cx))
-                    .rounded_full()
-                    .bg(color),
-            )
+            .child(pill)
             .when(has_attention, |slot| {
                 slot.child(
                     div()
@@ -446,6 +642,8 @@ impl Render for OutlineRail {
             self.intent = HoverIntent::default();
             self.timer = None;
             self.hovered = None;
+            // Bars come back settled, not mid-ease.
+            self.bars.iter_mut().for_each(|bar| bar.ease = None);
             return div().absolute().size_0().into_any_element();
         }
         // The pointer owns the magnified band while it is on the rail; keyboard focus drives the
@@ -456,6 +654,7 @@ impl Render for OutlineRail {
                 .position(|handle| handle.is_focused(window))
         });
         let reduce_motion = cx.reduce_motion();
+        self.retarget_bars(attention, reduce_motion, &*cx);
         let ticks: Vec<_> = (0..self.prompts.len())
             .map(|index| self.tick(index, attention, reduce_motion, &*cx))
             .collect();

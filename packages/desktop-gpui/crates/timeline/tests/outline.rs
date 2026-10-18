@@ -1,11 +1,14 @@
 //! The Chat outline rules: magnification, the lit prompt, the hover intent, the jump plan, and
 //! when the rail shows.
 
+use std::time::Duration;
+
 use bachuc_timeline::outline::{
-    HORIZONTAL_TRANSIT_PX, HoverIntent, IntentEffect, JumpPlan, accept_prompt_index_epoch,
-    pill_size, plan_prompt_jump, prompt_tick_magnification, rail_visible, reading_anchor,
-    resolve_active_prompt_seq,
+    BAR_EASE, BarEase, BarLook, HORIZONTAL_TRANSIT_PX, HoverIntent, IntentEffect, JumpPlan,
+    accept_prompt_index_epoch, ease_out, pill_size, plan_prompt_jump, prompt_tick_magnification,
+    rail_visible, reading_anchor, resolve_active_prompt_seq,
 };
+use gpui_kit::Rgba;
 
 #[test]
 fn magnification_is_one_at_the_pointer_and_zero_at_three_slots() {
@@ -161,4 +164,97 @@ fn a_horizontal_move_before_any_bar_schedules_nothing() {
     let mut intent = HoverIntent::default();
     intent.enter((0., 0.));
     assert_eq!(intent.pointer_moved((50., 0.)), IntentEffect::Idle);
+}
+
+fn look(width: f32, height: f32, color: f32) -> BarLook {
+    BarLook {
+        width,
+        height,
+        color: Rgba {
+            r: color,
+            g: color,
+            b: color,
+            a: 1.,
+        },
+    }
+}
+
+fn ms(millis: u64) -> Duration {
+    Duration::from_millis(millis)
+}
+
+#[test]
+fn ease_out_runs_from_zero_at_the_start_to_one_at_140_ms() {
+    assert_eq!(BAR_EASE, ms(140));
+    let progress = |elapsed: Duration| ease_out(elapsed.as_secs_f32() / BAR_EASE.as_secs_f32());
+    assert_eq!(progress(Duration::ZERO), 0.);
+    assert!((progress(BAR_EASE) - 1.).abs() < 1e-5);
+    // Past the end and out-of-range input stay inside 0..=1.
+    assert!((progress(ms(500)) - 1.).abs() < 1e-5);
+    assert_eq!(ease_out(-1.), 0.);
+    assert_eq!(ease_out(f32::NAN), 0.);
+    assert_eq!(ease_out(f32::INFINITY), 1.);
+}
+
+#[test]
+fn ease_out_never_decreases_and_starts_fast() {
+    let samples: Vec<f32> = (0..=100).map(|step| ease_out(step as f32 / 100.)).collect();
+    assert!(samples.windows(2).all(|pair| pair[0] <= pair[1]));
+    // cubic-bezier(0, 0, 0.58, 1) is ahead of linear for the first half.
+    assert!(ease_out(0.25) > 0.25);
+    assert!(ease_out(0.5) > 0.5);
+    // Spot check of the CSS curve: y at t = 0.5 is about 0.68.
+    assert!((ease_out(0.5) - 0.68).abs() < 0.02);
+}
+
+#[test]
+fn a_bar_interpolates_size_and_color_between_two_looks() {
+    let rest = look(10., 2., 0.2);
+    let big = look(26., 4., 0.8);
+    assert_eq!(rest.lerp(big, 0.), rest);
+    assert_eq!(rest.lerp(big, 1.), big);
+    let half = rest.lerp(big, 0.5);
+    assert_eq!((half.width, half.height), (18., 3.));
+    assert!((half.color.r - 0.5).abs() < 1e-6);
+    assert!((half.color.a - 1.).abs() < 1e-6);
+}
+
+#[test]
+fn a_new_target_eases_from_the_old_look_over_140_ms() {
+    let rest = look(10., 2., 0.2);
+    let big = look(26., 4., 0.8);
+    let mut bar = BarEase::new(rest);
+    // At rest: no ease to run, nothing changes.
+    assert!(!bar.retarget(rest, Duration::ZERO));
+    assert_eq!(bar.generation(), 0);
+    assert!(bar.retarget(big, ms(10_000)));
+    assert_eq!(bar.generation(), 1);
+    assert_eq!(bar.look_at(Duration::ZERO), rest);
+    let mid = bar.look_at(ms(70));
+    assert!(mid.width > 10. && mid.width < 26.);
+    assert!(mid.height > 2. && mid.height < 4.);
+    assert!(mid.color.r > 0.2 && mid.color.r < 0.8);
+    assert!(!bar.settled(ms(139)));
+    assert!(bar.settled(ms(140)));
+    assert_eq!(bar.look_at(ms(140)).width, 26.);
+    // The same target again is no change, so no new animation starts.
+    assert!(!bar.retarget(big, ms(30)));
+    assert_eq!(bar.generation(), 1);
+}
+
+#[test]
+fn a_retarget_in_mid_ease_starts_from_the_drawn_look() {
+    let rest = look(10., 2., 0.2);
+    let big = look(26., 4., 0.8);
+    let mut bar = BarEase::new(rest);
+    bar.retarget(big, ms(1_000));
+    let drawn = bar.look_at(ms(50));
+    assert!(drawn.width > 10. && drawn.width < 26.);
+    // The pointer moves away 50 ms in: the bar heads back to rest from where it is.
+    assert!(bar.retarget(rest, ms(50)));
+    assert_eq!(bar.from(), drawn);
+    assert_eq!(bar.to(), rest);
+    assert_eq!(bar.generation(), 2);
+    assert_eq!(bar.look_at(Duration::ZERO), drawn);
+    assert_eq!(bar.look_at(BAR_EASE).width, 10.);
 }
