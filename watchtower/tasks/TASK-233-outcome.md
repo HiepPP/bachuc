@@ -2,7 +2,7 @@
 
 ## Status
 
-Blocked: list rows need a vendor change (Q-144).
+Done: paragraph and heading rows match; the list gap goes to a follow-up TASK (Q-144 ANSWERED).
 
 BLOCKED (fix round 1). The timeline part is fixed: the paragraph gap now draws 24 px, as Electron. Two list gaps stay off, and only a vendor change fixes them (Q-144). No vendor file was edited.
 

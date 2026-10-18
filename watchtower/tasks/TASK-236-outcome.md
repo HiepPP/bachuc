@@ -2,7 +2,7 @@
 
 ## Status
 
-Blocked: BUILT, UNVERIFIED (Q-154).
+Done: owner hand test passed (Q-154).
 
 DONE, with both UI checker lines DEFERRED.
 

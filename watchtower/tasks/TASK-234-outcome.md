@@ -2,7 +2,7 @@
 
 ## Status
 
-Blocked: BUILT, UNVERIFIED (Q-152).
+Done: owner hand test passed (Q-152).
 
 DONE, with the UI checker line DEFERRED and the owner hand test UNVERIFIED. The zoom is a whole-UI zoom only in part: text, gpui-kit rem sizes, radii, and the header, tab bar, and tab chip heights scale. Most fixed `px` paddings and icons in the view crates do not scale yet; see Not scaled.
 
