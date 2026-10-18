@@ -2,7 +2,7 @@
 
 ## Status
 
-BLOCKED: BUILT, UNVERIFIED (Q-169). Code committed in `d15aabdd8`; the hover and sweep feel needs a hand check.
+DONE. Code in `d15aabdd8`; Hiep passed the Q-169 hand check on 2026-10-19.
 
 ## Changed
 
@@ -49,4 +49,4 @@ Lead, computer use, 2026-10-19. Screenshots in `/tmp/wt-ui/`.
 - Hide the rail during an ease: PASS with a limit. A jump to prompt 7, then the right panel opened about 300 ms later: the rail hid (no "Chat outline" in the AX tree), the app did not panic, and the rail came back settled with bar 7 lit (`255-returned.png`). The hide came after the 140 ms ease, not inside it.
 - Anti-goal CPU, rail showing, no pointer movement: PASS on the second run. Run 1, 10 samples: 0.4 to 0.7%, one 2.4% sample right after the jump and panel toggles. Run 2, 20 samples: 0.4 to 0.7%.
 
-Blocked: BUILT, UNVERIFIED (Q-169)
+- Fast sweep and hover feel: PASS by hand (Hiep, 2026-10-19, Q-169).

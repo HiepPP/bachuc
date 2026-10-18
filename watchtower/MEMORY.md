@@ -63,6 +63,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid terminal restore mode `"full-snapshot"` (`0x05` ANSI bytes) in the GPUI client while the daemon sends the `0x04` JSON grid without a restore mode. Reason: [ADR-0042](watchtower/decisions/ADR-0042-json-grid-terminal-restore-over-ansi-snapshot.md).
 - Avoid gpui-kit default themes and the gpui-kit `IconName` set in the GPUI client, and porting every dark theme variant now, while the owner wants the exact Electron look in `light` and `claude` dark. Reason: [ADR-0043](watchtower/decisions/ADR-0043-electron-tokens-and-lucide-icons-over-gpui-kit-defaults.md).
 - Avoid generic lucide icons in the GPUI Open-in menu while the owner wants each app to show its own icon. Reason: [ADR-0046](watchtower/decisions/ADR-0046-real-app-icons-in-open-in-menu-over-lucide.md).
+- Avoid the Electron overlap of the composer placeholder and the focus hint while the GPUI composer can be narrow. Reason: [ADR-0047](watchtower/decisions/ADR-0047-cut-placeholder-before-focus-hint-over-electron-overlap.md).
 
 ## Learnings
 
