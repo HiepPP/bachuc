@@ -65,6 +65,14 @@ Run 2026-10-18 by the UI checker (run D), after fix round 2. Bundle `Bachuc GPUI
 - Shift+Tab walks the same stops back: PASS. From "rd other card" Remove (Tab 14), 13 Shift+Tab presses went star, pencil, repo, open of the other card, then the subagent Remove, star, and open, the "1 subagent" toggle row, Remove all, star, pencil, repo, and the open target of "rd seen card": the exact reverse of Tab 1-13. Evidence: `/tmp/rd-229-07-shift-grid.png`.
 - Not a TASK-229 result: the stale notice ("live, Stale", "Updates are delayed...", Retry) showed in the first Board frame and again in Shift+Tab 4-12, and moved the list down 62-66 px. The pixel boxes were moved with it. Evidence: `/tmp/rd-229-04-top.png`.
 
+### Run E
+
+Run 2026-10-18 by the parent agent, on Hiep's request. Bundle `Bachuc GPUI` (`bundle.sh bin bachuc-desktop "Bachuc GPUI" io.github.hieppp.bachuc-desktop`), release binary built after `7d8765ed0`, PID 54091, launched with `open -n -g --env BACHUC_NO_ACTIVATE=1` and connected to live `127.0.0.1:6768`. The Board opened by AX press. The AX "zoom the window" action forced each frame. The release app stayed in front (`lsappinfo front`). Disposable mock agents in scratch repo `/tmp/hp-229`: "hp parent card" (`e9bd7971`) and its subagent "hp sub row" (`b2ab6e84`, label `paseo.parent-agent-id`). After the run, PID 54091 exited, and the 2 agents and 2 scratch workspaces were archived. Frames were checked by eye; no pixel scripts ran.
+
+- Tab through the card parts -> a 2 px ring with no fill: PASS. The star and Remove of "t198r2 running" show a ring around the part. The open target of the next card shows an inset ring, and its status line, model chip, and Remove stay visible.
+- Shift+Tab onto a subagent row's Remove and star -> the actions show: PASS. At rest the star and X are hidden. On Remove both show and the X has the ring; on the star both stay and the star has the ring.
+- Seen card un-dim: not checked. Every card on live was new; Run D covers it.
+
 ## Fix round 1
 
 Status: DONE (code). The screen checks are DEFERRED (UI checker).
