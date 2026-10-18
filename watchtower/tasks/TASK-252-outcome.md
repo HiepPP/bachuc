@@ -56,4 +56,4 @@ Run 2026-10-19 on live, thread `mock TASK-252 outline` (14 prompts), Claude Ligh
 - 1200x800 (pane 880 px): the rail is hidden -> PASS.
 - Settings > Appearance > Chat > Chat outline off hides the rail and persists `chatOutline` -> PASS; restored to on.
 - Idle CPU, 10 samples over 10 s: 0.0% -> PASS.
-- Jump to a prompt that is not loaded: UNVERIFIED (unattended): the 14-prompt thread fits in the first page.
+- Jump to a prompt that is not loaded, 2026-10-19: thread `mock TASK-252 long outline` (60 prompts, far over the 200-row tail). A click on bar 1 paged older history (6 `fetch_agent_timeline` requests in the live log) and showed Long prompt 1 at the top after about 1.5 s, with bar 1 lit -> PASS (`t252-long-jump.png`).
