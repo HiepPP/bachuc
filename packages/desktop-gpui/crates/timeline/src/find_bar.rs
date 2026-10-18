@@ -8,7 +8,7 @@ use bachuc_icons::IconName;
 use bachuc_theme::metrics::{
     BORDER_WIDTH_2, FONT_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3,
 };
-use bachuc_theme::{ShadowSize, Tokens, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, Tokens, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::text::RangeHighlight;
@@ -33,17 +33,17 @@ const RING_OFFSET: f32 = 1.;
 /// The outline of a focused field, drawn as a border on a box that reaches past the field by the
 /// ring offset and width. GPUI has no outline, and the box takes no pointer events because it has
 /// no handler. Its corners follow the field's radius, as a CSS outline does.
-fn focus_ring(color: Hsla) -> Div {
-    let reach = RING_WIDTH + RING_OFFSET;
+fn focus_ring(color: Hsla, zoom: f32) -> Div {
+    let reach = (RING_WIDTH + RING_OFFSET) * zoom;
     div()
         .absolute()
         .top(px(-reach))
         .right(px(-reach))
         .bottom(px(-reach))
         .left(px(-reach))
-        .border(px(RING_WIDTH))
+        .border(px(RING_WIDTH * zoom))
         .border_color(color)
-        .rounded(px(RADIUS_MD + reach))
+        .rounded(px(RADIUS_MD * zoom + reach))
 }
 
 /// The ring color: `outlineColor: theme.colors.accent` in `control-geometry.ts` (Q-098).
@@ -322,40 +322,43 @@ impl TimelineView {
         let can_step = count > 0;
         let size = ui_font_size(FONT_SM, cx);
         let nav = |id: &'static str, label: &'static str, name: IconName| {
-            icon_button(id, label, name, t.foreground_muted, &t).when(!can_step, |b| b.opacity(0.5))
+            icon_button(id, label, name, t.foreground_muted, &t, cx)
+                .when(!can_step, |b| b.opacity(0.5))
         };
         Some(
             div()
                 .absolute()
-                .top(px(SPACE_2))
-                .right(px(SPACE_3))
+                .top(zoomed(SPACE_2, cx))
+                .right(zoomed(SPACE_3, cx))
                 .child(
                     h_flex()
                         .id("find")
                         .role(Role::Search)
                         .aria_label("Find")
-                        .w(px(WIDGET_WIDTH))
+                        .w(zoomed(WIDGET_WIDTH, cx))
                         .max_w_full()
-                        .p(px(SPACE_1_5))
-                        .gap(px(SPACE_1))
+                        .p(zoomed(SPACE_1_5, cx))
+                        .gap(zoomed(SPACE_1, cx))
                         .items_center()
                         .bg(t.surface1)
                         .border_1()
                         .border_color(t.border)
-                        .rounded(px(RADIUS_LG))
+                        .rounded(zoomed(RADIUS_LG, cx))
                         .shadow(vec![shadow(ShadowSize::Md, cx)])
                         .child(
                             h_flex()
                                 .flex_1()
                                 .min_w_0()
-                                .h(px(FIELD_HEIGHT))
-                                .gap(px(SPACE_2))
+                                .h(zoomed(FIELD_HEIGHT, cx))
+                                .gap(zoomed(SPACE_2, cx))
                                 .items_center()
-                                .px(px(SPACE_2))
+                                .px(zoomed(SPACE_2, cx))
                                 .relative()
                                 .bg(t.surface2)
-                                .rounded(px(RADIUS_MD))
-                                .when(focused, |field| field.child(focus_ring(ring_color(&t))))
+                                .rounded(zoomed(RADIUS_MD, cx))
+                                .when(focused, |field| {
+                                    field.child(focus_ring(ring_color(&t), bachuc_theme::zoom(cx)))
+                                })
                                 .child(
                                     div().flex_1().min_w_0().child(
                                         Input::new(&finder.input)
@@ -410,6 +413,7 @@ impl TimelineView {
                                 IconName::X,
                                 t.foreground_muted,
                                 &t,
+                                cx,
                             )
                             .on_click(cx.listener(|this, _, _, cx| this.close_find(cx))),
                         ),
@@ -440,7 +444,7 @@ mod tests {
     fn focus_ring_is_two_pixels_wide_outside_the_field() {
         assert_eq!((RING_WIDTH, RING_OFFSET), (2., 1.));
         let color = hsla(0., 0., 0.1, 1.);
-        let mut ring = focus_ring(color);
+        let mut ring = focus_ring(color, 1.);
         let style = ring.style();
         assert_eq!(
             style.border_widths.top,

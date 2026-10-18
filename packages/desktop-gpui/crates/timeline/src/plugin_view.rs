@@ -4,8 +4,8 @@
 use std::time::Duration;
 
 use bachuc_plugin_host::{AssistantSelection, Handler, TimelineRenderInput};
-use bachuc_theme::metrics::{FONT_BASE, FONT_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2};
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
+use bachuc_theme::metrics::{FONT_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2};
+use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::text::{RangeHighlight, TextViewState};
 use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
@@ -239,22 +239,27 @@ impl TimelineView {
         self.plugin_views.insert(id.to_string(), (hash, view));
     }
 
-    /// A plugin item's view, or the unavailable note when no renderer of its plugin matches.
-    pub(crate) fn render_plugin_item(&self, id: &str, cx: &mut Context<Self>) -> AnyElement {
-        if let Some((_, view)) = self.plugin_views.get(id) {
-            return div().w_full().child(view.clone()).into_any_element();
-        }
-        let t = tokens(cx);
-        let text = "Plugin timeline item unavailable.";
-        div()
-            .id(SharedString::from(format!("plugin-unavailable-{id}")))
-            .role(Role::Note)
-            .aria_label(text)
-            .py(px(SPACE_2))
-            .text_size(ui_font_size(FONT_BASE, cx))
-            .text_color(t.foreground_muted)
-            .child(text)
-            .into_any_element()
+    /// A plugin item's view. None when no renderer of its plugin matches: the item draws
+    /// nothing.
+    pub(crate) fn render_plugin_item(&self, id: &str) -> Option<AnyElement> {
+        let (_, view) = self.plugin_views.get(id)?;
+        Some(div().w_full().child(view.clone()).into_any_element())
+    }
+
+    /// The parts of a projected entry that draw, as `plugins::shown_parts`.
+    pub(crate) fn shown_parts<'a>(&self, projection: &'a Projection, cx: &App) -> Vec<Part<'a>> {
+        let index = self.host.as_ref().map(|host| host.read(cx).index());
+        plugins::shown_parts(projection, |item| {
+            index.is_some_and(|index| {
+                plugins::renderer_for_item(
+                    index,
+                    projection.plugin_id,
+                    &item.item.kind,
+                    item.item.version,
+                )
+                .is_some()
+            })
+        })
     }
 
     /// An entry a transformer projected: its kept source and its plugin items, in order.
@@ -265,21 +270,20 @@ impl TimelineView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut parts = Vec::new();
-        for part in projection.parts() {
-            parts.push(match part {
-                Part::Source => self.render_source_entry(index, cx),
-                Part::Item(item) => self.render_plugin_item(&item.id, cx),
-            });
+        for part in self.shown_parts(projection, cx) {
+            match part {
+                Part::Source => parts.push(self.render_source_entry(index, cx)),
+                Part::Item(item) => parts.extend(self.render_plugin_item(&item.id)),
+            }
         }
         v_flex().w_full().children(parts).into_any_element()
     }
 
-    /// A daemon plugin item (`type: "plugin"`).
-    pub(crate) fn render_daemon_item(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
-        match plugins::daemon_item(&self.entries[index]["item"]) {
-            Some((_, id, _)) => self.render_plugin_item(&id, cx),
-            None => self.render_plugin_item("", cx),
-        }
+    /// A daemon plugin item (`type: "plugin"`). A malformed one draws nothing.
+    pub(crate) fn render_daemon_item(&self, index: usize) -> AnyElement {
+        plugins::daemon_item(&self.entries[index]["item"])
+            .and_then(|(_, id, _)| self.render_plugin_item(&id))
+            .unwrap_or_else(|| div().into_any_element())
     }
 
     /// A text state of an assistant message changed: its selection may have.
@@ -361,10 +365,18 @@ impl TimelineView {
         let size = if measured.width > px(0.) {
             measured
         } else {
-            size(px(TOOLBAR_ESTIMATE.0), px(TOOLBAR_ESTIMATE.1))
+            size(
+                zoomed(TOOLBAR_ESTIMATE.0, cx),
+                zoomed(TOOLBAR_ESTIMATE.1, cx),
+            )
         };
         let text = selection.state.read(cx).bounds();
-        let origin = plugins::toolbar_origin(text, size, self.bounds.get())?;
+        let origin = plugins::toolbar_origin(
+            text,
+            size,
+            self.bounds.get(),
+            zoomed(plugins::TOOLBAR_GAP, cx),
+        )?;
         let t = tokens(cx);
         let font = ui_font_size(FONT_SM, cx);
         let measure = self.toolbar_size.clone();
@@ -380,9 +392,9 @@ impl TimelineView {
                     )))
                     .role(Role::Button)
                     .aria_label(title.clone())
-                    .px(px(SPACE_2))
-                    .py(px(SPACE_1))
-                    .rounded(px(RADIUS_MD))
+                    .px(zoomed(SPACE_2, cx))
+                    .py(zoomed(SPACE_1, cx))
+                    .rounded(zoomed(RADIUS_MD, cx))
                     .cursor_pointer()
                     .text_size(font)
                     .text_color(t.foreground)
@@ -410,12 +422,12 @@ impl TimelineView {
                         .role(Role::Toolbar)
                         .aria_label("Selection actions")
                         .relative()
-                        .p(px(SPACE_1))
-                        .gap(px(SPACE_1))
+                        .p(zoomed(SPACE_1, cx))
+                        .gap(zoomed(SPACE_1, cx))
                         .bg(t.popover)
                         .border_1()
                         .border_color(t.border_accent)
-                        .rounded(px(RADIUS_LG))
+                        .rounded(zoomed(RADIUS_LG, cx))
                         .shadow(vec![shadow(ShadowSize::Md, cx)])
                         .child(
                             canvas(

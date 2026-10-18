@@ -103,6 +103,23 @@ impl Projection {
     }
 }
 
+/// The parts of a projection that draw: the source, and each item whose plugin registered a
+/// renderer. An item with no renderer draws nothing and takes no space; an empty result means
+/// the entry shows nothing.
+pub fn shown_parts<'a>(
+    projection: &'a Projection,
+    has_renderer: impl Fn(&ProjectedItem) -> bool,
+) -> Vec<Part<'a>> {
+    projection
+        .parts()
+        .into_iter()
+        .filter(|part| match part {
+            Part::Source => true,
+            Part::Item(item) => has_renderer(item),
+        })
+        .collect()
+}
+
 /// `<plugin_id>/<item.id>`, else `<plugin_id>/<entry key>/<index>`.
 pub fn item_id(plugin_id: &str, id: Option<&str>, entry_key: u64, index: usize) -> String {
     match id {
@@ -480,12 +497,13 @@ pub fn assistant_selection(
 }
 
 /// The selection toolbar's place in the timeline, relative to the timeline's origin: centered
-/// over the top of the selected text, `TOOLBAR_GAP` above it, clamped inside the timeline.
-/// `None` once the text scrolled out of the timeline.
+/// over the top of the selected text, `gap` above it (`TOOLBAR_GAP` with the zoom), clamped
+/// inside the timeline. `None` once the text scrolled out of the timeline.
 pub fn toolbar_origin(
     text: Bounds<Pixels>,
     toolbar: Size<Pixels>,
     area: Bounds<Pixels>,
+    gap: Pixels,
 ) -> Option<Point<Pixels>> {
     if text.bottom() < area.top() || text.top() > area.bottom() {
         return None;
@@ -493,7 +511,7 @@ pub fn toolbar_origin(
     let center = text.center().x - area.left();
     let max_left = (area.size.width - toolbar.width).max(px(0.));
     let left = (center - toolbar.width / 2.).clamp(px(0.), max_left);
-    let top = text.top().max(area.top()) - area.top() - px(TOOLBAR_GAP) - toolbar.height;
+    let top = text.top().max(area.top()) - area.top() - gap - toolbar.height;
     Some(point(left, top.max(px(0.))))
 }
 

@@ -9,7 +9,7 @@ use std::time::Duration;
 use bachuc_client::FileKind;
 use bachuc_icons::IconName;
 use bachuc_theme::metrics::{FONT_BASE, ICON_MD, SPACE_1, SPACE_2, SPACE_4, SPACE_6};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoom, zoomed};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::*;
@@ -208,14 +208,14 @@ impl TimelineView {
         let t = tokens(cx);
         let state = div()
             .w_full()
-            .h(px(IMAGE_STATE_HEIGHT))
+            .h(zoomed(IMAGE_STATE_HEIGHT, cx))
             .flex()
             .flex_col()
             .items_center()
             .justify_center()
-            .gap(px(SPACE_2))
-            .px(px(SPACE_4))
-            .py(px(SPACE_6));
+            .gap(zoomed(SPACE_2, cx))
+            .px(zoomed(SPACE_4, cx))
+            .py(zoomed(SPACE_6, cx));
         match self.images.get(source) {
             None | Some(ImageLoad::Loading) => state
                 .id(id)
@@ -223,7 +223,7 @@ impl TimelineView {
                 .aria_label(format!("{alt}, loading"))
                 .child(
                     Spinner::new()
-                        .with_size(px(ICON_MD))
+                        .with_size(zoomed(ICON_MD, cx))
                         .color(t.foreground_muted),
                 )
                 .into_any_element(),
@@ -243,6 +243,7 @@ impl TimelineView {
                             IconName::RotateCw,
                             t.foreground_muted,
                             &t,
+                            cx,
                         )
                         .on_click(
                             cx.listener(move |this, _, _, cx| this.retry_image(&retry_source, cx)),
@@ -251,15 +252,17 @@ impl TimelineView {
                     .into_any_element()
             }
             Some(ImageLoad::Ready { image, size }) => {
+                // The size is kept at 100%; the zoom applies when it draws.
+                let zoom = zoom(cx);
                 let image = image.clone();
                 let open = image.clone();
                 div()
                     .id(id)
                     .role(Role::Button)
                     .aria_label(format!("Open image attachment: {alt}"))
-                    .mx(px(-SPACE_1))
-                    .w(size.width)
-                    .h(size.height)
+                    .mx(zoomed(-SPACE_1, cx))
+                    .w(size.width * zoom)
+                    .h(size.height * zoom)
                     .max_w_full()
                     .overflow_hidden()
                     .cursor_pointer()
@@ -290,7 +293,7 @@ impl TimelineView {
                 .flex()
                 .items_center()
                 .justify_center()
-                .p(px(SPACE_4))
+                .p(zoomed(SPACE_4, cx))
                 .bg(black().opacity(BACKDROP_ALPHA))
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -300,24 +303,29 @@ impl TimelineView {
                 .child(
                     v_flex()
                         .size_full()
-                        .max_w(px(LIGHTBOX_MAX_WIDTH))
-                        .max_h(px(LIGHTBOX_MAX_HEIGHT))
+                        .max_w(zoomed(LIGHTBOX_MAX_WIDTH, cx))
+                        .max_h(zoomed(LIGHTBOX_MAX_HEIGHT, cx))
                         .child(img(image).size_full().object_fit(ObjectFit::Contain)),
                 )
                 .child(
-                    div().absolute().top(px(SPACE_2)).right(px(SPACE_2)).child(
-                        icon_button(
-                            "lightbox-close",
-                            "Dismiss image",
-                            IconName::X,
-                            t.foreground_muted,
-                            &t,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.lightbox = None;
-                            cx.notify();
-                        })),
-                    ),
+                    div()
+                        .absolute()
+                        .top(zoomed(SPACE_2, cx))
+                        .right(zoomed(SPACE_2, cx))
+                        .child(
+                            icon_button(
+                                "lightbox-close",
+                                "Dismiss image",
+                                IconName::X,
+                                t.foreground_muted,
+                                &t,
+                                cx,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.lightbox = None;
+                                cx.notify();
+                            })),
+                        ),
                 )
                 .into_any_element(),
         )

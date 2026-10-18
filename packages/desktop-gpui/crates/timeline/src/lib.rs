@@ -134,6 +134,9 @@ const BODY_LINE_HEIGHT: f32 = 1.4;
 /// The gap under a paragraph in the text view. Both line boxes are whole pixels, so the gap is
 /// the web's block gap with no rounding to take back.
 const PARAGRAPH_GAP: f32 = BLOCK_GAP;
+/// A top-level list's `marginTop: 4` and the 16 below it, in place of the paragraph gap.
+const LIST_SPACING_TOP: f32 = 4.;
+const LIST_SPACING_BOTTOM: f32 = 16.;
 /// A fence's line height over its size, as `splitFenceStyle`.
 const FENCE_LINE_HEIGHT: f32 = 1.45;
 /// `STREAM_METADATA_FONT_SIZE`, the compaction marker and turn footer text.
@@ -322,6 +325,9 @@ pub struct TimelineView {
     selection: Option<Selection>,
     /// The timeline's bounds and the selection toolbar's size at the last paint.
     bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// The width of the plugin corner pills over the timeline, 0 while none show. Message text
+    /// stays clear of them (`column_right_inset`).
+    corner_reserve: Pixels,
     toolbar_size: Rc<Cell<Size<Pixels>>>,
     pending_reveal: Option<PendingReveal>,
     reveal_highlight: Option<Task<()>>,
@@ -458,6 +464,7 @@ impl TimelineView {
             plugin_views: HashMap::new(),
             selection: None,
             bounds: Rc::new(Cell::new(Bounds::default())),
+            corner_reserve: px(0.),
             toolbar_size: Rc::new(Cell::new(Size::default())),
             pending_reveal: None,
             reveal_highlight: None,
@@ -472,6 +479,16 @@ impl TimelineView {
 
     pub fn agent_id(&self) -> &str {
         &self.agent_id
+    }
+
+    /// Sets the width of the corner pills over the timeline's top-right corner, 0 when none
+    /// show. The rows keep their text left of them, so a change redraws every row.
+    pub fn set_corner_reserve(&mut self, width: Pixels, cx: &mut Context<TimelineView>) {
+        if (f32::from(width) - f32::from(self.corner_reserve)).abs() > 0.5 {
+            self.corner_reserve = width;
+            self.list.remeasure();
+            cx.notify();
+        }
     }
 
     /// Locks the fork triggers while the app forks, as the web menu locks while `onFork` runs.
@@ -704,7 +721,7 @@ impl TimelineView {
         }));
         // A message row's height follows the row below it, so a new row under it redraws it.
         for index in 0..rows.len() {
-            if let Some(space) = self.space_below(&rows[index], rows.get(index + 1)) {
+            if let Some(space) = self.space_below(&rows[index], rows.get(index + 1), cx) {
                 let mut hasher = DefaultHasher::new();
                 rows[index].fingerprint.hash(&mut hasher);
                 space.to_bits().hash(&mut hasher);
@@ -1200,7 +1217,12 @@ impl TimelineView {
             RowKind::Footer { start, end } => this.render_footer(*start, *end, cx),
             RowKind::Permission(request) => this.render_permission(request, cx),
         };
-        let space = this.space_below(row, this.rows.get(index + 1));
+        let space = this.space_below(row, this.rows.get(index + 1), cx);
+        let inset = column_right_inset(
+            f32::from(this.bounds.get().size.width),
+            f32::from(this.corner_reserve),
+            bachuc_theme::zoom(cx),
+        );
         // `streamItemWrapper`: the content column, at most 820 wide, centered. Its width follows
         // `content_column_width`. `min_w_0` stops the min-content probe: GPUI text answers it
         // with its unwrapped width, which would hold the column wider than a narrow row.
@@ -1209,14 +1231,15 @@ impl TimelineView {
             .w_full()
             .flex()
             .justify_center()
-            .px(px(ROW_PADDING))
+            .px(zoomed(ROW_PADDING, cx))
             .child(
                 div()
                     .w_full()
                     .min_w_0()
-                    .max_w(px(MAX_CONTENT_WIDTH))
-                    .px(px(COLUMN_PADDING))
-                    .when_some(space, |column, space| column.pb(px(space)))
+                    .max_w(zoomed(MAX_CONTENT_WIDTH, cx))
+                    .pl(zoomed(COLUMN_PADDING, cx))
+                    .pr(zoomed(COLUMN_PADDING, cx) + px(inset))
+                    .when_some(space, |column, space| column.pb(zoomed(space, cx)))
                     .child(content),
             )
             .into_any_element()
@@ -1225,12 +1248,18 @@ impl TimelineView {
     /// The space under a message row, which depends on the row below it, as the web stream
     /// lays it out. A user message gets `getGapBetweenStreamItems`. An assistant message also
     /// keeps its last block's `marginBottom: 12` and its own `paddingBottom: 12`, which it drops
-    /// above a footer (`compactBottom`). None for the other rows.
-    fn space_below(&self, row: &ViewRow, next: Option<&ViewRow>) -> Option<f32> {
+    /// above a footer (`compactBottom`). None for the other rows, and for an entry that shows
+    /// nothing, such as plugin items with no renderer.
+    fn space_below(&self, row: &ViewRow, next: Option<&ViewRow>, cx: &App) -> Option<f32> {
         let RowKind::Entry(index) = row.kind else {
             return None;
         };
         if self.projector.is_hidden(index) {
+            return None;
+        }
+        if let Some(projection) = self.projector.get(index)
+            && self.shown_parts(projection, cx).is_empty()
+        {
             return None;
         }
         let is_user = self.grouper.is_user(index);
@@ -1298,7 +1327,7 @@ impl TimelineView {
                 // comes from `space_below`.
                 h_flex()
                     .justify_end()
-                    .pb(px(USER_TRAILING_ROW))
+                    .pb(zoomed(USER_TRAILING_ROW, cx))
                     .child(
                         div()
                             .id(("user", key))
@@ -1306,10 +1335,10 @@ impl TimelineView {
                             .aria_label(format!("User message: {}", preview(&text)))
                             .min_w_0()
                             .flex_shrink(1.)
-                            .px(px(SPACE_4))
-                            .py(px(SPACE_4))
-                            .rounded(px(RADIUS_2XL))
-                            .rounded_tr(px(RADIUS_SM))
+                            .px(zoomed(SPACE_4, cx))
+                            .py(zoomed(SPACE_4, cx))
+                            .rounded(zoomed(RADIUS_2XL, cx))
+                            .rounded_tr(zoomed(RADIUS_SM, cx))
                             .bg(t.surface3)
                             .text_color(t.foreground)
                             .text_size(size)
@@ -1324,14 +1353,14 @@ impl TimelineView {
                     .id(("message", key))
                     .role(Role::Article)
                     .aria_label(format!("Assistant message: {}", preview(text)))
-                    .pt(px(SPACE_3))
-                    .gap(px(SPACE_2))
+                    .pt(zoomed(SPACE_3, cx))
+                    .gap(zoomed(SPACE_2, cx))
                     .children(self.render_markdown(key, cx))
                     .into_any_element()
             }
             "reasoning" => self.render_thought(index, cx),
             "tool_call" => div()
-                .mb(px(SPACE_1))
+                .mb(zoomed(SPACE_1, cx))
                 .child(self.render_tool_call(index, cx))
                 .into_any_element(),
             "todo" => {
@@ -1344,10 +1373,10 @@ impl TimelineView {
                     .id(("todo", key))
                     .role(Role::List)
                     .aria_label(format!("Tasks, {done} of {} done", items.len()))
-                    .my(px(SPACE_2))
-                    .p(px(SPACE_3))
-                    .gap(px(SPACE_1))
-                    .rounded(px(RADIUS_LG))
+                    .my(zoomed(SPACE_2, cx))
+                    .p(zoomed(SPACE_3, cx))
+                    .gap(zoomed(SPACE_1, cx))
+                    .rounded(zoomed(RADIUS_LG, cx))
                     .border_1()
                     .border_color(t.border)
                     .bg(t.surface1)
@@ -1364,7 +1393,7 @@ impl TimelineView {
                             .id(("task", position))
                             .role(Role::ListItem)
                             .aria_label(text.clone())
-                            .gap(px(SPACE_2))
+                            .gap(zoomed(SPACE_2, cx))
                             .items_center()
                             .child(
                                 icon(if completed {
@@ -1372,7 +1401,7 @@ impl TimelineView {
                                 } else {
                                     IconName::Circle
                                 })
-                                .with_size(px(ICON_XS))
+                                .with_size(zoomed(ICON_XS, cx))
                                 .text_color(t.foreground_muted),
                             )
                             .child(
@@ -1397,6 +1426,7 @@ impl TimelineView {
                 t.tint_danger,
                 item["message"].as_str().unwrap_or("").to_string(),
                 base,
+                cx,
             ),
             "notification" => {
                 let message = item["message"].as_str().unwrap_or("").to_string();
@@ -1405,7 +1435,16 @@ impl TimelineView {
                     Some("warning") => (IconName::TriangleAlert, t.status_warning, t.tint_warning),
                     _ => (IconName::Info, t.foreground_muted, t.surface2),
                 };
-                notification(("note", key), Role::Note, name, color, tint, message, base)
+                notification(
+                    ("note", key),
+                    Role::Note,
+                    name,
+                    color,
+                    tint,
+                    message,
+                    base,
+                    cx,
+                )
             }
             "compaction" => {
                 let line = || div().flex_1().h(px(1.)).bg(t.border);
@@ -1414,17 +1453,17 @@ impl TimelineView {
                     .role(Role::Note)
                     .aria_label("Context compacted")
                     .items_center()
-                    .gap(px(SPACE_2))
-                    .py(px(SPACE_3))
-                    .px(px(SPACE_4))
+                    .gap(zoomed(SPACE_2, cx))
+                    .py(zoomed(SPACE_3, cx))
+                    .px(zoomed(SPACE_4, cx))
                     .child(line())
                     .child(
                         h_flex()
-                            .gap(px(SPACE_2))
+                            .gap(zoomed(SPACE_2, cx))
                             .items_center()
                             .child(
                                 icon(IconName::Scissors)
-                                    .with_size(px(ICON_XS))
+                                    .with_size(zoomed(ICON_XS, cx))
                                     .text_color(t.foreground_extra_muted),
                             )
                             .child(
@@ -1437,7 +1476,7 @@ impl TimelineView {
                     .child(line())
                     .into_any_element()
             }
-            "plugin" => self.render_daemon_item(index, cx),
+            "plugin" => self.render_daemon_item(index),
             other => {
                 let text = other.replace('_', " ");
                 div()
@@ -1468,6 +1507,7 @@ impl TimelineView {
         let view = cx.weak_entity();
         let (style, highlighter) = self.markdown_style(cx);
         let copy_color = t.foreground_muted;
+        let (copy_pad, copy_icon) = (zoomed(SPACE_1, cx), zoomed(ICON_SM, cx));
         blocks
             .into_iter()
             .enumerate()
@@ -1491,13 +1531,13 @@ impl TimelineView {
                                     .id("copy-code")
                                     .role(Role::Button)
                                     .aria_label("Copy code")
-                                    .p(px(SPACE_1))
+                                    .p(copy_pad)
                                     .cursor_pointer()
                                     .opacity(0.)
                                     .hover(|button| button.opacity(1.))
                                     .child(
                                         icon(IconName::Copy)
-                                            .with_size(px(ICON_SM))
+                                            .with_size(copy_icon)
                                             .text_color(copy_color),
                                     )
                                     .on_click(move |_, _, cx| {
@@ -1541,7 +1581,7 @@ impl TimelineView {
                     .id(("diagram", position))
                     .role(Role::Group)
                     .aria_label("Diagram source, failed to render")
-                    .gap(px(SPACE_1))
+                    .gap(zoomed(SPACE_1, cx))
                     .child(TextView::markdown(
                         ElementId::Name(format!("fallback-{key}-{position}").into()),
                         markdown,
@@ -1579,8 +1619,9 @@ impl TimelineView {
         corners.corner_radii.bottom_left = Some(radius.into());
         corners.corner_radii.bottom_right = Some(radius.into());
         let code = code_font_size(FONT_CODE, cx);
-        let code_block = fence_spacing(corners.clone())
-            .p(px(SPACE_3))
+        let zoom = bachuc_theme::zoom(cx);
+        let code_block = fence_spacing(corners.clone(), zoom)
+            .p(zoomed(SPACE_3, cx))
             .font_family(mono_font_family(cx))
             .text_size(code)
             .line_height((code * FENCE_LINE_HEIGHT).round());
@@ -1597,6 +1638,10 @@ impl TimelineView {
             .with_code_background(t.surface2)
             .with_border(theme.border)
             .with_paragraph_gap(window_rems(zoomed(PARAGRAPH_GAP, cx), rem_size(cx)))
+            .with_list_spacing(
+                window_rems(zoomed(LIST_SPACING_TOP, cx), rem_size(cx)),
+                window_rems(zoomed(LIST_SPACING_BOTTOM, cx), rem_size(cx)),
+            )
             .with_code_block(code_block)
             .with_table(corners)
             .with_table_head(table_head)
@@ -1605,7 +1650,7 @@ impl TimelineView {
                 ..Default::default()
             })
             .with_dark(theme.is_dark())
-            .with_heading(move |level| heading_style(level, content, border));
+            .with_heading(move |level| heading_style(level, content, border, zoom));
         // Read when the style is built, not per flush; a syntax theme change writes the theme
         // global, which drops this cache.
         let colors = syntax_colors(cx);
@@ -1646,18 +1691,18 @@ impl TimelineView {
             .id(("footer", key))
             .role(Role::Group)
             .aria_label("Turn actions")
-            .mt(px(FOOTER_TOP))
-            .pb(px(SPACE_8))
-            .h(px(FOOTER_HEIGHT + SPACE_8))
-            .gap(px(SPACE_2))
+            .mt(zoomed(FOOTER_TOP, cx))
+            .pb(zoomed(SPACE_8, cx))
+            .h(zoomed(FOOTER_HEIGHT + SPACE_8, cx))
+            .gap(zoomed(SPACE_2, cx))
             .items_center()
             .child(
                 div()
                     .id(("copy-turn", key))
                     .role(Role::Button)
                     .aria_label(if copied { "Copied" } else { "Copy turn" })
-                    .p(px(SPACE_1))
-                    .ml(px(-SPACE_1))
+                    .p(zoomed(SPACE_1, cx))
+                    .ml(zoomed(-SPACE_1, cx))
                     .cursor_pointer()
                     .child(
                         icon(if copied {
@@ -1665,7 +1710,7 @@ impl TimelineView {
                         } else {
                             IconName::Copy
                         })
-                        .with_size(px(ICON_SM))
+                        .with_size(zoomed(ICON_SM, cx))
                         .text_color(t.foreground_muted),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| this.copy_turn(start, end, cx))),
@@ -1700,7 +1745,7 @@ impl TimelineView {
             .id(("fork-turn", key))
             .role(Role::Button)
             .aria_label(FORK_MENU_LABEL)
-            .p(px(SPACE_1))
+            .p(zoomed(SPACE_1, cx))
             .when(locked, |trigger| trigger.opacity(DISABLED_OPACITY))
             .when(!locked, |trigger| {
                 trigger
@@ -1714,7 +1759,7 @@ impl TimelineView {
             })
             .child(
                 icon(IconName::Split)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(if open {
                         t.foreground
                     } else {
@@ -1734,14 +1779,14 @@ impl TimelineView {
                     .id(SharedString::from(format!("fork-{label}")))
                     .role(Role::MenuItem)
                     .aria_label(label)
-                    .min_h(px(MENU_ITEM_HEIGHT))
-                    .mx(px(SPACE_1))
-                    .px(px(SPACE_2))
-                    .py(px(SPACE_1))
+                    .min_h(zoomed(MENU_ITEM_HEIGHT, cx))
+                    .mx(zoomed(SPACE_1, cx))
+                    .px(zoomed(SPACE_2, cx))
+                    .py(zoomed(SPACE_1, cx))
                     .flex()
                     .items_center()
-                    .gap(px(SPACE_2))
-                    .rounded(px(RADIUS_MD))
+                    .gap(zoomed(SPACE_2, cx))
+                    .rounded(zoomed(RADIUS_MD, cx))
                     .cursor_pointer()
                     .hover(move |style| style.bg(t.surface2))
                     .on_click(
@@ -1753,7 +1798,7 @@ impl TimelineView {
                     })
                     .child(
                         icon(IconName::Split)
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .text_color(t.foreground),
                     )
                     .child(
@@ -1767,24 +1812,24 @@ impl TimelineView {
             });
             div()
                 .absolute()
-                .top(px(popup_offset(FORK_TRIGGER_HEIGHT)))
+                .top(zoomed(popup_offset(FORK_TRIGGER_HEIGHT), cx))
                 .left_0()
                 .child(
                     deferred(
                         anchored()
                             .anchor(Anchor::TopLeft)
-                            .snap_to_window_with_margin(px(8.))
+                            .snap_to_window_with_margin(zoomed(8., cx))
                             .child(
                                 v_flex()
                                     .id(("fork-menu", key))
                                     .role(Role::Menu)
                                     .aria_label(FORK_MENU_LABEL)
-                                    .min_w(px(FORK_MENU_WIDTH))
-                                    .py(px(SPACE_1))
+                                    .min_w(zoomed(FORK_MENU_WIDTH, cx))
+                                    .py(zoomed(SPACE_1, cx))
                                     .bg(t.popover)
                                     .border_1()
                                     .border_color(t.border_accent)
-                                    .rounded(px(RADIUS_LG))
+                                    .rounded(zoomed(RADIUS_LG, cx))
                                     .shadow(vec![shadow(ShadowSize::Md, cx)])
                                     .occlude()
                                     .on_mouse_down_out(
@@ -1860,10 +1905,10 @@ impl TimelineView {
             .id(("strip", row))
             .role(Role::Group)
             .aria_label(format!("{} step strip", group.step_count))
-            .w(px(STRIP_WIDTH))
-            .h(px(STRIP_HEIGHT))
-            .gap(px(2.))
-            .rounded(px(3.))
+            .w(zoomed(STRIP_WIDTH, cx))
+            .h(zoomed(STRIP_HEIGHT, cx))
+            .gap(zoomed(2., cx))
+            .rounded(zoomed(3., cx))
             .overflow_hidden()
             .flex_none()
             .children(group.steps.iter().zip(&weights).enumerate().map(
@@ -1882,7 +1927,7 @@ impl TimelineView {
                         .aria_label(format!("Step {}", position + 1))
                         .h_full()
                         .flex_shrink(1.)
-                        .w(px(STRIP_WIDTH * weight / weight_sum))
+                        .w(zoomed(STRIP_WIDTH * weight / weight_sum, cx))
                         .bg(color)
                         .when(dimmed, |segment| segment.opacity(DIMMED_OPACITY))
                         .cursor_pointer()
@@ -1929,7 +1974,7 @@ impl TimelineView {
             });
 
         let header = h_flex()
-            .gap(px(SPACE_3))
+            .gap(zoomed(SPACE_3, cx))
             .items_center()
             .child(
                 div()
@@ -1956,7 +2001,7 @@ impl TimelineView {
                 if group.is_loading { "working" } else { "done" },
                 plural(group.step_count, "step", "steps")
             ))
-            .pt(px(SPACE_2))
+            .pt(zoomed(SPACE_2, cx))
             .child(header)
             .into_any_element()
     }
@@ -1999,18 +2044,18 @@ impl TimelineView {
             .role(Role::Button)
             .aria_label(aria)
             .aria_selected(is_selected)
-            .gap(px(SPACE_3))
+            .gap(zoomed(SPACE_3, cx))
             .items_center()
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| this.select_step(step_key, false, cx)))
             .child(
                 div()
-                    .size(px(STEP_NUMBER))
-                    .mr(px(2.))
+                    .size(zoomed(STEP_NUMBER, cx))
+                    .mr(zoomed(2., cx))
                     .flex_none()
                     .rounded_full()
                     .border_1()
-                    .when(step.is_running, |number| number.border(px(1.5)))
+                    .when(step.is_running, |number| number.border(zoomed(1.5, cx)))
                     .border_color(border_color)
                     .bg(t.surface0)
                     .flex()
@@ -2026,7 +2071,7 @@ impl TimelineView {
                 h_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap(px(SPACE_1 + 2.))
+                    .gap(zoomed(SPACE_1 + 2., cx))
                     .items_baseline()
                     .child(
                         div()
@@ -2048,11 +2093,11 @@ impl TimelineView {
             )
             .child(
                 div()
-                    .w(px(STEP_TIME_WIDTH))
+                    .w(zoomed(STEP_TIME_WIDTH, cx))
                     .text_right()
                     .font_family(mono)
                     .text_size(code_font_size(STEP_TIME_SIZE, cx))
-                    .line_height(px(STEP_NUMBER))
+                    .line_height(zoomed(STEP_NUMBER, cx))
                     .text_color(t.foreground_muted)
                     .child(time),
             );
@@ -2066,7 +2111,7 @@ impl TimelineView {
                     for part in projection.parts() {
                         match part {
                             Part::Source => notes.extend(self.render_markdown(key, cx)),
-                            Part::Item(item) => notes.push(self.render_plugin_item(&item.id, cx)),
+                            Part::Item(item) => notes.extend(self.render_plugin_item(&item.id)),
                         }
                     }
                 }
@@ -2078,14 +2123,16 @@ impl TimelineView {
         for &index in &step.items {
             let projection = self.projector.get(index).map(|p| &**p);
             for part in plugins::step_parts(projection, step.edits.contains(&index)) {
-                edits.push(match part {
+                match part {
                     // The step body has no stream padding, so the badge does not reach past it.
-                    StepPart::ToolCall => div()
-                        .mx(px(tool_view::BADGE_BLEED))
-                        .child(self.render_tool_call(index, cx))
-                        .into_any_element(),
-                    StepPart::Item(item) => self.render_plugin_item(&item.id, cx),
-                });
+                    StepPart::ToolCall => edits.push(
+                        div()
+                            .mx(zoomed(tool_view::BADGE_BLEED, cx))
+                            .child(self.render_tool_call(index, cx))
+                            .into_any_element(),
+                    ),
+                    StepPart::Item(item) => edits.extend(self.render_plugin_item(&item.id)),
+                }
             }
         }
         // A picked step also lists its other calls, so each tool kind can open its details.
@@ -2098,7 +2145,7 @@ impl TimelineView {
                 // The step body has no stream padding, so the badge does not reach past it.
                 .map(|&index| {
                     div()
-                        .mx(px(tool_view::BADGE_BLEED))
+                        .mx(zoomed(tool_view::BADGE_BLEED, cx))
                         .child(self.render_tool_call(index, cx))
                         .into_any_element()
                 })
@@ -2112,39 +2159,44 @@ impl TimelineView {
         // last.
         let rail = div()
             .absolute()
-            .left(px(STEP_NUMBER / 2.))
+            .left(zoomed(STEP_NUMBER / 2., cx))
             .w(px(1.))
             .bg(t.border)
-            .top(px(if is_first {
-                STEP_LIST_TOP + STEP_NUMBER / 2.
-            } else {
-                0.
-            }))
-            .when(is_last, |rail| rail.h(px(SPACE_1 + STEP_NUMBER / 2.)))
+            .top(zoomed(
+                if is_first {
+                    STEP_LIST_TOP + STEP_NUMBER / 2.
+                } else {
+                    0.
+                },
+                cx,
+            ))
+            .when(is_last, |rail| {
+                rail.h(zoomed(SPACE_1 + STEP_NUMBER / 2., cx))
+            })
             .when(!is_last, |rail| rail.bottom_0());
 
         v_flex()
             .id(("step", step_key))
             .relative()
-            .when(is_first, |row| row.pt(px(STEP_LIST_TOP)))
+            .when(is_first, |row| row.pt(zoomed(STEP_LIST_TOP, cx)))
             .when(!(is_first && is_last), |row| row.child(rail))
             .child(
                 v_flex()
                     .relative()
-                    .gap(px(3.))
-                    .mx(px(-STEP_GAP))
-                    .px(px(STEP_GAP))
-                    .py(px(SPACE_1))
-                    .mb(px(STEP_GAP))
-                    .rounded(px(RADIUS_BASE))
+                    .gap(zoomed(3., cx))
+                    .mx(zoomed(-STEP_GAP, cx))
+                    .px(zoomed(STEP_GAP, cx))
+                    .py(zoomed(SPACE_1, cx))
+                    .mb(zoomed(STEP_GAP, cx))
+                    .rounded(zoomed(RADIUS_BASE, cx))
                     .when(is_selected, |row| row.bg(t.surface2))
                     .child(header)
                     .child(
                         v_flex()
                             .min_w_0()
-                            .gap(px(3.))
-                            .ml(px(STEP_BODY_LEFT))
-                            .mr(px(STEP_BODY_RIGHT))
+                            .gap(zoomed(3., cx))
+                            .ml(zoomed(STEP_BODY_LEFT, cx))
+                            .mr(zoomed(STEP_BODY_RIGHT, cx))
                             .children(notes)
                             .children(edits)
                             .children(calls)
@@ -2154,8 +2206,8 @@ impl TimelineView {
             .when(is_last_of_finished, |step| {
                 step.child(
                     div()
-                        .mt(px(RULE_TOP - STEP_GAP))
-                        .mb(px(RULE_BOTTOM))
+                        .mt(zoomed(RULE_TOP - STEP_GAP, cx))
+                        .mb(zoomed(RULE_BOTTOM, cx))
                         .h(px(1.))
                         .w_full()
                         .bg(t.border),
@@ -2189,15 +2241,15 @@ impl TimelineView {
             .id(("live", entry_key(&self.entries[last])))
             .role(Role::Status)
             .aria_label(format!("Running {command}"))
-            .mt(px(SPACE_1 + 2.))
-            .px(px(SPACE_2 + 2.))
-            .py(px(7.))
-            .rounded(px(RADIUS_LG))
+            .mt(zoomed(SPACE_1 + 2., cx))
+            .px(zoomed(SPACE_2 + 2., cx))
+            .py(zoomed(7., cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .border_1()
             .border_color(t.border)
             .font_family(mono_font_family(cx))
             .text_size(code_font_size(FONT_CODE, cx))
-            .line_height(px(LIVE_LINE_HEIGHT))
+            .line_height(zoomed(LIVE_LINE_HEIGHT, cx))
             .child(div().truncate().text_color(t.foreground).child(command))
             .children(shown.into_iter().map(|line| {
                 div()
@@ -2255,8 +2307,8 @@ impl Render for TimelineView {
                 .child(
                     list(self.list.clone(), cx.processor(Self::render_row))
                         .size_full()
-                        .pt(px(SPACE_4 + HISTORY_START_SLOT))
-                        .pb(px(SPACE_4)),
+                        .pt(zoomed(SPACE_4 + HISTORY_START_SLOT, cx))
+                        .pb(zoomed(SPACE_4, cx)),
                 )
                 .into_any_element()
         };
@@ -2278,12 +2330,38 @@ impl Render for TimelineView {
 const ROW_PADDING: f32 = SPACE_4;
 const COLUMN_PADDING: f32 = SPACE_2;
 
-/// The width text gets in a timeline row `row_width` wide: the row padding comes off both sides,
-/// the column stops at `MAX_CONTENT_WIDTH`, and its own padding comes off inside. It never goes
-/// below 0 and never past the row, so text wraps inside the row on a narrow window.
-pub fn content_column_width(row_width: f32) -> f32 {
-    let column = (row_width - 2. * ROW_PADDING).clamp(0., MAX_CONTENT_WIDTH);
-    (column - 2. * COLUMN_PADDING).max(0.)
+/// The width text gets in a timeline row `row_width` wide at `zoom`: the row padding comes off
+/// both sides, the column stops at `MAX_CONTENT_WIDTH`, and its own padding comes off inside.
+/// It never goes below 0 and never past the row, so text wraps inside the row on a narrow
+/// window.
+pub fn content_column_width(row_width: f32, zoom: f32) -> f32 {
+    (column_width(row_width, zoom) - 2. * COLUMN_PADDING * zoom).max(0.)
+}
+
+/// The content column's width in a row `row_width` wide, before its own padding.
+fn column_width(row_width: f32, zoom: f32) -> f32 {
+    (row_width - 2. * ROW_PADDING * zoom).clamp(0., MAX_CONTENT_WIDTH * zoom)
+}
+
+/// The corner pills sit this far in from the pane's top-right corner (`CornerPills`), and
+/// message text stops this far before them.
+const CORNER_PILLS_OFFSET: f32 = SPACE_3;
+const CORNER_PILLS_CLEARANCE: f32 = SPACE_3;
+
+/// The extra right padding a row's column needs so its text stops left of the corner pills,
+/// which are `pills_width` wide (as measured, so already zoomed) and float over the row's
+/// top-right corner. 0 with no pills and when the margin beside the centered column is already
+/// wide enough. The text never goes below 0 wide.
+pub fn column_right_inset(row_width: f32, pills_width: f32, zoom: f32) -> f32 {
+    if pills_width <= 0. {
+        return 0.;
+    }
+    let column = column_width(row_width, zoom);
+    let text_right = (row_width + column) / 2. - COLUMN_PADDING * zoom;
+    let limit = row_width - (CORNER_PILLS_OFFSET + CORNER_PILLS_CLEARANCE) * zoom - pills_width;
+    (text_right - limit)
+        .max(0.)
+        .min(content_column_width(row_width, zoom))
 }
 
 /// `Notification`: an icon and the message on a tinted box.
@@ -2295,27 +2373,28 @@ fn notification(
     tint: Hsla,
     message: String,
     size: Pixels,
+    cx: &App,
 ) -> AnyElement {
     h_flex()
         .id(id)
         .role(role)
         .aria_label(message.clone())
-        .mb(px(SPACE_1))
+        .mb(zoomed(SPACE_1, cx))
         .items_start()
-        .gap(px(SPACE_2))
-        .px(px(SPACE_3))
-        .py(px(10.))
-        .rounded(px(RADIUS_MD))
+        .gap(zoomed(SPACE_2, cx))
+        .px(zoomed(SPACE_3, cx))
+        .py(zoomed(10., cx))
+        .rounded(zoomed(RADIUS_MD, cx))
         .bg(tint)
         .text_size(size)
-        .line_height(px(20.))
+        .line_height(zoomed(20., cx))
         .child(
             div()
-                .h(px(20.))
+                .h(zoomed(20., cx))
                 .flex_none()
                 .flex()
                 .items_center()
-                .child(icon(name).with_size(px(ICON_MD)).text_color(color)),
+                .child(icon(name).with_size(zoomed(ICON_MD, cx)).text_color(color)),
         )
         .child(div().flex_1().min_w_0().child(message))
         .into_any_element()
@@ -2420,15 +2499,18 @@ fn paragraph_pitch(content: f32) -> f32 {
 /// collapses an h1 or h2 bottom margin with a fence's top margin (24 and 12 give 24), as CSS
 /// does. The web stream stacks blocks in flex columns, which add them (36). A relative offset
 /// with the same space below moves the fence as a margin would, and no margin collapses with it.
-fn fence_spacing(style: StyleRefinement) -> StyleRefinement {
-    style.relative().top(px(SPACE_3)).mb(px(SPACE_3))
+fn fence_spacing(style: StyleRefinement, zoom: f32) -> StyleRefinement {
+    style
+        .relative()
+        .top(px(SPACE_3 * zoom))
+        .mb(px(SPACE_3 * zoom))
 }
 
 /// One heading level of `markdown-styles.ts`: its `FONT_SIZE` tier over the base size, scaled
 /// to the content size and rounded, bold for h1 and h2 with a rule under them, semibold below.
 /// The top margin becomes padding, so it replaces the text view's own section gap. A heading
 /// gets no paragraph gap below it, so its bottom also holds the block container's 12.
-fn heading_style(level: u8, content: Pixels, border: Hsla) -> StyleRefinement {
+fn heading_style(level: u8, content: Pixels, border: Hsla, zoom: f32) -> StyleRefinement {
     let block = BLOCK_GAP - SPACE_3;
     let (tier, top, bottom) = match level {
         1 => (FONT_4XL, SPACE_6, SPACE_3),
@@ -2441,18 +2523,18 @@ fn heading_style(level: u8, content: Pixels, border: Hsla) -> StyleRefinement {
     let style = StyleRefinement::default()
         .text_size(size)
         .line_height((size * HEADING_LINE_HEIGHT).round())
-        .pt(px(top));
+        .pt(px(top * zoom));
     if level <= 2 {
         style
             .font_weight(FontWeight::BOLD)
-            .pb(px(SPACE_2))
-            .mb(px(bottom + block))
+            .pb(px(SPACE_2 * zoom))
+            .mb(px((bottom + block) * zoom))
             .border_b_1()
             .border_color(border)
     } else {
         style
             .font_weight(FontWeight::SEMIBOLD)
-            .pb(px(bottom + block))
+            .pb(px((bottom + block) * zoom))
     }
 }
 
@@ -2649,13 +2731,29 @@ mod tests {
         assert_eq!(message_gap(false, Below::Other), 40.);
     }
 
+    /// The heading and fence spacing scale with the zoom and equal their 100% size at zoom 1.
+    #[test]
+    fn heading_and_fence_spacing_scale_with_the_zoom() {
+        let border = hsla(0., 0., 0.5, 1.);
+        let at_100 = heading_style(2, px(15.), border, 1.);
+        let at_150 = heading_style(2, px(15.), border, 1.5);
+        assert_eq!(at_150.padding.top, Some(px(BLOCK_GAP * 1.5).into()));
+        assert_eq!(
+            at_150.margin.bottom,
+            Some(Length::Definite(px(24. * 1.5).into()))
+        );
+        assert_eq!(at_100.padding.top, Some(px(BLOCK_GAP).into()));
+        let fence = fence_spacing(StyleRefinement::default(), 1.5);
+        assert_eq!(fence.inset.top, Some(px(SPACE_3 * 1.5).into()));
+    }
+
     #[test]
     fn headings_hold_the_block_gap_below() {
         let border = hsla(0., 0., 0.5, 1.);
         // h2: `marginBottom: 12` plus the block's 12; h3: `marginBottom: 8` plus 12.
-        let h2 = heading_style(2, px(15.), border);
+        let h2 = heading_style(2, px(15.), border, 1.);
         assert_eq!(h2.margin.bottom, Some(Length::Definite(px(24.).into())));
-        let h3 = heading_style(3, px(15.), border);
+        let h3 = heading_style(3, px(15.), border, 1.);
         assert_eq!(h3.padding.bottom, Some(px(20.).into()));
     }
 
@@ -2674,8 +2772,8 @@ mod tests {
     #[test]
     fn fence_gaps_match_the_web_stream() {
         let border = hsla(0., 0., 0.5, 1.);
-        let heading = heading_style(2, px(15.), border);
-        let fence = fence_spacing(StyleRefinement::default());
+        let heading = heading_style(2, px(15.), border, 1.);
+        let fence = fence_spacing(StyleRefinement::default(), 1.);
         let fence_margin = length_px(fence.margin.top);
         let fence_offset = length_px(fence.inset.top);
         // The offset is undone below, so the blocks after the fence keep their place.
@@ -2716,16 +2814,16 @@ mod tests {
         let border = hsla(0., 0., 0.5, 1.);
         // Content 15: h1 28, h2 24, h3 21, h4 19, h5 and h6 17.
         let sizes: Vec<_> = (1..=6)
-            .map(|level| heading_style(level, px(15.), border).text.font_size)
+            .map(|level| heading_style(level, px(15.), border, 1.).text.font_size)
             .collect();
         let expected = [28., 24., 21., 19., 17., 17.];
         for (size, want) in sizes.iter().zip(expected) {
             assert_eq!(*size, Some(AbsoluteLength::Pixels(px(want))));
         }
-        let h2 = heading_style(2, px(15.), border);
+        let h2 = heading_style(2, px(15.), border, 1.);
         assert_eq!(h2.text.font_weight, Some(FontWeight::BOLD));
         assert_eq!(h2.border_color, Some(border));
-        let h3 = heading_style(3, px(15.), border);
+        let h3 = heading_style(3, px(15.), border, 1.);
         assert_eq!(h3.text.font_weight, Some(FontWeight::SEMIBOLD));
         assert_eq!(h3.border_color, None);
     }

@@ -9,7 +9,7 @@ use bachuc_theme::metrics::{
     FONT_BASE, ICON_MD, ICON_SM, ICON_XS, RADIUS_BASE, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2,
     SPACE_3,
 };
-use bachuc_theme::{Tokens, tokens, ui_font_size};
+use bachuc_theme::{Tokens, tokens, ui_font_size, zoomed};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::text::TextView;
@@ -260,17 +260,17 @@ impl TimelineView {
             .id(("permission", key))
             .role(Role::Group)
             .aria_label(format!("Permission request: {title}"))
-            .my(px(SPACE_3))
-            .p(px(SPACE_3))
-            .gap(px(SPACE_2))
-            .rounded(px(RADIUS_LG))
+            .my(zoomed(SPACE_3, cx))
+            .p(zoomed(SPACE_3, cx))
+            .gap(zoomed(SPACE_2, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .border_1()
             .border_color(t.border)
             .bg(t.surface1)
             .text_size(size)
             .child(
                 div()
-                    .line_height(px(TITLE_LINE_HEIGHT))
+                    .line_height(zoomed(TITLE_LINE_HEIGHT, cx))
                     .text_color(t.foreground)
                     .child(title),
             )
@@ -280,7 +280,7 @@ impl TimelineView {
                     .filter(|d| !d.is_empty())
                     .map(|text| {
                         div()
-                            .line_height(px(DESCRIPTION_LINE_HEIGHT))
+                            .line_height(zoomed(DESCRIPTION_LINE_HEIGHT, cx))
                             .text_color(t.foreground_muted)
                             .child(text.to_string())
                     }),
@@ -333,11 +333,11 @@ impl TimelineView {
                     .aria_label(label.clone())
                     .max_w_full()
                     .min_w_0()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .items_center()
-                    .py(px(SPACE_2))
-                    .px(px(SPACE_3))
-                    .rounded(px(RADIUS_MD))
+                    .py(zoomed(SPACE_2, cx))
+                    .px(zoomed(SPACE_3, cx))
+                    .rounded(zoomed(RADIUS_MD, cx))
                     .border_1()
                     .border_color(t.border_accent)
                     .bg(t.surface1)
@@ -357,12 +357,12 @@ impl TimelineView {
                     })
                     .map(|button| {
                         if is_responding {
-                            button.child(Spinner::new().with_size(px(ICON_SM)).color(color))
+                            button.child(Spinner::new().with_size(zoomed(ICON_SM, cx)).color(color))
                         } else {
                             button
                                 .child(
                                     icon(if allow { IconName::Check } else { IconName::X })
-                                        .with_size(px(ICON_SM))
+                                        .with_size(zoomed(ICON_SM, cx))
                                         .text_color(color),
                                 )
                                 .child(div().min_w_0().text_color(color).child(label))
@@ -370,17 +370,17 @@ impl TimelineView {
                     })
             });
         v_flex()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .child(
                 div()
-                    .my(px(SPACE_1))
+                    .my(zoomed(SPACE_1, cx))
                     .text_color(t.foreground_muted)
                     .child("How would you like to proceed?"),
             )
             .child(
                 h_flex()
                     .flex_wrap()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .items_center()
                     .children(buttons),
             )
@@ -423,10 +423,10 @@ impl TimelineView {
             .id(("plan", key))
             .role(Role::Group)
             .aria_label(title.clone())
-            .when(!compact, |card| card.my(px(SPACE_3)))
-            .p(px(SPACE_3))
-            .gap(px(SPACE_2))
-            .rounded(px(RADIUS_LG))
+            .when(!compact, |card| card.my(zoomed(SPACE_3, cx)))
+            .p(zoomed(SPACE_3, cx))
+            .gap(zoomed(SPACE_2, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .border_1()
             .border_color(t.border)
             .bg(t.surface1)
@@ -437,8 +437,8 @@ impl TimelineView {
                     .role(Role::Button)
                     .aria_label(title.clone())
                     .aria_expanded(open)
-                    .min_h(px(24.))
-                    .gap(px(SPACE_2))
+                    .min_h(zoomed(24., cx))
+                    .gap(zoomed(SPACE_2, cx))
                     .items_center()
                     .cursor_pointer()
                     .on_click(
@@ -450,14 +450,14 @@ impl TimelineView {
                         } else {
                             IconName::ChevronRight
                         })
-                        .with_size(px(ICON_MD))
+                        .with_size(zoomed(ICON_MD, cx))
                         .text_color(t.foreground_muted),
                     )
                     .child(
                         div()
                             .flex_shrink(1.)
                             .min_w_0()
-                            .line_height(px(TITLE_LINE_HEIGHT))
+                            .line_height(zoomed(TITLE_LINE_HEIGHT, cx))
                             .text_color(t.foreground)
                             .child(title),
                     ),
@@ -465,10 +465,10 @@ impl TimelineView {
             .when(open, |card| {
                 card.child(
                     v_flex()
-                        .gap(px(SPACE_2))
+                        .gap(zoomed(SPACE_2, cx))
                         .children(description.filter(|d| !d.is_empty()).map(|text| {
                             div()
-                                .line_height(px(DESCRIPTION_LINE_HEIGHT))
+                                .line_height(zoomed(DESCRIPTION_LINE_HEIGHT, cx))
                                 .text_color(t.foreground_muted)
                                 .child(text)
                         }))
@@ -507,8 +507,8 @@ impl TimelineView {
                 .aria_label("Questions")
                 .flex_wrap()
                 .items_center()
-                .gap(px(SPACE_1))
-                .px(px(SPACE_3))
+                .gap(zoomed(SPACE_1, cx))
+                .px(zoomed(SPACE_3, cx))
                 .children(questions.iter().enumerate().map(|(index, q)| {
                     let selected = index == active;
                     let answered = form.is_answered(questions, index);
@@ -519,14 +519,14 @@ impl TimelineView {
                         .role(Role::Tab)
                         .aria_label(format!("Question {} of {}", index + 1, questions.len()))
                         .aria_selected(selected)
-                        .min_h(px(NAV_HEIGHT))
+                        .min_h(zoomed(NAV_HEIGHT, cx))
                         .max_w_full()
                         .min_w_0()
-                        .gap(px(SPACE_1))
+                        .gap(zoomed(SPACE_1, cx))
                         .items_center()
-                        .px(px(SPACE_2))
-                        .py(px(SPACE_1))
-                        .rounded(px(RADIUS_MD))
+                        .px(zoomed(SPACE_2, cx))
+                        .py(zoomed(SPACE_1, cx))
+                        .rounded(zoomed(RADIUS_MD, cx))
                         .border_1()
                         .border_color(if selected {
                             t.foreground_muted
@@ -542,13 +542,15 @@ impl TimelineView {
                                 }))
                         })
                         .when(answered, |tab| {
-                            tab.child(icon(IconName::Check).with_size(px(ICON_XS)).text_color(
-                                if selected {
-                                    t.foreground
-                                } else {
-                                    t.foreground_muted
-                                },
-                            ))
+                            tab.child(
+                                icon(IconName::Check)
+                                    .with_size(zoomed(ICON_XS, cx))
+                                    .text_color(if selected {
+                                        t.foreground
+                                    } else {
+                                        t.foreground_muted
+                                    }),
+                            )
                         })
                         .child(
                             div()
@@ -574,7 +576,7 @@ impl TimelineView {
                     Role::RadioGroup
                 })
                 .aria_label(question.question.clone())
-                .gap(px(SPACE_1))
+                .gap(zoomed(SPACE_1, cx))
                 .children(
                     question
                         .options
@@ -586,8 +588,8 @@ impl TimelineView {
                             let request_id = id.to_string();
                             let hover = t.surface2;
                             let control = div()
-                                .size(px(CONTROL_SIZE))
-                                .mt(px(2.))
+                                .size(zoomed(CONTROL_SIZE, cx))
+                                .mt(zoomed(2., cx))
                                 .flex_none()
                                 .flex()
                                 .items_center()
@@ -600,18 +602,21 @@ impl TimelineView {
                                 })
                                 .map(|control| {
                                     if multi {
-                                        control.rounded(px(RADIUS_BASE)).when(selected, |c| {
-                                            c.bg(t.accent).child(
-                                                icon(IconName::Check)
-                                                    .with_size(px(ICON_XS))
-                                                    .text_color(t.accent_foreground),
-                                            )
-                                        })
+                                        control.rounded(zoomed(RADIUS_BASE, cx)).when(
+                                            selected,
+                                            |c| {
+                                                c.bg(t.accent).child(
+                                                    icon(IconName::Check)
+                                                        .with_size(zoomed(ICON_XS, cx))
+                                                        .text_color(t.accent_foreground),
+                                                )
+                                            },
+                                        )
                                     } else {
                                         control.rounded_full().when(selected, |c| {
                                             c.child(
                                                 div()
-                                                    .size(px(RADIO_DOT))
+                                                    .size(zoomed(RADIO_DOT, cx))
                                                     .rounded_full()
                                                     .bg(t.accent),
                                             )
@@ -632,10 +637,10 @@ impl TimelineView {
                                     Toggled::False
                                 })
                                 .items_start()
-                                .gap(px(SPACE_2))
-                                .px(px(SPACE_3))
-                                .py(px(SPACE_2))
-                                .rounded(px(RADIUS_MD))
+                                .gap(zoomed(SPACE_2, cx))
+                                .px(zoomed(SPACE_3, cx))
+                                .py(zoomed(SPACE_2, cx))
+                                .rounded(zoomed(RADIUS_MD, cx))
                                 .when(selected, |row| row.bg(t.surface2))
                                 .when(!is_responding, |row| {
                                     row.cursor_pointer()
@@ -655,10 +660,10 @@ impl TimelineView {
                                     v_flex()
                                         .flex_1()
                                         .min_w_0()
-                                        .gap(px(SPACE_1))
+                                        .gap(zoomed(SPACE_1, cx))
                                         .child(
                                             div()
-                                                .line_height(px(TITLE_LINE_HEIGHT))
+                                                .line_height(zoomed(TITLE_LINE_HEIGHT, cx))
                                                 .text_color(if selected {
                                                     t.foreground
                                                 } else {
@@ -668,7 +673,7 @@ impl TimelineView {
                                         )
                                         .children(option.description.clone().map(|text| {
                                             div()
-                                                .line_height(px(DESCRIPTION_LINE_HEIGHT))
+                                                .line_height(zoomed(DESCRIPTION_LINE_HEIGHT, cx))
                                                 .text_color(t.foreground_muted)
                                                 .child(text)
                                         })),
@@ -680,9 +685,9 @@ impl TimelineView {
         let other = question.shows_text_input().then(|| {
             let has_text = !form.others[active].is_empty();
             div()
-                .px(px(SPACE_3))
-                .py(px(SPACE_3))
-                .rounded(px(RADIUS_LG))
+                .px(zoomed(SPACE_3, cx))
+                .py(zoomed(SPACE_3, cx))
+                .rounded(zoomed(RADIUS_LG, cx))
                 .border_1()
                 .border_color(if has_text { t.border_accent } else { t.border })
                 .bg(t.surface2)
@@ -708,11 +713,11 @@ impl TimelineView {
         let hover = t.surface2;
         let action_button = |button: Stateful<Div>| {
             button
-                .gap(px(SPACE_2))
+                .gap(zoomed(SPACE_2, cx))
                 .items_center()
-                .py(px(SPACE_2))
-                .px(px(SPACE_3))
-                .rounded(px(RADIUS_MD))
+                .py(zoomed(SPACE_2, cx))
+                .px(zoomed(SPACE_3, cx))
+                .rounded(zoomed(RADIUS_MD, cx))
                 .border_1()
         };
         let dismiss = action_button(h_flex().id(("question-dismiss", key)))
@@ -730,14 +735,14 @@ impl TimelineView {
                 if responding.as_deref() == Some("dismiss") {
                     button.child(
                         Spinner::new()
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .color(t.foreground_muted),
                     )
                 } else {
                     button
                         .child(
                             icon(IconName::X)
-                                .with_size(px(ICON_SM))
+                                .with_size(zoomed(ICON_SM, cx))
                                 .text_color(t.foreground_muted),
                         )
                         .child(div().text_color(t.foreground_muted).child(dismiss_label))
@@ -760,14 +765,14 @@ impl TimelineView {
                 if responding.as_deref() == Some("submit") {
                     button.child(
                         Spinner::new()
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .color(t.accent_foreground),
                     )
                 } else {
                     button
                         .child(
                             icon(IconName::Check)
-                                .with_size(px(ICON_SM))
+                                .with_size(zoomed(ICON_SM, cx))
                                 .text_color(t.accent_foreground),
                         )
                         .child(div().text_color(t.accent_foreground).child(primary_label))
@@ -778,9 +783,9 @@ impl TimelineView {
             .id(("question-form", key))
             .role(Role::Group)
             .aria_label(format!("Question: {}", question.question))
-            .p(px(SPACE_3))
-            .gap(px(SPACE_3))
-            .rounded(px(RADIUS_LG))
+            .p(zoomed(SPACE_3, cx))
+            .gap(zoomed(SPACE_3, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
             .border_1()
             .border_color(t.border)
             .bg(t.surface1)
@@ -788,16 +793,21 @@ impl TimelineView {
             .children(nav)
             .child(
                 div()
-                    .px(px(SPACE_3))
-                    .pb(px(SPACE_1))
-                    .line_height(px(TITLE_LINE_HEIGHT))
+                    .px(zoomed(SPACE_3, cx))
+                    .pb(zoomed(SPACE_1, cx))
+                    .line_height(zoomed(TITLE_LINE_HEIGHT, cx))
                     .text_color(t.foreground)
                     .child(question.question.clone()),
             )
-            .child(v_flex().gap(px(SPACE_2)).children(options).children(other))
+            .child(
+                v_flex()
+                    .gap(zoomed(SPACE_2, cx))
+                    .children(options)
+                    .children(other),
+            )
             .child(
                 h_flex()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .items_center()
                     .child(dismiss)
                     .child(primary),

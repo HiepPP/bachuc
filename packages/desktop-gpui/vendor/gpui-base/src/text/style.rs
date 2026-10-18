@@ -19,6 +19,7 @@ pub struct TextViewStyle {
     code_background: Hsla,
     border: Hsla,
     paragraph_gap: Rems,
+    list_spacing: Option<(Rems, Rems)>,
     heading: Arc<dyn Fn(u8) -> StyleRefinement + Send + Sync + 'static>,
     code_block: StyleRefinement,
     table: StyleRefinement,
@@ -35,6 +36,7 @@ pub struct TextViewStyle {
 impl PartialEq for TextViewStyle {
     fn eq(&self, other: &Self) -> bool {
         self.paragraph_gap == other.paragraph_gap
+            && self.list_spacing == other.list_spacing
             && self.foreground == other.foreground
             && self.muted_foreground == other.muted_foreground
             && self.link == other.link
@@ -81,6 +83,7 @@ impl TextViewStyle {
             code_background: colors.accent,
             border: colors.border,
             paragraph_gap: rems(0.75),
+            list_spacing: None,
             heading: Arc::new(|_| StyleRefinement::default()),
             code_block: StyleRefinement::default(),
             table: StyleRefinement::default(),
@@ -137,6 +140,13 @@ impl TextViewStyle {
     /// Sets the gap between paragraphs. Defaults to 0.75 rem.
     pub fn with_paragraph_gap(mut self, gap: Rems) -> Self {
         self.paragraph_gap = gap;
+        self
+    }
+
+    /// Sets the space above and below a top-level list. Defaults to `None`: no
+    /// space above, and the paragraph gap below.
+    pub fn with_list_spacing(mut self, top: Rems, bottom: Rems) -> Self {
+        self.list_spacing = Some((top, bottom));
         self
     }
 
@@ -237,6 +247,11 @@ impl TextViewStyle {
     /// The gap between paragraphs.
     pub fn paragraph_gap(&self) -> Rems {
         self.paragraph_gap
+    }
+
+    /// The space above and below a top-level list, if set.
+    pub fn list_spacing(&self) -> Option<(Rems, Rems)> {
+        self.list_spacing
     }
 
     /// The style refinement for a heading at `level` (1-6).
