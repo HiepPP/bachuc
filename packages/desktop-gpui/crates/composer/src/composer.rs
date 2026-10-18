@@ -1279,6 +1279,19 @@ impl Composer {
         self.insert_mentions_at_caret(&[path], window, cx);
     }
 
+    /// Types `text` at the caret and focuses the input, for keys typed while focus is
+    /// elsewhere in the thread.
+    pub fn insert_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Composer>) {
+        let value = self.value(cx);
+        let mut at = self.input.read(cx).cursor().min(value.len());
+        while !value.is_char_boundary(at) {
+            at -= 1;
+        }
+        let mut next = value;
+        next.insert_str(at, text);
+        self.set_text_at(next, at + text.len(), window, cx);
+    }
+
     fn insert_mentions_at_caret(
         &mut self,
         paths: &[String],
