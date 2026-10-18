@@ -331,6 +331,8 @@ impl TimelineView {
                     .id(("permission-action", key.wrapping_add(position as u64)))
                     .role(Role::Button)
                     .aria_label(label.clone())
+                    .max_w_full()
+                    .min_w_0()
                     .gap(px(SPACE_2))
                     .items_center()
                     .py(px(SPACE_2))
@@ -363,7 +365,7 @@ impl TimelineView {
                                         .with_size(px(ICON_SM))
                                         .text_color(color),
                                 )
-                                .child(div().text_color(color).child(label))
+                                .child(div().min_w_0().text_color(color).child(label))
                         }
                     })
             });
@@ -454,6 +456,7 @@ impl TimelineView {
                     .child(
                         div()
                             .flex_shrink(1.)
+                            .min_w_0()
                             .line_height(px(TITLE_LINE_HEIGHT))
                             .text_color(t.foreground)
                             .child(title),
@@ -517,6 +520,8 @@ impl TimelineView {
                         .aria_label(format!("Question {} of {}", index + 1, questions.len()))
                         .aria_selected(selected)
                         .min_h(px(NAV_HEIGHT))
+                        .max_w_full()
+                        .min_w_0()
                         .gap(px(SPACE_1))
                         .items_center()
                         .px(px(SPACE_2))
@@ -547,6 +552,8 @@ impl TimelineView {
                         })
                         .child(
                             div()
+                                .min_w_0()
+                                .truncate()
                                 .text_color(if selected {
                                     t.foreground
                                 } else {
@@ -647,6 +654,7 @@ impl TimelineView {
                                 .child(
                                     v_flex()
                                         .flex_1()
+                                        .min_w_0()
                                         .gap(px(SPACE_1))
                                         .child(
                                             div()

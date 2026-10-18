@@ -507,6 +507,7 @@ impl ProjectEditor {
                     .child(
                         v_flex()
                             .flex_1()
+                            .min_w_0()
                             .gap(px(SPACE_1))
                             .child(div().child("Run as a service"))
                             .child(

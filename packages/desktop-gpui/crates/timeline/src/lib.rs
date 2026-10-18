@@ -1182,18 +1182,21 @@ impl TimelineView {
             RowKind::Permission(request) => this.render_permission(request, cx),
         };
         let space = this.space_below(row, this.rows.get(index + 1));
-        // `streamItemWrapper`: the content column, at most 820 wide, centered.
+        // `streamItemWrapper`: the content column, at most 820 wide, centered. Its width follows
+        // `content_column_width`. `min_w_0` stops the min-content probe: GPUI text answers it
+        // with its unwrapped width, which would hold the column wider than a narrow row.
         div()
             .id(("row", index))
             .w_full()
             .flex()
             .justify_center()
-            .px(px(SPACE_4))
+            .px(px(ROW_PADDING))
             .child(
                 div()
                     .w_full()
+                    .min_w_0()
                     .max_w(px(MAX_CONTENT_WIDTH))
-                    .px(px(SPACE_2))
+                    .px(px(COLUMN_PADDING))
                     .when_some(space, |column, space| column.pb(px(space)))
                     .child(content),
             )
@@ -1367,6 +1370,7 @@ impl TimelineView {
                             )
                             .child(
                                 div()
+                                    .min_w_0()
                                     .text_color(if completed {
                                         t.foreground_muted
                                     } else {
@@ -2259,6 +2263,18 @@ impl Render for TimelineView {
     }
 }
 
+/// The row's side padding and the content column's own padding, as `streamItemWrapper`.
+const ROW_PADDING: f32 = SPACE_4;
+const COLUMN_PADDING: f32 = SPACE_2;
+
+/// The width text gets in a timeline row `row_width` wide: the row padding comes off both sides,
+/// the column stops at `MAX_CONTENT_WIDTH`, and its own padding comes off inside. It never goes
+/// below 0 and never past the row, so text wraps inside the row on a narrow window.
+pub fn content_column_width(row_width: f32) -> f32 {
+    let column = (row_width - 2. * ROW_PADDING).clamp(0., MAX_CONTENT_WIDTH);
+    (column - 2. * COLUMN_PADDING).max(0.)
+}
+
 /// `Notification`: an icon and the message on a tinted box.
 fn notification(
     id: impl Into<ElementId>,
@@ -2290,7 +2306,7 @@ fn notification(
                 .items_center()
                 .child(icon(name).with_size(px(ICON_MD)).text_color(color)),
         )
-        .child(div().flex_1().child(message))
+        .child(div().flex_1().min_w_0().child(message))
         .into_any_element()
 }
 
