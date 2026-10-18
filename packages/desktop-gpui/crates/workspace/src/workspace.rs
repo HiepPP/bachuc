@@ -95,28 +95,28 @@ impl Render for DragPreview {
         let t = tokens(cx);
         h_flex()
             .h(zoomed(CONTROL_XS, cx))
-            .px(px(TAB_CHIP_PADDING))
-            .gap(px(TAB_CONTENT_GAP))
-            .rounded(px(RADIUS_MD))
+            .px(zoomed(TAB_CHIP_PADDING, cx))
+            .gap(zoomed(TAB_CONTENT_GAP, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .bg(t.surface2)
             .opacity(0.85)
             .text_size(ui_font_size(FONT_BASE, cx))
             .text_color(t.foreground)
-            .child(tab_glyph(*name, logo.as_ref(), t.foreground))
+            .child(tab_glyph(*name, logo.as_ref(), t.foreground, cx))
             .child(title.clone())
             .into_any_element()
     }
 }
 
 /// The tab's provider logo when it has one, else its icon.
-fn tab_glyph(name: IconName, logo: Option<&Arc<Image>>, color: Hsla) -> AnyElement {
+fn tab_glyph(name: IconName, logo: Option<&Arc<Image>>, color: Hsla, cx: &App) -> AnyElement {
     match logo {
         Some(logo) => img(logo.clone())
             .flex_none()
-            .size(px(TAB_ICON_WIDTH))
+            .size(zoomed(TAB_ICON_WIDTH, cx))
             .into_any_element(),
         None => icon(name)
-            .with_size(px(TAB_ICON_WIDTH))
+            .with_size(zoomed(TAB_ICON_WIDTH, cx))
             .text_color(color)
             .into_any_element(),
     }
@@ -172,15 +172,17 @@ fn one_line(title: &SharedString) -> SharedString {
 }
 
 /// One context menu row. A hint or a tooltip needs a custom row; the rest are plain items.
-fn menu_item(item: &TabMenuItem, muted: Hsla) -> PopupMenuItem {
-    let glyph = icon(item.icon).with_size(px(ICON_SM)).text_color(muted);
+fn menu_item(item: &TabMenuItem, muted: Hsla, cx: &App) -> PopupMenuItem {
+    let glyph = icon(item.icon)
+        .with_size(zoomed(ICON_SM, cx))
+        .text_color(muted);
     let base = if item.hint.is_some() || item.tooltip.is_some() {
         let (key, label, hint, tooltip) = (item.key, item.label, item.hint.clone(), item.tooltip);
-        PopupMenuItem::element(move |_, _| {
+        PopupMenuItem::element(move |_, cx| {
             h_flex()
                 .id(key)
                 .w_full()
-                .gap(px(SPACE_1))
+                .gap(zoomed(SPACE_1, cx))
                 .justify_between()
                 .child(label)
                 .when_some(hint.clone(), |row, hint| {
@@ -434,8 +436,8 @@ impl Workspace {
         let workspace = cx.entity().downgrade();
         let key = key.to_owned();
         let muted = tokens(cx).foreground_muted;
-        let menu = PopupMenu::build(window, cx, move |menu, _, _| {
-            let mut menu = menu.min_w(px(TAB_MENU_WIDTH));
+        let menu = PopupMenu::build(window, cx, move |menu, _, cx| {
+            let mut menu = menu.min_w(zoomed(TAB_MENU_WIDTH, cx));
             for entry in &entries {
                 menu = match entry {
                     TabMenuEntry::Separator { .. } => menu.separator(),
@@ -443,7 +445,7 @@ impl Workspace {
                         let workspace = workspace.clone();
                         let key = key.clone();
                         let action = item.action;
-                        menu.item(menu_item(item, muted).on_click(move |_, window, cx| {
+                        menu.item(menu_item(item, muted, cx).on_click(move |_, window, cx| {
                             workspace
                                 .update(cx, |this, cx| {
                                     this.run_tab_menu_action(action, &key, window, cx)
@@ -485,20 +487,20 @@ impl Workspace {
         self.focus_group(group, cx);
         let focus = self.focus_handle.clone();
         let muted = tokens(cx).foreground_muted;
-        let menu = PopupMenu::build(window, cx, move |menu, _, _| {
+        let menu = PopupMenu::build(window, cx, move |menu, _, cx| {
             menu.action_context(focus.clone())
-                .min_w(px(SPLIT_MENU_WIDTH))
+                .min_w(zoomed(SPLIT_MENU_WIDTH, cx))
                 .menu_with_icon(
                     "Split right",
                     icon(IconName::Columns2)
-                        .with_size(px(ICON_SM))
+                        .with_size(zoomed(ICON_SM, cx))
                         .text_color(muted),
                     Box::new(SplitRight),
                 )
                 .menu_with_icon(
                     "Split down",
                     icon(IconName::Rows2)
-                        .with_size(px(ICON_SM))
+                        .with_size(zoomed(ICON_SM, cx))
                         .text_color(muted),
                     Box::new(SplitDown),
                 )
@@ -564,12 +566,15 @@ impl Workspace {
                 .scroll
                 .get(&group)
                 .map_or(0., |scroll| f32::from(scroll.offset().x));
-            let x = f32::from(position.x - event.bounds.left()) - scroll;
-            let widths = self
+            let zoom = bachuc_theme::zoom(cx);
+            let x = (f32::from(position.x - event.bounds.left()) - scroll) / zoom;
+            let widths: Vec<f32> = self
                 .tab_layouts
                 .get(&group)
-                .map_or(&[][..], |layout| &layout.widths[..]);
-            Some((group, tab_layout::drop_slot(widths, x)))
+                .map_or_else(Vec::new, |layout| {
+                    layout.widths.iter().map(|width| width / zoom).collect()
+                });
+            Some((group, tab_layout::drop_slot(&widths, x)))
         } else if self.drop_target.is_some_and(|(target, _)| target == group) {
             None
         } else {
@@ -626,8 +631,10 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Measures every tab label once per title and font size, then lays out each tab bar.
-    fn layout_tabs(&mut self, window: &Window, font: Pixels) {
+    /// Measures every tab label once per title and font size, then lays out each tab bar. The
+    /// tab constants are 100% sizes: the lengths go in divided by `zoom` and the widths come out
+    /// multiplied by it.
+    fn layout_tabs(&mut self, window: &Window, font: Pixels, zoom: f32) {
         if font != self.label_font_size {
             self.label_widths.clear();
             self.label_font_size = font;
@@ -666,14 +673,18 @@ impl Workspace {
                         f32::from(shaped.width).ceil()
                     });
                     titles.insert(title.clone());
-                    label_allowance(width, *modified)
+                    label_allowance(width / zoom, *modified)
                 })
                 .collect();
             // The first frame has no size yet: lay tabs out at their natural width until the
             // canvas reports one.
             let row = rects.get(&id).map_or(0., |rect| rect.w);
-            let row = if row > 0. { row } else { f32::MAX / 4. };
-            layouts.insert(id, tab_layout::compute(row, &widths));
+            let row = if row > 0. { row / zoom } else { f32::MAX / 4. };
+            let mut layout = tab_layout::compute(row, &widths);
+            for width in &mut layout.widths {
+                *width = (*width * zoom).round();
+            }
+            layouts.insert(id, layout);
             self.scroll.entry(id).or_default();
         }
         if self.label_widths.len() > titles.len() * 2 {
@@ -760,15 +771,15 @@ impl Workspace {
             .when(row, |band| {
                 band.top_0()
                     .h_full()
-                    .left(px(-inset))
-                    .w(px(DIVIDER_HIT))
+                    .left(zoomed(-inset, cx))
+                    .w(zoomed(DIVIDER_HIT, cx))
                     .cursor_col_resize()
             })
             .when(!row, |band| {
                 band.left_0()
                     .w_full()
-                    .top(px(-inset))
-                    .h(px(DIVIDER_HIT))
+                    .top(zoomed(-inset, cx))
+                    .h(zoomed(DIVIDER_HIT, cx))
                     .cursor_row_resize()
             })
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
@@ -790,14 +801,14 @@ impl Workspace {
                         .when(row, |line| {
                             line.top_0()
                                 .h_full()
-                                .left(px(start))
-                                .w(px(DIVIDER_HIGHLIGHT))
+                                .left(zoomed(start, cx))
+                                .w(zoomed(DIVIDER_HIGHLIGHT, cx))
                         })
                         .when(!row, |line| {
                             line.left_0()
                                 .w_full()
-                                .top(px(start))
-                                .h(px(DIVIDER_HIGHLIGHT))
+                                .top(zoomed(start, cx))
+                                .h(zoomed(DIVIDER_HIGHLIGHT, cx))
                         }),
                 )
             });
@@ -856,7 +867,7 @@ impl Workspace {
             .flex_1()
             .min_w_0()
             .h_full()
-            .px(px(TAB_ROW_PADDING))
+            .px(zoomed(TAB_ROW_PADDING, cx))
             .overflow_x_scroll()
             .track_scroll(&scroll)
             .children(tabs)
@@ -864,15 +875,15 @@ impl Workspace {
                 row.child(
                     div()
                         .flex_none()
-                        .px(px(SPACE_1))
+                        .px(zoomed(SPACE_1, cx))
                         .child(self.render_new_tab_button(id, CONTROL_XS, t, cx)),
                 )
             });
         let toolbar = h_flex()
             .flex_none()
-            .gap(px(1.))
-            .px(px(SPLIT_ACTIONS_PADDING))
-            .mr(px(SPLIT_ACTIONS_MARGIN))
+            .gap(zoomed(1., cx))
+            .px(zoomed(SPLIT_ACTIONS_PADDING, cx))
+            .mr(zoomed(SPLIT_ACTIONS_MARGIN, cx))
             .when(layout.scrolls, |toolbar| {
                 toolbar.child(self.render_new_tab_button(id, TOOLBAR_BUTTON, t, cx))
             })
@@ -958,61 +969,60 @@ impl Workspace {
         let close_key = key.clone();
         let a11y_close_key = key.clone();
         let close_left = bachuc_theme::tab_close_position(cx) == TabClosePosition::Left;
-        let close_button = div()
-            .id(SharedString::from(format!("tab-close:{key}")))
-            .role(Role::Button)
-            .aria_label(SharedString::from(format!("Close {title}")))
-            .flex()
-            .items_center()
-            .justify_center()
-            .size(px(CLOSE_BUTTON))
-            .rounded(px(RADIUS_SM))
-            .child(
-                icon(IconName::X)
-                    .with_size(px(ICON_XS))
-                    .text_color(if close_hovered {
+        let close_button =
+            div()
+                .id(SharedString::from(format!("tab-close:{key}")))
+                .role(Role::Button)
+                .aria_label(SharedString::from(format!("Close {title}")))
+                .flex()
+                .items_center()
+                .justify_center()
+                .size(zoomed(CLOSE_BUTTON, cx))
+                .rounded(zoomed(RADIUS_SM, cx))
+                .child(icon(IconName::X).with_size(zoomed(ICON_XS, cx)).text_color(
+                    if close_hovered {
                         t.foreground
                     } else {
                         t.foreground_muted
-                    }),
-            )
-            // Hidden, the button stays in the accessibility tree but takes no pointer events,
-            // so the chip under it keeps its clicks.
-            .when(hovered, |button| {
-                let hover_key = key.clone();
-                button
-                    .cursor_pointer()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                        let next = hovered.then(|| hover_key.clone());
-                        if this.hovered_close != next {
-                            this.hovered_close = next;
-                            cx.notify();
-                        }
-                    }))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.hovered_close = None;
-                        this.close(&close_key, window, cx);
-                    }))
-            })
-            .on_a11y_action(AccessibleAction::Click, {
-                let view = cx.weak_entity();
-                move |_, window, cx| {
-                    view.update(cx, |this, cx| {
-                        this.hovered_close = None;
-                        this.close(&a11y_close_key, window, cx);
-                    })
-                    .ok();
-                }
-            });
+                    },
+                ))
+                // Hidden, the button stays in the accessibility tree but takes no pointer events,
+                // so the chip under it keeps its clicks.
+                .when(hovered, |button| {
+                    let hover_key = key.clone();
+                    button
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            let next = hovered.then(|| hover_key.clone());
+                            if this.hovered_close != next {
+                                this.hovered_close = next;
+                                cx.notify();
+                            }
+                        }))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.hovered_close = None;
+                            this.close(&close_key, window, cx);
+                        }))
+                })
+                .on_a11y_action(AccessibleAction::Click, {
+                    let view = cx.weak_entity();
+                    move |_, window, cx| {
+                        view.update(cx, |this, cx| {
+                            this.hovered_close = None;
+                            this.close(&a11y_close_key, window, cx);
+                        })
+                        .ok();
+                    }
+                });
         // Left: on hover the close button takes the icon slot, so the chip keeps its width.
         // Both layers stay in the layout and swap by opacity.
-        let glyph = tab_glyph(item.icon, self.extras.logo(&key), label_color);
+        let glyph = tab_glyph(item.icon, self.extras.logo(&key), label_color, cx);
         let (icon_slot, close_overlay) = if close_left {
             let slot = div()
                 .flex_none()
                 .relative()
-                .size(px(TAB_ICON_WIDTH))
+                .size(zoomed(TAB_ICON_WIDTH, cx))
                 .child(
                     div()
                         .size_full()
@@ -1022,8 +1032,8 @@ impl Workspace {
                 .child(
                     div()
                         .absolute()
-                        .top(px((TAB_ICON_WIDTH - CLOSE_BUTTON) / 2.))
-                        .left(px((TAB_ICON_WIDTH - CLOSE_BUTTON) / 2.))
+                        .top(zoomed((TAB_ICON_WIDTH - CLOSE_BUTTON) / 2., cx))
+                        .left(zoomed((TAB_ICON_WIDTH - CLOSE_BUTTON) / 2., cx))
                         .when(!hovered, |layer| layer.opacity(0.))
                         .child(close_button),
                 );
@@ -1031,7 +1041,7 @@ impl Workspace {
         } else {
             (
                 glyph,
-                Some(self.close_overlay(close_button, backdrop, hovered)),
+                Some(self.close_overlay(close_button, backdrop, hovered, cx)),
             )
         };
 
@@ -1061,9 +1071,9 @@ impl Workspace {
             .relative()
             .w(px(width))
             .h(zoomed(CONTROL_XS, cx))
-            .px(px(TAB_CHIP_PADDING))
-            .gap(px(TAB_CONTENT_GAP))
-            .rounded(px(RADIUS_MD))
+            .px(zoomed(TAB_CHIP_PADDING, cx))
+            .gap(zoomed(TAB_CONTENT_GAP, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .overflow_hidden()
             .when_some(fill, |chip, fill| chip.bg(fill))
             .on_mouse_down(
@@ -1136,7 +1146,7 @@ impl Workspace {
                         .role(Role::Image)
                         .aria_label("Modified")
                         .flex_none()
-                        .size(px(TAB_MODIFIED_DOT))
+                        .size(zoomed(TAB_MODIFIED_DOT, cx))
                         .rounded_full()
                         .bg(t.foreground_muted),
                 )
@@ -1148,20 +1158,20 @@ impl Workspace {
         div()
             .flex_none()
             .relative()
-            .mx(px(TAB_CHIP_GAP / 2.))
+            .mx(zoomed(TAB_CHIP_GAP / 2., cx))
             .child(chip)
             .when_some(indicator, |slot, before| {
                 let pill = div()
                     .absolute()
-                    .top(px(SPACE_0_5))
-                    .bottom(px(SPACE_0_5))
-                    .w(px(TAB_DROP_INDICATOR_WIDTH))
+                    .top(zoomed(SPACE_0_5, cx))
+                    .bottom(zoomed(SPACE_0_5, cx))
+                    .w(zoomed(TAB_DROP_INDICATOR_WIDTH, cx))
                     .rounded_full()
                     .bg(t.accent);
                 slot.child(if before {
-                    pill.left(px(pill_offset))
+                    pill.left(zoomed(pill_offset, cx))
                 } else {
-                    pill.right(px(pill_offset))
+                    pill.right(zoomed(pill_offset, cx))
                 })
             })
             .into_any_element()
@@ -1169,16 +1179,22 @@ impl Workspace {
 
     /// The Right close button: an overlay at the chip's right end with a scrim of the chip
     /// fill under it.
-    fn close_overlay(&self, close_button: Stateful<Div>, backdrop: Hsla, hovered: bool) -> Div {
+    fn close_overlay(
+        &self,
+        close_button: Stateful<Div>,
+        backdrop: Hsla,
+        hovered: bool,
+        cx: &App,
+    ) -> Div {
         h_flex()
             .absolute()
             .top_0()
             .bottom_0()
             .right_0()
-            .w(px(CLOSE_OVERLAY_WIDTH))
+            .w(zoomed(CLOSE_OVERLAY_WIDTH, cx))
             .justify_end()
-            .pr(px(SPACE_1))
-            .rounded_r(px(RADIUS_MD))
+            .pr(zoomed(SPACE_1, cx))
+            .rounded_r(zoomed(RADIUS_MD, cx))
             .bg(linear_gradient(
                 90.,
                 linear_color_stop(backdrop.opacity(0.), 0.),
@@ -1195,6 +1211,7 @@ impl Workspace {
         name: IconName,
         size: f32,
         t: &Tokens,
+        cx: &App,
     ) -> Stateful<Div> {
         let fill = t.interaction_highlight;
         div()
@@ -1205,13 +1222,13 @@ impl Workspace {
             .flex_none()
             .items_center()
             .justify_center()
-            .size(px(size))
-            .rounded(px(RADIUS_MD))
+            .size(zoomed(size, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .cursor_pointer()
             .hover(move |button| button.bg(fill))
             .child(
                 icon(name)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(t.foreground_extra_muted),
             )
     }
@@ -1230,6 +1247,7 @@ impl Workspace {
                 IconName::Plus,
                 size,
                 t,
+                cx,
             )
             .tooltip(|window, cx| {
                 Tooltip::new("New tab")
@@ -1269,6 +1287,7 @@ impl Workspace {
             name,
             TOOLBAR_BUTTON,
             t,
+            cx,
         )
         .when(maximized, |button| button.bg(fill))
         .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
@@ -1297,6 +1316,7 @@ impl Workspace {
                 IconName::Ellipsis,
                 TOOLBAR_BUTTON,
                 t,
+                cx,
             )
             .aria_expanded(open)
             .when(open, |button| button.bg(fill))
@@ -1326,13 +1346,13 @@ impl Workspace {
                 slot.child(
                     div()
                         .absolute()
-                        .top(px(popup_offset(TOOLBAR_BUTTON)))
+                        .top(zoomed(popup_offset(TOOLBAR_BUTTON), cx))
                         .right_0()
                         .child(
                             deferred(
                                 anchored()
                                     .anchor(Anchor::TopRight)
-                                    .snap_to_window_with_margin(px(8.))
+                                    .snap_to_window_with_margin(zoomed(8., cx))
                                     .child(menu),
                             )
                             .with_priority(gpui_kit::base::POPUP_PRIORITY),
@@ -1352,7 +1372,7 @@ impl Render for Workspace {
         }
         let t = tokens(cx);
         let font = ui_font_size(FONT_BASE, cx);
-        self.layout_tabs(window, font);
+        self.layout_tabs(window, font, bachuc_theme::zoom(cx));
 
         let bounds = self.bounds.clone();
         let entity = cx.entity_id();
@@ -1378,7 +1398,7 @@ impl Render for Workspace {
             deferred(
                 anchored()
                     .position(open.position)
-                    .snap_to_window_with_margin(px(8.))
+                    .snap_to_window_with_margin(zoomed(8., cx))
                     .child(open.menu.clone()),
             )
             .with_priority(gpui_kit::base::POPUP_PRIORITY)

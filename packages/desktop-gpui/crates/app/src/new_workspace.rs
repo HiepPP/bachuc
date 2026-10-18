@@ -19,7 +19,7 @@ use bachuc_theme::metrics::{
     FONT_2XL, FONT_BASE, ICON_MD, ICON_SM, RADIUS_2XL, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2,
     SPACE_4, SPACE_6, SPACE_8, WEIGHT_NORMAL,
 };
-use bachuc_theme::{ShadowSize, popup_offset, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, popup_offset, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
@@ -562,7 +562,7 @@ impl NewWorkspaceScreen {
                 .role(Role::Complementary)
                 .aria_label(entry.value.title.clone())
                 .flex_none()
-                .w(px(SIDE_PANEL_WIDTH))
+                .w(zoomed(SIDE_PANEL_WIDTH, cx))
                 .h_full()
                 .border_l_1()
                 .border_color(t.border)
@@ -864,13 +864,13 @@ impl NewWorkspaceScreen {
             .aria_expanded(open)
             .flex_shrink(1.)
             .min_w_0()
-            .h(px(BADGE_HEIGHT))
-            .max_w(px(BADGE_MAX_WIDTH))
+            .h(zoomed(BADGE_HEIGHT, cx))
+            .max_w(zoomed(BADGE_MAX_WIDTH, cx))
             .overflow_hidden()
-            .px(px(SPACE_2))
-            .gap(px(SPACE_1))
+            .px(zoomed(SPACE_2, cx))
+            .gap(zoomed(SPACE_1, cx))
             .items_center()
-            .rounded(px(RADIUS_2XL))
+            .rounded(zoomed(RADIUS_2XL, cx))
             .when(open, |chip| chip.bg(t.surface2))
             .when(disabled, |chip| chip.opacity(BADGE_DISABLED_OPACITY))
             .when(!disabled, |chip| {
@@ -886,13 +886,13 @@ impl NewWorkspaceScreen {
             .child(
                 div()
                     .flex_none()
-                    .size(px(ICON_MD))
+                    .size(zoomed(ICON_MD, cx))
                     .flex()
                     .items_center()
                     .justify_center()
                     .child(
                         icon(glyph)
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .text_color(t.foreground_muted),
                     ),
             )
@@ -907,9 +907,9 @@ impl NewWorkspaceScreen {
             )
             .child(
                 // `MetaChevron`: 1 px lower.
-                div().flex_none().relative().top(px(1.)).child(
+                div().flex_none().relative().top(zoomed(1., cx)).child(
                     icon(IconName::ChevronDown)
-                        .with_size(px(ICON_SM))
+                        .with_size(zoomed(ICON_SM, cx))
                         .text_color(t.foreground_extra_muted),
                 ),
             )
@@ -934,11 +934,11 @@ impl NewWorkspaceScreen {
                 label
             })
             .aria_selected(checked)
-            .min_h(px(BADGE_HEIGHT))
-            .px(px(SPACE_2))
-            .gap(px(SPACE_2))
+            .min_h(zoomed(BADGE_HEIGHT, cx))
+            .px(zoomed(SPACE_2, cx))
+            .gap(zoomed(SPACE_2, cx))
             .items_center()
-            .rounded(px(RADIUS_MD))
+            .rounded(zoomed(RADIUS_MD, cx))
             .cursor_pointer()
             .text_size(ui_font_size(FONT_BASE, cx))
             .text_color(t.foreground)
@@ -946,16 +946,16 @@ impl NewWorkspaceScreen {
             .child(
                 div()
                     .flex_none()
-                    .w(px(ICON_SM))
+                    .w(zoomed(ICON_SM, cx))
                     .when_some(glyph, |slot, glyph| {
                         slot.child(
                             icon(glyph)
-                                .with_size(px(ICON_SM))
+                                .with_size(zoomed(ICON_SM, cx))
                                 .text_color(t.foreground_muted),
                         )
                     })
                     .when(glyph.is_none() && checked, |slot| {
-                        slot.child(icon(IconName::Check).with_size(px(ICON_SM)))
+                        slot.child(icon(IconName::Check).with_size(zoomed(ICON_SM, cx)))
                     }),
             )
             .child(div().flex_1().min_w_0().truncate().child(text))
@@ -1052,8 +1052,8 @@ impl NewWorkspaceScreen {
                 };
                 let mut list: Vec<AnyElement> = vec![
                     div()
-                        .px(px(SPACE_1))
-                        .pb(px(SPACE_1))
+                        .px(zoomed(SPACE_1, cx))
+                        .pb(zoomed(SPACE_1, cx))
                         .child(
                             Input::new(&self.base_query)
                                 .accessibility_id("new-workspace-base-search")
@@ -1067,8 +1067,8 @@ impl NewWorkspaceScreen {
                             .id("new-workspace-base-empty")
                             .role(Role::Status)
                             .aria_label(empty)
-                            .px(px(SPACE_2))
-                            .py(px(SPACE_1))
+                            .px(zoomed(SPACE_2, cx))
+                            .py(zoomed(SPACE_1, cx))
                             .text_size(ui_font_size(FONT_BASE, cx))
                             .text_color(t.foreground_muted)
                             .child(empty)
@@ -1087,23 +1087,23 @@ impl NewWorkspaceScreen {
         // The wrapper sits one gap under the chip; the anchored list opens at its origin.
         div()
             .absolute()
-            .top(px(popup_offset(BADGE_HEIGHT)))
+            .top(zoomed(popup_offset(BADGE_HEIGHT), cx))
             .left_0()
             .child(
                 deferred(
-                    anchored().snap_to_window_with_margin(px(8.)).child(
+                    anchored().snap_to_window_with_margin(zoomed(8., cx)).child(
                         v_flex()
                             .id("new-workspace-picker")
                             .role(Role::Menu)
                             .aria_label(title)
-                            .w(px(PICKER_WIDTH))
-                            .max_h(px(PICKER_MAX_HEIGHT))
+                            .w(zoomed(PICKER_WIDTH, cx))
+                            .max_h(zoomed(PICKER_MAX_HEIGHT, cx))
                             .overflow_y_scroll()
-                            .p(px(SPACE_1))
+                            .p(zoomed(SPACE_1, cx))
                             .bg(t.popover)
                             .border_1()
                             .border_color(t.border)
-                            .rounded(px(RADIUS_LG))
+                            .rounded(zoomed(RADIUS_LG, cx))
                             .shadow(vec![shadow(ShadowSize::Md, cx)])
                             .occlude()
                             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
@@ -1180,9 +1180,9 @@ impl NewWorkspaceScreen {
             .role(Role::Group)
             .aria_label("New workspace options")
             .items_center()
-            .mb(px(SPACE_8))
-            .px(px(SPACE_4))
-            .gap(px(SPACE_2))
+            .mb(zoomed(SPACE_8, cx))
+            .px(zoomed(SPACE_4, cx))
+            .gap(zoomed(SPACE_2, cx))
             .child(self.control(project_chip, Picker::Project, cx))
             .when_some(isolation_chip, |row, chip| {
                 row.child(self.control(chip, Picker::Isolation, cx))
@@ -1198,17 +1198,21 @@ impl Render for NewWorkspaceScreen {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = tokens(cx);
         let side_panel = self.side_panel(window, cx);
-        let title = div().mb(px(SPACE_8)).pl(px(SPACE_6)).pr(px(SPACE_4)).child(
-            div()
-                .id("new-workspace-title")
-                .role(Role::Heading)
-                .aria_label("New workspace")
-                .text_size(ui_font_size(FONT_2XL, cx))
-                .line_height(px(TITLE_LINE_HEIGHT))
-                .font_weight(FontWeight(WEIGHT_NORMAL))
-                .text_color(t.foreground)
-                .child("New workspace"),
-        );
+        let title = div()
+            .mb(zoomed(SPACE_8, cx))
+            .pl(zoomed(SPACE_6, cx))
+            .pr(zoomed(SPACE_4, cx))
+            .child(
+                div()
+                    .id("new-workspace-title")
+                    .role(Role::Heading)
+                    .aria_label("New workspace")
+                    .text_size(ui_font_size(FONT_2XL, cx))
+                    .line_height(zoomed(TITLE_LINE_HEIGHT, cx))
+                    .font_weight(FontWeight(WEIGHT_NORMAL))
+                    .text_color(t.foreground)
+                    .child("New workspace"),
+            );
         let setup = v_flex()
             .child(title)
             .child(self.form_row(cx))
@@ -1222,7 +1226,7 @@ impl Render for NewWorkspaceScreen {
                     .role(Role::Alert)
                     .aria_label(format!("Error: {message}"))
                     .text_size(ui_font_size(FONT_BASE, cx))
-                    .line_height(px(ERROR_LINE_HEIGHT))
+                    .line_height(zoomed(ERROR_LINE_HEIGHT, cx))
                     .text_color(t.destructive)
                     .child(message)
             }))

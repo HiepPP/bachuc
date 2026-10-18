@@ -12,7 +12,7 @@ use bachuc_theme::metrics::{
     FONT_BASE, HEADER_HEIGHT, ICON_SM, RADIUS_LG, RADIUS_MD, SPACE_2, SPACE_3, SPACE_4,
     WEIGHT_MEDIUM,
 };
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size};
+use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -136,10 +136,10 @@ pub fn surface_header(
         .aria_label(format!("{title} header"))
         .relative()
         .flex_shrink_0()
-        .h(px(HEADER_HEIGHT))
-        .pl(px(leading_inset + SPACE_3))
-        .pr(px(SPACE_3))
-        .gap(px(SPACE_2))
+        .h(zoomed(HEADER_HEIGHT, cx))
+        .pl(zoomed(leading_inset + SPACE_3, cx))
+        .pr(zoomed(SPACE_3, cx))
+        .gap(zoomed(SPACE_2, cx))
         .items_center()
         .bg(t.surface0)
         .border_b_1()
@@ -148,15 +148,15 @@ pub fn surface_header(
             row.child(
                 div()
                     .flex_none()
-                    .size(px(ICON_BADGE))
+                    .size(zoomed(ICON_BADGE, cx))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(RADIUS_MD))
+                    .rounded(zoomed(RADIUS_MD, cx))
                     .bg(t.surface2)
                     .child(
                         icon(glyph)
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .text_color(t.foreground_muted),
                     ),
             )
@@ -198,7 +198,7 @@ pub fn surface_body(view: Option<AnyView>, cx: &App) -> AnyElement {
                 .role(Role::Alert)
                 .aria_label(notice)
                 .flex_1()
-                .p(px(SPACE_4))
+                .p(zoomed(SPACE_4, cx))
                 .text_size(ui_font_size(FONT_BASE, cx))
                 .text_color(t.status_danger)
                 .child(notice)
@@ -262,7 +262,7 @@ pub fn surface_overlay(
                 .bg(t.surface0)
                 .border_1()
                 .border_color(t.border)
-                .rounded(px(RADIUS_LG))
+                .rounded(zoomed(RADIUS_LG, cx))
                 .overflow_hidden()
                 .shadow(vec![shadow(ShadowSize::Lg, cx)])
                 .occlude()
