@@ -40,3 +40,8 @@ DONE, with the UI checker lines DEFERRED. The header root cause is proven from s
 ## Lessons
 
 - In GPUI, never stop the left mouse-down on a gpui-kit `DropdownMenu` trigger. For a button that must stop it, for example over a drag region, own the `PopupMenu` and toggle it in the capture phase.
+
+## UI Checks
+
+- Line 43 (AX click header three-dot and tab-bar three-dot): PASS. Header "Workspace actions" opened Rename agent, Archive agent, New tab, Split pane right and down, Copy path (`/tmp/wt-ui/chk-237-header-menu.png`). Tab-bar "More actions" opened Split right and Split down (`/tmp/wt-ui/chk-237-tab-menu.png`).
+- Line 44 (Open-in menu shows real app icons): PASS. "Choose editor" shows the VS Code, Finder, and Terminal app icons (`/tmp/wt-ui/chk-237-open-in.png`).

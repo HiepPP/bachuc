@@ -64,3 +64,7 @@ file change and no commit (`server/turn-diff.ts:414`), so a turn with no change 
   daemon item is missing in GPUI, compare the hello capabilities first.
 - A fetch from the TS client is a quick wire check: `connectToDaemon` with an endpoint target and
   `fetchAgentTimeline`.
+
+## UI Checks
+
+- Line 40 (edit prompt shows a card, no-edit prompt shows none): PASS. Disposable agent on live in `/tmp/wt-ui-repo` (haiku, bypassPermissions): the edit prompt (append "two" to `a.txt`) shows the "1 file changed +1 -0" card with `a.txt` and an "Open the turn diff of a.txt" button (`/tmp/wt-ui/chk-241-edit.png`). The next prompt with no tools shows "ok" and no new card; only the first turn has one (`/tmp/wt-ui/chk-241-noedit.png`). The agent was archived. The workspace the CLI created for `/tmp/wt-ui-repo` stays on live.

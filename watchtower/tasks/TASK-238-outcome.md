@@ -43,3 +43,8 @@ DONE. Skills and the draft command list now reach the composer. Two UI checker l
 - Electron merges sources first, then hides built-ins in a draft, so a skill named like a built-in stays hidden.
 - A fake-server test needs `add_agent` before `connect`, or the connect step panics.
 - Not ported by decision (Q-146): Escape on a start-position slash only dismisses the menu.
+
+## UI Checks
+
+- Line 41 (type "/" in an agent composer): PASS. After an AX click on the composer and typeText "/", the picker lists 50 skills and commands (for example gitnexus-debugging, caveman, brandkit) within 3 seconds (`/tmp/wt-ui/chk-238-slash2.png`). The test project has no `.claude/skills` folder, so the user and plugin skills show, not a project skill.
+- Line 42 (type "/" in a new-workspace draft): PASS. The same 50 items show (`/tmp/wt-ui/chk-238-newws-slash.png`).

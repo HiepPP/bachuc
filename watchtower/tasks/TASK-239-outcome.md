@@ -2,6 +2,8 @@
 
 ## Status
 
+Blocked: BUILT, UNVERIFIED (Q-150).
+
 DONE, with the owner hand test UNVERIFIED and the `measure.sh` CPU read DEFERRED. One spec item, the next Space's list drawn next to the current one during the drag, needs a plugin-host API outside this TASK's files; see Questions.
 
 ## Changed

@@ -2,6 +2,8 @@
 
 ## Status
 
+Blocked: BUILT, UNVERIFIED (Q-154).
+
 DONE, with both UI checker lines DEFERRED.
 
 ## Changed
@@ -31,3 +33,8 @@ DONE, with both UI checker lines DEFERRED.
 ## Lessons
 
 - A setting that a view crate reads, but that the settings crate cannot reach by a dependency, goes through a `bachuc-theme` global.
+
+## UI Checks
+
+- Line 40 (hover a tab in Left mode, x in the icon slot, AX click closes): UNVERIFIED (unattended): needs pointer. The hover state cannot be made without the pointer. Half checked: an AX click on "Close History" closed that tab (5 tabs to 4), seen after a forced frame (`/tmp/wt-ui/chk-236-after-close.png`). The AX tree of a background GPUI window lags until a frame is forced (zoom action), so read it only after that.
+- Line 41 (switch to Right, x on the right overlay): UNVERIFIED (unattended): needs pointer. The x shows on hover only.

@@ -74,3 +74,11 @@ Left unchanged, with the reason:
 
 - In GPUI, a flex item that holds text needs `min_w_0`, unless it has a definite width. Text answers the min-content probe with its unwrapped width, and taffy uses that as the flex item's minimum.
 - The GPUI list re-measures visible rows on every layout and drops all cached heights on a width change. If text overlaps inside a timeline row, look inside the row, not at the list.
+
+## UI Checks
+
+Run 2026-10-18, check bundle on live, background window. The window width cannot be set through AX (cua has no size call), so each "700 px" line ran in the content pane at window width 1200 with sidebar and Explorer open (pane about 560 px, narrower than 700), plus the zoom action (1710 px) for a resize.
+
+- Line 44 (AskUserQuestion option text at 700 px): PASS. Three options with 300 character descriptions wrap inside the card at a 560 px pane; no text passes the card edge. `/tmp/wt-ui/chk-232-narrow.png`.
+- Line 45 (resize 1600 to 700, long message above a Recap card): PASS (equivalent). Resized 1710 to 1200 with the zoom action; the Recap card sits below the long message with no overlap at both widths. `/tmp/wt-ui/chk-232-recap-1710.png`, `/tmp/wt-ui/chk-232-recap-1200.png`. Side observation, not scored: the floating "Remove" and "Remove & New Thread" buttons at the top right overlap message text at 1200.
+- Line 46 (200 character path, no spaces): PASS. A path with three 60 character segments and a 200 character single token both break inside their block at a 560 px pane. `/tmp/wt-ui/chk-232-path-1200b.png`.

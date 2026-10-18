@@ -2,6 +2,8 @@
 
 ## Status
 
+Blocked: BUILT, UNVERIFIED (Q-152).
+
 DONE, with the UI checker line DEFERRED and the owner hand test UNVERIFIED. The zoom is a whole-UI zoom only in part: text, gpui-kit rem sizes, radii, and the header, tab bar, and tab chip heights scale. Most fixed `px` paddings and icons in the view crates do not scale yet; see Not scaled.
 
 ## Changed
@@ -47,3 +49,7 @@ DONE, with the UI checker line DEFERRED and the owner hand test UNVERIFIED. The 
 ## Lessons
 
 - GPUI app code in px does not follow `set_rem_size`. A true whole-window zoom needs the display scale factor, which gpui-pre sets only under `test-support`. Getting that needs a vendored gpui-pre patch, which would also scale the mouse positions and the viewport.
+
+## UI Checks
+
+- Line 45 (Cmd+= twice, then Cmd+0): PASS. Keys went to the background window with no focus change. After two Cmd+= the sidebar, tabs, message text, and composer padding are larger (`/tmp/wt-ui/chk-234-after2.png`); after Cmd+0 the layout equals the start (`/tmp/wt-ui/chk-234-before.png`, `/tmp/wt-ui/chk-234-reset.png`).

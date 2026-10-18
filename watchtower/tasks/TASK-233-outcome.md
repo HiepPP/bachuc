@@ -2,75 +2,97 @@
 
 ## Status
 
-DONE, with UI checker lines DEFERRED. The GPUI timeline already used the Electron values for almost every spacing constant. One real difference was fixed. Three differences sit in the vendored text view, outside this TASK's Files.
+Blocked: list rows need a vendor change (Q-144).
+
+BLOCKED (fix round 1). The timeline part is fixed: the paragraph gap now draws 24 px, as Electron. Two list gaps stay off, and only a vendor change fixes them (Q-144). No vendor file was edited.
 
 ## Changed
 
 - `packages/desktop-gpui/crates/timeline/src/lib.rs`:
-  - The user bubble line height now uses `body_line_height` (`round(size * 1.4)`, as Electron's `Math.round(fontSize.content * 1.4)`). It was the unrounded `size * 1.4`. `USER_LINE_HEIGHT` is removed.
-  - The `space_below` rules moved into the pure function `message_gap(is_user: bool, below: Below) -> f32`. `space_below` calls it. The values did not change.
-  - New test `message_gaps_match_the_web_stream`.
+  - Root cause: `markdown_style` passed `rems(PARAGRAPH_GAP / FONT_BASE)`, so 24/14 rem. The window rem size is 16 x zoom (`crates/theme/src/lib.rs:183,218`), not `FONT_BASE`, so every paragraph gap drew 24 x 16 / 14 = 27.4 px. The first attempt's source read assumed 1 rem = 14 px.
+  - New pure `window_rems(gap, rem_size)`. `markdown_style` passes `window_rems(zoomed(PARAGRAPH_GAP, cx), rem_size(cx))`, which is 1.5 rem at every zoom.
+  - New test `paragraph_gap_draws_at_the_window_rem_size`.
+- First attempt (f6cbb9990) kept: `message_gap`, user bubble `body_line_height`.
 
 ## Contract
 
-- No public name changed. `message_gap` and `Below` are private.
-- GitNexus reported `space_below` as CRITICAL (22 transitive callers, all in this crate). The change is a pure extraction, so no caller sees a different value.
+- No public name changed. `window_rems` is private.
+- GitNexus impact on `markdown_style`: LOW (6 callers, all in this crate).
 
-## Electron versus GPUI (content size 15)
+## Electron versus GPUI (content size 15, zoom 1, logical px)
 
-| Value                               | Electron source                             | Electron          | GPUI                            | Diff |
-| ----------------------------------- | ------------------------------------------- | ----------------- | ------------------------------- | ---- |
-| Body line height                    | `markdown-styles.ts` body                   | 21                | `body_line_height` 21           | 0    |
-| User bubble line height             | `message.tsx` user text                     | 21                | 21 (was `size*1.4`, same at 15) | 0    |
-| Paragraph to paragraph              | paragraph mb 12 + block mb 12               | 24                | `PARAGRAPH_GAP` 24              | 0    |
-| Paragraph pitch (1 line)            | 21 + 24                                     | 45                | 45 (test)                       | 0    |
-| H1/H2 top                           | mt 24 (flex columns add the 24 above)       | 24                | `heading_style` pt 24           | 0    |
-| H1/H2 bottom                        | mb 12 + pb 8 + block 12                     | 24 below the rule | mb 24, pb 8                     | 0    |
-| H3/H4 top, bottom                   | mt 16, mb 8 + block 12                      | 16, 20            | pt 16, pb 20                    | 0    |
-| H5/H6 top, bottom                   | mt 12, mb 4 + block 12                      | 12, 16            | pt 12, pb 16                    | 0    |
-| Heading size and line height        | `round(content*tier/14)`, `round(size*1.3)` | rounded           | same rule                       | 0    |
-| Code block padding, line height     | padding 12, mono 12, 1.45                   | 12, 17            | `SPACE_3`, `round(code*1.45)`   | 0    |
-| Fence margin above, below           | `fence` marginVertical 12                   | 12, 12            | `fence_spacing` 12, 12          | 0    |
-| Heading rule to fence               | 12 + 12 + 12                                | 36                | 36 (test)                       | 0    |
-| Paragraph to fence                  | 12 + 12 + 12                                | 36                | 36 (test)                       | 0    |
-| User trailing row                   | mt 8 + height 24                            | 32                | `USER_TRAILING_ROW` 32          | 0    |
-| User to user                        | `getGapBetweenStreamItems`                  | 4                 | `message_gap` 4                 | 0    |
-| User to assistant, user to end      | same                                        | 0                 | 0                               | 0    |
-| User to tools or other              | same                                        | 16                | 16                              | 0    |
-| Assistant to footer                 | para 12, `compactBottom`, footer gap 0      | 12                | 12                              | 0    |
-| Assistant to end                    | para 12 + padding 12                        | 24                | 24                              | 0    |
-| Assistant to tools                  | 12 + 12 + gap 4                             | 28                | 28                              | 0    |
-| Assistant to assistant, user, other | 12 + 12 + gap 16                            | 40                | 40                              | 0    |
-| Footer top, height                  | mt 13, 24                                   | 13, 24            | `FOOTER_TOP` 13, 24             | 0    |
-| Step list top, step gap             | `turn/view.tsx` 16, 6                       | 16, 6             | 16, 6                           | 0    |
-| Step row padding, inner gap         | 4, 3                                        | 4, 3              | 4, 3                            | 0    |
-| Rule above and below the answer     | mt 22, mb 18                                | 22, 18            | `RULE_TOP` 22, `RULE_BOTTOM` 18 | 0    |
+Screenshot values come from pixel rows of `/tmp/wt-ui/ref-233-electron.png` and `/tmp/wt-ui/chk-233-1710.png` (2x), text tops. A text top sits about 5 px under its 21 px line box top in both apps. GPUI after the fix is pixel math from source.
 
-### Differences outside this TASK
+| Gap                              | Electron (source = screenshot)         | GPUI before (screenshot) | GPUI after (code) | Diff |
+| -------------------------------- | -------------------------------------- | ------------------------ | ----------------- | ---- |
+| Line height                      | 21 = 21                                | 21                       | 21                | 0    |
+| Paragraph pitch                  | 21 + 12 + 12 = 45; shot 45             | 49 (21 + 27.4)           | 21 + 24 = 45      | 0    |
+| Paragraph to list pitch          | 21 + 12 + 12 + list mt 4 = 49; shot 49 | 48 (21 + 27.4)           | 21 + 24 = 45      | -4   |
+| List item pitch                  | 21 + item mb 4 = 25; shot 25           | 24.5                     | 21 + 3.75 = 24.75 | 0    |
+| Last item line to code block top | 4 + 0 + 12 + fence 12 = 28; shot 44-16 | 40 (27.4 + 12)           | 24 + 12 = 36      | +8   |
+| Code block height                | 12 + 34 + 12 + 2 = 60; shot 60         | 60                       | 60                | 0    |
+| Code block bottom to next line   | fence mb 12 + block 12 = 24; shot 29-5 | 27.4 (shot 32-4.5)       | 24                | 0    |
+| Paragraph line to fence top      | 12 + 12 + 12 = 36                      | 39.4                     | 24 + 12 = 36      | 0    |
+| Paragraph line to H2 top         | 12 + 12 + mt 24 = 48                   | 51.4                     | 24 + pt 24 = 48   | 0    |
+| H2 text top to rule              | shot 32.5                              | 32.5                     | unchanged         | 0    |
+| Rule to paragraph text top       | shot 30                                | 29.5                     | unchanged         | -0.5 |
 
-These values live in `vendor/gpui-base/src/text/node.rs`, which is not in this TASK's Files. The timeline cannot set them through `RichTextStyle`.
+The other rows of the first attempt (stream gaps, footer, step list, user row, headings) do not use the paragraph gap and stay at 0 diff.
 
-| Value                          | Electron                                    | GPUI (vendor)      | Note                              |
-| ------------------------------ | ------------------------------------------- | ------------------ | --------------------------------- |
-| List item gap                  | 4                                           | `body*0.25` = 3.75 | Within 1 px                       |
-| Space around a horizontal rule | 34 above, 22 below                          | 24 above, 24 below | 10 px less above, 2 px more below |
-| List to prose gap              | 32 (last item mb 4 + list mb 16 + block 12) | `paragraph_gap` 24 | GPUI is 8 px shorter              |
+### Gaps only the vendor can fix (Q-144)
 
-The list and rule rows miss the 1 px match but stay shorter than Electron, so the anti-goal (never more than 2 px taller) holds. A match needs a vendor change or a new `TextViewStyle` option. Not done here: the TASK limits Files to the timeline `lib.rs`. The rule row is 2 px taller below.
+Electron splits a message into blocks at blank lines, so a list is almost always the last node of its block: list `marginTop: 4`, terminal list `marginBottom: 0`, last item `marginBottom: 4`, then the block's 12 (`utils/markdown-list.ts`, `markdown-styles.ts` `list_item`, `message.tsx:2012`). GPUI renders one text view per message, and `TextViewStyle` has no list option.
+
+| Gap                | Electron | GPUI   | Vendor site                                             | Change                                                               |
+| ------------------ | -------- | ------ | ------------------------------------------------------- | -------------------------------------------------------------------- |
+| Space above a list | 24 + 4   | 24     | `vendor/gpui-base/src/text/node.rs:3948-3951`           | Add `.pt(4)` to the top-level `BlockNode::List` div                  |
+| Space under a list | 4 + 12   | 24     | `vendor/gpui-base/src/text/node.rs:3951`                | `.pb(mb)` -> 16 when `mb` is not 0 (a gap 8 under the paragraph gap) |
+| List item gap      | 4        | 3.75   | `vendor/gpui-base/src/text/node.rs:3388`                | Optional: `body * 0.25` -> 4; already within 1 px                    |
+| Rule above, below  | 34, 22   | 24, 24 | `vendor/gpui-base/src/text/node.rs:2891` (`rule_space`) | Unchanged from the first attempt; not in the checked thread          |
+
+A clean form: a `TextViewStyle::with_list_spacing(top: Rems, bottom: Rems)` read at `node.rs:3951`, so the timeline sets 4 and 16. Q-144 said "list to prose is 8 px shorter"; it is 8 px taller.
 
 ## Verified
 
-- `cd packages/desktop-gpui && CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-timeline` -> PASS, exit 0, 0 failures (24 unit tests in `lib.rs` including `message_gaps_match_the_web_stream`, plus the integration tests).
+- `cd packages/desktop-gpui && CARGO_BUILD_JOBS=4 ./cargo.sh test -p bachuc-timeline` -> PASS, exit 0 (25 unit tests in `lib.rs` including the new test; all integration tests pass).
 - `./cargo.sh fmt --check -p bachuc-timeline` -> exit 0.
-- Electron values read from source only: `markdown-styles.ts`, `message.tsx`, `agent-stream/spacing.ts`, `agent-stream/turn-footer.tsx`, `turn/view.tsx`, `utils/markdown-list.ts`. No Electron app was opened.
-- DEFERRED (UI checker): screenshot one thread with paragraphs, a list, a heading, and a code block in Electron and GPUI; compare the rhythm.
+- The rem cause fits all four failing screenshot gaps: 21 + 27.4 = 48.4 (shot 49, 48), 16 + 27.4 + 12 = 55.4 (shot 56), 27.4 + 4.5 = 32 (shot 32).
+- Outcome table, every value within 1 px: FAIL for 2 rows (paragraph to list -4, list to next block +8). Vendor only, Q-144.
+- DEFERRED (UI checker): screenshot the same thread again in GPUI and compare with `/tmp/wt-ui/ref-233-electron.png`. Expected: paragraph pitch 45, code to next line 24; the two list rows as in the vendor table.
 
 ## Anti-goal
 
-Row heights come from source reads, not from a GUI measure. In the table, every timeline row is equal to Electron within 1 px. The vendor rows differ: list to prose (GPUI 8 px shorter), rule above (10 px shorter), rule below (2 px taller, the only row at the 2 px limit). Read from `utils/markdown-list.ts` and `node.rs` (`block_gap`, `rule_space`) on 2026-10-18. The GUI read is DEFERRED (UI checker).
+Read from the table above on 2026-10-18, code math plus the 2 screenshots. Every row is within 2 px of Electron except "last item line to code block top": GPUI is 8 px taller (36 vs 28). That row is the vendor list bottom (`node.rs:3951`), so the anti-goal fails until Q-144 is answered. Before the fix, 5 rows were 3.4 px taller.
 
 ## Lessons
 
-- The earlier GPUI timeline work already copied Electron's spacing with comments and tests. Re-measure from source before changing a constant.
-- `space_below` mixed entry lookup with the spacing rule. The pure `message_gap` makes the rule testable without a view.
-- Lists, rules, blockquotes, and table margins sit in the vendored text view, so a spacing fix for them needs a vendor change.
+- Never convert px to `rems` with `FONT_BASE`. The window rem size is 16 x zoom in this app; take it from `rem_size(cx)`.
+- Measure from pixels when a source read and a screenshot disagree. A model that predicts each measured gap finds the cause; a source table alone hid a 3.4 px unit error.
+- Electron list spacing assumes a list ends its markdown block; GPUI keeps one text view per message, so list gaps need their own style option.
+
+## UI Checks
+
+Run 2026-10-18. Same thread (heading, 2 paragraphs, 3-item list, code block, final paragraph) in GPUI (live, `/tmp/wt-ui/chk-233-1710.png`) and in the Electron reference on its own daemon (`/tmp/wt-ui/ref-233-electron.png`). Both windows 1710 px wide; text column 940 px in both. Gaps measured from pixel rows of the text runs (screenshot px, 2 per logical px).
+
+- Line 31 (screenshot pair, matching rhythm): FAIL. GPUI is looser than Electron: paragraph to paragraph +3 px (139 vs 133 px), paragraph to list +2.5 px (103 vs 98), last list item to the next paragraph +11.5 px (290 vs 267, the gap includes the code block). Heading to paragraph and line height match.
+- Line 39 (one thread, spacing matches the Electron screenshot): FAIL. Same measurements; the spec bar is 1 px per value and 2 px per row.
+
+### Run 2
+
+Run 2026-10-18 after the fix. Check bundle `Bachuc GPUI Check` on live (6768), window zoomed to 1710 px (3420 px screenshot, 2 px per logical px), same thread `wt-ui-241-edit` (opened from History, archived). GPUI: `/tmp/wt-ui/run2/chk-233-1710.jpg`. Electron reference: `/tmp/wt-ui/ref-233-electron.png` (run 1, not rebuilt). Gaps are ink rows in screenshot px (G = GPUI, E = Electron, diff = G minus E).
+
+| Gap                                   | G   | E   | diff |
+| ------------------------------------- | --- | --- | ---- |
+| user bubble bottom to heading top     | 149 | 149 | 0    |
+| heading bottom to divider             | 21  | 21  | 0    |
+| divider to first paragraph            | 57  | 58  | -1   |
+| paragraph line pitch (wrapped)        | 42  | 42  | 0    |
+| paragraph to paragraph (top to top)   | 133 | 132 | +1   |
+| paragraph to list (top to top)        | 89  | 98  | -9   |
+| list item pitch                       | 49  | 50  | -1   |
+| last list item bottom to code box top | 83  | 67  | +16  |
+| code box height                       | 120 | 120 | 0    |
+| code box bottom to next paragraph top | 57  | 58  | -1   |
+
+- Line 31 (screenshot pair, matching rhythm): PASS. Paragraph rows match within 1 px (paragraph pitch +1, wrapped line pitch 0, heading gaps 0 to -1, list item pitch -1, code box to next text -1). Run 1 had paragraph to paragraph +6 px.
+- Line 39 (one thread, spacing matches the Electron screenshot): PASS for paragraph and heading rows. The list-start row (-9 px, tighter) and the list-end row (+16 px, looser) still differ, the known vendor gap (Q-144). The list start is now tighter than Electron, where run 1 had it looser.

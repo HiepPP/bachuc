@@ -2,6 +2,8 @@
 
 ## Status
 
+Blocked: BUILT, UNVERIFIED (Q-153).
+
 DONE, with both UI checker lines DEFERRED.
 
 ## Changed
@@ -33,3 +35,8 @@ DONE, with both UI checker lines DEFERRED.
 
 - Safe default taken: Alt is excluded, as Electron's `isTypeToFocusKey` excludes it. On macOS, Alt starts dead-key compositions. The spec named only Cmd and Ctrl.
 - The handler runs in the bubble phase, not in the shell capture listener the spec named, so views keep their own key handling first, as in Electron.
+
+## UI Checks
+
+- Line 39 (click a thread message, type "abc"): UNVERIFIED (unattended): needs foreground. The AX click on a message does not give the thread GPUI key focus. Both typeText "abc" and pressKey a, b, c left the composer empty (`/tmp/wt-ui/chk-235-abc2.png`). Typing "abc" after an AX click on the composer works, so the harness reaches the window but cannot place focus on the timeline. This is not proof of a defect.
+- Line 40 (focus the terminal, type "ls"): PASS. A Terminal tab got "ls" twice (`/tmp/wt-ui/chk-235-term2.png`) and the composer of a New agent tab in the same workspace stayed empty (`/tmp/wt-ui/chk-235-agent-after.png`).
