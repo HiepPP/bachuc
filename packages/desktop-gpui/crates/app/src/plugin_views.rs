@@ -19,10 +19,9 @@ use gpui_kit::*;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
-/// The overlay card: 92 percent wide up to 1180, 88 percent high.
-const OVERLAY_WIDTH: f32 = 0.92;
-const OVERLAY_MAX_WIDTH: f32 = 1180.;
-const OVERLAY_HEIGHT: f32 = 0.88;
+/// The overlay card: 96 percent wide, 94 percent high.
+const OVERLAY_WIDTH: f32 = 0.96;
+const OVERLAY_HEIGHT: f32 = 0.94;
 /// The backdrop's `rgba(0, 0, 0, 0.35)`.
 const BACKDROP_ALPHA: f32 = 0.35;
 /// `HeaderIconBadge`.
@@ -259,7 +258,6 @@ pub fn surface_overlay(
                 .role(Role::Dialog)
                 .aria_label("Plugin")
                 .w(relative(OVERLAY_WIDTH))
-                .max_w(px(OVERLAY_MAX_WIDTH))
                 .h(relative(OVERLAY_HEIGHT))
                 .bg(t.surface0)
                 .border_1()

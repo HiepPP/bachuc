@@ -16,10 +16,10 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::rc::Rc;
 
-/// The desktop sheet: a 55% black backdrop with padding 24, the card at most 520 wide and 85%
+/// The desktop sheet: a 55% black backdrop with padding 24, the card at most 820 wide and 85%
 /// high on `surface1`, radius 12, a `surface2` border; the header 24 by 16 with `gap: 8`.
 const BACKDROP: f32 = 0.55;
-const CARD_WIDTH: f32 = 520.;
+const CARD_WIDTH: f32 = 820.;
 const CARD_HEIGHT: f32 = 0.85;
 const TITLE_ICON: f32 = 18.;
 const CLOSE_ICON: f32 = 16.;
