@@ -32,6 +32,9 @@ const LINE: f32 = 1.3;
 const WORKSPACE_MAX_WIDTH: f32 = 320.;
 const COLUMN_WIDTH: f32 = 132.;
 const TIME_WIDTH: f32 = 72.;
+/// The title part keeps this width before the project and branch columns give way, so a
+/// narrow pane or a large zoom truncates those columns instead of clipping the badges.
+const CONTENT_MIN_WIDTH: f32 = 240.;
 /// `SEARCH_FIELD_MAX_WIDTH` and the 20 px input line.
 const SEARCH_MAX_WIDTH: f32 = 420.;
 const SEARCH_LINE: f32 = 20.;
@@ -318,7 +321,8 @@ impl HistoryScreen {
         };
         let column = |width: f32| {
             div()
-                .flex_none()
+                .flex_shrink(1.)
+                .min_w_0()
                 .w(zoomed(width, cx))
                 .truncate()
                 .text_color(t.foreground_muted)
@@ -338,7 +342,7 @@ impl HistoryScreen {
             );
         let content = h_flex()
             .flex_1()
-            .min_w_0()
+            .min_w(zoomed(CONTENT_MIN_WIDTH, cx))
             .overflow_hidden()
             .gap(zoomed(SPACE_2, cx))
             .child(
@@ -374,12 +378,14 @@ impl HistoryScreen {
                 ))
             });
         let columns = h_flex()
-            .flex_none()
+            .flex_shrink(1.)
+            .min_w_0()
             .gap(zoomed(SPACE_3, cx))
             .child(column(COLUMN_WIDTH).child(marked(&text.project, &text.project_marks)))
             .child(column(COLUMN_WIDTH).child(marked(&text.branch, &text.branch_marks)))
             .child(
                 column(TIME_WIDTH)
+                    .flex_none()
                     .text_align(TextAlign::Right)
                     .child(text.time_ago.clone()),
             );
@@ -389,6 +395,7 @@ impl HistoryScreen {
             .role(Role::Button)
             .aria_label(format!("{}: {}", text.label, text.title))
             .items_center()
+            .gap(zoomed(SPACE_3, cx))
             .py(zoomed(SPACE_2, cx))
             .px(zoomed(SPACE_3, cx))
             .text_size(size)
