@@ -13,7 +13,7 @@ use bachuc_client::WorkspaceScript;
 use bachuc_icons::{IconName, github_mark, icon};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, HEADER_HEIGHT, ICON_SM, RADIUS_LG, RADIUS_MD, SETTINGS_SIDEBAR_WIDTH,
-    SPACE_1, SPACE_2, SPACE_3, SPACE_6, TRAFFIC_LIGHT_WIDTH, WEIGHT_MEDIUM,
+    SPACE_1, SPACE_2, SPACE_3, SPACE_6, TRAFFIC_LIGHT_WIDTH,
 };
 use bachuc_theme::{ShadowSize, popup_offset, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
@@ -352,7 +352,9 @@ impl Shell {
                             .min_w_0()
                             .truncate()
                             .text_size(ui_font_size(FONT_BASE, cx))
-                            .font_weight(FontWeight(WEIGHT_MEDIUM))
+                            .font_weight(FontWeight(
+                                bachuc_theme::reading_look(cx).header_title_weight,
+                            ))
                             .text_color(t.foreground)
                             .child(title),
                     )

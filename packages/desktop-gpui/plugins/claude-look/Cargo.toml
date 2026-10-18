@@ -7,4 +7,5 @@ publish = false
 # The native client of `hiep-plugins/plugins/claude-look` (ADR-0045). Never depends on a view crate.
 [dependencies]
 bachuc-plugin-host = { path = "../../crates/plugin-host" }
+bachuc-theme = { path = "../../crates/theme" }
 gpui-kit.workspace = true

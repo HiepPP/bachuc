@@ -62,6 +62,30 @@ struct State {
     dark: Tokens,
     /// Plugin themes. The active one wins over `choice`.
     custom: CustomState,
+    reading: ReadingLook,
+}
+
+/// The chat reading layout a plugin may set: the content column width, the line height of
+/// assistant reply text, and the workspace header title weight. Electron's claude-look plugin
+/// overrides all three with CSS.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReadingLook {
+    /// The chat column, composer, and footer cap at 100%, in px.
+    pub content_width: f32,
+    /// Assistant reply body text, as a factor of the content font size.
+    pub response_line_height: f32,
+    /// The workspace header title; Electron's `ScreenTitle` is 300 on desktop.
+    pub header_title_weight: f32,
+}
+
+impl Default for ReadingLook {
+    fn default() -> Self {
+        Self {
+            content_width: metrics::MAX_CONTENT_WIDTH,
+            response_line_height: 1.4,
+            header_title_weight: 300.,
+        }
+    }
 }
 
 impl Global for State {}
@@ -81,6 +105,7 @@ fn state(cx: &mut App) -> &mut State {
             light: Tokens::light(),
             dark: Tokens::claude_dark(),
             custom: CustomState::default(),
+            reading: ReadingLook::default(),
         });
     }
     cx.global_mut::<State>()
@@ -204,6 +229,21 @@ pub fn zoom(cx: &App) -> f32 {
 /// A fixed `metrics` size (a padding, a height, an icon) with the zoom applied.
 pub fn zoomed(base: f32, cx: &App) -> Pixels {
     px(base * zoom(cx))
+}
+
+/// Sets the chat reading layout and redraws the windows when it changed.
+pub fn set_reading_look(look: ReadingLook, cx: &mut App) {
+    let state = state(cx);
+    if state.reading != look {
+        state.reading = look;
+        cx.refresh_windows();
+    }
+}
+
+/// The chat reading layout on screen.
+pub fn reading_look(cx: &App) -> ReadingLook {
+    cx.try_global::<State>()
+        .map_or_else(ReadingLook::default, |state| state.reading)
 }
 
 /// The distance from the top of a trigger to the top of the menu under it: the trigger height

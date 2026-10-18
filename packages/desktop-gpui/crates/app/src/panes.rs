@@ -9,8 +9,8 @@ use bachuc_composer::{Composer, CornerPills};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
-    BORDER_WIDTH_1, FONT_BASE, FONT_SM, ICON_MD, MAX_CONTENT_WIDTH, RADIUS_2XL, RADIUS_LG,
-    RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
+    BORDER_WIDTH_1, FONT_BASE, FONT_SM, ICON_MD, RADIUS_2XL, RADIUS_LG, RADIUS_MD, SPACE_0_5,
+    SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
 use bachuc_theme::{tokens, ui_font_size, zoomed};
 use bachuc_timeline::TimelineView;
@@ -225,7 +225,7 @@ impl AgentPane {
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(zoomed(MAX_CONTENT_WIDTH, cx))
+                    .max_w(zoomed(bachuc_theme::reading_look(cx).content_width, cx))
                     .gap(zoomed(SPACE_2, cx))
                     .child(
                         h_flex()

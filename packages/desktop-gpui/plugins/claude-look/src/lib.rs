@@ -1,6 +1,7 @@
 //! `bachuc-plugin-claude-look`: the native client of the claude-look plugin
-//! (`hiep-plugins/plugins/claude-look/index.client.tsx`, ADR-0045). It ports only the palette of
-//! `client/theme.ts`; the web CSS and the width change of the Electron client have no native part.
+//! (`hiep-plugins/plugins/claude-look/index.client.tsx`, ADR-0045). It ports the palette of
+//! `client/theme.ts`, the 1.5 reply line height of `client/web.ts`, and the 768 px chat column of
+//! `client/width.ts`.
 
 use bachuc_plugin_host::{
     Contributions, NativePlugin, PluginContext, PluginThemeColors, ThemeAppearance,
@@ -9,6 +10,14 @@ use bachuc_plugin_host::{
 use gpui_kit::{App, Hsla, Rgba};
 
 const PLUGIN_ID: &str = "claude-look";
+
+/// Claude desktop's thread width (`client/width.ts`), reply line height, and regular-weight
+/// header title (`client/web.ts`).
+pub(crate) const READING_LOOK: bachuc_theme::ReadingLook = bachuc_theme::ReadingLook {
+    content_width: 768.,
+    response_line_height: 1.5,
+    header_title_weight: 400.,
+};
 
 /// The eight colors of `claudeLight` in `client/theme.ts`, as `0xRRGGBB`.
 pub(crate) struct Palette {
@@ -46,6 +55,7 @@ impl NativePlugin for ClaudeLook {
 
     fn contribute(&self, _ctx: PluginContext, contributions: &mut Contributions, _cx: &mut App) {
         contributions.add_theme(claude_light());
+        contributions.set_reading_look(READING_LOOK);
     }
 }
 
@@ -114,6 +124,25 @@ mod tests {
         assert_eq!(palette.accent, ts("accent"));
         assert_eq!(palette.muted_foreground, ts("mutedForeground"));
         assert_eq!(palette.ring, ts("ring"));
+    }
+
+    #[test]
+    fn reading_look_matches_the_web_client() {
+        let root = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../../hiep-plugins/plugins/claude-look"
+        );
+        let width = std::fs::read_to_string(format!("{root}/client/width.ts")).unwrap();
+        let web = std::fs::read_to_string(format!("{root}/client/web.ts")).unwrap();
+        assert!(width.contains("768"), "width.ts no longer narrows to 768");
+        assert!(web.contains("line-height:1.5"), "web.ts no longer sets 1.5");
+        assert!(
+            web.contains("font-weight:400"),
+            "web.ts no longer sets the title weight"
+        );
+        assert_eq!(READING_LOOK.header_title_weight, 400.);
+        assert_eq!(READING_LOOK.content_width, 768.);
+        assert_eq!(READING_LOOK.response_line_height, 1.5);
     }
 
     #[test]

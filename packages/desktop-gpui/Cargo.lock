@@ -710,6 +710,7 @@ name = "bachuc-plugin-claude-look"
 version = "0.1.0"
 dependencies = [
  "bachuc-plugin-host",
+ "bachuc-theme",
  "gpui-kit",
 ]
 

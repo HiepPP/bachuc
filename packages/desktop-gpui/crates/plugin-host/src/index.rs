@@ -38,6 +38,7 @@ pub struct ContributionIndex {
     header_subtitles: Vec<Contributed<HeaderSubtitle>>,
     selection_actions: Vec<Contributed<SelectionAction>>,
     themes: Vec<Contributed<ThemeContribution>>,
+    reading_look: Option<bachuc_theme::ReadingLook>,
     /// Transformers by item type, so the timeline's per-entry lookup allocates nothing.
     transformers: HashMap<&'static str, Vec<Contributed<TimelineTransformer>>>,
     /// Renderers by kind, then version; the first of a kind and version wins.
@@ -85,6 +86,9 @@ impl ContributionIndex {
             tag(id, &plugin.header_subtitles, &mut index.header_subtitles);
             tag(id, &plugin.selection_actions, &mut index.selection_actions);
             tag(id, &plugin.themes, &mut index.themes);
+            if plugin.reading_look.is_some() {
+                index.reading_look = plugin.reading_look;
+            }
             for button in &plugin.stop_buttons {
                 if let Some(first) = index.stop_buttons.first() {
                     log::warn!(
@@ -204,6 +208,11 @@ impl ContributionIndex {
 
     pub fn themes(&self) -> &[Contributed<ThemeContribution>] {
         &self.themes
+    }
+
+    /// The chat reading layout of the last plugin that set one.
+    pub fn reading_look(&self) -> Option<bachuc_theme::ReadingLook> {
+        self.reading_look
     }
 
     /// The transformers of one timeline item type, in registration order; empty for a type

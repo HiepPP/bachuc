@@ -61,8 +61,8 @@ use bachuc_plugin_host::{
     SendKey, SlashInput, StopButtonProps, decode_attachment_search,
 };
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, MAX_CONTENT_WIDTH, POPUP_GAP, RADIUS_LG, RADIUS_MD,
-    SPACE_1, SPACE_2, SPACE_3, SPACE_4,
+    FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, POPUP_GAP, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2,
+    SPACE_3, SPACE_4,
 };
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size, zoomed};
 use gpui_kit::component::input::{
@@ -3125,6 +3125,7 @@ impl Render for Composer {
         let inset = bachuc_timeline::column_right_inset(
             f32::from(self.width.get()),
             f32::from(self.corner_reserve),
+            bachuc_theme::reading_look(cx).content_width,
             bachuc_theme::zoom(cx),
         );
         let width = self.width.clone();
@@ -3157,7 +3158,7 @@ impl Render for Composer {
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(zoomed(MAX_CONTENT_WIDTH, cx))
+                    .max_w(zoomed(bachuc_theme::reading_look(cx).content_width, cx))
                     .pr(px(inset))
                     .gap(zoomed(SPACE_3, cx))
                     .children(queue)

@@ -35,8 +35,8 @@ use bachuc_icons::{IconName, icon};
 use bachuc_plugin_host::{PluginHost, PluginHostEvent};
 use bachuc_theme::metrics::{
     FONT_2XL, FONT_BASE, FONT_CODE, FONT_CONTENT, FONT_LG, FONT_XL, ICON_MD, ICON_SM, ICON_XS,
-    MAX_CONTENT_WIDTH, RADIUS_2XL, RADIUS_BASE, RADIUS_LG, RADIUS_MD, RADIUS_SM, SPACE_1, SPACE_2,
-    SPACE_3, SPACE_4, SPACE_6, SPACE_8,
+    RADIUS_2XL, RADIUS_BASE, RADIUS_LG, RADIUS_MD, RADIUS_SM, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
+    SPACE_6, SPACE_8,
 };
 use bachuc_theme::{
     ShadowSize, TurnLabel, code_font_size, content_font_size, mono_font_family, popup_offset,
@@ -1221,6 +1221,7 @@ impl TimelineView {
         let inset = column_right_inset(
             f32::from(this.bounds.get().size.width),
             f32::from(this.corner_reserve),
+            bachuc_theme::reading_look(cx).content_width,
             bachuc_theme::zoom(cx),
         );
         // `streamItemWrapper`: the content column, at most 820 wide, centered. Its width follows
@@ -1236,7 +1237,7 @@ impl TimelineView {
                 div()
                     .w_full()
                     .min_w_0()
-                    .max_w(zoomed(MAX_CONTENT_WIDTH, cx))
+                    .max_w(zoomed(bachuc_theme::reading_look(cx).content_width, cx))
                     .pl(zoomed(COLUMN_PADDING, cx))
                     .pr(zoomed(COLUMN_PADDING, cx) + px(inset))
                     .when_some(space, |column, space| column.pb(zoomed(space, cx)))
@@ -1503,7 +1504,9 @@ impl TimelineView {
         });
         let t = tokens(cx);
         let size = content_font_size(cx);
-        let line_height = px(body_line_height(size / px(1.)));
+        // Reply text follows the reading look (1.5 under claude-look); user messages keep 1.4.
+        let line_height =
+            px((size / px(1.) * bachuc_theme::reading_look(cx).response_line_height).round());
         let view = cx.weak_entity();
         let (style, highlighter) = self.markdown_style(cx);
         let copy_color = t.foreground_muted;
@@ -2334,13 +2337,13 @@ const COLUMN_PADDING: f32 = SPACE_2;
 /// both sides, the column stops at `MAX_CONTENT_WIDTH`, and its own padding comes off inside.
 /// It never goes below 0 and never past the row, so text wraps inside the row on a narrow
 /// window.
-pub fn content_column_width(row_width: f32, zoom: f32) -> f32 {
-    (column_width(row_width, zoom) - 2. * COLUMN_PADDING * zoom).max(0.)
+pub fn content_column_width(row_width: f32, max_width: f32, zoom: f32) -> f32 {
+    (column_width(row_width, max_width, zoom) - 2. * COLUMN_PADDING * zoom).max(0.)
 }
 
 /// The content column's width in a row `row_width` wide, before its own padding.
-fn column_width(row_width: f32, zoom: f32) -> f32 {
-    (row_width - 2. * ROW_PADDING * zoom).clamp(0., MAX_CONTENT_WIDTH * zoom)
+fn column_width(row_width: f32, max_width: f32, zoom: f32) -> f32 {
+    (row_width - 2. * ROW_PADDING * zoom).clamp(0., max_width * zoom)
 }
 
 /// The corner pills sit this far in from the pane's top-right corner (`CornerPills`), and
@@ -2356,14 +2359,14 @@ const MIN_TEXT_WIDTH: f32 = 320.;
 /// top-right corner. 0 with no pills and when the margin beside the centered column is already
 /// wide enough. The text keeps at least `MIN_TEXT_WIDTH`, or its whole width when it is
 /// narrower than that.
-pub fn column_right_inset(row_width: f32, pills_width: f32, zoom: f32) -> f32 {
+pub fn column_right_inset(row_width: f32, pills_width: f32, max_width: f32, zoom: f32) -> f32 {
     if pills_width <= 0. {
         return 0.;
     }
-    let column = column_width(row_width, zoom);
+    let column = column_width(row_width, max_width, zoom);
     let text_right = (row_width + column) / 2. - COLUMN_PADDING * zoom;
     let limit = row_width - (CORNER_PILLS_OFFSET + CORNER_PILLS_CLEARANCE) * zoom - pills_width;
-    let room = (content_column_width(row_width, zoom) - MIN_TEXT_WIDTH * zoom).max(0.);
+    let room = (content_column_width(row_width, max_width, zoom) - MIN_TEXT_WIDTH * zoom).max(0.);
     (text_right - limit).max(0.).min(room)
 }
 

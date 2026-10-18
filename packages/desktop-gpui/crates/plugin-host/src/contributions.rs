@@ -353,6 +353,7 @@ pub struct Contributions {
     pub(crate) timeline_renderers: Vec<TimelineRenderer>,
     pub(crate) selection_actions: Vec<SelectionAction>,
     pub(crate) themes: Vec<ThemeContribution>,
+    pub(crate) reading_look: Option<bachuc_theme::ReadingLook>,
 }
 
 impl Contributions {
@@ -434,5 +435,11 @@ impl Contributions {
 
     pub fn add_theme(&mut self, theme: ThemeContribution) {
         self.themes.push(theme);
+    }
+
+    /// Sets the chat column width and reply line height while the plugin is active. With
+    /// several plugins, the last one registered wins.
+    pub fn set_reading_look(&mut self, look: bachuc_theme::ReadingLook) {
+        self.reading_look = Some(look);
     }
 }

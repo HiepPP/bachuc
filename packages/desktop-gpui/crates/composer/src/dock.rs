@@ -2,7 +2,7 @@
 //! a pane. The bottom dock puts the composer under the content; the centered dock (the New
 //! workspace screen) centers both in an 820 px column.
 
-use bachuc_theme::metrics::{HEADER_HEIGHT, MAX_CONTENT_WIDTH, SPACE_6};
+use bachuc_theme::metrics::{HEADER_HEIGHT, SPACE_6};
 use bachuc_theme::zoomed;
 use gpui_kit::component::v_flex;
 use gpui_kit::*;
@@ -42,7 +42,7 @@ fn dock_layout(centered: bool, content: AnyElement, composer: AnyElement, cx: &A
                 v_flex()
                     .flex_shrink(1.)
                     .w_full()
-                    .max_w(zoomed(MAX_CONTENT_WIDTH, cx))
+                    .max_w(zoomed(bachuc_theme::reading_look(cx).content_width, cx))
                     .child(
                         div()
                             .id("composer-dock-setup")
