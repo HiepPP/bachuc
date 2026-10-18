@@ -4,7 +4,7 @@
 
 - Title: GPUI bug fixes and daily Electron gaps
 - Slug: 20261017-gpui-daily-gaps-and-fixes
-- Status: IMPLEMENTED
+- Status: ARCHIVED
 - Updated: 2026-10-18
 
 ## Tracker
@@ -79,7 +79,7 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 - 2026-10-18 ADD: TASK-220 to TASK-231 are DONE on `feat/gpui-daily-gaps-and-fixes`; nothing is pushed. Plan Verify passed. Owner hand test: Q-142.
 
-- Implement ran on 2026-10-17 and 2026-10-18 on `feat/gpui-daily-gaps-and-fixes`. All 22 TASKs are DONE; nothing is pushed.
+- Implement ran on 2026-10-17 and 2026-10-18 on `feat/gpui-daily-gaps-and-fixes`. TASK-198 to TASK-219 (22 TASKs) are DONE.
 - TASK-199 was re-scoped by Q-127: the Board stayed in front after a sidebar workspace click. TASK-198 (`150a36be3`) fixed it.
 - Owner hand test: the Q-133 checks passed on 2026-10-18 on a bundle built from `fc70abf5a`.
 - Deferred gaps (Q-115) and follow-ups: Q-117, Q-122, Q-124, Q-128, Q-129, Q-130, Q-132, Q-134, Q-135.
@@ -88,3 +88,4 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 - [watchtower/archive/20261016-gpui-parity-follow-ups/NEXT.md](watchtower/archive/20261016-gpui-parity-follow-ups/NEXT.md)
 - [watchtower/archive/20261016-gpui-electron-parity/NEXT.md](watchtower/archive/20261016-gpui-electron-parity/NEXT.md)
+- Archived: 2026-10-18 -> watchtower/archive/20261017-gpui-daily-gaps-and-fixes/
