@@ -11,7 +11,7 @@ use bachuc_icons::IconName;
 use bachuc_plugin_host::{
     Contributed, ProjectMenuItem, SidebarItem, SidebarProject, SwipeDirection,
 };
-use gpui_kit::{ScrollDelta, SharedString};
+use gpui_kit::{ScrollDelta, SharedString, TouchPhase};
 use std::collections::HashMap;
 use std::future::Future;
 
@@ -140,81 +140,214 @@ pub fn pick_title(titles: impl IntoIterator<Item = Option<SharedString>>) -> Opt
 
 // ---- swipe ----
 
-/// Turns trackpad wheel deltas into at most one swipe per gesture (`wheel-gesture.ts`). A quiet
-/// gap ends a gesture, and the momentum tail does not fire again unless a new stroke
-/// accelerates through it. Deltas use the web sign: a finger moving left is positive `x`.
-#[derive(Clone, Debug)]
-pub struct WheelGesture {
-    last: f64,
-    x: f32,
-    y: f32,
-    fired: bool,
-    fired_at: f64,
-    previous_magnitude: f32,
-    tail_minimum: f32,
-    rising: u32,
+/// What one scroll event, or a quiet timeout, does to the swipe. Offsets are pixels in the web
+/// sign: a finger moving left is positive and points at the next Space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SwipeStep {
+    /// Not part of a swipe: a vertical scroll, a momentum tail, or too little travel.
+    Ignore,
+    /// The list follows the finger.
+    Drag { offset: f32 },
+    /// The fingers lifted past half the width or with a flick: go one Space in `direction`.
+    Commit {
+        direction: SwipeDirection,
+        offset: f32,
+    },
+    /// The fingers lifted short of a switch, or the system took the gesture.
+    SnapBack { offset: f32 },
 }
 
-impl Default for WheelGesture {
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Mode {
+    Idle,
+    /// Travel before the gesture picks an axis.
+    Pending {
+        x: f32,
+        y: f32,
+    },
+    Dragging {
+        offset: f32,
+    },
+    /// A vertical gesture: the list scrolls until it ends.
+    Vertical,
+    /// After a release: the momentum tail, ignored until a new gesture.
+    Tail,
+}
+
+/// The two-finger swipe over the project list as a state machine. GPUI gives each scroll event
+/// a phase: `Started` for macOS MayBegin and Began, `Ended`, and `Moved` for everything else,
+/// momentum and Cancelled included. A mouse wheel never sends `Started`, so a quiet gap ends
+/// its gesture.
+#[derive(Clone, Debug)]
+pub struct SwipeGesture {
+    mode: Mode,
+    /// The gesture began with `Started`, so `Ended` will close it.
+    phased: bool,
+    last: f64,
+    last_move: f64,
+    /// Pixels per millisecond, smoothed over the last moves.
+    velocity: f32,
+}
+
+impl Default for SwipeGesture {
     fn default() -> Self {
         Self {
+            mode: Mode::Idle,
+            phased: false,
             last: f64::NEG_INFINITY,
-            x: 0.,
-            y: 0.,
-            fired: false,
-            fired_at: f64::NEG_INFINITY,
-            previous_magnitude: 0.,
-            tail_minimum: f32::INFINITY,
-            rising: 0,
+            last_move: f64::NEG_INFINITY,
+            velocity: 0.,
         }
     }
 }
 
-/// A quiet gap that ends a gesture.
+/// A quiet gap that ends a gesture without phases, and the tail after a release.
 const QUIET_GAP_MS: f64 = 120.;
-const MIN_TRAVEL: f32 = 28.;
+/// A phased gesture ends without `Ended` only after this long; macOS sends Cancelled as `Moved`.
+const PHASED_TIMEOUT_MS: f64 = 1500.;
+/// Travel before the gesture picks an axis.
+const AXIS_LOCK: f32 = 8.;
 const HORIZONTAL_RATIO: f32 = 1.5;
+/// A lift this fast, toward the offset, switches even short of half the width.
+const FLICK_VELOCITY: f32 = 0.5;
+const FLICK_MIN_TRAVEL: f32 = 24.;
+/// Fingers that rested this long before lifting carry no velocity.
+const STALE_MOVE_MS: f64 = 60.;
 /// A line delta counts as this many pixels (`WHEEL_DELTA_SCALE`).
 const LINE_PIXELS: f32 = 16.;
 
-impl WheelGesture {
-    pub fn push(&mut self, dx: f32, dy: f32, time: f64) -> Option<SwipeDirection> {
-        let magnitude = dx.abs();
-        let reversed = self.fired && dx * self.x < 0. && magnitude >= 2.;
-        if self.fired && time - self.fired_at > 80. {
-            self.tail_minimum = self.tail_minimum.min(magnitude);
-            self.rising = if magnitude > self.previous_magnitude {
-                self.rising + 1
-            } else {
-                0
-            };
-        }
-        let fresh_push = self.fired
-            && time - self.fired_at > 160.
-            && magnitude >= 4f32.max(self.tail_minimum * 1.6)
-            && (self.rising >= 2 || magnitude >= 8f32.max(self.previous_magnitude * 2.));
-        if time - self.last > QUIET_GAP_MS || reversed || fresh_push {
-            self.x = 0.;
-            self.y = 0.;
-            self.fired = false;
-            self.tail_minimum = f32::INFINITY;
-            self.rising = 0;
-        }
+impl SwipeGesture {
+    /// Feeds one scroll event. `width` is the list width in pixels.
+    pub fn push(
+        &mut self,
+        dx: f32,
+        dy: f32,
+        phase: TouchPhase,
+        time: f64,
+        width: f32,
+    ) -> SwipeStep {
+        let quiet = time - self.last > QUIET_GAP_MS;
         self.last = time;
-        self.previous_magnitude = magnitude;
-        self.x += dx;
-        self.y += dy.abs();
-        if self.fired || self.x.abs() < MIN_TRAVEL || self.x.abs() < self.y * HORIZONTAL_RATIO {
-            return None;
+        match phase {
+            TouchPhase::Started => {
+                // A new gesture during a drag means the old one never ended.
+                let lost = match self.mode {
+                    Mode::Dragging { offset } => Some(SwipeStep::SnapBack { offset }),
+                    _ => None,
+                };
+                self.begin(true);
+                let step = self.travel(dx, dy, time);
+                return lost.unwrap_or(step);
+            }
+            TouchPhase::Ended => {
+                self.travel(dx, dy, time);
+                return self.release(time, width);
+            }
+            TouchPhase::Cancelled => return self.cancel(),
+            TouchPhase::Moved => {}
         }
-        self.fired = true;
-        self.fired_at = time;
-        self.tail_minimum = f32::INFINITY;
-        Some(if self.x > 0. {
-            SwipeDirection::Next
+        match self.mode {
+            Mode::Idle | Mode::Tail | Mode::Vertical if quiet => self.begin(false),
+            Mode::Idle | Mode::Tail | Mode::Vertical => return SwipeStep::Ignore,
+            Mode::Pending { .. } | Mode::Dragging { .. } => {}
+        }
+        self.travel(dx, dy, time)
+    }
+
+    /// How long after the last event [`Self::tick`] should run; `None` when no gesture is open.
+    pub fn timeout_ms(&self) -> Option<f64> {
+        match self.mode {
+            Mode::Pending { .. } | Mode::Dragging { .. } => Some(if self.phased {
+                PHASED_TIMEOUT_MS
+            } else {
+                QUIET_GAP_MS
+            }),
+            _ => None,
+        }
+    }
+
+    /// Ends an open gesture whose events stopped. Without phases the last event is the lift, so
+    /// its velocity counts; a phased gesture that lost its `Ended` decides by travel alone.
+    pub fn tick(&mut self, time: f64, width: f32) -> SwipeStep {
+        match self.timeout_ms() {
+            Some(timeout) if time - self.last >= timeout => {
+                let lift = if self.phased { time } else { self.last };
+                self.release(lift, width)
+            }
+            _ => SwipeStep::Ignore,
+        }
+    }
+
+    fn begin(&mut self, phased: bool) {
+        self.mode = Mode::Pending { x: 0., y: 0. };
+        self.phased = phased;
+        self.velocity = 0.;
+    }
+
+    fn travel(&mut self, dx: f32, dy: f32, time: f64) -> SwipeStep {
+        match self.mode {
+            Mode::Pending { x, y } => {
+                let (x, y) = (x + dx, y + dy.abs());
+                self.mode = if x.abs() >= AXIS_LOCK && x.abs() >= y * HORIZONTAL_RATIO {
+                    self.last_move = time;
+                    Mode::Dragging { offset: x }
+                } else if y >= AXIS_LOCK {
+                    Mode::Vertical
+                } else {
+                    Mode::Pending { x, y }
+                };
+                match self.mode {
+                    Mode::Dragging { offset } => SwipeStep::Drag { offset },
+                    _ => SwipeStep::Ignore,
+                }
+            }
+            Mode::Dragging { offset } => {
+                if dx == 0. {
+                    return SwipeStep::Drag { offset };
+                }
+                let elapsed = (time - self.last_move).max(1.) as f32;
+                self.velocity = 0.7 * (dx / elapsed) + 0.3 * self.velocity;
+                self.last_move = time;
+                let offset = offset + dx;
+                self.mode = Mode::Dragging { offset };
+                SwipeStep::Drag { offset }
+            }
+            _ => SwipeStep::Ignore,
+        }
+    }
+
+    fn release(&mut self, lift: f64, width: f32) -> SwipeStep {
+        let mode = std::mem::replace(&mut self.mode, Mode::Tail);
+        let Mode::Dragging { offset } = mode else {
+            return SwipeStep::Ignore;
+        };
+        let velocity = if lift - self.last_move > STALE_MOVE_MS {
+            0.
         } else {
-            SwipeDirection::Previous
-        })
+            self.velocity
+        };
+        let flick = velocity.abs() >= FLICK_VELOCITY
+            && velocity.signum() == offset.signum()
+            && offset.abs() >= FLICK_MIN_TRAVEL;
+        if offset.abs() >= width / 2. || flick {
+            SwipeStep::Commit {
+                direction: if offset > 0. {
+                    SwipeDirection::Next
+                } else {
+                    SwipeDirection::Previous
+                },
+                offset,
+            }
+        } else {
+            SwipeStep::SnapBack { offset }
+        }
+    }
+
+    fn cancel(&mut self) -> SwipeStep {
+        match std::mem::replace(&mut self.mode, Mode::Tail) {
+            Mode::Dragging { offset } => SwipeStep::SnapBack { offset },
+            _ => SwipeStep::Ignore,
+        }
     }
 }
 
@@ -233,10 +366,18 @@ pub fn is_horizontal(dx: f32, dy: f32) -> bool {
     dx.abs() > dy.abs()
 }
 
+/// A drag toward a Space that does not exist gives way less and less: `offset` pixels draw as
+/// this many, never past half the width.
+pub fn rubber_band(offset: f32, width: f32) -> f32 {
+    let limit = width.max(1.) / 2.;
+    offset.signum() * limit * (1. - 1. / (offset.abs() * 0.55 / limit + 1.))
+}
+
 // ---- slide ----
 
 pub const SLIDE_OUT_MS: f32 = 65.;
 pub const SLIDE_IN_MS: f32 = 105.;
+pub const SNAP_BACK_MS: f32 = 180.;
 
 /// Where the list is during a slide. `offset` is a fraction of the list width: -1 is fully off
 /// to the left, 1 fully off to the right.
@@ -246,6 +387,27 @@ pub struct SlideFrame {
     pub opacity: f32,
     /// The filter change shows from this frame on (the list is out of sight).
     pub applied: bool,
+}
+
+/// The list fades as it leaves, the same way during a drag and a slide.
+fn opacity_at(offset: f32) -> f32 {
+    1. - offset.abs().min(1.)
+}
+
+/// The list under the finger: `offset` web-sign pixels move it left. `blocked` is a drag toward
+/// a Space that a swipe already found missing, which rubber-bands.
+pub fn drag_frame(offset: f32, width: f32, blocked: bool) -> SlideFrame {
+    let shown = if blocked {
+        rubber_band(offset, width)
+    } else {
+        offset
+    };
+    let offset = (-shown / width.max(1.)).clamp(-1., 1.);
+    SlideFrame {
+        offset,
+        opacity: opacity_at(offset),
+        applied: false,
+    }
 }
 
 /// `cubic-bezier(x1, y1, x2, y2)` at progress `t`.
@@ -267,22 +429,52 @@ fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32, t: f32) -> f32 {
     curve(y1, y2, (low + high) / 2.)
 }
 
-/// The slide at `elapsed_ms` after a swipe: out against `direction` over 65 ms, then in from
-/// `direction` over 105 ms. `None` once it ends.
-pub fn slide_frame(direction: SwipeDirection, elapsed_ms: f32) -> Option<SlideFrame> {
-    let sign = match direction {
+fn sign(direction: SwipeDirection) -> f32 {
+    match direction {
         SwipeDirection::Next => 1.,
         SwipeDirection::Previous => -1.,
+    }
+}
+
+/// How long the out phase of a slide runs when it starts at `from` (a drag fraction): the part
+/// of the way the finger did not cover.
+pub fn slide_out_ms(direction: SwipeDirection, from: f32) -> f32 {
+    SLIDE_OUT_MS * (1. - (-sign(direction) * from).clamp(0., 1.))
+}
+
+/// The slide at `elapsed_ms` after it starts at `from`. With a `target`, the list goes out
+/// against it, the rows change, and the new list comes in from it over 105 ms; a strip click
+/// starts at 0 and runs 65 ms out. With no target the list snaps back to 0. `None` once it ends.
+pub fn slide_frame(
+    target: Option<SwipeDirection>,
+    from: f32,
+    elapsed_ms: f32,
+) -> Option<SlideFrame> {
+    let elapsed_ms = elapsed_ms.max(0.);
+    let Some(direction) = target else {
+        if elapsed_ms >= SNAP_BACK_MS {
+            return None;
+        }
+        let eased = cubic_bezier(0.16, 1., 0.3, 1., elapsed_ms / SNAP_BACK_MS);
+        let offset = from * (1. - eased);
+        return Some(SlideFrame {
+            offset,
+            opacity: opacity_at(offset),
+            applied: false,
+        });
     };
-    if elapsed_ms < SLIDE_OUT_MS {
-        let eased = cubic_bezier(0.4, 0., 1., 1., (elapsed_ms.max(0.)) / SLIDE_OUT_MS);
+    let sign = sign(direction);
+    let out_ms = slide_out_ms(direction, from);
+    if elapsed_ms < out_ms {
+        let eased = cubic_bezier(0.4, 0., 1., 1., elapsed_ms / out_ms);
+        let offset = from + (-sign - from) * eased;
         Some(SlideFrame {
-            offset: -sign * eased,
-            opacity: 1. - eased,
+            offset,
+            opacity: opacity_at(offset),
             applied: false,
         })
-    } else if elapsed_ms < SLIDE_OUT_MS + SLIDE_IN_MS {
-        let eased = cubic_bezier(0.16, 1., 0.3, 1., (elapsed_ms - SLIDE_OUT_MS) / SLIDE_IN_MS);
+    } else if elapsed_ms < out_ms + SLIDE_IN_MS {
+        let eased = cubic_bezier(0.16, 1., 0.3, 1., (elapsed_ms - out_ms) / SLIDE_IN_MS);
         Some(SlideFrame {
             offset: sign * (1. - eased),
             opacity: eased,

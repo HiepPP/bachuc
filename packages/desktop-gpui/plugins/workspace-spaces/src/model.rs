@@ -558,15 +558,23 @@ pub(crate) fn adjacent_space(
     (next != from).then_some(next)
 }
 
-/// The Space a sidebar swipe moves to. A swipe waits out a save.
+/// The Space where sidebar swipes land, one step each from the selected Space, in order. A
+/// step past either end stays, because a swipe never wraps. `None` when they land on the
+/// selected Space or the Spaces are still loading.
 pub(crate) fn swipe_target(
     snap: Option<&Snapshot>,
-    busy: bool,
     selected: Option<&str>,
-    direction: SwipeDirection,
+    swipes: &[SwipeDirection],
 ) -> Option<String> {
-    let snap = snap.filter(|_| !busy)?;
-    adjacent_space(&snap.state, selected, direction)
+    let state = &snap?.state;
+    let from = selected_space(state, selected);
+    let mut at = from.to_string();
+    for &direction in swipes {
+        if let Some(next) = adjacent_space(state, Some(&at), direction) {
+            at = next;
+        }
+    }
+    (at != from).then_some(at)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1297,21 +1305,43 @@ mod tests {
     }
 
     #[test]
-    fn a_swipe_moves_one_space_without_wrapping_and_waits_out_a_save() {
+    fn a_swipe_moves_one_space_and_stays_past_either_end() {
         let snap = filter_snapshot();
-        let next = |selected, busy, direction| swipe_target(Some(&snap), busy, selected, direction);
-        assert_eq!(next(None, false, SwipeDirection::Previous), None);
+        let next = |selected, direction| swipe_target(Some(&snap), selected, &[direction]);
         assert_eq!(
-            next(None, false, SwipeDirection::Next).as_deref(),
-            Some("space-2")
+            next(None, SwipeDirection::Previous),
+            None,
+            "before the first"
         );
-        assert_eq!(next(Some("space-2"), false, SwipeDirection::Next), None);
+        assert_eq!(next(None, SwipeDirection::Next).as_deref(), Some("space-2"));
         assert_eq!(
-            next(Some("space-2"), false, SwipeDirection::Previous).as_deref(),
+            next(Some("space-2"), SwipeDirection::Next),
+            None,
+            "past the last"
+        );
+        assert_eq!(
+            next(Some("space-2"), SwipeDirection::Previous).as_deref(),
             Some("space-1")
         );
-        assert_eq!(next(None, true, SwipeDirection::Next), None);
-        assert_eq!(swipe_target(None, false, None, SwipeDirection::Next), None);
+        assert_eq!(swipe_target(None, None, &[SwipeDirection::Next]), None);
+        assert_eq!(swipe_target(Some(&snap), None, &[]), None);
+    }
+
+    #[test]
+    fn swipes_queued_during_a_save_run_in_order_and_stop_at_the_ends() {
+        let three = Snapshot::new(state(&["space-1", "space-2", "space-3"]), Vec::new());
+        let land =
+            |selected, swipes: &[SwipeDirection]| swipe_target(Some(&three), selected, swipes);
+        use SwipeDirection::{Next, Previous};
+        assert_eq!(land(None, &[Next, Next]).as_deref(), Some("space-3"));
+        assert_eq!(land(None, &[Next, Next, Next]).as_deref(), Some("space-3"));
+        // The step past the end stays, so the next one counts from the last Space.
+        assert_eq!(
+            land(Some("space-3"), &[Next, Previous]).as_deref(),
+            Some("space-2")
+        );
+        assert_eq!(land(Some("space-2"), &[Next, Previous]), None);
+        assert_eq!(land(None, &[Previous, Next]).as_deref(), Some("space-2"));
     }
 
     #[test]

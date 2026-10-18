@@ -12,9 +12,9 @@ use crate::model::{
     project_initial, workspace_label,
 };
 use crate::plugin::{
-    NavPress, NavRow, WheelGesture, added_sidebar_project, filtered_rows, is_horizontal, nav_press,
-    nav_rows, pick_title, run_in_order, slide_frame, submenu_row_label, submenu_trailing,
-    visible_projects, wheel_deltas,
+    NavPress, NavRow, SwipeGesture, SwipeStep, added_sidebar_project, drag_frame, filtered_rows,
+    is_horizontal, nav_press, nav_rows, pick_title, run_in_order, slide_frame, slide_out_ms,
+    submenu_row_label, submenu_trailing, visible_projects, wheel_deltas,
 };
 use crate::ring::{FRAME as RING_FRAME, Knockout, RunningRing};
 use bachuc_client::{Client, ClientEvent, DirectoryEvent, ProjectNode};
@@ -140,15 +140,15 @@ struct SectionView {
     view: AnyView,
 }
 
-/// A filter slide in flight (`slide.tsx`). The list changes at the end of the out phase.
+/// A filter slide in flight (`slide.tsx`), or a snap back when `target` is `None`. A slide
+/// starts at `from`, where the finger left the list, and the rows change at the end of its out
+/// phase.
 struct Slide {
     started: Instant,
-    direction: SwipeDirection,
+    target: Option<SwipeDirection>,
+    from: f32,
     generation: u64,
 }
-
-/// The list swaps its rows at this point of a slide.
-const SLIDE_APPLY: Duration = Duration::from_millis(65);
 
 #[derive(Clone, Copy)]
 struct ResizeDrag;
@@ -225,8 +225,16 @@ pub struct Sidebar {
     sections: Vec<SectionView>,
     /// (plugin id, surface id) of the open plugin page, for the active nav row.
     active_surface: Option<(String, String)>,
-    wheel: WheelGesture,
+    swipe: SwipeGesture,
     wheel_epoch: Instant,
+    /// The web-sign pixel offset of the list while a finger drags it.
+    drag: Option<f32>,
+    /// A released swipe that waits for its filter change: the direction and the drag fraction.
+    /// A swipe the filter does not answer before the next frame snaps back.
+    awaiting: Option<(SwipeDirection, f32)>,
+    /// The way a swipe last found no Space; a drag that way rubber-bands.
+    swipe_edge: Option<SwipeDirection>,
+    _swipe_timeout: Option<Task<()>>,
     slide: Option<Slide>,
     slide_generation: u64,
     adding: bool,
@@ -264,8 +272,12 @@ impl Sidebar {
             host: None,
             sections: Vec::new(),
             active_surface: None,
-            wheel: WheelGesture::default(),
+            swipe: SwipeGesture::default(),
             wheel_epoch: Instant::now(),
+            drag: None,
+            awaiting: None,
+            swipe_edge: None,
+            _swipe_timeout: None,
             slide: None,
             slide_generation: 0,
             adding: false,
@@ -368,25 +380,35 @@ impl Sidebar {
 
     /// Applies a pending filter change at once and drops the slide.
     fn finish_slide(&mut self, cx: &mut Context<Self>) {
-        if self.slide.take().is_some() {
+        if let Some(slide) = self.slide.take() {
             self.slide_generation += 1;
-            self.refresh(cx);
+            if slide.target.is_some() {
+                self.refresh(cx);
+            }
         }
     }
 
     /// Slides the list out, swaps the rows, and slides the new list in. A second change during
-    /// a slide applies the first one at once.
+    /// a slide applies the first one at once. The swipe that asked for this change starts the
+    /// slide where the finger left the list.
     fn start_slide(&mut self, direction: SwipeDirection, cx: &mut Context<Self>) {
         self.finish_slide(cx);
+        let from = match self.awaiting.take() {
+            Some((asked, from)) if asked == direction => from,
+            _ => 0.,
+        };
+        self.swipe_edge = None;
         self.slide_generation += 1;
         let generation = self.slide_generation;
         self.slide = Some(Slide {
             started: Instant::now(),
-            direction,
+            target: Some(direction),
+            from,
             generation,
         });
+        let apply = Duration::from_secs_f32(slide_out_ms(direction, from) / 1000.);
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(SLIDE_APPLY).await;
+            cx.background_executor().timer(apply).await;
             this.update(cx, |this, cx| {
                 if this.slide.as_ref().map(|slide| slide.generation) == Some(generation) {
                     this.refresh(cx);
@@ -652,8 +674,9 @@ impl Sidebar {
         }
     }
 
-    /// Feeds a wheel event over the project list to the swipe gesture and calls every filter's
-    /// `on_swipe` once per gesture. A horizontal scroll never scrolls the list.
+    /// Feeds a wheel event over the project list to the swipe gesture: the list follows the
+    /// finger, and a release calls every filter's `on_swipe` or snaps back. A horizontal scroll
+    /// never scrolls the list.
     fn on_wheel(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
         let Some(host) = &self.host else {
             return;
@@ -663,27 +686,103 @@ impl Sidebar {
             return;
         }
         let (dx, dy) = wheel_deltas(event.delta);
-        if is_horizontal(dx, dy) {
+        if is_horizontal(dx, dy) || self.drag.is_some() {
             cx.stop_propagation();
         }
         // A pressed button means a drag is in flight, so the swipe must not switch under it.
         if event.modifiers.control || cx.has_active_drag() {
             return;
         }
-        let now = self.wheel_epoch.elapsed().as_secs_f64() * 1000.;
-        let Some(direction) = self.wheel.push(dx, dy, now) else {
+        let now = self.swipe_now();
+        let step = self.swipe.push(dx, dy, event.touch_phase, now, self.width);
+        self.apply_swipe(step, cx);
+        self.schedule_swipe_timeout(cx);
+    }
+
+    fn swipe_now(&self) -> f64 {
+        self.wheel_epoch.elapsed().as_secs_f64() * 1000.
+    }
+
+    /// Ends a gesture whose events stopped without a release. Each event replaces the timer.
+    fn schedule_swipe_timeout(&mut self, cx: &mut Context<Self>) {
+        let Some(timeout) = self.swipe.timeout_ms() else {
+            self._swipe_timeout = None;
             return;
         };
-        let handlers: Vec<_> = host
-            .read(cx)
-            .index()
-            .project_filters()
-            .iter()
-            .filter_map(|filter| filter.value.on_swipe.clone())
-            .collect();
-        for handler in handlers {
-            handler(direction, cx);
+        self._swipe_timeout = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_secs_f64(timeout / 1000.))
+                .await;
+            this.update(cx, |this, cx| {
+                let step = this.swipe.tick(this.swipe_now(), this.width);
+                this.apply_swipe(step, cx);
+            })
+            .ok();
+        }));
+    }
+
+    fn apply_swipe(&mut self, step: SwipeStep, cx: &mut Context<Self>) {
+        match step {
+            SwipeStep::Ignore => {}
+            SwipeStep::Drag { offset } => {
+                if self.drag.is_none() {
+                    // A slide still running shows its end at once under the finger.
+                    self.finish_slide(cx);
+                    self.awaiting = None;
+                }
+                if self.drag != Some(offset) {
+                    self.drag = Some(offset);
+                    cx.notify();
+                }
+            }
+            SwipeStep::Commit { direction, offset } => {
+                let from = self.drag_fraction(offset);
+                self.drag = None;
+                self.awaiting = Some((direction, from));
+                cx.notify();
+                let handlers: Vec<_> = self.host.as_ref().map_or_else(Vec::new, |host| {
+                    host.read(cx)
+                        .index()
+                        .project_filters()
+                        .iter()
+                        .filter_map(|filter| filter.value.on_swipe.clone())
+                        .collect()
+                });
+                for handler in handlers {
+                    handler(direction, cx);
+                }
+            }
+            SwipeStep::SnapBack { offset } => {
+                let from = self.drag_fraction(offset);
+                self.drag = None;
+                self.snap_back(from, cx);
+            }
         }
+    }
+
+    /// Where the list is drawn for a drag `offset`, as a fraction of the width.
+    fn drag_fraction(&self, offset: f32) -> f32 {
+        drag_frame(offset, self.width, self.blocked(offset)).offset
+    }
+
+    fn blocked(&self, offset: f32) -> bool {
+        let toward = if offset > 0. {
+            SwipeDirection::Next
+        } else {
+            SwipeDirection::Previous
+        };
+        self.swipe_edge == Some(toward)
+    }
+
+    fn snap_back(&mut self, from: f32, cx: &mut Context<Self>) {
+        self.slide_generation += 1;
+        self.slide = Some(Slide {
+            started: Instant::now(),
+            target: None,
+            from,
+            generation: self.slide_generation,
+        });
+        cx.notify();
     }
 
     /// Picks a folder, adds it as a project, and tells every filter about it, in index order.
@@ -776,16 +875,11 @@ impl Sidebar {
             } => PINNED_BLOCK_GAP,
             _ => 0.,
         };
-        // The list container pads 8 px at the sides, and 16 px under the last row. A row
-        // takes the wheel after the list registers its own handler, so it can keep a
-        // horizontal swipe from scrolling the list.
+        // The list container pads 8 px at the sides, and 16 px under the last row.
         div()
             .w_full()
             .px(px(SPACE_2))
             .pb(px(below + if last { SPACE_4 } else { 0. }))
-            .on_scroll_wheel(
-                cx.listener(|this, event: &ScrollWheelEvent, _, cx| this.on_wheel(event, cx)),
-            )
             .child(body)
             .into_any_element()
     }
@@ -1872,18 +1966,46 @@ impl Render for Sidebar {
         // The app may create the plugin host after the sidebar.
         self.attach_host(window, cx);
         let t = tokens(cx);
-        let frame = self.slide.as_ref().and_then(|slide| {
-            slide_frame(
-                slide.direction,
-                slide.started.elapsed().as_secs_f32() * 1000.,
-            )
-        });
-        if frame.is_some() {
-            window.request_animation_frame();
-        } else {
-            self.slide = None;
+        // The filter answers a swipe within the same effect cycle. No answer means no Space
+        // that way, or a save that queued the swipe; its change slides in later.
+        if let Some((direction, from)) = self.awaiting.take() {
+            self.swipe_edge = Some(direction);
+            self.snap_back(from, cx);
         }
+        let frame = match self.drag {
+            Some(offset) => Some(drag_frame(offset, self.width, self.blocked(offset))),
+            None => {
+                let frame = self.slide.as_ref().and_then(|slide| {
+                    slide_frame(
+                        slide.target,
+                        slide.from,
+                        slide.started.elapsed().as_secs_f32() * 1000.,
+                    )
+                });
+                if frame.is_some() {
+                    window.request_animation_frame();
+                } else {
+                    self.slide = None;
+                }
+                frame
+            }
+        };
         let width = self.width;
+        let sidebar = cx.weak_entity();
+        // The swipe takes the wheel in the capture phase over the tree, which stays put while
+        // the rows move with the finger, so it can keep a horizontal swipe from the list.
+        let wheel = canvas(
+            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+            move |_, hitbox, window, _| {
+                window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture && hitbox.should_handle_scroll(window) {
+                        sidebar.update(cx, |this, cx| this.on_wheel(event, cx)).ok();
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_full();
         let tree = div()
             .id("sidebar-tree")
             .role(Role::Tree)
@@ -1892,8 +2014,9 @@ impl Render for Sidebar {
             .min_h_0()
             .pt(px(SPACE_0_5))
             .overflow_hidden()
+            .child(wheel)
             .child(
-                // Offset with `left`, as Electron does, and only while a slide runs.
+                // Offset with `left`, as Electron does, and only while a drag or a slide runs.
                 div()
                     .size_full()
                     .relative()

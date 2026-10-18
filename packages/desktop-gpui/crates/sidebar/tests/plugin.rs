@@ -5,7 +5,7 @@ use bachuc_plugin_host::{
 };
 use bachuc_sidebar::model::{Facts, Row, ViewState, build_rows};
 use bachuc_sidebar::plugin::*;
-use gpui_kit::{Point, ScrollDelta, SharedString, point, px};
+use gpui_kit::{Point, ScrollDelta, SharedString, TouchPhase, point, px};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -254,76 +254,230 @@ fn the_first_non_empty_trimmed_title_wins() {
 
 // ---- swipe ----
 
-fn push(gesture: &mut WheelGesture, dx: f32, dy: f32, time: f64) -> Option<SwipeDirection> {
-    gesture.push(dx, dy, time)
-}
+const WIDTH: f32 = 240.;
 
-#[test]
-fn three_pushes_inside_the_quiet_gap_make_one_next() {
-    let mut gesture = WheelGesture::default();
-    assert_eq!(push(&mut gesture, 10., 0., 0.), None);
-    assert_eq!(push(&mut gesture, 10., 2., 16.), None);
-    assert_eq!(push(&mut gesture, 10., 1., 32.), Some(SwipeDirection::Next));
-    assert_eq!(push(&mut gesture, 10., 0., 48.), None, "one per gesture");
-}
-
-#[test]
-fn a_quiet_gap_restarts_the_count() {
-    let mut gesture = WheelGesture::default();
-    assert_eq!(push(&mut gesture, 10., 0., 0.), None);
-    assert_eq!(push(&mut gesture, 10., 0., 130.), None);
-    assert_eq!(
-        push(&mut gesture, 10., 0., 260.),
-        None,
-        "10 + 10 + 10 never sums"
-    );
-    let mut steady = WheelGesture::default();
-    steady.push(10., 0., 0.);
-    steady.push(10., 0., 100.);
-    assert_eq!(steady.push(10., 0., 200.), Some(SwipeDirection::Next));
-}
-
-#[test]
-fn a_negative_push_makes_previous() {
-    let mut gesture = WheelGesture::default();
-    assert_eq!(
-        push(&mut gesture, -30., 0., 0.),
-        Some(SwipeDirection::Previous)
-    );
-}
-
-#[test]
-fn a_diagonal_push_makes_none() {
-    let mut gesture = WheelGesture::default();
-    assert_eq!(push(&mut gesture, 20., 20., 0.), None);
-    assert_eq!(push(&mut gesture, 20., 20., 16.), None);
-}
-
-#[test]
-fn a_reversal_starts_a_new_gesture() {
-    let mut gesture = WheelGesture::default();
-    assert_eq!(push(&mut gesture, 30., 0., 0.), Some(SwipeDirection::Next));
-    assert_eq!(
-        push(&mut gesture, -30., 0., 16.),
-        Some(SwipeDirection::Previous)
-    );
-}
-
-#[test]
-fn a_decaying_tail_stays_quiet_and_a_fresh_stroke_fires_again() {
-    let mut gesture = WheelGesture::default();
-    assert_eq!(push(&mut gesture, 30., 0., 0.), Some(SwipeDirection::Next));
-    // Momentum tail, every push smaller than the one before.
-    for (step, dx) in [8., 6., 5., 4., 3., 2., 1.].into_iter().enumerate() {
-        let time = 40. + step as f64 * 30.;
-        assert_eq!(push(&mut gesture, dx, 0., time), None, "tail push {step}");
+/// Feeds `moves` (dx, dy) 8 ms apart after a `Started` at `start`; returns the last step and
+/// the time of the last move.
+fn drag(gesture: &mut SwipeGesture, start: f64, moves: &[(f32, f32)]) -> (SwipeStep, f64) {
+    let mut step = gesture.push(0., 0., TouchPhase::Started, start, WIDTH);
+    let mut time = start;
+    for &(dx, dy) in moves {
+        time += 8.;
+        step = gesture.push(dx, dy, TouchPhase::Moved, time, WIDTH);
     }
-    // A new stroke after the tail: no quiet gap, but it speeds up well past the tail.
-    let mut fired = None;
-    for (step, dx) in [3., 6., 12., 24., 30.].into_iter().enumerate() {
-        fired = fired.or(push(&mut gesture, dx, 0., 300. + step as f64 * 20.));
+    (step, time)
+}
+
+fn lift(gesture: &mut SwipeGesture, time: f64) -> SwipeStep {
+    gesture.push(0., 0., TouchPhase::Ended, time, WIDTH)
+}
+
+#[test]
+fn the_list_follows_the_finger_one_to_one() {
+    let mut gesture = SwipeGesture::default();
+    let (step, _) = drag(
+        &mut gesture,
+        0.,
+        &[(4., 0.), (6., 1.), (10., 0.), (25., 0.)],
+    );
+    assert_eq!(step, SwipeStep::Drag { offset: 45. });
+    let frame = drag_frame(45., WIDTH, false);
+    assert!(
+        (frame.offset + 45. / WIDTH).abs() < 1e-6,
+        "a left finger moves the list left"
+    );
+}
+
+#[test]
+fn a_slow_release_past_half_the_width_switches() {
+    let mut gesture = SwipeGesture::default();
+    let (_, time) = drag(&mut gesture, 0., &[(40., 0.); 4]);
+    // The fingers rest before they lift, so only the travel counts.
+    assert_eq!(
+        lift(&mut gesture, time + 200.),
+        SwipeStep::Commit {
+            direction: SwipeDirection::Next,
+            offset: 160.
+        }
+    );
+}
+
+#[test]
+fn a_slow_release_short_of_half_snaps_back() {
+    let mut gesture = SwipeGesture::default();
+    let (_, time) = drag(&mut gesture, 0., &[(-30., 0.); 3]);
+    assert_eq!(
+        lift(&mut gesture, time + 200.),
+        SwipeStep::SnapBack { offset: -90. }
+    );
+}
+
+#[test]
+fn a_fast_flick_switches_short_of_half() {
+    let mut gesture = SwipeGesture::default();
+    let (_, time) = drag(&mut gesture, 0., &[(-15., 0.), (-20., 0.)]);
+    assert_eq!(
+        lift(&mut gesture, time + 4.),
+        SwipeStep::Commit {
+            direction: SwipeDirection::Previous,
+            offset: -35.
+        }
+    );
+}
+
+#[test]
+fn a_vertical_scroll_is_never_a_swipe() {
+    let mut gesture = SwipeGesture::default();
+    let (step, time) = drag(
+        &mut gesture,
+        0.,
+        &[(1., 10.), (30., 0.), (30., 0.), (30., 0.)],
+    );
+    assert_eq!(step, SwipeStep::Ignore, "the axis locks on the first 8 px");
+    assert_eq!(gesture.timeout_ms(), None);
+    assert_eq!(lift(&mut gesture, time + 8.), SwipeStep::Ignore);
+    let mut diagonal = SwipeGesture::default();
+    let (step, _) = drag(&mut diagonal, 0., &[(20., 20.), (20., 20.)]);
+    assert_eq!(step, SwipeStep::Ignore);
+}
+
+#[test]
+fn the_direction_follows_the_finger_when_it_reverses() {
+    let mut back = SwipeGesture::default();
+    let (step, time) = drag(
+        &mut back,
+        0.,
+        &[(40., 0.), (40., 0.), (40., 0.), (-50., 0.), (-50., 0.)],
+    );
+    assert_eq!(step, SwipeStep::Drag { offset: 20. });
+    assert_eq!(
+        lift(&mut back, time + 200.),
+        SwipeStep::SnapBack { offset: 20. }
+    );
+
+    let mut over = SwipeGesture::default();
+    let (_, time) = drag(&mut over, 0., &[(30., 0.), (-40., 0.), (-40., 0.)]);
+    assert_eq!(
+        lift(&mut over, time + 4.),
+        SwipeStep::Commit {
+            direction: SwipeDirection::Previous,
+            offset: -50.
+        },
+        "a flick back past the start goes the other way"
+    );
+}
+
+#[test]
+fn the_momentum_tail_never_swipes_again_and_the_next_gesture_does() {
+    let mut gesture = SwipeGesture::default();
+    let (_, time) = drag(&mut gesture, 0., &[(70., 0.); 2]);
+    assert!(matches!(
+        lift(&mut gesture, time + 2.),
+        SwipeStep::Commit { .. }
+    ));
+    for step in 0..30 {
+        let tail = gesture.push(
+            20.,
+            0.,
+            TouchPhase::Moved,
+            time + 10. + step as f64 * 16.,
+            WIDTH,
+        );
+        assert_eq!(tail, SwipeStep::Ignore, "tail event {step}");
     }
-    assert_eq!(fired, Some(SwipeDirection::Next));
+    // A new stroke right after the tail, with no quiet gap, starts with `Started`.
+    let (_, again) = drag(&mut gesture, time + 500., &[(70., 0.); 2]);
+    assert!(matches!(
+        lift(&mut gesture, again + 2.),
+        SwipeStep::Commit { .. }
+    ));
+}
+
+#[test]
+fn ten_quick_swipes_each_switch() {
+    let mut gesture = SwipeGesture::default();
+    let mut start = 0.;
+    for swipe in 0..10 {
+        let (_, time) = drag(&mut gesture, start, &[(20., 0.), (30., 0.), (30., 0.)]);
+        assert!(
+            matches!(lift(&mut gesture, time + 2.), SwipeStep::Commit { .. }),
+            "swipe {swipe}"
+        );
+        // Momentum between the swipes.
+        gesture.push(10., 0., TouchPhase::Moved, time + 12., WIDTH);
+        start = time + 30.;
+    }
+}
+
+#[test]
+fn a_wheel_without_phases_ends_after_a_quiet_gap() {
+    let mut gesture = SwipeGesture::default();
+    for step in 0..9 {
+        gesture.push(16., 0., TouchPhase::Moved, step as f64 * 40., WIDTH);
+    }
+    let last = 8. * 40.;
+    assert_eq!(gesture.timeout_ms(), Some(120.));
+    assert_eq!(
+        gesture.tick(last + 60., WIDTH),
+        SwipeStep::Ignore,
+        "too early"
+    );
+    assert_eq!(
+        gesture.tick(last + 120., WIDTH),
+        SwipeStep::Commit {
+            direction: SwipeDirection::Next,
+            offset: 144.
+        }
+    );
+    assert_eq!(gesture.timeout_ms(), None);
+}
+
+#[test]
+fn a_phased_drag_waits_for_its_lift_and_a_lost_one_ends_by_travel() {
+    let mut gesture = SwipeGesture::default();
+    let (_, time) = drag(&mut gesture, 0., &[(-50., 0.); 3]);
+    assert_eq!(
+        gesture.tick(time + 400., WIDTH),
+        SwipeStep::Ignore,
+        "resting fingers"
+    );
+    assert_eq!(
+        gesture.tick(time + 1500., WIDTH),
+        SwipeStep::Commit {
+            direction: SwipeDirection::Previous,
+            offset: -150.
+        }
+    );
+}
+
+#[test]
+fn a_cancel_or_a_new_start_mid_drag_snaps_back() {
+    let mut gesture = SwipeGesture::default();
+    let (_, time) = drag(&mut gesture, 0., &[(40., 0.); 4]);
+    assert_eq!(
+        gesture.push(0., 0., TouchPhase::Cancelled, time + 8., WIDTH),
+        SwipeStep::SnapBack { offset: 160. }
+    );
+    let mut restarted = SwipeGesture::default();
+    let (_, time) = drag(&mut restarted, 0., &[(40., 0.); 2]);
+    assert_eq!(
+        restarted.push(0., 0., TouchPhase::Started, time + 8., WIDTH),
+        SwipeStep::SnapBack { offset: 80. }
+    );
+}
+
+#[test]
+fn a_drag_past_the_last_space_rubber_bands() {
+    let free = drag_frame(200., WIDTH, false);
+    let banded = drag_frame(200., WIDTH, true);
+    assert!(
+        banded.offset < 0. && banded.offset > free.offset,
+        "{banded:?}"
+    );
+    let far = drag_frame(5000., WIDTH, true);
+    assert!(far.offset > -0.5, "never past half the width: {far:?}");
+    assert!(rubber_band(-200., WIDTH) < 0.);
+    assert_eq!(rubber_band(0., WIDTH), 0.);
 }
 
 #[test]
@@ -340,38 +494,63 @@ fn scroll_deltas_use_the_web_sign_and_count_lines_as_16_pixels() {
 
 #[test]
 fn the_slide_runs_out_then_in_and_ends_at_170_ms() {
-    let start = slide_frame(SwipeDirection::Next, 0.).unwrap();
+    let next = Some(SwipeDirection::Next);
+    let start = slide_frame(next, 0., 0.).unwrap();
     assert!(start.offset.abs() < 1e-4 && (start.opacity - 1.).abs() < 1e-4);
     assert!(!start.applied);
 
     // The out phase ends at 65 ms with the list off to the left and invisible; the rows change
     // there and the new list starts off to the right.
-    let apply = slide_frame(SwipeDirection::Next, 65.).unwrap();
+    let apply = slide_frame(next, 0., 65.).unwrap();
     assert!(apply.applied);
     assert!((apply.offset - 1.).abs() < 1e-4, "{apply:?}");
     assert!(apply.opacity.abs() < 1e-4, "{apply:?}");
 
-    let before_apply = slide_frame(SwipeDirection::Next, 64.9).unwrap();
+    let before_apply = slide_frame(next, 0., 64.9).unwrap();
     assert!(!before_apply.applied);
     assert!(before_apply.offset < -0.99, "{before_apply:?}");
 
-    let middle = slide_frame(SwipeDirection::Next, 65. + 52.5).unwrap();
+    let middle = slide_frame(next, 0., 65. + 52.5).unwrap();
     assert!(middle.offset > 0. && middle.offset < 1.);
     assert!(middle.opacity > 0. && middle.opacity < 1.);
 
-    assert_eq!(slide_frame(SwipeDirection::Next, 170.), None);
-    assert_eq!(slide_frame(SwipeDirection::Next, 400.), None);
-    let end = slide_frame(SwipeDirection::Next, 169.9).unwrap();
+    assert_eq!(slide_frame(next, 0., 170.), None);
+    assert_eq!(slide_frame(next, 0., 400.), None);
+    let end = slide_frame(next, 0., 169.9).unwrap();
     assert!(end.offset.abs() < 0.01 && end.opacity > 0.99, "{end:?}");
 }
 
 #[test]
 fn the_slide_goes_the_other_way_for_previous() {
-    let next = slide_frame(SwipeDirection::Next, 30.).unwrap();
-    let previous = slide_frame(SwipeDirection::Previous, 30.).unwrap();
+    let next = slide_frame(Some(SwipeDirection::Next), 0., 30.).unwrap();
+    let previous = slide_frame(Some(SwipeDirection::Previous), 0., 30.).unwrap();
     assert!(next.offset < 0. && previous.offset > 0.);
     assert!((next.offset + previous.offset).abs() < 1e-6);
     assert_eq!(next.opacity, previous.opacity);
+}
+
+#[test]
+fn a_released_swipe_slides_on_from_the_finger() {
+    let next = Some(SwipeDirection::Next);
+    let from = drag_frame(180., WIDTH, false).offset;
+    assert!((slide_out_ms(SwipeDirection::Next, from) - 65. * 0.25).abs() < 1e-3);
+    let first = slide_frame(next, from, 0.).unwrap();
+    assert!(
+        (first.offset - from).abs() < 1e-4,
+        "no jump at release: {first:?}"
+    );
+    assert!((first.opacity - drag_frame(180., WIDTH, false).opacity).abs() < 1e-4);
+    assert!(slide_frame(next, from, 16.3).unwrap().applied);
+    assert_eq!(slide_frame(next, from, 16.25 + 105.), None);
+}
+
+#[test]
+fn a_snap_back_returns_to_the_start() {
+    let first = slide_frame(None, -0.3, 0.).unwrap();
+    assert!((first.offset + 0.3).abs() < 1e-4 && !first.applied);
+    let middle = slide_frame(None, -0.3, 60.).unwrap();
+    assert!(middle.offset > -0.3 && middle.offset < 0.);
+    assert_eq!(slide_frame(None, -0.3, 180.), None);
 }
 
 // ---- project menu ----
