@@ -642,6 +642,13 @@ mod tests {
         assert_eq!(popup_offset(0.), metrics::POPUP_GAP);
     }
 
+    /// gpui-kit `dropdown_menu` takes no offset: its `Popover` places the menu `rem / 4` from
+    /// the trigger. That must stay the theme gap.
+    #[test]
+    fn gpui_kit_dropdown_gap_is_the_popup_gap() {
+        assert_eq!(BASE_REM_SIZE * 0.25, metrics::POPUP_GAP);
+    }
+
     #[test]
     fn mono_family_prefers_sf_mono_and_falls_back_to_menlo() {
         let names = |list: &[&str]| list.iter().map(|name| name.to_string()).collect::<Vec<_>>();

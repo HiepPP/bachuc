@@ -707,7 +707,7 @@ impl Shell {
                 .enumerate()
                 .map(|(ix, script)| self.script_row(workspace_id, ix, script, cx))
                 .collect();
-            header_popover("scripts-menu", "Workspace scripts", rows, cx)
+            header_popover("scripts-menu", "Workspace scripts", 28., rows, cx)
         });
         div()
             .relative()
@@ -973,7 +973,13 @@ impl Shell {
                     .into_any_element(),
                 );
             }
-            header_popover("open-in-editor-menu", "Choose editor", rows, cx)
+            header_popover(
+                "open-in-editor-menu",
+                "Choose editor",
+                HEADER_CONTROL_HEIGHT,
+                rows,
+                cx,
+            )
         });
         div()
             .relative()
@@ -1322,17 +1328,19 @@ fn menu_row(
         }))
 }
 
-/// A header menu under its trigger, right-aligned, closed by a press outside it.
+/// A header menu under its trigger of `trigger_height`, right-aligned, closed by a press
+/// outside it.
 fn header_popover(
     id: &'static str,
     label: &'static str,
+    trigger_height: f32,
     rows: Vec<AnyElement>,
     cx: &mut Context<Shell>,
 ) -> AnyElement {
     let t = tokens(cx);
     div()
         .absolute()
-        .top(px(popup_offset(28.)))
+        .top(px(popup_offset(trigger_height)))
         .right_0()
         .child(
             deferred(
