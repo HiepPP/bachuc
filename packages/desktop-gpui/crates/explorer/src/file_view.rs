@@ -6,7 +6,7 @@ use crate::syntax::{Run, ThemeSyntax, highlight, language_for};
 use crate::ui::{centered_text, file_meta_state};
 use bachuc_client::{Client, FileContent, FileKind};
 use bachuc_theme::metrics::{FONT_SM, RADIUS_SM, SPACE_2, SPACE_3, TAB_BAR_HEIGHT};
-use bachuc_theme::{syntax_colors, tokens, ui_font_size};
+use bachuc_theme::{syntax_colors, tokens, ui_font_size, zoom, zoomed};
 use gpui_kit::component::h_flex;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -333,9 +333,9 @@ impl FileView {
             .role(Role::Status)
             .aria_label(format!("{size}, {lines}"))
             .flex_shrink_0()
-            .h(px(TAB_BAR_HEIGHT))
-            .px(px(SPACE_3))
-            .gap(px(SPACE_2))
+            .h(zoomed(TAB_BAR_HEIGHT, cx))
+            .px(zoomed(SPACE_3, cx))
+            .gap(zoomed(SPACE_2, cx))
             .text_size(ui_font_size(FONT_SM, cx))
             .text_color(colors.foreground_extra_muted)
             .child(size)
@@ -354,7 +354,7 @@ impl FileView {
         let colors = tokens(cx);
         let (size, family) = code_font(cx);
         let size_px: f32 = size.into();
-        let gutter = gutter_text_width(doc.line_count(), size_px);
+        let gutter = gutter_text_width(doc.line_count(), size_px, zoom(cx));
         let line_height = px(size_px * LINE_HEIGHT_FACTOR);
         let target = self.line.map(|line| line as usize);
         range
@@ -380,8 +380,8 @@ impl FileView {
                             .w(px(gutter))
                             .h_full()
                             .flex_shrink_0()
-                            .pl(px(GUTTER_PAD_LEFT))
-                            .pr(px(GUTTER_PAD_RIGHT))
+                            .pl(zoomed(GUTTER_PAD_LEFT, cx))
+                            .pr(zoomed(GUTTER_PAD_RIGHT, cx))
                             .text_right()
                             .text_color(colors.foreground_muted)
                             .border_r_1()
@@ -390,8 +390,8 @@ impl FileView {
                     )
                     .child(
                         div()
-                            .pl(px(LINE_PAD_LEFT))
-                            .pr(px(SPACE_2))
+                            .pl(zoomed(LINE_PAD_LEFT, cx))
+                            .pr(zoomed(SPACE_2, cx))
                             .whitespace_nowrap()
                             .child(code_text(text, runs)),
                     )
@@ -402,9 +402,10 @@ impl FileView {
 }
 
 /// The gutter: digits for the last line number, at least two, and the element padding.
-fn gutter_text_width(lines: usize, size: f32) -> f32 {
-    // `gutter_width` adds 12 px for the diff gutter; the editor gutter has 8 px of padding.
-    gutter_width(lines as u32, size) - 12. + GUTTER_PAD_LEFT + GUTTER_PAD_RIGHT
+fn gutter_text_width(lines: usize, size: f32, zoom: f32) -> f32 {
+    // `gutter_width` adds 12 px for the diff gutter; the editor gutter has 8 px of padding,
+    // which grows with the zoom while the digits already follow the zoomed code font.
+    gutter_width(lines as u32, size) - 12. + (GUTTER_PAD_LEFT + GUTTER_PAD_RIGHT) * zoom
 }
 
 impl Render for FileView {
@@ -448,12 +449,12 @@ impl Render for FileView {
                     .aria_label(self.path.clone())
                     .flex_1()
                     .min_h_0()
-                    .p(px(SPACE_3))
+                    .p(zoomed(SPACE_3, cx))
                     .child(
                         img(image.clone())
                             .size_full()
                             .object_fit(ObjectFit::Contain)
-                            .rounded(px(RADIUS_SM)),
+                            .rounded(zoomed(RADIUS_SM, cx)),
                     ),
             ),
             State::Text(doc) => {
@@ -479,7 +480,7 @@ impl Render for FileView {
                             )
                             .with_width_from_item(Some(longest))
                             .size_full()
-                            .py(px(CONTENT_PADDING)),
+                            .py(zoomed(CONTENT_PADDING, cx)),
                         ),
                 )
             }

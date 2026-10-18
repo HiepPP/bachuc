@@ -16,7 +16,7 @@ use crate::ui::{
 use bachuc_client::{Client, ClientEvent, DiffCompare, DirectoryEvent, FileDiff, FileDiffStatus};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{FONT_BASE, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3};
-use bachuc_theme::{syntax_colors, tokens, ui_font_size};
+use bachuc_theme::{syntax_colors, tokens, ui_font_size, zoom, zoomed};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -69,6 +69,8 @@ pub struct DiffView {
     /// The syntax colors the runs were made for.
     colors: ThemeSyntax,
     gutter: f32,
+    /// The zoom the list heights and the gutter were made for; `render` redoes them on a change.
+    zoom: f32,
     list: ListState,
     requests: Latest,
     /// The focus file to scroll to: the one the view opened with, then each later Changes click.
@@ -169,6 +171,7 @@ impl DiffView {
             runs: Vec::new(),
             colors: ThemeSyntax(syntax_colors(cx)),
             gutter: 0.,
+            zoom: zoom(cx),
             list: ListState::new(0, ListAlignment::Top, px(OVERDRAW)),
             requests: Latest::default(),
             focus: FocusTracker::new(revision, initial_focus),
@@ -251,7 +254,7 @@ impl DiffView {
                 self.doc = DiffDoc::new(diffs);
                 self.runs.clear();
                 let (code_size, _) = code_font(cx);
-                self.gutter = gutter_width(self.doc.max_number(), code_size.into());
+                self.gutter = self.gutter_for(code_size.into());
                 self.state = if self.doc.is_empty() {
                     State::Empty
                 } else {
@@ -266,6 +269,16 @@ impl DiffView {
         cx.notify();
     }
 
+    /// The height of one diff line at the current zoom.
+    fn line_height(&self) -> f32 {
+        LINE_HEIGHT * self.zoom
+    }
+
+    /// The gutter width: digits at the zoomed code size, and the 12 px padding at the zoom.
+    fn gutter_for(&self, code_size: f32) -> f32 {
+        gutter_width(self.doc.max_number(), code_size) - 12. + 12. * self.zoom
+    }
+
     /// Gives the list the new row count and keeps the top row where it was.
     fn reset_list(&mut self) {
         let keep = self.list.logical_scroll_top();
@@ -277,7 +290,7 @@ impl DiffView {
     /// while they wrap.
     fn reset_rows(&mut self) {
         let count = self.doc.rows().len();
-        match uniform_row_height(self.wrap, LINE_HEIGHT) {
+        match uniform_row_height(self.wrap, self.line_height()) {
             Some(height) => self.list.reset_with_uniform_height(count, px(height)),
             None => self.list.reset(count),
         }
@@ -332,7 +345,7 @@ impl DiffView {
         code_widths(
             self.doc.longest_columns(file),
             self.advance,
-            CODE_LEFT_PADDING + SPACE_3,
+            (CODE_LEFT_PADDING + SPACE_3) * self.zoom,
             self.pane_width,
             self.gutter,
         )
@@ -345,7 +358,7 @@ impl DiffView {
         event: &ScrollWheelEvent,
         cx: &mut Context<DiffView>,
     ) {
-        let delta = event.delta.pixel_delta(px(LINE_HEIGHT));
+        let delta = event.delta.pixel_delta(px(self.line_height()));
         let shift_wheel = event.modifiers.shift && delta.x == px(0.);
         let delta: f32 = if shift_wheel { delta.y } else { delta.x }.into();
         if delta == 0. {
@@ -497,8 +510,8 @@ impl DiffView {
             .role(Role::Button)
             .aria_label(label)
             .flex_shrink_0()
-            .size(px(TOOLBAR_BUTTON))
-            .rounded(px(RADIUS_MD))
+            .size(zoomed(TOOLBAR_BUTTON, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .flex()
             .items_center()
             .justify_center()
@@ -506,7 +519,7 @@ impl DiffView {
             .hover(|style| style.bg(colors.interaction_highlight))
             .child(
                 icon(glyph)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(colors.foreground_extra_muted),
             )
     }
@@ -539,10 +552,10 @@ impl DiffView {
             .role(Role::Toolbar)
             .aria_label("Diff")
             .flex_shrink_0()
-            .h(px(TOOLBAR_HEIGHT))
-            .pl(px(SPACE_2))
-            .pr(px(HEADER_RIGHT))
-            .gap(px(SPACE_2))
+            .h(zoomed(TOOLBAR_HEIGHT, cx))
+            .pl(zoomed(SPACE_2, cx))
+            .pr(zoomed(HEADER_RIGHT, cx))
+            .gap(zoomed(SPACE_2, cx))
             .bg(colors.surface0)
             .border_b_1()
             .border_color(colors.border)
@@ -550,7 +563,7 @@ impl DiffView {
                 h_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap(px(SPACE_1))
+                    .gap(zoomed(SPACE_1, cx))
                     .child(diff_mode_menu("diff-view-mode", &self.cwd, cx))
                     .when(matches!(self.state, State::Ready), |this| {
                         this.child(diff_stat(added, removed, cx))
@@ -639,10 +652,10 @@ impl DiffView {
             .aria_label(label)
             .aria_expanded(expanded)
             .w_full()
-            .h(px(HEADER_HEIGHT))
-            .pl(px(HEADER_LEFT))
-            .pr(px(HEADER_RIGHT))
-            .gap(px(SPACE_2))
+            .h(zoomed(HEADER_HEIGHT, cx))
+            .pl(zoomed(HEADER_LEFT, cx))
+            .pr(zoomed(HEADER_RIGHT, cx))
+            .gap(zoomed(SPACE_2, cx))
             .justify_between()
             .bg(colors.surface0)
             .border_b_1()
@@ -654,9 +667,9 @@ impl DiffView {
                 h_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap(px(SPACE_1))
+                    .gap(zoomed(SPACE_1, cx))
                     .text_size(ui_font_size(FONT_BASE, cx))
-                    .child(chevron(expanded, &colors))
+                    .child(chevron(expanded, &colors, cx))
                     .child(
                         div()
                             .flex_shrink_0()
@@ -685,9 +698,9 @@ impl DiffView {
             .child(
                 h_flex()
                     .flex_shrink_0()
-                    .gap(px(SPACE_2))
+                    .gap(zoomed(SPACE_2, cx))
                     .child(diff_stat(entry.additions, entry.deletions, cx))
-                    .child(change_icon(entry.change, &colors)),
+                    .child(change_icon(entry.change, &colors, cx)),
             )
             .into_any_element()
     }
@@ -709,8 +722,8 @@ impl DiffView {
             .role(Role::Status)
             .aria_label(label)
             .w_full()
-            .px(px(HEADER_LEFT))
-            .py(px(SPACE_3))
+            .px(zoomed(HEADER_LEFT, cx))
+            .py(zoomed(SPACE_3, cx))
             .text_size(size)
             .font_family(family)
             .text_color(colors.foreground_muted)
@@ -772,8 +785,8 @@ impl DiffView {
             )
         };
         let code = div()
-            .pl(px(CODE_LEFT_PADDING))
-            .pr(px(SPACE_3))
+            .pl(zoomed(CODE_LEFT_PADDING, cx))
+            .pr(zoomed(SPACE_3, cx))
             .child(code_text(&line_data.text, runs));
         let code = if wrap {
             code.flex_1().min_w_0().whitespace_normal()
@@ -793,15 +806,15 @@ impl DiffView {
             .w_full()
             .map(|row| {
                 if wrap {
-                    row.min_h(px(LINE_HEIGHT)).items_stretch()
+                    row.min_h(zoomed(LINE_HEIGHT, cx)).items_stretch()
                 } else {
-                    row.h(px(LINE_HEIGHT))
+                    row.h(zoomed(LINE_HEIGHT, cx))
                 }
             })
             .overflow_hidden()
             .font_family(family)
             .text_size(size)
-            .line_height(px(LINE_HEIGHT))
+            .line_height(zoomed(LINE_HEIGHT, cx))
             .bg(background)
             .text_color(text_color)
             .when(!wrap, |row| {
@@ -814,7 +827,7 @@ impl DiffView {
                     .w(px(self.gutter))
                     .when(!wrap, |gutter| gutter.h_full())
                     .flex_shrink_0()
-                    .pr(px(NUMBER_RIGHT))
+                    .pr(zoomed(NUMBER_RIGHT, cx))
                     .text_right()
                     .text_color(number_color)
                     .border_r_1()
@@ -874,6 +887,12 @@ impl Render for DiffView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = tokens(cx);
         let (code_size, family) = code_font(cx);
+        if self.zoom != zoom(cx) {
+            // Row heights and the gutter were made for the old zoom.
+            self.zoom = zoom(cx);
+            self.gutter = self.gutter_for(code_size.into());
+            self.reset_list();
+        }
         let font_id = window.text_system().resolve_font(&font(family));
         self.advance = window
             .text_system()

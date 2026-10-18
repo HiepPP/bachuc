@@ -4,7 +4,7 @@ use crate::ui::{card, column, note, page_title, row, row_text, scroll_page, sect
 use bachuc_client::{Client, ProviderSummary};
 use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{FONT_SM, ICON_SM, SPACE_1, SPACE_4};
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::theme::Theme;
 use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -96,7 +96,7 @@ impl ProvidersPane {
                     } else {
                         IconName::ChevronDown
                     })
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(colors.foreground_muted),
                 )
             });
@@ -105,9 +105,9 @@ impl ProvidersPane {
                 .id(("provider-models", index))
                 .role(Role::List)
                 .aria_label(format!("{} models", provider.label))
-                .px(px(SPACE_4))
-                .pb(px(SPACE_4))
-                .gap(px(SPACE_1))
+                .px(zoomed(SPACE_4, cx))
+                .pb(zoomed(SPACE_4, cx))
+                .gap(zoomed(SPACE_1, cx))
                 .children(provider.models.iter().map(|(model_id, label)| {
                     div()
                         .id(SharedString::from(format!("model-{model_id}")))
@@ -116,7 +116,7 @@ impl ProvidersPane {
                         .flex()
                         .flex_row()
                         .justify_between()
-                        .gap(px(SPACE_4))
+                        .gap(zoomed(SPACE_4, cx))
                         .text_size(ui_font_size(FONT_SM, cx))
                         .child(div().text_color(colors.foreground).child(label.clone()))
                         .child(
@@ -143,7 +143,7 @@ impl Render for ProvidersPane {
             card(cx)
                 .child(
                     div()
-                        .p(px(SPACE_4))
+                        .p(zoomed(SPACE_4, cx))
                         .child(note("No providers reported yet", cx)),
                 )
                 .into_any_element()
@@ -158,9 +158,12 @@ impl Render for ProvidersPane {
         scroll_page(
             "providers-pane",
             &self.scroll,
-            column()
-                .child(page_title("Providers", cx))
-                .child(section("Providers", None, body, cx)),
+            column(cx).child(page_title("Providers", cx)).child(section(
+                "Providers",
+                None,
+                body,
+                cx,
+            )),
             cx,
         )
     }

@@ -10,7 +10,7 @@ use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
     CONTROL_SM, FONT_BASE, FONT_SM, ICON_SM, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_2, SPACE_3,
 };
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::theme::Theme;
@@ -167,12 +167,12 @@ impl ShortcutsPane {
     fn keys(&self, chord: &str, cx: &App) -> Div {
         let colors = tokens(cx);
         h_flex()
-            .gap(px(SPACE_1))
+            .gap(zoomed(SPACE_1, cx))
             .children(display_combos(chord).into_iter().map(|text| {
                 div()
-                    .px(px(SPACE_1))
-                    .py(px(SPACE_0_5))
-                    .rounded(px(RADIUS_MD))
+                    .px(zoomed(SPACE_1, cx))
+                    .py(zoomed(SPACE_0_5, cx))
+                    .rounded(zoomed(RADIUS_MD, cx))
                     .bg(colors.surface3.opacity(0.5))
                     .text_size(ui_font_size(FONT_SM, cx))
                     .text_color(colors.foreground_muted)
@@ -223,7 +223,7 @@ impl ShortcutsPane {
             // here disables Done and names the other action.
             let recorded = self.pending().is_some();
             h_flex()
-                .gap(px(SPACE_2))
+                .gap(zoomed(SPACE_2, cx))
                 .when(recorded, |this| {
                     this.child(
                         Button::new(("shortcut-done", index))
@@ -254,16 +254,16 @@ impl ShortcutsPane {
                 format!("Actions for {label}"),
                 cx,
             )
-            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, app| {
                 let item = |text: &'static str, name: IconName, run: RowAction| {
                     let (weak, action) = (weak.clone(), action.clone());
                     PopupMenuItem::new(text)
-                        .icon(icon(name).with_size(px(ICON_SM)))
+                        .icon(icon(name).with_size(zoomed(ICON_SM, app)))
                         .on_click(move |_, _, cx| {
                             weak.update(cx, |this, cx| run(this, &action, cx)).ok();
                         })
                 };
-                menu.min_w(px(220.))
+                menu.min_w(zoomed(220., app))
                     .item(item(
                         if has_chord { "Rebind" } else { "Bind" },
                         IconName::Pencil,
@@ -276,7 +276,10 @@ impl ShortcutsPane {
                         menu.item(item("Reset to default", IconName::Undo2, Self::reset))
                     })
             });
-            div().size(px(CONTROL_SM)).child(menu).into_any_element()
+            div()
+                .size(zoomed(CONTROL_SM, cx))
+                .child(menu)
+                .into_any_element()
         };
 
         v_flex()
@@ -285,8 +288,8 @@ impl ShortcutsPane {
             .aria_label(label.clone())
             .child(
                 row(first, cx)
-                    .px(px(SPACE_3))
-                    .py(px(SPACE_3))
+                    .px(zoomed(SPACE_3, cx))
+                    .py(zoomed(SPACE_3, cx))
                     .when(capturing.is_some(), |this| this.bg(colors.surface2))
                     .child(
                         div()
@@ -300,11 +303,11 @@ impl ShortcutsPane {
                     .child(
                         h_flex()
                             .items_center()
-                            .gap(px(SPACE_2))
+                            .gap(zoomed(SPACE_2, cx))
                             .child(
                                 v_flex()
                                     .items_end()
-                                    .gap(px(SPACE_1))
+                                    .gap(zoomed(SPACE_1, cx))
                                     .child(keys)
                                     .children(clash.map(|text| error_text(text, cx))),
                             )
@@ -322,7 +325,7 @@ impl Render for ShortcutsPane {
             .iter()
             .any(|s| is_overridden(&self.shortcuts, &s.action));
         let shortcuts = self.shortcuts.clone();
-        let mut body = column()
+        let mut body = column(cx)
             .child(page_title("Shortcuts", cx))
             .children(self.error.clone().map(|error| error_text(error, cx)));
         for (position, group) in Section::ALL.into_iter().enumerate() {

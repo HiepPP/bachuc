@@ -6,7 +6,7 @@ use bachuc_theme::metrics::{
     CONTROL_SM, FONT_BASE, FONT_SM, ICON_SM, RADIUS_BASE, RADIUS_LG, RADIUS_MD, RADIUS_XL,
     SETTINGS_CONTENT_WIDTH, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6, WEIGHT_MEDIUM,
 };
-use bachuc_theme::{tokens, ui_font_size};
+use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::{Selectable, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -20,13 +20,13 @@ const FONT_4XL: f32 = 26.;
 pub const LINE_HEIGHT_NORMAL: f32 = 1.2;
 
 /// The content column of a pane: centered, 720 px at most, padded 16 px (24 px above).
-pub fn column() -> Div {
+pub fn column(cx: &App) -> Div {
     v_flex()
         .w_full()
-        .max_w(px(SETTINGS_CONTENT_WIDTH))
+        .max_w(zoomed(SETTINGS_CONTENT_WIDTH, cx))
         .mx_auto()
-        .p(px(SPACE_4))
-        .pt(px(SPACE_6))
+        .p(zoomed(SPACE_4, cx))
+        .pt(zoomed(SPACE_6, cx))
 }
 
 /// The page heading at the top of the column (`pageTitle` in `settings-screen.tsx`).
@@ -37,8 +37,8 @@ pub fn page_title(title: impl Into<SharedString>, cx: &App) -> Stateful<Div> {
         .id("page-title")
         .role(Role::Heading)
         .aria_label(title.clone())
-        .ml(px(SPACE_1))
-        .mb(px(SPACE_6))
+        .ml(zoomed(SPACE_1, cx))
+        .mb(zoomed(SPACE_6, cx))
         .text_size(ui_font_size(FONT_4XL, cx))
         .font_weight(FontWeight(WEIGHT_MEDIUM))
         .text_color(colors.foreground)
@@ -97,7 +97,7 @@ pub fn select_trigger(
 ) -> MenuTrigger {
     let leading = leading.map(|name| {
         icon(name)
-            .with_size(px(bachuc_theme::metrics::ICON_MD))
+            .with_size(zoomed(bachuc_theme::metrics::ICON_MD, cx))
             .text_color(tokens(cx).foreground_muted)
             .into_any_element()
     });
@@ -117,14 +117,14 @@ pub fn select_trigger_with(
         .id(id)
         .role(Role::Button)
         .aria_label(label)
-        .h(px(CONTROL_SM))
-        .px(px(SPACE_3))
+        .h(zoomed(CONTROL_SM, cx))
+        .px(zoomed(SPACE_3, cx))
         .flex()
         .flex_row()
         .items_center()
-        .gap(px(SPACE_2))
+        .gap(zoomed(SPACE_2, cx))
         .flex_shrink_0()
-        .rounded(px(RADIUS_XL))
+        .rounded(zoomed(RADIUS_XL, cx))
         .border_1()
         .border_color(colors.border_accent)
         .cursor_pointer()
@@ -132,7 +132,7 @@ pub fn select_trigger_with(
         .children(leading)
         .child(
             div()
-                .max_w(px(220.))
+                .max_w(zoomed(220., cx))
                 .truncate()
                 .text_size(ui_font_size(FONT_BASE, cx))
                 .text_color(colors.foreground)
@@ -141,7 +141,7 @@ pub fn select_trigger_with(
         .child(
             div().pt(px(1.)).child(
                 icon(IconName::ChevronDown)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(colors.foreground_muted),
             ),
         );
@@ -155,7 +155,7 @@ pub fn select_trigger_with(
 /// `ThemeSwatch`: a 16 px round dot of a theme's background with a 1 px `border` ring.
 pub fn swatch(color: Hsla, cx: &App) -> Div {
     div()
-        .size(px(bachuc_theme::metrics::ICON_MD))
+        .size(zoomed(bachuc_theme::metrics::ICON_MD, cx))
         .flex_shrink_0()
         .rounded_full()
         .border_1()
@@ -176,16 +176,16 @@ pub fn more_trigger(
         .id(id)
         .role(Role::Button)
         .aria_label(label)
-        .size(px(CONTROL_SM))
+        .size(zoomed(CONTROL_SM, cx))
         .flex()
         .items_center()
         .justify_center()
         .flex_shrink_0()
-        .rounded(px(RADIUS_LG))
+        .rounded(zoomed(RADIUS_LG, cx))
         .cursor_pointer()
         .text_color(colors.foreground_muted)
         .hover(move |style| style.bg(colors.surface2).text_color(fg))
-        .child(icon(IconName::MoreHorizontal).with_size(px(ICON_SM)));
+        .child(icon(IconName::MoreHorizontal).with_size(zoomed(ICON_SM, cx)));
     MenuTrigger {
         base,
         open: false,
@@ -216,13 +216,13 @@ pub fn scroll_page(
 pub fn section(title: &str, trailing: Option<AnyElement>, body: impl IntoElement, cx: &App) -> Div {
     let colors = tokens(cx);
     v_flex()
-        .mb(px(SPACE_6))
+        .mb(zoomed(SPACE_6, cx))
         .child(
             h_flex()
                 .items_center()
                 .justify_between()
-                .mb(px(SPACE_3))
-                .ml(px(SPACE_1))
+                .mb(zoomed(SPACE_3, cx))
+                .ml(zoomed(SPACE_1, cx))
                 .child(
                     div()
                         .id(SharedString::from(format!("heading-{title}")))
@@ -243,7 +243,7 @@ pub fn card(cx: &App) -> Div {
     v_flex()
         .w_full()
         .bg(colors.surface1)
-        .rounded(px(RADIUS_LG))
+        .rounded(zoomed(RADIUS_LG, cx))
         .border_1()
         .border_color(colors.border)
         .overflow_hidden()
@@ -256,9 +256,9 @@ pub fn row(first: bool, cx: &App) -> Div {
         .w_full()
         .items_center()
         .justify_between()
-        .gap(px(SPACE_3))
-        .px(px(SPACE_4))
-        .py(px(SPACE_4))
+        .gap(zoomed(SPACE_3, cx))
+        .px(zoomed(SPACE_4, cx))
+        .py(zoomed(SPACE_4, cx))
         .when(!first, |this| this.border_t_1().border_color(colors.border))
 }
 
@@ -268,7 +268,7 @@ pub fn row_text(title: impl Into<SharedString>, hint: Option<SharedString>, cx: 
     v_flex()
         .flex_1()
         .min_w_0()
-        .gap(px(SPACE_1))
+        .gap(zoomed(SPACE_1, cx))
         .child(
             div()
                 .text_size(ui_font_size(FONT_BASE, cx))
@@ -317,17 +317,17 @@ pub fn icon_button(
         .id(id)
         .role(Role::Button)
         .aria_label(label)
-        .size(px(bachuc_theme::metrics::CONTROL_XS))
+        .size(zoomed(bachuc_theme::metrics::CONTROL_XS, cx))
         .flex()
         .items_center()
         .justify_center()
         .flex_shrink_0()
-        .rounded(px(RADIUS_LG))
+        .rounded(zoomed(RADIUS_LG, cx))
         .cursor_pointer()
         .hover(|style| style.bg(colors.surface2))
         .child(
             icon(name)
-                .with_size(px(ICON_SM))
+                .with_size(zoomed(ICON_SM, cx))
                 .text_color(colors.foreground_muted),
         )
 }
@@ -336,9 +336,9 @@ pub fn icon_button(
 pub fn tag(text: impl Into<SharedString>, color: Hsla, tint: Hsla, cx: &App) -> Div {
     div()
         .flex_shrink_0()
-        .px(px(SPACE_2))
-        .py(px(SPACE_1 / 2.))
-        .rounded(px(RADIUS_BASE))
+        .px(zoomed(SPACE_2, cx))
+        .py(zoomed(SPACE_1 / 2., cx))
+        .rounded(zoomed(RADIUS_BASE, cx))
         .bg(tint)
         .text_size(ui_font_size(FONT_SM, cx))
         .text_color(color)
@@ -359,9 +359,9 @@ pub fn callout(cx: &App) -> Div {
     let colors = tokens(cx);
     v_flex()
         .w_full()
-        .gap(px(SPACE_2))
-        .p(px(SPACE_3))
-        .rounded(px(RADIUS_MD))
+        .gap(zoomed(SPACE_2, cx))
+        .p(zoomed(SPACE_3, cx))
+        .rounded(zoomed(RADIUS_MD, cx))
         .border_1()
         .border_color(colors.border)
         .bg(colors.surface2)

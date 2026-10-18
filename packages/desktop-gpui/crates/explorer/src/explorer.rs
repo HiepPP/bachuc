@@ -31,7 +31,7 @@ use bachuc_icons::{IconName, icon};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3, SPACE_4, TAB_BAR_HEIGHT,
 };
-use bachuc_theme::{mono_font_family, tokens, ui_font_size};
+use bachuc_theme::{mono_font_family, tokens, ui_font_size, zoomed};
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
@@ -854,15 +854,16 @@ impl Explorer {
         let colors = tokens(cx);
         let (muted, destructive) = (colors.foreground_muted, colors.destructive);
         let explorer = cx.entity().downgrade();
-        let menu = PopupMenu::build(window, cx, move |menu, _, _| {
-            let mut menu = menu.min_w(px(FILE_MENU_WIDTH));
+        let menu_width = zoomed(FILE_MENU_WIDTH, cx);
+        let menu = PopupMenu::build(window, cx, move |menu, _, app| {
+            let mut menu = menu.min_w(menu_width);
             for entry in &entries {
                 menu = match *entry {
                     FileMenuEntry::Separator => menu.separator(),
                     FileMenuEntry::Item(action) => {
                         let explorer = explorer.clone();
                         let target = target.clone();
-                        menu.item(file_menu_item(action, muted, destructive).on_click(
+                        menu.item(file_menu_item(action, muted, destructive, app).on_click(
                             move |_, window, cx| {
                                 explorer
                                     .update(cx, |this, cx| {
@@ -1293,24 +1294,24 @@ impl Explorer {
         } else {
             colors.foreground_muted
         };
-        div().mx(px(TAB_GAP / 2.)).child(
+        div().mx(zoomed(TAB_GAP / 2., cx)).child(
             div()
                 .id(id)
                 .role(Role::Tab)
                 .aria_label(label)
                 .aria_selected(active)
-                .h(px(TAB_HEIGHT))
-                .max_w(px(180.))
-                .px(px(SPACE_2))
-                .rounded(px(RADIUS_MD))
+                .h(zoomed(TAB_HEIGHT, cx))
+                .max_w(zoomed(180., cx))
+                .px(zoomed(SPACE_2, cx))
+                .rounded(zoomed(RADIUS_MD, cx))
                 .flex()
                 .items_center()
-                .gap(px(SPACE_1))
+                .gap(zoomed(SPACE_1, cx))
                 .cursor_pointer()
                 .when(active, |this| this.bg(colors.interaction_highlight))
                 .hover(|style| style.bg(colors.interaction_highlight))
                 .on_click(cx.listener(move |this, _, _, cx| this.select_tab(tab, cx)))
-                .child(icon(glyph).with_size(px(ICON_SM)).text_color(color))
+                .child(icon(glyph).with_size(zoomed(ICON_SM, cx)).text_color(color))
                 .child(
                     div()
                         .min_w_0()
@@ -1330,8 +1331,8 @@ impl Explorer {
             .aria_label("Explorer views")
             .relative()
             .flex_shrink_0()
-            .h(px(TAB_BAR_HEIGHT))
-            .px(px(TAB_RAIL_INSET))
+            .h(zoomed(TAB_BAR_HEIGHT, cx))
+            .px(zoomed(TAB_RAIL_INSET, cx))
             .flex()
             .items_center()
             .bg(colors.surface_sidebar)
@@ -1396,8 +1397,8 @@ impl Explorer {
                             )
                             .track_scroll(&self.files_scroll)
                             .size_full()
-                            .pt(px(SPACE_2))
-                            .pb(px(SPACE_4)),
+                            .pt(zoomed(SPACE_2, cx))
+                            .pb(zoomed(SPACE_4, cx)),
                         ),
                 )
                 .into_any_element(),
@@ -1418,8 +1419,8 @@ impl Explorer {
             .role(Role::Button)
             .aria_label(label)
             .flex_shrink_0()
-            .size(px(TOOLBAR_BUTTON))
-            .rounded(px(RADIUS_MD))
+            .size(zoomed(TOOLBAR_BUTTON, cx))
+            .rounded(zoomed(RADIUS_MD, cx))
             .flex()
             .items_center()
             .justify_center()
@@ -1427,7 +1428,7 @@ impl Explorer {
             .hover(|style| style.bg(colors.interaction_highlight))
             .child(
                 icon(glyph)
-                    .with_size(px(ICON_SM))
+                    .with_size(zoomed(ICON_SM, cx))
                     .text_color(colors.foreground_extra_muted),
             )
     }
@@ -1472,8 +1473,8 @@ impl Explorer {
             .role(Role::Toolbar)
             .aria_label("Files")
             .flex_shrink_0()
-            .h(px(TOOLBAR_HEIGHT))
-            .pr(px(TRAILING_RAIL - (TOOLBAR_BUTTON - ICON_SM) / 2.))
+            .h(zoomed(TOOLBAR_HEIGHT, cx))
+            .pr(zoomed(TRAILING_RAIL - (TOOLBAR_BUTTON - ICON_SM) / 2., cx))
             .justify_between()
             .bg(colors.surface_sidebar)
             .border_b_1()
@@ -1483,11 +1484,11 @@ impl Explorer {
                     .id("files-sort-trigger")
                     .role(Role::Button)
                     .aria_label(format!("Sort by {sort_label}"))
-                    .ml(px(SPACE_3 - SPACE_1))
-                    .px(px(SPACE_1))
-                    .h(px(SORT_TRIGGER_HEIGHT))
-                    .gap(px(SPACE_1))
-                    .rounded(px(RADIUS_MD))
+                    .ml(zoomed(SPACE_3 - SPACE_1, cx))
+                    .px(zoomed(SPACE_1, cx))
+                    .h(zoomed(SORT_TRIGGER_HEIGHT, cx))
+                    .gap(zoomed(SPACE_1, cx))
+                    .rounded(zoomed(RADIUS_MD, cx))
                     .cursor_pointer()
                     .hover(|style| style.bg(colors.interaction_highlight))
                     .on_click(cx.listener(|this, _, _, cx| this.cycle_sort(cx)))
@@ -1499,13 +1500,13 @@ impl Explorer {
                     )
                     .child(
                         icon(IconName::ChevronDown)
-                            .with_size(px(12.))
+                            .with_size(zoomed(12., cx))
                             .text_color(colors.foreground_muted),
                     ),
             )
             .child(
                 h_flex()
-                    .gap(px(SPACE_1))
+                    .gap(zoomed(SPACE_1, cx))
                     .when(entry_ops, |this| {
                         this.child(self.new_entry_button(
                             "files-new-file",
@@ -1549,8 +1550,8 @@ impl Explorer {
             .flex_1()
             .items_center()
             .justify_center()
-            .gap(px(SPACE_2))
-            .p(px(SPACE_4))
+            .gap(zoomed(SPACE_2, cx))
+            .p(zoomed(SPACE_4, cx))
             .text_size(ui_font_size(FONT_BASE, cx))
             .child(
                 div()
@@ -1564,8 +1565,8 @@ impl Explorer {
                     .role(Role::Button)
                     .aria_label("Retry")
                     .cursor_pointer()
-                    .px(px(SPACE_3))
-                    .py(px(SPACE_1))
+                    .px(zoomed(SPACE_3, cx))
+                    .py(zoomed(SPACE_1, cx))
                     .rounded_full()
                     .border_1()
                     .border_color(colors.border)
@@ -1612,11 +1613,11 @@ impl Explorer {
                 let menu_view = cx.weak_entity();
                 let name = row.entry.name.clone();
                 let lead = if !row.entry.is_dir {
-                    file_icon_element(&name).into_any_element()
+                    file_icon_element(&name, cx).into_any_element()
                 } else if row.loading {
-                    loading_marker(&colors).into_any_element()
+                    loading_marker(&colors, cx).into_any_element()
                 } else {
-                    chevron(row.expanded, &colors).into_any_element()
+                    chevron(row.expanded, &colors, cx).into_any_element()
                 };
                 let group = SharedString::from(format!("explorer-file-row-{index}"));
                 Some(
@@ -1628,12 +1629,12 @@ impl Explorer {
                         .aria_selected(selected)
                         .when(row.entry.is_dir, |this| this.aria_expanded(row.expanded))
                         .w_full()
-                        .h(px(FILE_ROW_HEIGHT))
-                        .pl(px(tree_padding_left(row.depth)))
-                        .pr(px(TRAILING_RAIL))
+                        .h(zoomed(FILE_ROW_HEIGHT, cx))
+                        .pl(zoomed(tree_padding_left(row.depth), cx))
+                        .pr(zoomed(TRAILING_RAIL, cx))
                         .flex()
                         .items_center()
-                        .gap(px(TREE_ICON_GAP))
+                        .gap(zoomed(TREE_ICON_GAP, cx))
                         .cursor_pointer()
                         .when(selected, |this| this.bg(colors.surface_sidebar_hover))
                         .hover(|style| style.bg(colors.surface_sidebar_hover))
@@ -1714,7 +1715,7 @@ impl Explorer {
                             )
                             .track_scroll(&self.changes_scroll)
                             .size_full()
-                            .pb(px(SPACE_4 * 2.)),
+                            .pb(zoomed(SPACE_4 * 2., cx)),
                         )
                         .into_any_element()
                 };
@@ -1742,14 +1743,14 @@ impl Explorer {
             .aria_label("Commits")
             .aria_expanded(open)
             .flex_shrink_0()
-            .pl(px(tree_padding_left(0)))
-            .pr(px(SPACE_3))
-            .py(px(SPACE_2))
-            .gap(px(SPACE_2))
+            .pl(zoomed(tree_padding_left(0), cx))
+            .pr(zoomed(SPACE_3, cx))
+            .py(zoomed(SPACE_2, cx))
+            .gap(zoomed(SPACE_2, cx))
             .cursor_pointer()
             .hover(|style| style.bg(colors.surface_sidebar_hover))
             .on_click(cx.listener(|this, _, _, cx| this.toggle_commits(cx)))
-            .child(chevron(open, &colors))
+            .child(chevron(open, &colors, cx))
             .child(
                 div()
                     .text_size(ui_font_size(FONT_BASE, cx))
@@ -1773,9 +1774,9 @@ impl Explorer {
                 .id(id)
                 .role(Role::Status)
                 .aria_label(text.clone())
-                .pl(px(SPACE_2))
-                .pr(px(SPACE_3))
-                .py(px(SPACE_2))
+                .pl(zoomed(SPACE_2, cx))
+                .pr(zoomed(SPACE_3, cx))
+                .py(zoomed(SPACE_2, cx))
                 .text_size(ui_font_size(FONT_SM, cx))
                 .text_color(if error {
                     colors.status_danger
@@ -1820,9 +1821,9 @@ impl Explorer {
                         .id("commits-section-list")
                         .role(Role::List)
                         .aria_label("Commits")
-                        .max_h(px(COMMITS_MAX_HEIGHT))
+                        .max_h(zoomed(COMMITS_MAX_HEIGHT, cx))
                         .overflow_y_scroll()
-                        .pb(px(SPACE_1))
+                        .pb(zoomed(SPACE_1, cx))
                         .children(elements)
                         .into_any_element()
                 }
@@ -1848,9 +1849,9 @@ impl Explorer {
         let base = h_flex()
             .id(("commit-row", position))
             .role(Role::Button)
-            .h(px(COMMIT_ROW_HEIGHT))
-            .px(px(SPACE_2))
-            .gap(px(SPACE_2))
+            .h(zoomed(COMMIT_ROW_HEIGHT, cx))
+            .px(zoomed(SPACE_2, cx))
+            .gap(zoomed(SPACE_2, cx))
             .cursor_pointer()
             .hover(|style| style.bg(colors.surface_sidebar_hover))
             .on_click(cx.listener(move |this, _, _, cx| this.click_commit_row(row, cx)));
@@ -1861,7 +1862,7 @@ impl Explorer {
                 let (first, last) = (index == 0, index + 1 == commits.len());
                 // Local commits are rings; commits on the remote are filled dots.
                 let dot = div()
-                    .size(px(COMMIT_DOT))
+                    .size(zoomed(COMMIT_DOT, cx))
                     .rounded_full()
                     .border_2()
                     .border_color(colors.accent)
@@ -1872,7 +1873,7 @@ impl Explorer {
                     });
                 let node = div()
                     .relative()
-                    .w(px(COMMIT_DOT))
+                    .w(zoomed(COMMIT_DOT, cx))
                     .h_full()
                     .flex_shrink_0()
                     .flex()
@@ -1882,15 +1883,15 @@ impl Explorer {
                         this.child(
                             div()
                                 .absolute()
-                                .left(px((COMMIT_DOT - COMMIT_RAIL) / 2.))
-                                .w(px(COMMIT_RAIL))
+                                .left(zoomed((COMMIT_DOT - COMMIT_RAIL) / 2., cx))
+                                .w(zoomed(COMMIT_RAIL, cx))
                                 .top(if first {
-                                    px(COMMIT_ROW_HEIGHT / 2.)
+                                    zoomed(COMMIT_ROW_HEIGHT / 2., cx)
                                 } else {
                                     px(0.)
                                 })
                                 .bottom(if last {
-                                    px(COMMIT_ROW_HEIGHT / 2.)
+                                    zoomed(COMMIT_ROW_HEIGHT / 2., cx)
                                 } else {
                                     px(0.)
                                 })
@@ -1905,10 +1906,10 @@ impl Explorer {
                         h_flex()
                             .flex_1()
                             .min_w_0()
-                            .gap(px(SPACE_1))
+                            .gap(zoomed(SPACE_1, cx))
                             .child(
                                 div()
-                                    .w(px(COMMIT_SHA_WIDTH))
+                                    .w(zoomed(COMMIT_SHA_WIDTH, cx))
                                     .flex_shrink_0()
                                     .truncate()
                                     .font_family(mono_font_family(cx))
@@ -1933,7 +1934,7 @@ impl Explorer {
                             .text_color(colors.foreground_muted)
                             .child(time_ago(&commit.author_date, now)),
                     )
-                    .child(chevron(open, &colors))
+                    .child(chevron(open, &colors, cx))
                     .into_any_element()
             }
             CommitRow::File { commit, file } => {
@@ -1955,13 +1956,13 @@ impl Explorer {
                     entry.additions,
                     entry.deletions
                 ))
-                .pl(px(tree_padding_left(1)))
+                .pl(zoomed(tree_padding_left(1), cx))
                 .child(
                     h_flex()
                         .flex_1()
                         .min_w_0()
-                        .gap(px(TREE_ICON_GAP))
-                        .child(file_icon_element(&name))
+                        .gap(zoomed(TREE_ICON_GAP, cx))
+                        .child(file_icon_element(&name, cx))
                         .child(
                             div()
                                 .min_w_0()
@@ -1972,7 +1973,7 @@ impl Explorer {
                         ),
                 )
                 .child(diff_stat(entry.additions, entry.deletions, cx))
-                .child(change_icon(change, &colors))
+                .child(change_icon(change, &colors, cx))
                 .into_any_element()
             }
         })
@@ -1995,11 +1996,11 @@ impl Explorer {
                 .id(id)
                 .role(Role::Toolbar)
                 .flex_shrink_0()
-                .h(px(TOOLBAR_HEIGHT))
-                .pl(px(SPACE_2))
+                .h(zoomed(TOOLBAR_HEIGHT, cx))
+                .pl(zoomed(SPACE_2, cx))
                 // A bare glyph's hitbox overhangs its ink, so the glyph sits on the trailing rail.
-                .pr(px(TRAILING_RAIL - (TOOLBAR_BUTTON - ICON_SM) / 2.))
-                .gap(px(SPACE_2))
+                .pr(zoomed(TRAILING_RAIL - (TOOLBAR_BUTTON - ICON_SM) / 2., cx))
+                .gap(zoomed(SPACE_2, cx))
                 .bg(colors.surface_sidebar)
                 .border_b_1()
                 .border_color(colors.border)
@@ -2018,7 +2019,7 @@ impl Explorer {
                         h_flex()
                             .flex_1()
                             .min_w_0()
-                            .gap(px(SPACE_1))
+                            .gap(zoomed(SPACE_1, cx))
                             .child(diff_mode_menu("changes-diff-mode", &self.cwd, cx))
                             .child(diff_stat(added, removed, cx)),
                     )
@@ -2060,12 +2061,12 @@ impl Explorer {
                 let row = self.change_rows.get(index)?;
                 let base = div()
                     .w_full()
-                    .h(px(CHANGE_ROW_HEIGHT))
-                    .pr(px(TRAILING_RAIL))
+                    .h(zoomed(CHANGE_ROW_HEIGHT, cx))
+                    .pr(zoomed(TRAILING_RAIL, cx))
                     .flex()
                     .items_center()
                     .justify_between()
-                    .gap(px(SPACE_1))
+                    .gap(zoomed(SPACE_1, cx))
                     .cursor_pointer();
                 let element = match row {
                     ChangeRow::Folder {
@@ -2085,7 +2086,7 @@ impl Explorer {
                             .aria_label(display_name.clone())
                             .aria_selected(selected)
                             .aria_expanded(!collapsed)
-                            .pl(px(tree_padding_left(*depth)))
+                            .pl(zoomed(tree_padding_left(*depth), cx))
                             .when(selected, |this| this.bg(colors.surface_sidebar_hover))
                             .hover(|style| style.bg(colors.surface_sidebar_hover))
                             .on_click(
@@ -2112,8 +2113,8 @@ impl Explorer {
                                 h_flex()
                                     .flex_1()
                                     .min_w_0()
-                                    .gap(px(TREE_ICON_GAP))
-                                    .child(chevron(!collapsed, &colors))
+                                    .gap(zoomed(TREE_ICON_GAP, cx))
+                                    .child(chevron(!collapsed, &colors, cx))
                                     .child(
                                         div()
                                             .min_w_0()
@@ -2144,7 +2145,7 @@ impl Explorer {
                             .role(Role::TreeItem)
                             .aria_label(label)
                             .aria_selected(selected)
-                            .pl(px(tree_padding_left(*depth)))
+                            .pl(zoomed(tree_padding_left(*depth), cx))
                             .when(selected, |this| this.bg(colors.surface_sidebar_hover))
                             .hover(|style| style.bg(colors.surface_sidebar_hover))
                             .on_click(
@@ -2171,8 +2172,8 @@ impl Explorer {
                                 h_flex()
                                     .flex_1()
                                     .min_w_0()
-                                    .gap(px(TREE_ICON_GAP))
-                                    .child(file_icon_element(name))
+                                    .gap(zoomed(TREE_ICON_GAP, cx))
+                                    .child(file_icon_element(name, cx))
                                     .child(
                                         div()
                                             .min_w_0()
@@ -2188,9 +2189,9 @@ impl Explorer {
                             .child(
                                 h_flex()
                                     .flex_shrink_0()
-                                    .gap(px(SPACE_2))
+                                    .gap(zoomed(SPACE_2, cx))
                                     .child(diff_stat(file.additions, file.deletions, cx))
-                                    .child(change_icon(change, &colors)),
+                                    .child(change_icon(change, &colors, cx)),
                             )
                     }
                 };
@@ -2211,7 +2212,7 @@ impl Render for Explorer {
             deferred(
                 anchored()
                     .position(open.position)
-                    .snap_to_window_with_margin(px(8.))
+                    .snap_to_window_with_margin(zoomed(8., cx))
                     .child(open.menu.clone()),
             )
             .with_priority(gpui_kit::base::POPUP_PRIORITY)
@@ -2232,9 +2233,9 @@ impl Render for Explorer {
 }
 
 /// One file menu row: a muted icon and a label, both red for a destructive item.
-fn file_menu_item(action: FileAction, muted: Hsla, destructive: Hsla) -> PopupMenuItem {
+fn file_menu_item(action: FileAction, muted: Hsla, destructive: Hsla, cx: &App) -> PopupMenuItem {
     let label = action.label();
-    let glyph = icon(action.icon()).with_size(px(ICON_SM));
+    let glyph = icon(action.icon()).with_size(zoomed(ICON_SM, cx));
     if action.destructive() {
         PopupMenuItem::element(move |_, _| div().text_color(destructive).child(label))
             .icon(glyph.text_color(destructive))
@@ -2285,7 +2286,10 @@ fn draft_row(
 ) -> AnyElement {
     let colors = tokens(cx);
     let (lead, label) = match kind {
-        NewEntryKind::Directory => (chevron(false, &colors).into_any_element(), "Folder name"),
+        NewEntryKind::Directory => (
+            chevron(false, &colors, cx).into_any_element(),
+            "Folder name",
+        ),
         NewEntryKind::File => {
             let typed = input.read(cx).value().to_string();
             let name = if typed.is_empty() {
@@ -2293,7 +2297,7 @@ fn draft_row(
             } else {
                 typed
             };
-            (file_icon_element(&name).into_any_element(), "File name")
+            (file_icon_element(&name, cx).into_any_element(), "File name")
         }
     };
     div()
@@ -2301,12 +2305,12 @@ fn draft_row(
         .role(Role::TreeItem)
         .aria_label(label)
         .w_full()
-        .h(px(FILE_ROW_HEIGHT))
-        .pl(px(tree_padding_left(depth)))
-        .pr(px(TRAILING_RAIL))
+        .h(zoomed(FILE_ROW_HEIGHT, cx))
+        .pl(zoomed(tree_padding_left(depth), cx))
+        .pr(zoomed(TRAILING_RAIL, cx))
         .flex()
         .items_center()
-        .gap(px(TREE_ICON_GAP))
+        .gap(zoomed(TREE_ICON_GAP, cx))
         .child(lead)
         .child(name_field(input, label))
         .into_any_element()

@@ -5,6 +5,7 @@
 use bachuc_theme::metrics::{FONT_CODE, RADIUS_LG, SPACE_2, SPACE_3};
 use bachuc_theme::{
     SyntaxColors, code_font_family, code_font_size, content_font_size, syntax_colors, tokens,
+    zoomed,
 };
 use gpui_kit::component::v_flex;
 use gpui_kit::*;
@@ -157,7 +158,7 @@ fn code_row(kind: Kind, tokens_of_line: &[Token], colors: &SyntaxColors, cx: &Ap
             runs.push((start..text.len(), color_style(pick(colors))));
         }
     }
-    let mut row = div().px(px(SPACE_3)).whitespace_nowrap();
+    let mut row = div().px(zoomed(SPACE_3, cx)).whitespace_nowrap();
     if let Some(background) = background {
         row = row.bg(background);
     }
@@ -182,17 +183,17 @@ pub fn preview(label: &'static str, sample: &'static str, cx: &App) -> Stateful<
         .role(Role::Image)
         .aria_label(label)
         .w_full()
-        .py(px(SPACE_2))
+        .py(zoomed(SPACE_2, cx))
         .bg(ui.surface1)
-        .rounded(px(RADIUS_LG))
+        .rounded(zoomed(RADIUS_LG, cx))
         .border_1()
         .border_color(ui.border)
         .overflow_hidden()
         .text_color(ui.foreground)
         .child(
             div()
-                .px(px(SPACE_3))
-                .pb(px(SPACE_2))
+                .px(zoomed(SPACE_3, cx))
+                .pb(zoomed(SPACE_2, cx))
                 .text_size(content)
                 .line_height((content * 1.4).round())
                 .child(sample),

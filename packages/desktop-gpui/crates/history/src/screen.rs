@@ -10,7 +10,7 @@ use bachuc_theme::metrics::{
     BORDER_WIDTH_1, FONT_BASE, FONT_SM, HEADER_HEIGHT, ICON_SM, ICON_XS, RADIUS_MD, SPACE_1,
     SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6, WEIGHT_MEDIUM,
 };
-use bachuc_theme::{Tokens, tokens, ui_font_size};
+use bachuc_theme::{Tokens, tokens, ui_font_size, zoomed};
 use chrono::{Local, Utc};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
@@ -288,9 +288,9 @@ impl HistoryScreen {
             Some(HistoryRow::Header(section)) => {
                 let size = ui_font_size(FONT_BASE, cx);
                 div()
-                    .mt(px(SPACE_2))
-                    .mb(px(SPACE_2))
-                    .px(px(SPACE_3))
+                    .mt(zoomed(SPACE_2, cx))
+                    .mb(zoomed(SPACE_2, cx))
+                    .px(zoomed(SPACE_3, cx))
                     .text_size(size)
                     .line_height(size * LINE)
                     .font_weight(FontWeight(WEIGHT_MEDIUM))
@@ -319,15 +319,15 @@ impl HistoryScreen {
         let column = |width: f32| {
             div()
                 .flex_none()
-                .w(px(width))
+                .w(zoomed(width, cx))
                 .truncate()
                 .text_color(t.foreground_muted)
         };
         let title = h_flex()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .flex_shrink(1.)
             .min_w_0()
-            .child(provider_icon(&entry.provider, t.foreground_muted))
+            .child(provider_icon(&entry.provider, t.foreground_muted, cx))
             .child(
                 div()
                     .min_w_0()
@@ -340,18 +340,18 @@ impl HistoryScreen {
             .flex_1()
             .min_w_0()
             .overflow_hidden()
-            .gap(px(SPACE_2))
+            .gap(zoomed(SPACE_2, cx))
             .child(
                 div()
                     .flex_none()
-                    .max_w(px(WORKSPACE_MAX_WIDTH))
+                    .max_w(zoomed(WORKSPACE_MAX_WIDTH, cx))
                     .truncate()
                     .text_color(t.foreground)
                     .child(marked(&text.label, &text.label_marks)),
             )
             .child(
                 icon(IconName::ChevronRight)
-                    .with_size(px(ICON_XS))
+                    .with_size(zoomed(ICON_XS, cx))
                     .text_color(t.foreground_muted),
             )
             .child(title)
@@ -375,7 +375,7 @@ impl HistoryScreen {
             });
         let columns = h_flex()
             .flex_none()
-            .gap(px(SPACE_3))
+            .gap(zoomed(SPACE_3, cx))
             .child(column(COLUMN_WIDTH).child(marked(&text.project, &text.project_marks)))
             .child(column(COLUMN_WIDTH).child(marked(&text.branch, &text.branch_marks)))
             .child(
@@ -389,8 +389,8 @@ impl HistoryScreen {
             .role(Role::Button)
             .aria_label(format!("{}: {}", text.label, text.title))
             .items_center()
-            .py(px(SPACE_2))
-            .px(px(SPACE_3))
+            .py(zoomed(SPACE_2, cx))
+            .px(zoomed(SPACE_3, cx))
             .text_size(size)
             .line_height(size * LINE)
             .cursor_pointer()
@@ -399,12 +399,12 @@ impl HistoryScreen {
             .child(content)
             .child(columns)
             .on_press(cx, move |this, _, cx| this.open(index, cx));
-        div().pb(px(SPACE_1)).child(row).into_any_element()
+        div().pb(zoomed(SPACE_1, cx)).child(row).into_any_element()
     }
 
     fn render_footer(&self, t: &Tokens, cx: &mut Context<Self>) -> AnyElement {
         let content = match self.footer() {
-            Footer::None => return div().h(px(SPACE_6)).into_any_element(),
+            Footer::None => return div().h(zoomed(SPACE_6, cx)).into_any_element(),
             Footer::TooManyMatches => {
                 let size = ui_font_size(FONT_BASE, cx);
                 div()
@@ -426,8 +426,8 @@ impl HistoryScreen {
         };
         h_flex()
             .justify_center()
-            .py(px(SPACE_4))
-            .mb(px(SPACE_6))
+            .py(zoomed(SPACE_4, cx))
+            .mb(zoomed(SPACE_6, cx))
             .child(content)
             .into_any_element()
     }
@@ -437,8 +437,8 @@ impl HistoryScreen {
         let size = ui_font_size(FONT_BASE, cx);
         let has_text = !self.input.read(cx).value().is_empty();
         h_flex()
-            .px(px(SPACE_6))
-            .pt(px(SPACE_4))
+            .px(zoomed(SPACE_6, cx))
+            .pt(zoomed(SPACE_4, cx))
             .child(
                 h_flex()
                     .id("history-search")
@@ -446,22 +446,22 @@ impl HistoryScreen {
                     .aria_label(SEARCH_PLACEHOLDER)
                     .flex_1()
                     .min_w_0()
-                    .max_w(px(SEARCH_MAX_WIDTH))
-                    .gap(px(SPACE_2))
+                    .max_w(zoomed(SEARCH_MAX_WIDTH, cx))
+                    .gap(zoomed(SPACE_2, cx))
                     .items_center()
-                    .py(px(SPACE_1_5))
-                    .px(px(SPACE_3))
-                    .rounded(px(RADIUS_MD))
-                    .border(px(BORDER_WIDTH_1))
+                    .py(zoomed(SPACE_1_5, cx))
+                    .px(zoomed(SPACE_3, cx))
+                    .rounded(zoomed(RADIUS_MD, cx))
+                    .border(zoomed(BORDER_WIDTH_1, cx))
                     .border_color(if focused { t.border_accent } else { t.border })
                     .bg(if focused { t.surface2 } else { t.surface1 })
                     .child(
                         icon(IconName::Search)
-                            .with_size(px(ICON_SM))
+                            .with_size(zoomed(ICON_SM, cx))
                             .text_color(t.foreground_muted),
                     )
                     .child(
-                        div().flex_1().min_w_0().h(px(SEARCH_LINE)).child(
+                        div().flex_1().min_w_0().h(zoomed(SEARCH_LINE, cx)).child(
                             Input::new(&self.input)
                                 .appearance(false)
                                 .bordered(false)
@@ -482,7 +482,7 @@ impl HistoryScreen {
                                 .cursor_pointer()
                                 .child(
                                     icon(IconName::X)
-                                        .with_size(px(ICON_SM))
+                                        .with_size(zoomed(ICON_SM, cx))
                                         .text_color(t.foreground_muted),
                                 )
                                 .on_press(cx, |this, window, cx| this.clear_search(window, cx)),
@@ -499,8 +499,8 @@ impl HistoryScreen {
             .min_h_0()
             .items_center()
             .justify_center()
-            .gap(px(SPACE_6))
-            .p(px(SPACE_6))
+            .gap(zoomed(SPACE_6, cx))
+            .p(zoomed(SPACE_6, cx))
             .child(
                 div()
                     .id("history-state")
@@ -554,8 +554,8 @@ impl Render for HistoryScreen {
             Body::List => div()
                 .flex_1()
                 .min_h_0()
-                .px(px(SPACE_6))
-                .pt(px(SPACE_4))
+                .px(zoomed(SPACE_6, cx))
+                .pt(zoomed(SPACE_4, cx))
                 .child(list(self.list.clone(), cx.processor(Self::render_row)).size_full())
                 .into_any_element(),
         };
@@ -566,10 +566,10 @@ impl Render for HistoryScreen {
             .child(
                 h_flex()
                     .flex_none()
-                    .h(px(HEADER_HEIGHT))
-                    .px(px(SPACE_4))
+                    .h(zoomed(HEADER_HEIGHT, cx))
+                    .px(zoomed(SPACE_4, cx))
                     .items_center()
-                    .border_b(px(BORDER_WIDTH_1))
+                    .border_b(zoomed(BORDER_WIDTH_1, cx))
                     .border_color(t.border)
                     .child(
                         div()
@@ -620,9 +620,9 @@ fn text_button(
         .id(id)
         .role(Role::Button)
         .aria_label(label)
-        .px(px(SPACE_3))
-        .py(px(SPACE_1_5))
-        .rounded(px(RADIUS_MD))
+        .px(zoomed(SPACE_3, cx))
+        .py(zoomed(SPACE_1_5, cx))
+        .rounded(zoomed(RADIUS_MD, cx))
         .text_size(size)
         .line_height(size * LINE)
         .text_color(t.foreground)
@@ -652,12 +652,12 @@ fn badge(
     };
     h_flex()
         .flex_none()
-        .gap(px(BADGE_GAP))
+        .gap(zoomed(BADGE_GAP, cx))
         .items_center()
-        .px(px(SPACE_2))
-        .py(px(BADGE_PAD_Y))
+        .px(zoomed(SPACE_2, cx))
+        .py(zoomed(BADGE_PAD_Y, cx))
         .rounded_full()
-        .border(px(BORDER_WIDTH_1))
+        .border(zoomed(BORDER_WIDTH_1, cx))
         .border_color(if warning {
             transparent_black()
         } else {
@@ -668,16 +668,19 @@ fn badge(
         .line_height(size * LINE)
         .text_color(color)
         .when_some(leading, |badge, name| {
-            badge.child(icon(name).with_size(px(FONT_SM)).text_color(color))
+            badge.child(icon(name).with_size(zoomed(FONT_SM, cx)).text_color(color))
         })
         .child(label)
 }
 
-fn provider_icon(provider: &str, color: Hsla) -> AnyElement {
+fn provider_icon(provider: &str, color: Hsla, cx: &App) -> AnyElement {
     match provider_logo(provider, color) {
-        Some(image) => img(image).flex_none().size(px(ICON_SM)).into_any_element(),
+        Some(image) => img(image)
+            .flex_none()
+            .size(zoomed(ICON_SM, cx))
+            .into_any_element(),
         None => icon(provider_fallback_icon(provider))
-            .with_size(px(ICON_SM))
+            .with_size(zoomed(ICON_SM, cx))
             .text_color(color)
             .into_any_element(),
     }
