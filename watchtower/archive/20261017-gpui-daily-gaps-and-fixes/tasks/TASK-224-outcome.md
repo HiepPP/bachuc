@@ -43,3 +43,9 @@ Run 2026-10-18 by the UI checker (run 5). Bundle `Bachuc GPUI Check` built from 
 
 - A repo with a real PR shows the ring, durations, and Markdown bodies: UNVERIFIED (unattended): no PR. No live workspace has a PR: only `calendar-ref` has a remote, on `main`, and `gh pr list --head main` returns none. The checker did not add a real repo to live.
 - Anti-goal, 0 `checkout_pr_status_request` over 60 idle seconds: PASS. With the scratch workspace open and idle, the windows 04:00:38, 04:01:08, 04:01:38, 04:02:08, 04:02:38, 04:03:08, and 04:03:38 (3.5 min, all clients) had 0. Note: the workspace has no PR, so no Pull request tab was open.
+
+## Owner Hand Test (Q-142)
+
+Run 2026-10-18 by Hiep on a `Bachuc GPUI` bundle built from `d92756a33`, connected to live `127.0.0.1:6768`, in the scratch workspaces q142 (`/tmp/q142`) and q142-hub.
+
+- A real PR (thehub #671, 14 checks, in a shallow clone at `/tmp/q142-hub`) -> the checks ring, the check durations, and the Markdown body show as in Electron: PASS.

@@ -45,3 +45,9 @@ Run 2026-10-18 by the UI checker (run 5). Bundle `Bachuc GPUI Check` built from 
 
 - Cmd+F, "hello", Escape, Cmd+F -> the query is still there with matches: PASS. In a new terminal of the scratch workspace after `echo hello; echo hello world`, Cmd+F and "hello" showed "1 of 4" with highlights. Escape removed the Find bar from the AX tree. Cmd+F showed the field with value "hello" (text selected) and "1 of 4" again. Evidence: `/tmp/r5-227-01-find-typed.png`, `/tmp/r5-227-02-find-reopen.png`.
 - Review focus, a wrapped path opens whole: UNVERIFIED (unattended): needs pointer (Cmd-click).
+
+## Owner Hand Test (Q-142)
+
+Run 2026-10-18 by Hiep on a `Bachuc GPUI` bundle built from `d92756a33`, connected to live `127.0.0.1:6768`, in the scratch workspaces q142 (`/tmp/q142`) and q142-hub.
+
+- Cmd-click a terminal path that wraps onto a second row (`/tmp/q142/src/deep/.../target-file-for-cmd-click.txt`) -> both rows underline, and the whole file opens: PASS.

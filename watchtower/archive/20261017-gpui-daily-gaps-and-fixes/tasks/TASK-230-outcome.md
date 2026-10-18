@@ -32,3 +32,10 @@ DONE
 
 - In taffy, an absolute child positions against its direct parent, so `.relative()` on the root only documents intent and moves no other absolute child.
 - A fade that must end needs state outside `with_animation`: `with_animation` restarts on a new id and plays once on mount, so a fade-out id would flash at mount. A stored start `Instant` plus `window.request_animation_frame()` during the fade is simpler and testable.
+
+## Owner Hand Test (Q-142)
+
+Run 2026-10-18 by Hiep on a `Bachuc GPUI` bundle built from `d92756a33`, connected to live `127.0.0.1:6768`, in the scratch workspaces q142 (`/tmp/q142`) and q142-hub.
+
+- Drag a Finder file over the composer -> the overlay shows; drag it out without a drop -> the overlay goes away: PASS.
+- Drag again and drop -> the overlay goes away, and the file is attached: PASS.

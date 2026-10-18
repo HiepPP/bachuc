@@ -46,3 +46,10 @@ Run 2026-10-18 by the UI checker (run 5). Bundle `Bachuc GPUI Check` built from 
 - Restore success -> "Stashed changes restored" toast: PASS (timing in TASK-226).
 - Review focus, host without `checkoutDiscardChanges` -> no Discard item: UNVERIFIED (unattended): live has the feature, and the file menu opens only by right-click (needs pointer).
 - Review focus, no agent or draft tab focused -> no Add to chat item: UNVERIFIED (unattended): needs pointer (right-click menu).
+
+## Owner Hand Test (Q-142)
+
+Run 2026-10-18 by Hiep on a `Bachuc GPUI` bundle built from `d92756a33`, connected to live `127.0.0.1:6768`, in the scratch workspaces q142 (`/tmp/q142`) and q142-hub.
+
+- No agent or draft tab focused, right-click a changed file -> Discard shows and Add to chat does not: PASS.
+- Host without `checkoutDiscardChanges` -> no Discard item: not run. Live has the feature, and no old host was available.

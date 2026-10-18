@@ -52,3 +52,10 @@ Run 2026-10-18 by the UI checker (run 5). Bundle `Bachuc GPUI Check` built from 
 - Stop: "Stop web" stopped it ("web script, exit 1"; no `http.server` process).
 - Anti-goal, no new request type after a workspace click: PASS. A click on t207-ws and back (04:05:43-04:05:46) gave the window 04:06:08: `plugin.rpc.invoke`, `fetch_workspaces`, `checkout_status`, `project.list`, `fetch_agents`, `checkout_pr_status`, `unsubscribe_checkout_diff`, `file_explorer`, `subscribe_checkout_diff`, `checkout.diff.get`, `agent.timeline.set_subscription`, `fetch_agent_timeline`, `agent.provider_subagents.list`, `subscription.release`. Each type is in an earlier workspace open or older log lines.
 - Note: the first AX press on the project row "t207-ws" folded the project; a second press unfolded it.
+
+## Owner Hand Test (Q-142)
+
+Run 2026-10-18 by Hiep on a `Bachuc GPUI` bundle built from `d92756a33`, connected to live `127.0.0.1:6768`, in the scratch workspaces q142 (`/tmp/q142`) and q142-hub.
+
+- Add to chat on a draft tab in q142 -> the composer shows an `app.txt` chip: PASS. The chip stays with that draft: it does not show in an agent tab of another project, and it is back after a return to q142.
+- Add to chat with a finished agent tab focused: not run as a separate step.

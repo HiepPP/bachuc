@@ -48,3 +48,10 @@ Run 2026-10-18 by the UI checker (run B). Bundle `Bachuc GPUI Check` built from 
 - Toolbar New folder, the same way: PASS. The row "Folder name" drew at the root; `rb-newdir` and Enter added the folder to the tree, sorted with the folders. Evidence: `/tmp/rb-225-03-new-folder-row.png`, `/tmp/rb-225-04-new-folder.png`.
 - Right-click menus (changed file Duplicate, changed folder items): UNVERIFIED (unattended): needs pointer.
 - Anti-goal, `top` CPU while scrolling a 2,000-entry tree: UNVERIFIED (unattended): needs pointer. The Files list is virtual (only about 22 rows in the AX tree), has no keyboard navigation, and exposes no AX scroll action, so only the wheel scrolls it. TASK-213 has no earlier reading. Idle reading with `rb-big` open: 0.0-0.2% (`top -l 6 -s 1`, load 4.4). Evidence: `/tmp/rb-225-05-rb-big-open.png`.
+
+## Owner Hand Test (Q-142)
+
+Run 2026-10-18 by Hiep on a `Bachuc GPUI` bundle built from `d92756a33`, connected to live `127.0.0.1:6768`, in the scratch workspaces q142 (`/tmp/q142`) and q142-hub.
+
+- Right-click a changed file -> the menu has Duplicate: PASS.
+- Right-click a changed folder -> Electron's folder menu shows, not the file menu: PASS.
