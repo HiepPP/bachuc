@@ -52,3 +52,9 @@ Run 2026-10-19 on live (6768) with the check bundle, launched with `BACHUC_NO_AC
 
 - UI check "after the agent stops -> the tab shows the logo only": the checker saw the ring go and a green dot stay, because the stopped agent was "Ready to review" (the `attention` bucket). The spec Expected result and the `badge.rs` test map `attention` to a dot and only `done` to the logo. The code follows the spec; the Verify line assumed the `done` bucket. Result: PASS by the spec mapping. A recheck needs an agent in the `done` bucket.
 - CPU anti-goal waits for the group B fix round: the 35.5% read included the TASK-266 and TASK-267 motion cost.
+
+## UI Checks Round 2
+
+Run 2026-10-19 on live (6768) with the check bundle (`BACHUC_NO_ACTIVATE=1`). Two running agent tabs were open in one workspace (parent `c0c37c4f`, runner `0bb3226b`), with the subagents menu open on the running row "Run sleep and echo steps". All test agents were archived and the app was quit.
+
+- Anti-goal: 34.7% over 60 s in that state (round 1: 35.5%) -> value recorded. Window 2400x1400, not round 1's 1200x800: the default window is fully covered by the release GPUI window and could not render, and raising is forbidden.

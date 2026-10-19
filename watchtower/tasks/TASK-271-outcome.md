@@ -37,3 +37,9 @@ Lessons:
 Run 2026-10-19. No app was opened for this line.
 
 - Screen check: opening the read-only view is TASK-272 -> UNVERIFIED (unattended). The view opens only from a provider subagent row click, which TASK-272 owns and which is not part of this run; no other AX path opens it.
+
+## UI Checks Round 2
+
+Run 2026-10-19 on live (6768), from TASK-272's provider row press (the view has no other AX entry).
+
+- Read-only view: PASS. The opened subagent tab shows the child's running steps and has no composer. Its AX tree has only "Copy message" under Message actions: no Rewind, no fork button, and no permission rows. The tab logo is present; the provider identity at that icon size was not read.

@@ -80,3 +80,12 @@ Lessons:
 Questions:
 
 - Is 15 fps acceptable for the pulse and the shimmer, or should the next round trade CPU budget for a higher rate?
+
+## UI Checks Round 2
+
+Run 2026-10-19 on live (6768) with the check bundle (`BACHUC_NO_ACTIVATE=1`, AX actions only). Agent `8b2f81db` ran a foreground `sleep 600`; the running step was selected, as in round 1, so the step body draws the "Shell sleep 600" badge. The app was quit and the agent archived.
+
+- Shimmer and pulse: four screenshots 300 ms apart -> PASS. The badge's light band moves over the summary: the lightened column windows were x~966-1022, 1014-1054, 1078-1110, and 974-990 across the four shots (per-pair region diff mean 5.3-6.8, max 176). The step number region and the step strip bar change on every pair (number mean 6.5/2.6, max 133; bar mean 28.4/9.4, max 165), so both still pulse.
+- Note for the next check: with the step not selected, the running call draws the live command card ("$ sleep 600") instead of the badge, and no shimmer is drawn there. Select the running step first.
+- Anti-goal: the 60 s read gave 0.5% because the display slept mid-window; the read is invalid. A redo was blocked when the check window stopped rendering after the display mode changed and the active Space switched. -> UNVERIFIED (unattended).
+- 15 fps still reads as motion at these samples; smoothness is left to the owner hand check.

@@ -42,3 +42,13 @@ Lessons:
 - The row has no parent ID, so the shell must take it from the composer's `agent_id`; `row_click` takes it as an input.
 - `put_pane` reads a logo only for an `agent:` identity, so a non-agent tab must set its logo after `put_pane` and store the provider on the pane for `refresh_logos`.
 - `crates/composer/tests/` holds the owner's uncommitted text replacement test. This TASK added its test inside `subagents_track.rs` and did not touch that folder.
+
+## UI Checks Round 2
+
+Run 2026-10-19 on live (6768) with the check bundle (`BACHUC_NO_ACTIVATE=1`, AX actions only). Parent agent `72f4d2b8` started one Agent-tool child (`sleep 40`, echo, `sleep 40`); its composer track showed the provider row "Run sleeps and echo". All test agents were archived and the app was quit.
+
+- Row press -> tab: PASS. The provider row opened a new tab titled with the row label "Run sleeps and echo"; the pane shows the child subtitle ("general-purpose · Opus 5.5 · Medium · ...") and its steps, and the pane has no composer input.
+- Next child step lands live: PASS. The open tab moved from "ran 1 command, used 2 other tools / Running Task notification" to "ran 3 commands, used 19 other tools / Running Agent", then to the finished turn with the child's "done" text, with no reload.
+- Second press: PASS. A second AX press on the same row put the same tab back on (`Value: on`) and the tab count stayed 2.
+- Plan Verify "a click on a Claude subagent row opens its read-only tab": PASS, from the first press above.
+- Paseo subagent row and archive buttons: UNVERIFIED (unattended). The test agents produced only provider rows; no Paseo subagent row existed, and the window stopped rendering before a Paseo child could be started.
