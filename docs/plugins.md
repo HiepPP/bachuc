@@ -342,7 +342,7 @@ for the author-facing contract.
 
 ## GPUI native clients
 
-The GPUI desktop client does not run `index.client.tsx`. A plugin's server part stays in `hiep-plugins/plugins/<plugin-id>`; its GPUI client is the Rust crate `packages/desktop-gpui/plugins/<plugin-id>`, named `bachuc-plugin-<plugin-id>`. The React client is frozen. A plugin with no client part needs no crate. [ADR-0045](../watchtower/decisions/ADR-0045-native-rust-plugin-clients-over-webview-panes-or-shared-logic.md) has the reasons.
+The GPUI desktop client does not run `index.client.tsx`. A plugin's server part stays in `hiep-plugins/plugins/<plugin-id>`; its GPUI client is the Rust crate `packages/desktop-gpui/plugins/<plugin-id>`, named `bachuc-plugin-<plugin-id>`. The React client is frozen. A plugin with no client part needs no crate. [docs/gpui.md](gpui.md) has the client crate map and the GPUI rules. [ADR-0045](../watchtower/decisions/ADR-0045-native-rust-plugin-clients-over-webview-panes-or-shared-logic.md) has the reasons.
 
 - The crate depends on `bachuc-plugin-host` and never on a view crate, so no dependency cycle forms.
 - The crate declares `gpui-kit` with no `features` key. Another feature set makes a second GPUI build.

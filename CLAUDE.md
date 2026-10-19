@@ -13,7 +13,7 @@ This is an npm workspace monorepo:
 - `packages/cli` — Docker-style CLI (`paseo run/ls/logs/wait`)
 - `packages/relay` — E2E encrypted relay for remote access
 - `packages/desktop` — Electron desktop wrapper
-- `packages/desktop-gpui` — Rust GPUI desktop client, a Cargo workspace; run cargo through its `cargo.sh`
+- `packages/desktop-gpui` — Rust GPUI desktop client, a Cargo workspace; run cargo through its `cargo.sh`. Read [docs/gpui.md](docs/gpui.md) before you change it
 - `packages/website` — Marketing site (paseo.sh)
 - `hiep-plugins` — The user's own Paseo plugins (`hiep-plugins/plugins/*`), with their own `AGENTS.md`
 
@@ -51,6 +51,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/providers.md](docs/providers.md)                               | Adding a new agent provider end-to-end                                                                                         |
 | [docs/forge-providers.md](docs/forge-providers.md)                   | Adding a git forge: registry/manifest, drop-in checklist, self-host/GHES, the two facts tiers                                  |
 | [docs/custom-providers.md](docs/custom-providers.md)                 | Custom provider config: Z.AI, Alibaba/Qwen, ACP agents, profiles, custom binaries                                              |
+| [docs/gpui.md](docs/gpui.md)                                         | GPUI desktop client — crate map, data flow, build and test, render and layout rules, screen checks                             |
 | [docs/plugins.md](docs/plugins.md)                                   | Local plugin manifest, directory source config, RPCs, native surfaces, attachment sources, GPUI clients                        |
 | [docs/service-proxy.md](docs/service-proxy.md)                       | Service proxy: exposing workspace scripts at public URLs, DNS setup, reverse proxy config                                      |
 | [docs/development.md](docs/development.md)                           | Dev server, build sync gotchas, CLI reference, agent state, Playwright MCP                                                     |
