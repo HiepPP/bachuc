@@ -55,3 +55,7 @@ Lead, 2026-10-19, check bundle on live (6768), cua_repl:
 ## UI Checks 2 (lead, 2026-10-19 13:50)
 
 - Not run: the display did not repaint and scroll did nothing, so the row was not reachable in the virtual list.
+
+## UI Checks 3 (lead, 2026-10-19 14:00)
+
+- Not run: GPUI draws no frames while another app window covers the check window, so scroll and clicks in the sidebar and timeline did nothing. Run with the check app alone in front.

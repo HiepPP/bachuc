@@ -44,3 +44,11 @@ Lead, 2026-10-19, check bundle on live (6768), cua_repl:
 - In the composer, Edit > Select All then Edit > Copy put the text on the clipboard (`pbpaste` read it). PASS.
 - Edit > Cut, Edit > Paste, and Edit > Undo did not change the composer value. The Cmd+X and Cmd+V keys did. FAIL.
 - Window > Minimize and Cmd+M left the window on screen. UNVERIFIED: the display did not repaint, so the window state may be stale.
+
+## UI Checks 3 (lead, 2026-10-19 14:00, live, check app in front, cua_repl)
+
+- Correction to UI Checks 2: menu Cut, Paste, and Undo do edit the composer. The covered window did not redraw until the next key event, so the AX value read stale. After one arrow key the values were right: Cut emptied the input and filled the clipboard, Paste restored "cut me", Undo emptied it. PASS.
+- Cmd+H hid the app (window went off screen). PASS.
+- Cmd+M did nothing before the fix; the native minimize button worked. Cause: `on_main_window` in [packages/desktop-gpui/crates/app/src/main.rs](packages/desktop-gpui/crates/app/src/main.rs) updated the window inside that window's own action dispatch, and the nested update failed silently. Fix: defer the update with `cx.defer` and log a failure. After the fix Cmd+M minimized the window. PASS. The same fix covers Window > Zoom and Enter Full Screen.
+- Cmd+= wrote zoom 1.75 and Cmd+- wrote 1.5 back to `appearance.json`; Cmd+, opened Settings. PASS through the keys, which run the same menu actions. A mouse click on the View menu timed out in cua_repl, so the menu-click path itself stays UNVERIFIED.
+- No headless test covers the deferral: view crates have no GPUI test context ([docs/gpui.md](docs/gpui.md)).
