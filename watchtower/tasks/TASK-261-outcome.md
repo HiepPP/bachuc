@@ -51,3 +51,7 @@ Lead, 2026-10-19, check bundle on live (6768), cua_repl:
 
 - The Display preferences button pressed by AX opens the menu: Grouping: Project, Title: Title, Show, Project: All projects. PASS.
 - Visible difference: GPUI writes the value after a colon ("Grouping: Project"); Electron shows it right-aligned. Tooltip, submenus, and choices after relaunch: owner hand check Q-171.
+
+## UI Checks 2 (lead, 2026-10-19 13:50)
+
+- Not run: the display did not repaint and scroll did nothing, so the row was not reachable in the virtual list.

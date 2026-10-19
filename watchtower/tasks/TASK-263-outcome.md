@@ -46,3 +46,7 @@ Lead, 2026-10-19, check bundle on live (6768), cua_repl:
 
 - AX tree of a user prompt (thread `mock TASK-263 footer`) has "Rewind to this message" and "Copy message". PASS.
 - Hover reveal, copy, rewind on a live agent, failed rewind toast, old host: owner hand check Q-172.
+
+## UI Checks 2 (lead, 2026-10-19 13:50)
+
+- Not run: the display did not repaint and scroll did nothing, so the row was not reachable in the virtual list.

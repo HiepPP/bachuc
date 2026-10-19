@@ -37,3 +37,10 @@ Lead, 2026-10-19, check bundle on live (6768), cua_repl:
 - Menu bar AX tree -> Bachuc GPUI Check, Edit, View, Window. PASS.
 - Cmd+Q quit the check app (no process left). PASS.
 - Cmd+H, Cmd+M, Edit items, and Settings and zoom from the menu: UNVERIFIED, owner hand check Q-170.
+
+## UI Checks 2 (lead, 2026-10-19 13:50, live, cua_repl AX only; the display did not repaint, so no screenshot is evidence)
+
+- Edit menu with no input focused: Undo, Redo, Cut, Copy, Paste, Select All are disabled. PASS.
+- In the composer, Edit > Select All then Edit > Copy put the text on the clipboard (`pbpaste` read it). PASS.
+- Edit > Cut, Edit > Paste, and Edit > Undo did not change the composer value. The Cmd+X and Cmd+V keys did. FAIL.
+- Window > Minimize and Cmd+M left the window on screen. UNVERIFIED: the display did not repaint, so the window state may be stale.
