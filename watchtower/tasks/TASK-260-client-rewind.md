@@ -27,7 +27,7 @@ Files:
 Interfaces:
 
 - Produces: `Client::rewind_modes(&self, agent_id: &str) -> RewindModes` (`conversation`, `files`, `both`: bool) for TASK-263
-- Produces: `Client::rewind(&self, agent_id: &str, message_id: &str, mode: RewindMode, cx: &mut App) -> Task<Result<(), String>>` for TASK-263
+- Produces: `Client::rewind(&mut self, agent_id: &str, message_id: &str, mode: RewindMode, cx: &mut Context<Client>) -> Task<Result<(), String>>` for TASK-263
 
 Expected result:
 

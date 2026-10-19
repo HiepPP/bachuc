@@ -32,7 +32,7 @@ Anti-goal: every existing shortcut still fires once; 0 shortcuts in [packages/de
 
 ## Verify
 
-- `cd packages/desktop-gpui && ./cargo.sh test -p bachuc-app` -> a new test passes that checks no keystroke in `fixed_bindings` equals a keystroke in the shortcut table.
+- `cd packages/desktop-gpui && ./cargo.sh test -p bachuc-app` -> the test `no_fixed_binding_repeats_a_shortcut_table_keystroke_in_the_same_context` passes: no fixed binding shares a keystroke with a table binding in an overlapping context.
 - Screen check (cua_repl, AX only): read the menu bar AX tree of the check bundle -> the four menus and their items exist.
 - Owner hand check: with no input focused, Edit > Copy and Paste are disabled and nothing crashes.
 - Owner hand check: Settings, Zoom In, Zoom Out, and Actual Size from the menu do the same as their keys.
