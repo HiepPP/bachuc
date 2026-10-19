@@ -396,3 +396,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the check bundle uses the same `~/Library/Application Support/BachucGpui` folder as the owner's daily GPUI app, so a screen check that toggles state writes the owner's real `sidebar.json`. The GPUI sidebar also opens scrolled to the end, and `cua_repl` scroll moves only a few rows per page, so a long live project list is slow to reach.
 - Source: TASK-258 and TASK-261 UI checks; `bachuc_command::data_dir`.
 - Use next time: undo any state a screen check toggles, and pick a project near the end of the list for sidebar checks. A new field on `WorkspaceNode` breaks struct literals in other crates; it now derives `Default`, so use `..Default::default()` (TASK-259).
+
+### 2026-10-19 - Implement 20261019-gpui-background-process-card
+
+- Learned: GPUI marks every ancestor view dirty when a child view notifies, so a 33 ms `Motion` mark re-renders the whole timeline that holds it; the frame count is the CPU lever (TASK-266 and TASK-267 fix round 1 moved to one shared 66 ms ticker). An unattended CPU read is not possible while the owner's release GPUI window covers the check window: the covered window draws nothing and reads 0.1-0.3%.
+- Source: TASK-266, TASK-267 outcomes (UI Checks rounds 1-3); `packages/desktop-gpui/crates/timeline/src/motion.rs`.
+- Use next time: plan a CPU anti-goal as an owner A/B check with a pre-plan base app, and build the base from a `git archive` of the base ref that also includes `hiep-plugins` (the board plugin embeds its assets). The lefthook `format` job fails with exit 2 when the only staged markdown is under `vendor/`; stage another markdown file, such as an outcome, in the same commit.

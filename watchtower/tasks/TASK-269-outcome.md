@@ -86,3 +86,17 @@ Lessons:
 Questions:
 
 - None for the builder; the UI checker should confirm the note height is within 4 px at zoom 1.
+
+## UI Checks Round 2
+
+Run 2026-10-19 on live (6768) with the check bundle. Live agent `bd6603ec` replied with exactly the round-1 note and was archived. The check window stopped rendering after the display slept and the active Space changed; the raise and activate actions that would reopen it are forbidden, and the Electron reference was not opened.
+
+- Anti-goal: note height GPUI vs Electron -> UNVERIFIED (unattended). No screenshot of the note was taken.
+- Four block gaps -> UNVERIFIED (unattended), for the same reason.
+
+## UI Checks Round 3
+
+Run 2026-10-19. The Electron reference daemon on 6770 is not listening, and agent `bd6603ec` ("ui269 look r2") exists only on live (6768), so the note has no Electron screenshot to compare against.
+
+- Note height GPUI vs Electron -> UNVERIFIED (unattended): the note is not on 6770. Round 1's 148.5 vs 139.5 logical px stand; no new read.
+- The GPUI note was not opened; zoom stays 1.25.
