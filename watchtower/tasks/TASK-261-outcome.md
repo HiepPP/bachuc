@@ -63,3 +63,9 @@ Lead, 2026-10-19, check bundle on live (6768), cua_repl:
 ## UI Checks 4 (lead, 2026-10-19 14:10)
 
 - Not run: Zen (full screen) and the daily Bachuc GPUI window were in front of the check window, so GPUI drew no frames. Clicks, scroll, and Cmd+K changed the AX tree but not the screen.
+
+## Owner Check (2026-10-19)
+
+- Hiep checked Q-171 by hand on live (thread `mock QA footer`): all steps pass.
+
+Status: DONE
