@@ -43,7 +43,90 @@ impl log::Log for StderrLogger {
     fn flush(&self) {}
 }
 
+/// Makes gpui skip glyph dilation, which copies CoreGraphics font smoothing and thickens strokes
+/// by text luminance. Electron turns smoothing off (`-webkit-font-smoothing: antialiased`).
+/// gpui reads `AppleFontSmoothing` once, at the first glyph, and only an explicit `0` turns the
+/// dilation off, so this runs first in `main` and on every launch: a user `defaults` change
+/// cannot bring the dilation back.
+#[cfg(target_os = "macos")]
+fn disable_font_smoothing() {
+    use core_foundation_sys::base::{CFRelease, kCFAllocatorDefault};
+    use core_foundation_sys::number::{CFNumberCreate, kCFNumberSInt32Type};
+    use core_foundation_sys::preferences::{
+        CFPreferencesAppSynchronize, CFPreferencesSetAppValue, kCFPreferencesCurrentApplication,
+    };
+    use core_foundation_sys::string::{CFStringCreateWithCString, kCFStringEncodingUTF8};
+
+    let zero: i32 = 0;
+    // SAFETY: both Core Foundation objects are created here, checked for null, used by the
+    // preference calls (which retain what they keep), and released once.
+    unsafe {
+        let key = CFStringCreateWithCString(
+            kCFAllocatorDefault,
+            c"AppleFontSmoothing".as_ptr(),
+            kCFStringEncodingUTF8,
+        );
+        let value = CFNumberCreate(
+            kCFAllocatorDefault,
+            kCFNumberSInt32Type,
+            (&raw const zero).cast(),
+        );
+        if !key.is_null() && !value.is_null() {
+            CFPreferencesSetAppValue(key, value.cast(), kCFPreferencesCurrentApplication);
+            CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication);
+        }
+        if !key.is_null() {
+            CFRelease(key.cast());
+        }
+        if !value.is_null() {
+            CFRelease(value.cast());
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn disable_font_smoothing() {}
+
+/// Shows the standard About panel. GPUI has no API for it.
+#[cfg(target_os = "macos")]
+fn show_about_panel() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+
+    let Some(main_thread) = MainThreadMarker::new() else {
+        log::warn!("about panel requested off the main thread");
+        return;
+    };
+    NSApplication::sharedApplication(main_thread).orderFrontStandardAboutPanel(None);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn show_about_panel() {}
+
+/// Handlers of the app and window menu items. Quit and Hide have no window; the window items
+/// act on the active window, or the first one while the app is in the background.
+fn register_app_actions(cx: &mut App) {
+    cx.on_action(|_: &actions::Quit, cx| cx.quit());
+    cx.on_action(|_: &actions::Hide, cx| cx.hide());
+    cx.on_action(|_: &actions::HideOthers, cx| cx.hide_other_apps());
+    cx.on_action(|_: &actions::ShowAll, cx| cx.unhide_other_apps());
+    cx.on_action(|_: &actions::About, _| show_about_panel());
+    cx.on_action(|_: &actions::Minimize, cx| on_main_window(cx, |window| window.minimize_window()));
+    cx.on_action(|_: &actions::Zoom, cx| on_main_window(cx, |window| window.zoom_window()));
+    cx.on_action(|_: &actions::ToggleFullScreen, cx| {
+        on_main_window(cx, |window| window.toggle_fullscreen())
+    });
+}
+
+fn on_main_window(cx: &mut App, run: impl FnOnce(&mut Window)) {
+    let Some(handle) = cx.active_window().or_else(|| cx.windows().first().copied()) else {
+        return;
+    };
+    let _ = handle.update(cx, |_, window, _| run(window));
+}
+
 fn main() {
+    disable_font_smoothing();
     if log::set_logger(&StderrLogger).is_ok() {
         log::set_max_level(log::LevelFilter::Info);
     }
@@ -61,6 +144,8 @@ fn main() {
             bachuc_settings::load_appearance(cx);
             // The shell binds the shortcut table; these never change.
             cx.bind_keys(actions::fixed_bindings());
+            register_app_actions(cx);
+            cx.set_menus(actions::app_menus());
             let activate = activates_on_launch(std::env::var("BACHUC_NO_ACTIVATE").ok().as_deref());
             if activate {
                 cx.activate(true);
