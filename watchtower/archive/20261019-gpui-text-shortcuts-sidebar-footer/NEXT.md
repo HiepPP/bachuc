@@ -4,7 +4,7 @@
 
 - Title: GPUI text, shortcuts, sidebar preferences, and prompt footer
 - Slug: 20261019-gpui-text-shortcuts-sidebar-footer
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-19
 
 ## Tracker
@@ -42,4 +42,4 @@
 
 ## Archive
 
-- None.
+- Archived: 2026-10-19 -> watchtower/archive/20261019-gpui-text-shortcuts-sidebar-footer/
