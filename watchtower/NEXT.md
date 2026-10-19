@@ -24,8 +24,8 @@ One row per TASK. Group ties together items that ship as one transaction.
 | 9     | TASK-273 Status badge on subagent rows and tabs         | C1    | DONE    | [watchtower/tasks/TASK-273-status-badge-on-subagent-rows-and-tabs.md](watchtower/tasks/TASK-273-status-badge-on-subagent-rows-and-tabs.md)                 | TASK-268                     | -       | Committed 3a017cc5c; badges pass (attention dot per spec). implement: manual checks pending (CPU, Q-175). |
 | 10    | TASK-272 Open a provider subagent from its row          | C2    | DONE    | [watchtower/tasks/TASK-272-open-a-provider-subagent-from-its-row.md](watchtower/tasks/TASK-272-open-a-provider-subagent-from-its-row.md)                   | TASK-273, TASK-270, TASK-271 | -       | Committed 7b8048b4d; 4 UI lines pass. implement: manual checks pending (Paseo row press).                 |
 
-| 11 | TASK-274 Find the GPUI repaint sources | D | IN PROGRESS | [watchtower/tasks/TASK-274-find-the-gpui-repaint-sources.md](watchtower/tasks/TASK-274-find-the-gpui-repaint-sources.md) | - | - | Measure only; Hiep allows front-window runs while away. |
-| 12 | TASK-275 One shared 66 ms frame ticker | E | TODO | [watchtower/tasks/TASK-275-one-shared-frame-ticker.md](watchtower/tasks/TASK-275-one-shared-frame-ticker.md) | TASK-274 | - | ADR-0052. Unblocks the CPU line of TASK-266 and TASK-267. |
+| 11 | TASK-274 Find the GPUI repaint sources | D | DONE | [watchtower/tasks/TASK-274-find-the-gpui-repaint-sources.md](watchtower/tasks/TASK-274-find-the-gpui-repaint-sources.md) | - | - | BASE 42.4%: orb 17.4, sidebar ring 22.1. CHECK 31.3%. |
+| 12 | TASK-275 One shared 66 ms frame ticker | E | IN PROGRESS | [watchtower/tasks/TASK-275-one-shared-frame-ticker.md](watchtower/tasks/TASK-275-one-shared-frame-ticker.md) | TASK-274 | - | ADR-0052. Unblocks the CPU line of TASK-266 and TASK-267. |
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
 
