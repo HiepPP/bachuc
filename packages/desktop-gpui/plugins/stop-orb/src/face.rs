@@ -1,10 +1,11 @@
 //! The stop button face (`client/stop-orb.tsx`): the solving orb in the stop button's red, on a
 //! round button that gains the composer's icon-button background under the pointer. The orb
-//! draws on a GPUI `canvas` and asks for the next frame only while it shows and the agent is not
-//! stopping.
+//! draws on a GPUI `canvas` and asks the one app ticker (`bachuc_theme::motion`, ADR-0052) for the
+//! next frame only while it shows and the agent is not stopping.
 
 use crate::orb::{DOT_SIZE, Options, Orb, OrbClock, frame_rubik, ink_rgb, solving_orb};
 use bachuc_plugin_host::StopButtonProps;
+use bachuc_theme::motion::request_tick;
 use bachuc_theme::{Scheme, scheme, tokens};
 use gpui_kit::*;
 use std::sync::OnceLock;
@@ -98,11 +99,11 @@ impl OrbFace {
 }
 
 impl Render for OrbFace {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = tokens(cx);
         let dots = self.painted_dots(scheme(cx) == Scheme::Dark);
         if !self.cancelling {
-            window.request_animation_frame();
+            request_tick(cx.entity_id(), cx);
         }
         // The hover background is the composer's icon-button one. Only the background and the
         // speed change on hover; the layout stays.

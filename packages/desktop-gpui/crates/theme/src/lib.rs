@@ -7,6 +7,7 @@
 
 mod custom;
 pub mod metrics;
+pub mod motion;
 mod syntax;
 mod tokens;
 
