@@ -1481,7 +1481,8 @@ impl Shell {
         view
     }
 
-    /// Opens the New workspace screen in a new tab of the home view and shows it.
+    /// Opens the New workspace screen in a new tab of the home view and shows it. A page surface
+    /// closes, as for a route change, so a Board card's repo link shows the screen.
     pub(crate) fn open_new_workspace(
         &mut self,
         preset: NewWorkspacePreset,
@@ -1490,6 +1491,7 @@ impl Shell {
     ) -> Entity<NewWorkspaceScreen> {
         self.ensure_home(window, cx);
         let screen = self.open_new_workspace_screen(HOME, None, preset, window, cx);
+        self.close_page_surface(cx);
         self.select(HOME.to_string(), window, cx);
         screen
     }
