@@ -388,3 +388,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: `Styled` on the gpui-component `Popover` styles the menu panel, not the trigger box. A layout rule for the trigger in its parent row (`min_w_0`, shrink) needs `Popover::trigger_style`. A builder that put `min_w_0` on the `Popover` passed every code check, and only the screen check caught it.
 - Source: TASK-253 fix round 1, `packages/desktop-gpui/crates/composer/src/agent_controls/mod.rs` (`shrinking_trigger`), `gpui-component-0.7.3/src/popover.rs`.
 - Use next time: style a popover trigger through `trigger_style`; a `cua_repl` screenshot takes 95 to 460 ms, so it cannot catch a 140 ms animation frame.
+
+### 2026-10-19 - Implement 20261019-gpui-text-shortcuts-sidebar-footer
+
+- Learned: the check bundle uses the same `~/Library/Application Support/BachucGpui` folder as the owner's daily GPUI app, so a screen check that toggles state writes the owner's real `sidebar.json`. The GPUI sidebar also opens scrolled to the end, and `cua_repl` scroll moves only a few rows per page, so a long live project list is slow to reach.
+- Source: TASK-258 and TASK-261 UI checks; `bachuc_command::data_dir`.
+- Use next time: undo any state a screen check toggles, and pick a project near the end of the list for sidebar checks. A new field on `WorkspaceNode` breaks struct literals in other crates; it now derives `Default`, so use `..Default::default()` (TASK-259).

@@ -28,3 +28,10 @@ Status: DONE (screen, defaults, and owner checks DEFERRED)
 
 - gpui reads `AppleFontSmoothing` as a CFNumber; a string or bool value is ignored (`font_smoothing_allowed_by_user`, `gpui-pre-apple-0.3.9/src/text_system.rs:243-262`).
 - No unit test: the call writes the user's preferences domain of the test binary.
+
+## UI Checks
+
+Lead, 2026-10-19, check bundle on live (6768), cua_repl:
+
+- `defaults read io.github.hieppp.bachuc-desktop-check AppleFontSmoothing` -> `0`. PASS.
+- Screenshot pair with Electron and the row-height pair: UNVERIFIED (unattended). The owner judges blur by eye.

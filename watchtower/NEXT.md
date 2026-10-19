@@ -9,16 +9,16 @@
 
 ## Tracker
 
-| Order | TASK                                               | Group | Status      | Spec                                                                                                                     | Deps               | Context                                        | Notes                                             |
-| ----- | -------------------------------------------------- | ----- | ----------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------ | ---------------------------------------------- | ------------------------------------------------- |
-| 1     | TASK-256 Text drawn like Electron                  | A     | IN PROGRESS | [watchtower/tasks/TASK-256-text-like-electron.md](watchtower/tasks/TASK-256-text-like-electron.md)                       | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Turns off gpui glyph dilation.                    |
-| 2     | TASK-257 Native macOS menu bar                     | A     | IN PROGRESS | [watchtower/tasks/TASK-257-native-menu-bar.md](watchtower/tasks/TASK-257-native-menu-bar.md)                             | TASK-256           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares main.rs with TASK-256.                     |
-| 3     | TASK-258 Sidebar collapse state persists           | B     | IN PROGRESS | [watchtower/tasks/TASK-258-sidebar-collapse-persists.md](watchtower/tasks/TASK-258-sidebar-collapse-persists.md)         | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Adds sidebar.json.                                |
-| 4     | TASK-259 Client parses workspace display data      | C     | IN PROGRESS | [watchtower/tasks/TASK-259-client-workspace-display-data.md](watchtower/tasks/TASK-259-client-workspace-display-data.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | PR, checks, labels, statusEnteredAt.              |
-| 5     | TASK-260 Client rewind call and capabilities       | C     | IN PROGRESS | [watchtower/tasks/TASK-260-client-rewind.md](watchtower/tasks/TASK-260-client-rewind.md)                                 | TASK-259           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares core.rs with TASK-259.                     |
-| 6     | TASK-261 Display preferences menu                  | B     | IN PROGRESS | [watchtower/tasks/TASK-261-display-preferences-menu.md](watchtower/tasks/TASK-261-display-preferences-menu.md)           | TASK-258, TASK-259 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Grouping, Title, Show, filters.                   |
-| 7     | TASK-262 Sidebar row meta items                    | B     | IN PROGRESS | [watchtower/tasks/TASK-262-sidebar-row-meta-items.md](watchtower/tasks/TASK-262-sidebar-row-meta-items.md)               | TASK-261           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Draws each Show item.                             |
-| 8     | TASK-263 Prompt footer with time, rewind, and copy | B     | IN PROGRESS | [watchtower/tasks/TASK-263-prompt-footer.md](watchtower/tasks/TASK-263-prompt-footer.md)                                 | TASK-260           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Runs after TASK-262 in group B (shared shell.rs). |
+| Order | TASK                                               | Group | Status  | Spec                                                                                                                     | Deps               | Context                                        | Notes                                                            |
+| ----- | -------------------------------------------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------ | ---------------------------------------------- | ---------------------------------------------------------------- |
+| 1     | TASK-256 Text drawn like Electron                  | A     | DONE    | [watchtower/tasks/TASK-256-text-like-electron.md](watchtower/tasks/TASK-256-text-like-electron.md)                       | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (blur by eye).                  |
+| 2     | TASK-257 Native macOS menu bar                     | A     | BLOCKED | [watchtower/tasks/TASK-257-native-menu-bar.md](watchtower/tasks/TASK-257-native-menu-bar.md)                             | TASK-256           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | BUILT, UNVERIFIED (Q-170).                                       |
+| 3     | TASK-258 Sidebar collapse state persists           | B     | DONE    | [watchtower/tasks/TASK-258-sidebar-collapse-persists.md](watchtower/tasks/TASK-258-sidebar-collapse-persists.md)         | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (collapsed row after relaunch). |
+| 4     | TASK-259 Client parses workspace display data      | C     | DONE    | [watchtower/tasks/TASK-259-client-workspace-display-data.md](watchtower/tasks/TASK-259-client-workspace-display-data.md) | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Client parses PR, checks, labels, statusEnteredAt.               |
+| 5     | TASK-260 Client rewind call and capabilities       | C     | DONE    | [watchtower/tasks/TASK-260-client-rewind.md](watchtower/tasks/TASK-260-client-rewind.md)                                 | TASK-259           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Client rewind call and modes.                                    |
+| 6     | TASK-261 Display preferences menu                  | B     | BLOCKED | [watchtower/tasks/TASK-261-display-preferences-menu.md](watchtower/tasks/TASK-261-display-preferences-menu.md)           | TASK-258, TASK-259 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | BUILT, UNVERIFIED (Q-171).                                       |
+| 7     | TASK-262 Sidebar row meta items                    | B     | DONE    | [watchtower/tasks/TASK-262-sidebar-row-meta-items.md](watchtower/tasks/TASK-262-sidebar-row-meta-items.md)               | TASK-261           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (no PR or label data on live).  |
+| 8     | TASK-263 Prompt footer with time, rewind, and copy | B     | BLOCKED | [watchtower/tasks/TASK-263-prompt-footer.md](watchtower/tasks/TASK-263-prompt-footer.md)                                 | TASK-260           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | BUILT, UNVERIFIED (Q-172).                                       |
 
 ## Plan Verify
 
@@ -38,7 +38,7 @@
 
 ## Handoff
 
-- Next action: run `/watchtower implement`.
+- Next action: the owner runs the hand checks Q-170, Q-171, and Q-172 on live, then answers them in [watchtower/QUESTIONS.md](watchtower/QUESTIONS.md).
 
 ## Archive
 

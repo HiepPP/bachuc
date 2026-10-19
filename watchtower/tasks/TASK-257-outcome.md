@@ -29,3 +29,11 @@ Status: DONE (AX and owner checks DEFERRED)
 - A menu item shows the keys of the keymap binding of its action (`partial_eq`), so `RunAction("settings.toggle")` shows Cmd+,. After a user rebind the menu text keeps the old keys until `set_menus` runs again; shell.rs (not in scope) does the rebind.
 - `Enter Full Screen` is not in the spec's new-action list; added `ToggleFullScreen` (no key) as the safe default.
 - `About` uses `orderFrontStandardAboutPanel`; no custom About window.
+
+## UI Checks
+
+Lead, 2026-10-19, check bundle on live (6768), cua_repl:
+
+- Menu bar AX tree -> Bachuc GPUI Check, Edit, View, Window. PASS.
+- Cmd+Q quit the check app (no process left). PASS.
+- Cmd+H, Cmd+M, Edit items, and Settings and zoom from the menu: UNVERIFIED, owner hand check Q-170.

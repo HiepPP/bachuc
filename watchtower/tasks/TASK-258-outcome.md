@@ -38,3 +38,10 @@ Writes happen only in `save_prefs`, called from the 3 toggle functions and once 
 - Keep the old `Sidebar::new` and add a `with_data_dir` constructor: the example and tests then never touch the owner's data dir.
 - An empty project list proves nothing (it is also the state before the first answer), so the prune waits for a non-empty list.
 - Another group's edits to `crates/app` (`actions.rs`, `main.rs`) made `fmt --check -p bachuc-app` fail for a while; it passed after they formatted.
+
+## UI Checks
+
+Lead, 2026-10-19, check bundle on live (6768), cua_repl:
+
+- Collapse toggle wrote `sidebar.json` once (mtime 1792385669); a relaunch and idle did not rewrite it; the App id stayed after relaunch. PASS.
+- The visual collapsed row after relaunch: UNVERIFIED (unattended), because the sidebar opens scrolled to the end and the App project has no rows.
