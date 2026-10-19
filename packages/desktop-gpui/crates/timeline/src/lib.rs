@@ -29,7 +29,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bachuc_client::{Client, ClientEvent, ForkBoundary, ForkCursor};
+use bachuc_client::{Client, ClientEvent, ForkBoundary, ForkCursor, RewindMode, RewindModes};
 use bachuc_diagram::{DiagramReady, DiagramRenderer, image_size};
 use bachuc_explorer::syntax::Run;
 use bachuc_icons::{IconName, icon};
@@ -44,9 +44,10 @@ use bachuc_theme::{
     rem_size, scheme, shadow, syntax_colors, tokens, turn_label_colors, ui_font_size, zoomed,
 };
 use gpui_kit::base::text::{CodeBlock, TextView as RichText, TextViewStyle as RichTextStyle};
+use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::text::{TextView, TextViewState};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, Selectable, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::Value;
@@ -71,6 +72,20 @@ pub enum TimelineEvent {
         cwd: String,
         path: String,
         line: Option<u32>,
+    },
+}
+
+/// A rewind the user picked under a prompt. The app calls `Client::rewind`, puts `text` back in
+/// the composer when [`restores_composer`] says so, and shows a toast on failure. A separate type,
+/// like [`TimelineForkEvent`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TimelineRewindEvent {
+    Rewind {
+        agent_id: String,
+        message_id: String,
+        mode: RewindMode,
+        /// The prompt that is rewound.
+        text: String,
     },
 }
 
@@ -124,9 +139,17 @@ const RULE_BOTTOM: f32 = 18.;
 /// The web stream's empty slot above the first row, where older history loads
 /// (`HISTORY_START_SLOT_HEIGHT_PX`), under the 16 px content padding.
 const HISTORY_START_SLOT: f32 = 32.;
-/// The user message's trailing row under the bubble: 8 above, 24 high. It holds the time and
-/// copy button, which show on hover; the space stays when they are hidden.
-const USER_TRAILING_ROW: f32 = SPACE_2 + 24.;
+/// The user message's trailing row under the bubble: 8 above, 24 high. It holds the time, the
+/// rewind menu, and the copy button, which show on hover; the space stays when they are hidden.
+const USER_TRAILING_ROW: f32 = SPACE_2 + USER_TRAILING_HEIGHT;
+const USER_TRAILING_HEIGHT: f32 = 24.;
+/// `rewind-menu.tsx`: `minWidth={220}`, and the `Undo2` trigger at 16.
+const REWIND_MENU_WIDTH: f32 = 220.;
+const REWIND_ICON: f32 = 16.;
+/// `message.actions.copyMessage`, `rewind.tooltip`, and `rewind.warning`.
+const COPY_MESSAGE_LABEL: &str = "Copy message";
+const REWIND_LABEL: &str = "Rewind to this message";
+const REWIND_WARNING: &str = "This action cannot be undone";
 /// The space between two markdown blocks: the paragraph's `marginBottom: 12` and the block
 /// container's 12.
 const BLOCK_GAP: f32 = SPACE_6;
@@ -339,6 +362,11 @@ pub struct TimelineView {
     fork_menu_dismissed: Option<(u64, Instant)>,
     /// A fork runs: the app set it, and every fork trigger is disabled.
     fork_pending: bool,
+    /// A rewind runs: the app set it, and every rewind trigger is disabled.
+    rewind_pending: bool,
+    /// The user message whose copy button shows its check, by entry key, and the timer that
+    /// clears it.
+    copied_user: Option<(u64, Task<()>)>,
     /// The Chat outline rail, a view of its own so a hover or a scroll redraws it alone.
     outline: Entity<OutlineRail>,
     /// Whether the timeline was wide enough for the rail at the last paint.
@@ -358,6 +386,7 @@ pub struct TimelineView {
 
 impl EventEmitter<TimelineEvent> for TimelineView {}
 impl EventEmitter<TimelineForkEvent> for TimelineView {}
+impl EventEmitter<TimelineRewindEvent> for TimelineView {}
 
 impl Focusable for TimelineView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -496,6 +525,8 @@ impl TimelineView {
             fork_menu: None,
             fork_menu_dismissed: None,
             fork_pending: false,
+            rewind_pending: false,
+            copied_user: None,
             outline,
             outline_wide: Rc::new(Cell::new(false)),
             prompts_enabled: false,
@@ -531,6 +562,14 @@ impl TimelineView {
             if pending {
                 self.fork_menu = None;
             }
+            cx.notify();
+        }
+    }
+
+    /// The app sets this while a rewind runs; the rewind triggers are disabled until it ends.
+    pub fn set_rewind_pending(&mut self, pending: bool, cx: &mut Context<TimelineView>) {
+        if self.rewind_pending != pending {
+            self.rewind_pending = pending;
             cx.notify();
         }
     }
@@ -1189,6 +1228,39 @@ impl TimelineView {
         self.refresh(cx);
     }
 
+    /// Copies the prompt text of a user message and shows the check for [`COPIED_FOR`].
+    fn copy_user_message(&mut self, key: u64, text: String, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        let timer = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(COPIED_FOR).await;
+            let _ = this.update(cx, |this, cx| {
+                this.copied_user = None;
+                cx.notify();
+            });
+        });
+        self.copied_user = Some((key, timer));
+        cx.notify();
+    }
+
+    /// Asks the app to rewind to a prompt. A second pick while one runs does nothing.
+    fn rewind(
+        &mut self,
+        mode: RewindMode,
+        message_id: String,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.rewind_pending {
+            return;
+        }
+        cx.emit(TimelineRewindEvent::Rewind {
+            agent_id: self.agent_id.clone(),
+            message_id,
+            mode,
+            text,
+        });
+    }
+
     /// Whether a row shows the diagram that finished rendering.
     fn shows_diagram(&self, row: &ViewRow, ready: &DiagramReady) -> bool {
         let entries: &[usize] = match &row.kind {
@@ -1494,10 +1566,13 @@ impl TimelineView {
                     })
                     .collect();
                 // The web stream gives a user message no outer margin; the row's gap below
-                // comes from `space_below`.
-                h_flex()
-                    .justify_end()
-                    .pb(zoomed(USER_TRAILING_ROW, cx))
+                // comes from `space_below`. The trailing row keeps its height whether or not
+                // it shows, so hovering never moves the layout.
+                let group = SharedString::from(format!("user-message-{key}"));
+                let footer = self.render_user_footer(index, key, &text, &group, cx);
+                v_flex()
+                    .group(group)
+                    .items_end()
                     .child(
                         div()
                             .id(("user", key))
@@ -1515,6 +1590,7 @@ impl TimelineView {
                             .line_height(px(body_line_height(size / px(1.))))
                             .child(StyledText::new(text).with_highlights(highlights)),
                     )
+                    .child(footer)
                     .into_any_element()
             }
             "assistant_message" => {
@@ -1898,6 +1974,162 @@ impl TimelineView {
                     .child(label)
             }))
             .into_any_element()
+    }
+
+    /// The row under a user bubble (`UserMessage`'s trailing row): the time, the rewind menu, and
+    /// the copy button. It is drawn at opacity 0 and shows with the message's hover; the height
+    /// stays, and a hidden control cannot be pressed with the pointer because the pointer over
+    /// it is hover.
+    fn render_user_footer(
+        &self,
+        index: usize,
+        key: u64,
+        text: &str,
+        group: &SharedString,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let t = tokens(cx);
+        let entry = &self.entries[index];
+        let has_text = !text.trim().is_empty();
+        let row = h_flex()
+            .id(("user-footer", key))
+            .role(Role::Group)
+            .aria_label("Message actions")
+            .h(zoomed(USER_TRAILING_ROW, cx))
+            .pt(zoomed(SPACE_2, cx))
+            .gap(zoomed(SPACE_2, cx))
+            .items_center()
+            .opacity(user_trailing_opacity(false))
+            .group_hover(group.clone(), |style| {
+                style.opacity(user_trailing_opacity(true))
+            });
+        if !has_text {
+            return row;
+        }
+        let stamp = grouping::timestamp_ms(entry);
+        let time = (stamp > 0)
+            .then(|| {
+                let now = chrono::Utc::now().timestamp_millis();
+                let offset = chrono::Local::now().offset().local_minus_utc();
+                format_message_timestamp(stamp, now, offset)
+            })
+            .flatten();
+        let copied = self
+            .copied_user
+            .as_ref()
+            .is_some_and(|(copied, _)| *copied == key);
+        let message_id = user_message_id(entry).map(str::to_string);
+        let modes = self.client.read(cx).rewind_modes(&self.agent_id);
+        let choices = rewind_choices(modes, message_id.as_deref());
+        let view = cx.weak_entity();
+        let copy_text = text.to_string();
+        let copy_view = view.clone();
+        row.children(time.map(|time| {
+            div()
+                .text_size(ui_font_size(METADATA_SIZE, cx))
+                .text_color(t.foreground_muted)
+                .child(time)
+        }))
+        .children(
+            message_id
+                .filter(|_| !choices.is_empty())
+                .map(|message_id| self.render_rewind(key, choices, message_id, text, cx)),
+        )
+        .child(
+            div()
+                .id(("copy-message", key))
+                .role(Role::Button)
+                .aria_label(if copied { "Copied" } else { COPY_MESSAGE_LABEL })
+                // The icon sits flush with the bubble's right edge, as the web's -4 margin.
+                .pl(zoomed(SPACE_1, cx))
+                .py(zoomed(SPACE_1, cx))
+                .cursor_pointer()
+                .child(
+                    icon(if copied {
+                        IconName::Check
+                    } else {
+                        IconName::Copy
+                    })
+                    .with_size(zoomed(ICON_SM, cx))
+                    .text_color(t.foreground_muted),
+                )
+                .on_click(cx.listener({
+                    let text = text.to_string();
+                    move |this, _, _, cx| this.copy_user_message(key, text.clone(), cx)
+                }))
+                .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                    copy_view
+                        .update(cx, |this, cx| {
+                            this.copy_user_message(key, copy_text.clone(), cx)
+                        })
+                        .ok();
+                }),
+        )
+    }
+
+    /// `RewindMenu`: the `Undo2` trigger with its tooltip, opening the warning and one item per
+    /// mode the host and the agent take. It is built with `PopupMenu`.
+    fn render_rewind(
+        &self,
+        key: u64,
+        choices: Vec<RewindMode>,
+        message_id: String,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let t = tokens(cx);
+        let glyph = |color: Hsla| {
+            icon(IconName::Undo2)
+                .with_size(zoomed(REWIND_ICON, cx))
+                .text_color(color)
+        };
+        let base = div()
+            .id(("rewind", key))
+            .role(Role::Button)
+            .aria_label(REWIND_LABEL)
+            .p(zoomed(SPACE_1, cx))
+            .rounded(zoomed(RADIUS_MD, cx));
+        if self.rewind_pending {
+            return base
+                .opacity(DISABLED_OPACITY)
+                .child(glyph(t.foreground_muted))
+                .into_any_element();
+        }
+        let base = base
+            .cursor_pointer()
+            .hover(move |style| style.bg(t.surface2))
+            .tooltip(|window, cx| Tooltip::new(REWIND_LABEL).build(window, cx))
+            .child(glyph(t.foreground_muted));
+        let view = cx.weak_entity();
+        let text = text.to_string();
+        let item_size = zoomed(ICON_SM, cx);
+        let width = zoomed(REWIND_MENU_WIDTH, cx);
+        RewindTrigger {
+            base,
+            open: false,
+            fill: t.surface2,
+        }
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu: PopupMenu, _, _| {
+            let mut menu = menu
+                .min_w(width)
+                .item(PopupMenuItem::label(REWIND_WARNING))
+                .separator();
+            for &mode in &choices {
+                let (label, glyph) = rewind_mode_label(mode);
+                let (view, message_id, text) = (view.clone(), message_id.clone(), text.clone());
+                menu = menu.item(
+                    PopupMenuItem::new(label)
+                        .icon(icon(glyph).with_size(item_size))
+                        .on_click(move |_, _, cx| {
+                            let (message_id, text) = (message_id.clone(), text.clone());
+                            view.update(cx, |this, cx| this.rewind(mode, message_id, text, cx))
+                                .ok();
+                        }),
+                );
+            }
+            menu
+        })
+        .into_any_element()
     }
 
     /// `AssistantForkMenu`: a split icon that opens "Fork in a new tab" and "Fork in a new
@@ -2803,6 +3035,105 @@ fn short_path(path: &str) -> String {
 }
 
 /// The first line of a message, cut short, for accessibility labels.
+/// A button that opens a gpui-kit dropdown menu, filled while the menu is open.
+#[derive(IntoElement)]
+struct RewindTrigger {
+    base: Stateful<Div>,
+    open: bool,
+    fill: Hsla,
+}
+
+impl Selectable for RewindTrigger {
+    fn selected(mut self, selected: bool) -> Self {
+        self.open = selected;
+        self
+    }
+
+    fn is_selected(&self) -> bool {
+        self.open
+    }
+}
+
+impl Styled for RewindTrigger {
+    fn style(&mut self) -> &mut StyleRefinement {
+        self.base.style()
+    }
+}
+
+impl InteractiveElement for RewindTrigger {
+    fn interactivity(&mut self) -> &mut Interactivity {
+        self.base.interactivity()
+    }
+}
+
+impl DropdownMenu for RewindTrigger {}
+
+impl RenderOnce for RewindTrigger {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let fill = self.fill;
+        self.base.when(self.open, |base| base.bg(fill))
+    }
+}
+
+/// The message id of a user message, when the live wire gives one (`item.messageId`).
+fn user_message_id(entry: &Value) -> Option<&str> {
+    entry["item"]["messageId"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+}
+
+/// The modes the rewind menu lists, in its order. Without a message id or without any mode there
+/// is no menu, so no button (`resolveRewindMenuItems`; an old host takes none).
+fn rewind_choices(modes: RewindModes, message_id: Option<&str>) -> Vec<RewindMode> {
+    if message_id.is_none() {
+        return Vec::new();
+    }
+    [
+        (RewindMode::Conversation, modes.conversation),
+        (RewindMode::Files, modes.files),
+        (RewindMode::Both, modes.both),
+    ]
+    .into_iter()
+    .filter_map(|(mode, on)| on.then_some(mode))
+    .collect()
+}
+
+fn rewind_mode_label(mode: RewindMode) -> (&'static str, IconName) {
+    match mode {
+        RewindMode::Conversation => ("Rewind conversation", IconName::MessageSquare),
+        RewindMode::Files => ("Rewind files", IconName::FileText),
+        RewindMode::Both => ("Rewind conversation and files", IconName::Layers),
+    }
+}
+
+/// `shouldRestoreComposerForRewindMode`: a rewind that removes the conversation puts the rewound
+/// prompt back in the composer; a files-only rewind leaves the composer alone.
+pub fn restores_composer(mode: RewindMode) -> bool {
+    matches!(mode, RewindMode::Conversation | RewindMode::Both)
+}
+
+/// The opacity of the user message's trailing row: hidden at rest, shown while the message is
+/// hovered. Only the opacity changes; [`USER_TRAILING_ROW`] is reserved in both states.
+fn user_trailing_opacity(hovered: bool) -> f32 {
+    if hovered { 1. } else { 0. }
+}
+
+/// `formatMessageTimestamp` for en-US: the same local day shows the time ("10:39 AM"), the
+/// previous six days show the weekday and the time, and anything older (or in the future) shows
+/// the date and the time. `offset_secs` is the local offset from UTC.
+fn format_message_timestamp(then_ms: i64, now_ms: i64, offset_secs: i32) -> Option<String> {
+    let zone = chrono::FixedOffset::east_opt(offset_secs)?;
+    let then = chrono::DateTime::from_timestamp_millis(then_ms)?.with_timezone(&zone);
+    let now = chrono::DateTime::from_timestamp_millis(now_ms)?.with_timezone(&zone);
+    let time = then.format("%-I:%M %p").to_string();
+    let days = (now.date_naive() - then.date_naive()).num_days();
+    Some(match days {
+        0 => time,
+        1..=6 => format!("{} {time}", then.format("%A")),
+        _ => format!("{}, {time}", then.format("%b %-d, %Y")),
+    })
+}
+
 fn preview(text: &str) -> String {
     let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
     let mut preview: String = line.chars().take(80).collect();
@@ -2818,13 +3149,15 @@ mod tests {
     use super::Below;
     use super::tool_view::{code_styles, fence_language};
     use super::{
-        BLOCK_GAP, PARAGRAPH_GAP, StepCounts, body_line_height, counts_text, fence_spacing,
-        fork_boundary, format_clock, format_duration, format_elapsed, heading_style,
-        latest_assistant, message_gap, paragraph_pitch, toggle, window_rems,
+        BLOCK_GAP, PARAGRAPH_GAP, StepCounts, USER_TRAILING_HEIGHT, USER_TRAILING_ROW,
+        body_line_height, counts_text, fence_spacing, fork_boundary, format_clock, format_duration,
+        format_elapsed, format_message_timestamp, heading_style, latest_assistant, message_gap,
+        paragraph_pitch, restores_composer, rewind_choices, toggle, user_message_id,
+        user_trailing_opacity, window_rems,
     };
-    use bachuc_client::{ForkBoundary, ForkCursor};
+    use bachuc_client::{ForkBoundary, ForkCursor, RewindMode, RewindModes};
     use bachuc_theme::metrics::FONT_CONTENT;
-    use bachuc_theme::metrics::SPACE_3;
+    use bachuc_theme::metrics::{SPACE_2, SPACE_3};
     use bachuc_theme::{Scheme, SyntaxThemeId, syntax_colors_for};
     use gpui_kit::{
         AbsoluteLength, DefiniteLength, FontWeight, Hsla, Length, StyleRefinement, hsla, px, rgb,
@@ -3103,6 +3436,98 @@ mod tests {
         assert_eq!(found(Some(1), 1), None, "an empty response");
         assert_eq!(found(None, 0), Some(Some(1)), "no user message loaded");
         assert_eq!(found(Some(1), 9), None, "an end past the entries");
+    }
+
+    const HOUR: i64 = 3_600_000;
+    /// 2026-10-19T10:39:00Z.
+    const NOON: i64 = 1_792_406_340_000;
+
+    #[test]
+    fn the_prompt_time_follows_format_message_timestamp() {
+        let now = NOON + 2 * HOUR;
+        // The same day shows only the time.
+        assert_eq!(
+            format_message_timestamp(NOON, now, 0).as_deref(),
+            Some("10:39 AM")
+        );
+        // The local offset decides the day and the hour: +7 h puts 10:39 UTC at 5:39 PM.
+        assert_eq!(
+            format_message_timestamp(NOON, now, 7 * 3600).as_deref(),
+            Some("5:39 PM")
+        );
+        // Within the previous six calendar days: the weekday and the time.
+        assert_eq!(
+            format_message_timestamp(NOON - 24 * HOUR, now, 0).as_deref(),
+            Some("Sunday 10:39 AM")
+        );
+        assert_eq!(
+            format_message_timestamp(NOON - 6 * 24 * HOUR, now, 0).as_deref(),
+            Some("Tuesday 10:39 AM")
+        );
+        // A week and older: the date and the time.
+        assert_eq!(
+            format_message_timestamp(NOON - 7 * 24 * HOUR, now, 0).as_deref(),
+            Some("Oct 12, 2026, 10:39 AM")
+        );
+        assert_eq!(
+            format_message_timestamp(NOON - 200 * 24 * HOUR, now, 0).as_deref(),
+            Some("Apr 2, 2026, 10:39 AM")
+        );
+        // Counted on the calendar, not in hours: 23 hours back can be yesterday.
+        let early = NOON - 10 * HOUR; // 00:39 today
+        assert_eq!(
+            format_message_timestamp(early - HOUR, early + HOUR, 0).as_deref(),
+            Some("Sunday 11:39 PM")
+        );
+    }
+
+    #[test]
+    fn a_prompt_has_a_rewind_button_only_with_a_message_id_and_a_mode() {
+        let all = RewindModes {
+            conversation: true,
+            files: true,
+            both: true,
+        };
+        assert_eq!(
+            rewind_choices(all, Some("m1")),
+            [
+                RewindMode::Conversation,
+                RewindMode::Files,
+                RewindMode::Both
+            ]
+        );
+        assert!(rewind_choices(all, None).is_empty(), "no messageId");
+        assert!(
+            rewind_choices(RewindModes::default(), Some("m1")).is_empty(),
+            "an old host takes no mode"
+        );
+        let only_files = RewindModes {
+            files: true,
+            ..Default::default()
+        };
+        assert_eq!(rewind_choices(only_files, Some("m1")), [RewindMode::Files]);
+        let with = serde_json::json!({"item": {"type": "user_message", "messageId": "m1"}});
+        let empty = serde_json::json!({"item": {"type": "user_message", "messageId": ""}});
+        let without = serde_json::json!({"item": {"type": "user_message"}});
+        assert_eq!(user_message_id(&with), Some("m1"));
+        assert_eq!(user_message_id(&empty), None);
+        assert_eq!(user_message_id(&without), None);
+    }
+
+    #[test]
+    fn only_a_rewind_of_the_conversation_restores_the_composer() {
+        assert!(restores_composer(RewindMode::Conversation));
+        assert!(restores_composer(RewindMode::Both));
+        assert!(!restores_composer(RewindMode::Files));
+    }
+
+    #[test]
+    fn hovering_a_prompt_changes_the_opacity_and_never_the_row_height() {
+        assert_eq!(user_trailing_opacity(false), 0.);
+        assert_eq!(user_trailing_opacity(true), 1.);
+        // The row is always `USER_TRAILING_ROW` high: 8 above plus the 24 px controls.
+        assert_eq!(USER_TRAILING_ROW, SPACE_2 + USER_TRAILING_HEIGHT);
+        assert_eq!(USER_TRAILING_ROW, 32.);
     }
 
     #[test]

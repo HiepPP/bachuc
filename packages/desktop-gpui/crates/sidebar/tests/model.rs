@@ -1,6 +1,11 @@
-use bachuc_client::{AgentSummary, AttentionReason, ChangedFile, ProjectNode, WorkspaceNode};
+use bachuc_client::{
+    AgentSummary, AttentionReason, ChangedFile, CheckSummary, CheckSummaryState, ProjectNode,
+    PullRequestState, WorkspaceLabel, WorkspaceNode, WorkspaceScript,
+};
 use bachuc_sidebar::model::build_rows as build_rows_with;
 use bachuc_sidebar::model::*;
+use bachuc_sidebar::prefs::{ChecksDisplay, RowItems, TitleSource, Trailing};
+use std::collections::HashSet;
 
 /// The rows with no client fields: no attention, no key, no diff stat, no pin time.
 fn build_rows(projects: &[ProjectNode], agents: &[AgentSummary], state: &ViewState) -> Vec<Row> {
@@ -50,6 +55,7 @@ fn ids(rows: &[Row]) -> Vec<String> {
             Row::Workspace(w) => format!("w:{}", w.id),
             Row::ShowMore { group, .. } => format!("more:{group:?}"),
             Row::Empty => "empty".to_string(),
+            Row::StatusHeader { bucket, .. } => format!("s:{}", bucket.key()),
         })
         .collect()
 }
@@ -621,4 +627,598 @@ fn a_workspace_label_names_its_status_unless_done() {
     };
     assert_eq!(workspace_label(row, false), "name-a1, Working");
     assert_eq!(workspace_label(row, true), "project-a, name-a1, Working");
+}
+
+/// 50 projects with 10 workspaces each, one agent per workspace, a tenth of them running.
+fn large_tree() -> (Vec<ProjectNode>, Vec<AgentSummary>) {
+    let mut agents = Vec::new();
+    let projects = (0..50)
+        .map(|p| {
+            let workspaces = (0..10)
+                .map(|w| {
+                    let id = format!("{p}-{w}");
+                    let agent_id = format!("a{id}");
+                    let status = if w == 0 { "running" } else { "idle" };
+                    agents.push(agent(&agent_id, status, 0));
+                    workspace(&id, w == 9, &[agent_id.as_str()])
+                })
+                .collect();
+            project(&p.to_string(), workspaces)
+        })
+        .collect();
+    (projects, agents)
+}
+
+/// The median of 21 runs, in milliseconds, so one scheduler stall does not decide the result.
+fn median_ms(mut run: impl FnMut()) -> f64 {
+    let mut times: Vec<f64> = (0..21)
+        .map(|_| {
+            let start = std::time::Instant::now();
+            run();
+            start.elapsed().as_secs_f64() * 1000.
+        })
+        .collect();
+    times.sort_by(|a, b| a.total_cmp(b));
+    times[10]
+}
+
+#[test]
+fn building_500_workspaces_in_project_mode_stays_under_2_ms() {
+    let (projects, agents) = large_tree();
+    let facts = Facts::default();
+    let state = ViewState::default();
+    let ms = median_ms(|| {
+        std::hint::black_box(build_rows_with(&projects, &agents, &facts, &state));
+    });
+    eprintln!("build_rows project mode, 50 projects x 10 workspaces: {ms:.3} ms");
+    assert!(ms < 2., "{ms:.3} ms");
+}
+
+fn status_state() -> ViewState {
+    ViewState {
+        grouping: Grouping::Status,
+        ..Default::default()
+    }
+}
+
+fn labelled(id: &str, labels: &[&str]) -> WorkspaceNode {
+    WorkspaceNode {
+        labels: labels
+            .iter()
+            .map(|name| WorkspaceLabel {
+                name: name.to_string(),
+                color: "sky".into(),
+            })
+            .collect(),
+        ..workspace(id, false, &[])
+    }
+}
+
+#[test]
+fn status_grouping_lists_workspaces_under_status_headings_in_electron_order() {
+    let projects = [
+        project(
+            "a",
+            vec![
+                workspace("a-done", false, &[]),
+                workspace("a-run", false, &["run"]),
+                workspace("a-ask", false, &["ask"]),
+            ],
+        ),
+        project(
+            "b",
+            vec![
+                workspace("b-ready", false, &["ready"]),
+                workspace("b-pin", true, &[]),
+            ],
+        ),
+    ];
+    let agents = [
+        agent("run", "running", 0),
+        agent("ask", "idle", 1),
+        agent("ready", "idle", 0),
+    ];
+    let facts = Facts {
+        attention: [("ready".to_string(), (true, Some(AttentionReason::Finished)))].into(),
+        ..Default::default()
+    };
+    let rows = build_rows_with(&projects, &agents, &facts, &status_state());
+    // Needs input, failed, ready to review, working, done; the pinned section keeps its place;
+    // there are no project rows.
+    assert_eq!(
+        ids(&rows),
+        [
+            "pinned",
+            "w:b-pin",
+            "title",
+            "s:needs_input",
+            "w:a-ask",
+            "s:attention",
+            "w:b-ready",
+            "s:running",
+            "w:a-run",
+            "s:done",
+            "w:a-done",
+        ]
+    );
+    let Row::Workspace(row) = &rows[4] else {
+        panic!("workspace row")
+    };
+    assert_eq!(row.group, Group::Status(StatusBucket::NeedsInput));
+    assert!(row.block_end);
+}
+
+fn row(id: &str, project: &str, entered: Option<i64>) -> WorkspaceRow {
+    let node = WorkspaceNode {
+        status_entered_at: entered,
+        ..workspace(id, false, &[])
+    };
+    let projects = [ProjectNode {
+        name: project.into(),
+        ..self::project(project, vec![node])
+    }];
+    let rows = build_rows(&projects, &[], &ViewState::default());
+    let Some(Row::Workspace(row)) = rows
+        .into_iter()
+        .find(|row| matches!(row, Row::Workspace(_)))
+    else {
+        panic!("workspace row")
+    };
+    row
+}
+
+#[test]
+fn a_status_group_sorts_by_latest_entry_then_project_then_name() {
+    let groups = status_groups(vec![
+        row("old", "a", Some(100)),
+        row("none", "a", None),
+        row("new", "z", Some(900)),
+        row("tie-b", "b", Some(500)),
+        row("tie-a", "a", Some(500)),
+    ]);
+    assert_eq!(groups.len(), 1);
+    let order: Vec<&str> = groups[0].1.iter().map(|row| row.id.as_str()).collect();
+    // Newest first; equal times by project name; a row without a time last.
+    assert_eq!(order, ["new", "tie-a", "tie-b", "old", "none"]);
+}
+
+#[test]
+fn a_collapsed_status_group_keeps_its_heading_only() {
+    let projects = [project("a", vec![workspace("a1", false, &[])])];
+    let mut state = status_state();
+    state.collapsed_statuses.insert(StatusBucket::Done);
+    let rows = build_rows(&projects, &[], &state);
+    assert_eq!(ids(&rows), ["title", "s:done"]);
+    assert!(matches!(
+        rows[1],
+        Row::StatusHeader {
+            collapsed: true,
+            block_end: true,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn the_project_filter_keeps_the_chosen_project_even_without_workspaces() {
+    let projects = [
+        project("a", vec![workspace("a1", false, &[])]),
+        project("b", vec![]),
+    ];
+    let mut state = ViewState::default();
+    state.project_filter.insert("b".into());
+    assert_eq!(ids(&build_rows(&projects, &[], &state)), ["title", "p:b"]);
+    // A filter whose projects all went filters nothing.
+    state.project_filter = ["gone".to_string()].into();
+    assert_eq!(
+        ids(&build_rows(&projects, &[], &state)),
+        ["title", "p:a", "w:a1", "p:b"]
+    );
+    // Status grouping takes the same filter.
+    state.project_filter = ["a".to_string()].into();
+    state.grouping = Grouping::Status;
+    assert_eq!(
+        ids(&build_rows(&projects, &[], &state)),
+        ["title", "s:done", "w:a1"]
+    );
+}
+
+#[test]
+fn the_label_filter_keeps_workspaces_with_any_chosen_label_and_drops_empty_projects() {
+    let projects = [
+        project(
+            "a",
+            vec![labelled("a1", &["Bug", "UI"]), labelled("a2", &[])],
+        ),
+        project("b", vec![labelled("b1", &["  ui  "])]),
+        project("c", vec![labelled("c1", &["Docs"])]),
+    ];
+    let mut state = ViewState::default();
+    state.label_filter.insert("ui".into());
+    // The key ignores case and whitespace; project c has nothing left and goes.
+    assert_eq!(
+        ids(&build_rows(&projects, &[], &state)),
+        ["title", "p:a", "w:a1", "p:b", "w:b1"]
+    );
+    // The empty key selects a workspace with no label.
+    state.label_filter = ["".to_string()].into();
+    assert_eq!(
+        ids(&build_rows(&projects, &[], &state)),
+        ["title", "p:a", "w:a2"]
+    );
+    // Several keys include a workspace that carries any of them.
+    state.label_filter = ["docs".to_string(), "".to_string()].into();
+    assert_eq!(
+        ids(&build_rows(&projects, &[], &state)),
+        ["title", "p:a", "w:a2", "p:c", "w:c1"]
+    );
+}
+
+#[test]
+fn label_options_list_each_label_once_by_name() {
+    let projects = [
+        project("a", vec![labelled("a1", &["UI", "Bug"])]),
+        project("b", vec![labelled("b1", &[" ui "])]),
+    ];
+    let names: Vec<String> = label_options(&projects)
+        .into_iter()
+        .map(|option| option.key)
+        .collect();
+    assert_eq!(names, ["bug", "ui"]);
+}
+
+#[test]
+fn the_filter_rows_follow_the_electron_rules() {
+    assert!(!project_filter_visible(1));
+    assert!(project_filter_visible(2));
+    assert!(!label_filter_visible(false, false));
+    assert!(label_filter_visible(true, false));
+    // An active filter keeps its row so the filter can be undone.
+    assert!(label_filter_visible(false, true));
+    let projects = [
+        ("a".to_string(), "Alpha".to_string()),
+        ("b".into(), "Beta".into()),
+    ];
+    assert_eq!(
+        project_filter_value(&HashSet::new(), &projects),
+        "All projects"
+    );
+    assert_eq!(
+        project_filter_value(&["b".to_string()].into(), &projects),
+        "Beta"
+    );
+    assert_eq!(
+        project_filter_value(&["a".to_string(), "b".to_string()].into(), &projects),
+        "2 projects"
+    );
+    assert_eq!(
+        project_filter_value(&["gone".to_string()].into(), &projects),
+        "All projects"
+    );
+}
+
+#[test]
+fn building_500_workspaces_in_status_mode_stays_under_2_ms() {
+    let (projects, agents) = large_tree();
+    let facts = Facts::default();
+    let state = status_state();
+    let ms = median_ms(|| {
+        std::hint::black_box(build_rows_with(&projects, &agents, &facts, &state));
+    });
+    eprintln!("build_rows status mode, 50 projects x 10 workspaces: {ms:.3} ms");
+    assert!(ms < 2., "{ms:.3} ms");
+}
+
+// ---- row meta items (TASK-262) ----
+
+fn full_row() -> WorkspaceRow {
+    let mut row = row("w", "project", Some(1_000));
+    row.branch = Some("feat/x".into());
+    row.diff = Some((3, 1));
+    row.pull_request = Some(RowPullRequest {
+        number: 7,
+        url: "https://github.com/o/r/pull/7".into(),
+        state: PullRequestState::Open,
+        forge: "github".into(),
+        checks: Some(CheckSummary {
+            state: CheckSummaryState::Failed,
+            completed: 2,
+            total: 2,
+        }),
+    });
+    row.labels = vec![WorkspaceLabel {
+        name: "Bug".into(),
+        color: "red".into(),
+    }];
+    row.service = Some(ServiceSummary {
+        name: "web".into(),
+        health: Some("healthy".into()),
+    });
+    row
+}
+
+fn all_on() -> RowItems {
+    RowItems {
+        branch: true,
+        project: true,
+        pull_request: true,
+        services: true,
+        labels: true,
+    }
+}
+
+fn kinds(items: &[MetaItem]) -> Vec<&'static str> {
+    items
+        .iter()
+        .map(|item| match item {
+            MetaItem::Branch(_) => "branch",
+            MetaItem::Project(_) => "project",
+            MetaItem::PullRequest(_) => "pr",
+            MetaItem::Checks { .. } => "checks",
+            MetaItem::Services(_) => "services",
+            MetaItem::Labels(_) => "labels",
+        })
+        .collect()
+}
+
+#[test]
+fn meta_items_follow_the_electron_order() {
+    let row = full_row();
+    let items = meta_items(&row, &all_on(), ChecksDisplay::IconAndText, true);
+    assert_eq!(
+        kinds(&items),
+        ["branch", "project", "pr", "checks", "services", "labels"]
+    );
+    assert!(matches!(items[3], MetaItem::Checks { label: true, .. }));
+    let icon_only = meta_items(&row, &all_on(), ChecksDisplay::IconOnly, true);
+    assert!(matches!(
+        icon_only[3],
+        MetaItem::Checks { label: false, .. }
+    ));
+}
+
+#[test]
+fn toggles_off_give_no_items_and_checks_follow_their_own_choice() {
+    let row = full_row();
+    assert!(meta_items(&row, &RowItems::none(), ChecksDisplay::Hidden, true).is_empty());
+    // Checks show without the pull request beside them.
+    let items = meta_items(&row, &RowItems::none(), ChecksDisplay::IconAndText, true);
+    assert_eq!(kinds(&items), ["checks"]);
+    // Each toggle answers for itself.
+    let mut only_services = RowItems::none();
+    only_services.services = true;
+    assert_eq!(
+        kinds(&meta_items(
+            &row,
+            &only_services,
+            ChecksDisplay::Hidden,
+            true
+        )),
+        ["services"]
+    );
+}
+
+#[test]
+fn missing_data_hides_an_item() {
+    let mut row = full_row();
+    row.branch = None;
+    row.pull_request = None;
+    row.labels.clear();
+    row.service = None;
+    let items = meta_items(&row, &all_on(), ChecksDisplay::IconAndText, true);
+    assert_eq!(kinds(&items), ["project"]);
+    row.branch = Some(String::new());
+    row.project_name = String::new();
+    assert!(meta_items(&row, &all_on(), ChecksDisplay::IconAndText, true).is_empty());
+    // A pull request without checks draws no Checks item.
+    let mut no_checks = full_row();
+    no_checks.pull_request.as_mut().unwrap().checks = None;
+    let items = meta_items(&no_checks, &all_on(), ChecksDisplay::IconAndText, true);
+    assert!(!kinds(&items).contains(&"checks"));
+}
+
+#[test]
+fn the_project_name_shows_only_on_a_row_that_leads_with_the_project() {
+    let row = full_row();
+    let under_heading = meta_items(&row, &all_on(), ChecksDisplay::Hidden, false);
+    assert!(!kinds(&under_heading).contains(&"project"));
+}
+
+#[test]
+fn a_row_with_a_meta_line_has_another_shape() {
+    let mut bare = row("w", "project", None);
+    bare.branch = None;
+    let plain = Row::Workspace(bare);
+    let rich = Row::Workspace(full_row());
+    let items = all_on();
+    assert_ne!(
+        plain.shape_with(&items, ChecksDisplay::IconAndText),
+        rich.shape_with(&items, ChecksDisplay::IconAndText)
+    );
+    // Toggling every item off gives the same shape as a row without data.
+    assert_eq!(
+        rich.shape_with(&RowItems::none(), ChecksDisplay::Hidden)
+            .clone(),
+        plain.shape_with(&RowItems::none(), ChecksDisplay::Hidden)
+    );
+    assert!(has_meta_line(&full_row(), &items, ChecksDisplay::Hidden));
+    assert!(!has_meta_line(
+        &WorkspaceRow {
+            branch: None,
+            ..row("w", "p", None)
+        },
+        &items,
+        ChecksDisplay::Hidden
+    ));
+}
+
+#[test]
+fn the_trailing_slot_holds_the_diff_or_the_last_activity_never_both() {
+    let row = full_row();
+    assert_eq!(
+        trailing_slot(&row, Some(Trailing::DiffStats)),
+        Some(TrailingSlot::Diff {
+            added: 3,
+            removed: 1
+        })
+    );
+    assert_eq!(
+        trailing_slot(&row, Some(Trailing::LastActivity)),
+        Some(TrailingSlot::LastActivity(1_000))
+    );
+    assert_eq!(trailing_slot(&row, None), None);
+    let mut bare = full_row();
+    bare.diff = None;
+    bare.status_entered_at = None;
+    assert_eq!(trailing_slot(&bare, Some(Trailing::DiffStats)), None);
+    assert_eq!(trailing_slot(&bare, Some(Trailing::LastActivity)), None);
+}
+
+#[test]
+fn the_branch_title_falls_back_to_the_workspace_name() {
+    let mut row = full_row();
+    assert_eq!(row_title(&row, TitleSource::Title), "name-w");
+    assert_eq!(row_title(&row, TitleSource::Branch), "feat/x");
+    row.branch = None;
+    assert_eq!(row_title(&row, TitleSource::Branch), "name-w");
+    row.branch = Some(String::new());
+    assert_eq!(row_title(&row, TitleSource::Branch), "name-w");
+    assert_eq!(
+        workspace_label_for(&full_row(), false, TitleSource::Branch),
+        "feat/x"
+    );
+}
+
+fn script(name: &str, kind: &str, lifecycle: &str, health: Option<&str>) -> WorkspaceScript {
+    WorkspaceScript {
+        name: name.into(),
+        kind: kind.into(),
+        lifecycle: lifecycle.into(),
+        health: health.map(String::from),
+        terminal_id: None,
+        exit_code: None,
+        proxy_url: None,
+        local_proxy_url: None,
+        public_proxy_url: None,
+    }
+}
+
+#[test]
+fn the_service_summary_counts_running_services_and_prefers_an_unhealthy_one() {
+    assert_eq!(select_service_summary(&[]), None);
+    // A plain script and a stopped service say nothing about the workspace being up.
+    assert_eq!(
+        select_service_summary(&[
+            script("test", "script", "running", None),
+            script("old", "service", "stopped", Some("healthy")),
+        ]),
+        None
+    );
+    let summary = select_service_summary(&[
+        script("api", "service", "running", Some("healthy")),
+        script("web", "service", "running", Some("unhealthy")),
+    ])
+    .unwrap();
+    assert_eq!(summary.name, "web");
+    assert!(summary.unhealthy());
+    let first = select_service_summary(&[
+        script("api", "service", "running", Some("healthy")),
+        script("web", "service", "running", None),
+    ])
+    .unwrap();
+    assert_eq!(first.name, "api");
+}
+
+#[test]
+fn the_compact_time_matches_describe_compact_time_ago() {
+    let now = 1_760_000_000_000; // 2025-10-09T08:53:20Z
+    assert_eq!(compact_time_ago(now - 30_000, now), "now");
+    assert_eq!(compact_time_ago(now - 5 * 60_000, now), "5m");
+    assert_eq!(compact_time_ago(now - 3 * 3_600_000, now), "3h");
+    assert_eq!(compact_time_ago(now - 2 * 86_400_000, now), "2d");
+    // A week or more shows the date: 2025-09-20 is 19 days earlier.
+    assert_eq!(compact_time_ago(now - 19 * 86_400_000, now), "Sep 20");
+    assert_eq!(
+        compact_time_ago(1_709_251_200_000 + 3_600_000, now),
+        "Mar 1"
+    );
+}
+
+#[test]
+fn a_label_color_name_picks_its_identity_color() {
+    assert_eq!(label_color("violet"), Some(IDENTITY_COLORS[0]));
+    assert_eq!(label_color("blue"), Some(IDENTITY_COLORS[9]));
+    assert_eq!(label_color("plaid"), None);
+}
+
+#[test]
+fn rows_copy_the_meta_data_when_they_build() {
+    let node = WorkspaceNode {
+        pull_request: Some(bachuc_client::WorkspacePullRequest {
+            number: 9,
+            title: "t".into(),
+            url: "u".into(),
+            state: PullRequestState::Merged,
+            is_merged: true,
+            is_draft: false,
+            forge: "github".into(),
+            checks: None,
+        }),
+        labels: vec![WorkspaceLabel {
+            name: "UI".into(),
+            color: "sky".into(),
+        }],
+        ..workspace("w1", false, &[])
+    };
+    let facts = Facts {
+        services: [(
+            "w1".to_string(),
+            ServiceSummary {
+                name: "web".into(),
+                health: None,
+            },
+        )]
+        .into(),
+        ..Default::default()
+    };
+    let rows = build_rows_with(
+        &[project("a", vec![node])],
+        &[],
+        &facts,
+        &ViewState::default(),
+    );
+    let Row::Workspace(row) = &rows[2] else {
+        panic!("workspace row")
+    };
+    assert_eq!(row.pull_request.as_ref().map(|pr| pr.number), Some(9));
+    assert_eq!(row.labels.len(), 1);
+    assert_eq!(row.service.as_ref().map(|s| s.name.as_str()), Some("web"));
+}
+
+#[test]
+fn building_500_workspaces_with_meta_data_stays_under_2_ms() {
+    let (mut projects, agents) = large_tree();
+    for node in projects.iter_mut().flat_map(|p| &mut p.workspaces) {
+        node.labels = vec![WorkspaceLabel {
+            name: "Bug".into(),
+            color: "red".into(),
+        }];
+        node.pull_request = Some(bachuc_client::WorkspacePullRequest {
+            number: 1,
+            title: "title".into(),
+            url: "https://github.com/o/r/pull/1".into(),
+            state: PullRequestState::Open,
+            is_merged: false,
+            is_draft: false,
+            forge: "github".into(),
+            checks: None,
+        });
+    }
+    let facts = Facts::default();
+    let state = ViewState::default();
+    let ms = median_ms(|| {
+        std::hint::black_box(build_rows_with(&projects, &agents, &facts, &state));
+    });
+    eprintln!("build_rows project mode with PR and labels: {ms:.3} ms");
+    assert!(ms < 2., "{ms:.3} ms");
 }

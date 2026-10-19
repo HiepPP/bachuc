@@ -1152,8 +1152,9 @@ impl Composer {
         true
     }
 
-    /// Puts `text` in the input with the caret at its end.
-    fn set_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+    /// Puts `text` in the input with the caret at its end. The app uses it to put a rewound
+    /// prompt back.
+    pub fn set_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         let lines: Vec<&str> = text.split('\n').collect();
         let position = Position {
             line: (lines.len() - 1) as u32,
