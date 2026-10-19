@@ -11,7 +11,7 @@ use crate::chrome::{ExplorerResize, HANDLE_WIDTH, HeaderMenu, NoPreview};
 use crate::dock;
 use crate::new_workspace::{self, NewWorkspacePreset, NewWorkspaceScreen, SidePanelChanged};
 use crate::panes::{
-    AgentPane, Launch, LaunchItem, LazyAgentPane, NewTabPane, PaneFrame, launch_hints,
+    AgentPane, Launch, LaunchItem, LazyAgentPane, NewTabPane, PaneFrame, SubagentPane, launch_hints,
 };
 use crate::plugin_views::{
     OpenSurface, PluginViews, surface_body, surface_header, surface_overlay, surface_page,
@@ -38,7 +38,7 @@ use bachuc_command::{
     CommandCenter, CommandEvent, CommandFileEvent, FileResult, Shortcut, ShortcutsDialog,
     ShortcutsDialogEvent, data_dir, load_shortcuts,
 };
-use bachuc_composer::{Composer, ComposerEvent, DraftSeed};
+use bachuc_composer::{Composer, ComposerEvent, DraftSeed, row_label};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_explorer::{
     DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerFileEvent, ExplorerNoticeEvent,
@@ -99,6 +99,9 @@ pub(crate) enum PaneContent {
     Agent(Entity<AgentPane>),
     /// An agent tab not shown yet; `materialize` makes its `AgentPane`.
     LazyAgent(Entity<LazyAgentPane>),
+    /// A provider subagent's read-only timeline. It is not a daemon agent, so its identity
+    /// carries no `agent:` prefix.
+    Subagent(Entity<SubagentPane>),
     /// The workspace draft tab.
     Draft(Entity<WorkspaceDraftPane>),
     /// The New workspace screen, in a tab of the home view.
@@ -122,6 +125,7 @@ impl PaneContent {
         match self {
             PaneContent::Agent(view) => view.clone().into(),
             PaneContent::LazyAgent(view) => view.clone().into(),
+            PaneContent::Subagent(view) => view.clone().into(),
             PaneContent::Draft(view) => view.clone().into(),
             PaneContent::NewWorkspace(view) => view.clone().into(),
             PaneContent::History(view) => view.clone().into(),
@@ -140,6 +144,7 @@ impl PaneContent {
         matches!(
             self,
             PaneContent::Agent(_)
+                | PaneContent::Subagent(_)
                 | PaneContent::Draft(_)
                 | PaneContent::NewWorkspace(_)
                 | PaneContent::Terminal(_)
@@ -161,6 +166,8 @@ impl PaneContent {
                     .unwrap_or_default(),
             },
             PaneContent::File(_) => TabKind::File,
+            // A provider subagent is not a daemon agent, so it gets no agent tab menu.
+            PaneContent::Subagent(_) => TabKind::Other,
             // History, Pull request, and the other panes have no tab menu of their own.
             _ => TabKind::Other,
         }
@@ -1059,6 +1066,7 @@ impl Shell {
         };
         match &pane.content {
             PaneContent::Agent(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
+            PaneContent::Subagent(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
             PaneContent::Draft(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
             PaneContent::NewWorkspace(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
             // A terminal focuses itself when it opens and on a click.
@@ -2503,6 +2511,10 @@ impl Shell {
                         this.open_workspace_changes(workspace_id, window, cx)
                     }
                     ComposerEvent::OpenAgent { agent_id } => this.open_agent(agent_id, window, cx),
+                    ComposerEvent::OpenProviderSubagent {
+                        parent_agent_id,
+                        subagent_id,
+                    } => this.open_provider_subagent(parent_agent_id, subagent_id, window, cx),
                     _ => {}
                 }
             }),
@@ -2895,6 +2907,104 @@ impl Shell {
             Some(key) => self.activate_key(&workspace_id, &key, window, cx),
             None => self.open_agent_pane(&workspace_id, None, agent_id, window, cx),
         }
+        if workspace_id == HOME {
+            self.select(HOME.to_string(), window, cx);
+        }
+    }
+
+    /// Opens a provider child's read-only timeline in the parent's workspace, or focuses the
+    /// tab already open for it (`subagents/track.tsx` -> `provider-subagent-panel.tsx`).
+    fn open_provider_subagent(
+        &mut self,
+        parent_agent_id: &str,
+        subagent_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.client.read(cx).supports_provider_subagent_timeline() {
+            return;
+        }
+        let identity = provider_subagent_identity(parent_agent_id, subagent_id);
+        let target = {
+            let client = self.client.read(cx);
+            let workspace_id = agent_workspace(client.projects(), client.agents(), parent_agent_id);
+            agent_target(client.projects(), workspace_id.as_deref())
+        };
+        let workspace_id = match target {
+            Some(workspace_id) => {
+                self.open_workspace(workspace_id.clone(), window, cx);
+                workspace_id
+            }
+            None => {
+                self.ensure_home(window, cx);
+                self.close_page_surface(cx);
+                HOME.to_string()
+            }
+        };
+        if let Some(key) = self.find_identity(&workspace_id, &identity) {
+            self.activate_key(&workspace_id, &key, window, cx);
+            if workspace_id == HOME {
+                self.select(HOME.to_string(), window, cx);
+            }
+            return;
+        }
+        let row = self
+            .client
+            .read(cx)
+            .subagents(parent_agent_id)
+            .into_iter()
+            .find(|row| row.id == subagent_id);
+        let title: SharedString = row
+            .as_ref()
+            .and_then(row_label)
+            .map(Into::into)
+            .unwrap_or_else(|| "Subagent".into());
+        let provider = row
+            .as_ref()
+            .map(|row| row.provider.clone())
+            .unwrap_or_default();
+        let subtitle = row.as_ref().and_then(|row| {
+            let subtitle = row.subtitle.as_deref()?.trim();
+            (!subtitle.is_empty()).then(|| subtitle.to_string())
+        });
+        let key = self.next_key();
+        let client = self.client.clone();
+        let diagrams = self.diagrams.clone();
+        let timeline_key = bachuc_client::provider_subagent_key(parent_agent_id, subagent_id);
+        let view =
+            cx.new(|cx| SubagentPane::new(client, timeline_key, subtitle, diagrams, window, cx));
+        let timeline = view.read(cx).timeline.clone();
+        let subscriptions = vec![cx.subscribe_in(
+            &timeline,
+            window,
+            |this: &mut Shell, _, event: &TimelineEvent, window, cx| {
+                let TimelineEvent::OpenFile { cwd, path, line } = event;
+                this.open_file(cwd, path, *line, window, cx);
+            },
+        )];
+        let icon = agent_icon(Some(&provider));
+        self.put_pane(
+            &workspace_id,
+            key.clone(),
+            Some(identity),
+            title,
+            icon,
+            PaneContent::Subagent(view.clone()),
+            subscriptions,
+            window,
+            cx,
+        );
+        // `put_pane` reads a logo only for an agent key, so the child's provider logo is set
+        // here. The pane keeps the provider, so a theme change rebuilds it.
+        let logo = provider_logo(&provider, tokens(cx).foreground);
+        if let Some(open) = self.workspaces.get_mut(&workspace_id) {
+            if let Some(pane) = open.panes.get_mut(&key) {
+                pane.provider = Some(provider);
+            }
+            open.view
+                .update(cx, |workspace, cx| workspace.set_item_logo(&key, logo, cx));
+        }
+        view.update(cx, |pane, cx| pane.focus(window, cx));
         if workspace_id == HOME {
             self.select(HOME.to_string(), window, cx);
         }
@@ -3938,6 +4048,15 @@ pub(crate) fn reload_error(message: &str) -> String {
 /// Electron route change does. An overlay floats over the workspace and stays.
 pub(crate) fn closes_surface_on_open(presentation: SurfacePresentation) -> bool {
     presentation == SurfacePresentation::Page
+}
+
+/// The tab identity of a provider subagent. The `subagent:` prefix is not `agent:`, so
+/// `agent_of_key` never treats the child as a daemon agent.
+pub(crate) fn provider_subagent_identity(parent_agent_id: &str, subagent_id: &str) -> String {
+    format!(
+        "subagent:{}",
+        bachuc_client::provider_subagent_key(parent_agent_id, subagent_id)
+    )
 }
 
 /// The workspace that holds an agent: the tree's, else the agent's own `workspace_id` when the

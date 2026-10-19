@@ -29,3 +29,4 @@ pub use composer::{Composer, ComposerEvent};
 pub use dock::composer_dock;
 pub use draft::{DraftOptions, DraftSeed, DraftSubmission, SubmitIcon};
 pub use plugin_slots::CornerPills;
+pub use subagents_track::row_label;

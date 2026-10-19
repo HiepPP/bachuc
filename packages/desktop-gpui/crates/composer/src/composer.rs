@@ -122,6 +122,11 @@ pub enum ComposerEvent {
     OpenChanges { workspace_id: String },
     /// A Paseo subagent row: open that agent.
     OpenAgent { agent_id: String },
+    /// A provider subagent row: open its read-only timeline tab.
+    OpenProviderSubagent {
+        parent_agent_id: String,
+        subagent_id: String,
+    },
     /// A draft submit press; the text may be empty. The owner reads `draft_submission`.
     DraftSubmit,
     /// A draft `Action` pill opens this New workspace panel instead of running `on_press`.
@@ -2233,8 +2238,11 @@ impl Composer {
         });
         let watched = &self.watched;
         let weak = cx.weak_entity();
-        let (open_weak, archive_weak, changes_weak) = (weak.clone(), weak.clone(), weak);
+        let (open_weak, provider_weak, archive_weak, changes_weak) =
+            (weak.clone(), weak.clone(), weak.clone(), weak);
         let client = self.client.clone();
+        let supports_open = self.client.read(cx).supports_provider_subagent_timeline();
+        let parent_agent_id = self.agent_id.clone();
         let actions = SubagentActions {
             open: Rc::new(move |agent_id: &str, cx: &mut App| {
                 let agent_id = agent_id.to_string();
@@ -2242,6 +2250,20 @@ impl Composer {
                     .update(cx, |_, cx| cx.emit(ComposerEvent::OpenAgent { agent_id }))
                     .ok();
             }),
+            open_provider: Rc::new(
+                move |parent_agent_id: &str, subagent_id: &str, cx: &mut App| {
+                    let (parent_agent_id, subagent_id) =
+                        (parent_agent_id.to_string(), subagent_id.to_string());
+                    provider_weak
+                        .update(cx, |_, cx| {
+                            cx.emit(ComposerEvent::OpenProviderSubagent {
+                                parent_agent_id,
+                                subagent_id,
+                            })
+                        })
+                        .ok();
+                },
+            ),
             archive: Rc::new(move |agent_id: &str, cx: &mut App| {
                 client.update(cx, |client, cx| client.archive_agent(agent_id, cx));
             }),
@@ -2255,9 +2277,11 @@ impl Composer {
             .into_iter()
             .chain(subagents_pill(
                 watched.subagents.clone(),
+                &parent_agent_id,
                 progress,
                 ring,
                 badges,
+                supports_open,
                 actions,
             ))
             .chain(plugin_track)
