@@ -281,7 +281,8 @@ impl Shell {
         let host_index = initial_host(&hosts, preferred.as_deref());
         let client = Client::connect(hosts[host_index].clone(), cx);
         let diagrams = cx.new(|cx| DiagramRenderer::new(window, cx));
-        let sidebar = cx.new(|cx| Sidebar::new(client.clone(), window, cx));
+        let sidebar =
+            cx.new(|cx| Sidebar::with_data_dir(client.clone(), Some(data_dir()), window, cx));
         let shortcuts = load_shortcuts();
         let bindings = binding_specs(&shortcuts);
         cx.bind_keys(bindings.iter().map(BindingSpec::binding));
@@ -645,7 +646,8 @@ impl Shell {
             let _ = this.update(cx, |shell, _| shell.retired = None);
         })
         .detach();
-        self.sidebar = cx.new(|cx| Sidebar::new(client.clone(), window, cx));
+        self.sidebar =
+            cx.new(|cx| Sidebar::with_data_dir(client.clone(), Some(data_dir()), window, cx));
         if let Some(explorer) = self.explorer.take() {
             explorer.update(cx, |explorer, cx| explorer.set_visible(false, cx));
         }
@@ -4123,6 +4125,7 @@ mod tests {
             branch: None,
             pinned: false,
             agent_ids: agent_ids.iter().map(|id| id.to_string()).collect(),
+            ..Default::default()
         }
     }
 

@@ -1476,6 +1476,7 @@ mod tests {
                 branch: None,
                 pinned: false,
                 agent_ids: Vec::new(),
+                ..Default::default()
             }],
         }
     }

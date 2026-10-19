@@ -19,6 +19,7 @@ fn workspace(project: usize, n: usize, pinned: bool) -> WorkspaceNode {
         branch: None,
         pinned,
         agent_ids: Vec::new(),
+        ..Default::default()
     }
 }
 

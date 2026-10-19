@@ -33,6 +33,10 @@ pub use model::{
     ChangedFile, CheckoutStatus, DirectoryEvent, FileContent, FileEntry, FileKind, ProjectNode,
     QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
 };
+pub use model::{
+    CheckSummary, CheckSummaryState, PullRequestState, WorkspaceLabel, WorkspacePullRequest,
+    select_check_summary,
+};
 pub use model::{DirectorySuggestion, MatchMode, NewEntryKind};
 pub use model::{ForkBoundary, ForkContext, ForkCursor, HistoryEntry, HistoryPage};
 pub use model::{
@@ -40,6 +44,7 @@ pub use model::{
     PrStatus, PrStatusReply, PrTimelineItem, StashEntry, WorkspaceScript,
 };
 pub use model::{PromptEntry, PromptIndex};
+pub use model::{RewindMode, RewindModes};
 pub use plugins::{
     PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite, PluginStatus,
 };
@@ -1010,6 +1015,30 @@ impl Client {
         let receiver = self.core.fork_context(agent_id, boundary);
         self.publish(cx);
         reply_task(receiver, cx)
+    }
+
+    /// The rewind modes of the agent. All false when the host lacks the `rewind` feature.
+    pub fn rewind_modes(&self, agent_id: &str) -> RewindModes {
+        self.core.rewind_modes(agent_id)
+    }
+
+    /// Rewinds the agent to a user message. Resolves on the host's answer; `Err` holds its
+    /// error text. A rewind of the conversation reloads the timeline tail.
+    pub fn rewind(
+        &mut self,
+        agent_id: &str,
+        message_id: &str,
+        mode: RewindMode,
+        cx: &mut Context<Client>,
+    ) -> Task<Result<(), String>> {
+        let receiver = self.core.rewind(agent_id, message_id, mode);
+        self.publish(cx);
+        cx.background_spawn(async move {
+            receiver
+                .await
+                .unwrap_or_else(|_| Err(anyhow::anyhow!("client closed")))
+                .map_err(|error| error.to_string())
+        })
     }
 
     pub fn agent_provider_session_id(&self, agent_id: &str) -> Option<String> {

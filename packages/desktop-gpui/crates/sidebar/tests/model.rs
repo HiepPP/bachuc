@@ -28,6 +28,7 @@ fn workspace(id: &str, pinned: bool, agent_ids: &[&str]) -> WorkspaceNode {
         branch: Some("main".into()),
         pinned,
         agent_ids: agent_ids.iter().map(|id| id.to_string()).collect(),
+        ..Default::default()
     }
 }
 

@@ -7,7 +7,7 @@
 
 use crate::metrics::{ADD_PROJECT_MIN, LABEL_LINE, NAV_ROW_MIN};
 use crate::model::{
-    Facts, Group, ProjectRow, Row, RowShape, StatusBucket, ViewState, WorkspaceRow,
+    Facts, Group, ProjectRow, Row, RowShape, StatusBucket, WorkspaceRow,
     archive_prompt_for_checkout, changed_range, clamp_width, format_diff_count, identity_color,
     project_initial, workspace_label,
 };
@@ -16,6 +16,7 @@ use crate::plugin::{
     is_horizontal, nav_press, nav_rows, pick_title, run_in_order, slide_frame, slide_out_ms,
     submenu_row_label, submenu_trailing, visible_projects, wheel_deltas,
 };
+use crate::prefs::SidebarPrefs;
 use crate::ring::{FRAME as RING_FRAME, Knockout, RunningRing};
 use bachuc_client::{Client, ClientEvent, DirectoryEvent, ProjectNode};
 use bachuc_icons::{IconName, icon};
@@ -39,6 +40,7 @@ use gpui_kit::*;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -214,7 +216,11 @@ impl RenderOnce for KebabButton {
 pub struct Sidebar {
     client: Entity<Client>,
     selected: Option<String>,
-    state: ViewState,
+    prefs: SidebarPrefs,
+    /// Where `sidebar.json` lives. None keeps the prefs in memory only.
+    data_dir: Option<PathBuf>,
+    /// Whether the first project list already dropped the prefs of projects that went.
+    pruned: bool,
     rows: Vec<Row>,
     shapes: Vec<RowShape>,
     list: ListState,
@@ -243,7 +249,23 @@ pub struct Sidebar {
 }
 
 impl Sidebar {
+    /// A sidebar that keeps its collapse state in memory only.
     pub fn new(client: Entity<Client>, window: &mut Window, cx: &mut Context<Sidebar>) -> Sidebar {
+        Self::with_data_dir(client, None, window, cx)
+    }
+
+    /// A sidebar that loads its prefs from `sidebar.json` in `data_dir` and saves them there on
+    /// each toggle.
+    pub fn with_data_dir(
+        client: Entity<Client>,
+        data_dir: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Sidebar>,
+    ) -> Sidebar {
+        let prefs = data_dir
+            .as_deref()
+            .map(SidebarPrefs::load_from)
+            .unwrap_or_default();
         let subscriptions = vec![
             cx.subscribe(&client, |this, _, event: &ClientEvent, cx| match event {
                 ClientEvent::Connected
@@ -262,7 +284,9 @@ impl Sidebar {
         let mut sidebar = Sidebar {
             client,
             selected: None,
-            state: ViewState::default(),
+            prefs,
+            data_dir,
+            pruned: false,
             rows: Vec::new(),
             shapes: Vec::new(),
             list: ListState::new(0, ListAlignment::Top, px(OVERDRAW)),
@@ -434,6 +458,7 @@ impl Sidebar {
 
     /// Builds the rows again from the client and redraws only when something changed.
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.prune_stale_prefs(cx);
         let client = self.client.read(cx);
         let rows = if client.projects().is_empty() && !client.is_connected() {
             // Nothing to say before the first answer.
@@ -465,7 +490,7 @@ impl Sidebar {
                 &visible,
                 client.agents(),
                 &facts,
-                &self.state,
+                &self.prefs.view,
             )
         };
         if rows == self.rows {
@@ -495,22 +520,55 @@ impl Sidebar {
         cx.notify();
     }
 
-    fn toggle_project(&mut self, id: &str, cx: &mut Context<Self>) {
-        if !self.state.collapsed_projects.remove(id) {
-            self.state.collapsed_projects.insert(id.to_string());
+    /// The first project list drops the stored ids of projects that no longer exist. An empty
+    /// list proves nothing, because it is also the state before the first answer.
+    fn prune_stale_prefs(&mut self, cx: &mut Context<Self>) {
+        if self.pruned {
+            return;
         }
+        let projects = self.client.read(cx).projects();
+        if projects.is_empty() {
+            return;
+        }
+        let known: HashSet<&str> = projects.iter().map(|project| project.id.as_str()).collect();
+        let changed = self.prefs.retain_projects(&known);
+        self.pruned = true;
+        if changed {
+            self.save_prefs();
+        }
+    }
+
+    /// Called on a toggle only. A failed save logs a warning and the sidebar keeps working.
+    fn save_prefs(&self) {
+        let Some(dir) = &self.data_dir else {
+            return;
+        };
+        if let Err(error) = self.prefs.save_to(dir) {
+            log::warn!("cannot save sidebar.json: {error}");
+        }
+    }
+
+    fn toggle_project(&mut self, id: &str, cx: &mut Context<Self>) {
+        let collapsed = &mut self.prefs.view.collapsed_projects;
+        if !collapsed.remove(id) {
+            collapsed.insert(id.to_string());
+        }
+        self.save_prefs();
         self.refresh(cx);
     }
 
     fn toggle_pinned(&mut self, cx: &mut Context<Self>) {
-        self.state.pinned_collapsed = !self.state.pinned_collapsed;
+        self.prefs.view.pinned_collapsed = !self.prefs.view.pinned_collapsed;
+        self.save_prefs();
         self.refresh(cx);
     }
 
     fn toggle_group(&mut self, group: Group, cx: &mut Context<Self>) {
-        if !self.state.expanded_groups.remove(&group) {
-            self.state.expanded_groups.insert(group);
+        let expanded = &mut self.prefs.view.expanded_groups;
+        if !expanded.remove(&group) {
+            expanded.insert(group);
         }
+        self.save_prefs();
         self.refresh(cx);
     }
 
