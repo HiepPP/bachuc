@@ -118,11 +118,17 @@ fn register_app_actions(cx: &mut App) {
     });
 }
 
-fn on_main_window(cx: &mut App, run: impl FnOnce(&mut Window)) {
+/// Deferred, because a menu item or key on the active window dispatches inside that window's
+/// update, where a nested `update` of the same window fails.
+fn on_main_window(cx: &mut App, run: impl FnOnce(&mut Window) + 'static) {
     let Some(handle) = cx.active_window().or_else(|| cx.windows().first().copied()) else {
         return;
     };
-    let _ = handle.update(cx, |_, window, _| run(window));
+    cx.defer(move |cx| {
+        if let Err(error) = handle.update(cx, |_, window, _| run(window)) {
+            log::warn!("window menu action failed: {error}");
+        }
+    });
 }
 
 fn main() {
