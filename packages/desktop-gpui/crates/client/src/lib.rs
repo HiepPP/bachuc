@@ -30,8 +30,9 @@ pub use model::{
     CheckoutDetails, CommitFile, CommitList, CommitSummary, DiffStat, FileDiff, FileDiffStatus,
 };
 pub use model::{
-    ChangedFile, CheckoutStatus, DirectoryEvent, FileContent, FileEntry, FileKind, ProjectNode,
-    QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
+    BackgroundProcess, ChangedFile, CheckoutStatus, DirectoryEvent, FileContent, FileEntry,
+    FileKind, ProjectNode, QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior,
+    WorkspaceNode,
 };
 pub use model::{
     CheckSummary, CheckSummaryState, PullRequestState, WorkspaceLabel, WorkspacePullRequest,
@@ -72,6 +73,64 @@ impl EventEmitter<ClientEvent> for Client {}
 impl EventEmitter<DirectoryEvent> for Client {}
 impl EventEmitter<PluginEvent> for Client {}
 impl EventEmitter<GitStatusEvent> for Client {}
+
+/// The timeline key of a provider subagent, built as the app's stream ID: `provider:`, then
+/// both ids percent-encoded as `encodeURIComponent` does, so ids with `:` cannot collide.
+pub fn provider_subagent_key(parent_agent_id: &str, subagent_id: &str) -> String {
+    format!(
+        "provider:{}:{}",
+        encode_component(parent_agent_id),
+        encode_component(subagent_id)
+    )
+}
+
+/// Splits a `provider_subagent_key` back into its parent and child ids. A plain agent id
+/// gives `None`.
+pub fn parse_provider_subagent_key(key: &str) -> Option<(String, String)> {
+    let rest = key.strip_prefix("provider:")?;
+    let (parent, child) = rest.split_once(':')?;
+    Some((decode_component(parent)?, decode_component(child)?))
+}
+
+/// The characters `encodeURIComponent` leaves as they are.
+fn encode_component(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'!'
+            | b'~'
+            | b'*'
+            | b'\''
+            | b'('
+            | b')' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+fn decode_component(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
 
 /// Waits for a core reply on the background executor.
 fn reply_task<T: Send + 'static>(
@@ -223,6 +282,12 @@ impl Client {
     pub fn load_older(&mut self, agent_id: &str, cx: &mut Context<Client>) {
         self.core.load_older(agent_id);
         self.publish(cx);
+    }
+
+    /// Whether the host streams provider subagent timelines
+    /// (`features.projectedSubagentTimeline`).
+    pub fn supports_provider_subagent_timeline(&self) -> bool {
+        self.core.supports_provider_subagent_timeline()
     }
 
     /// Sends a prompt. `images` are `{data, mimeType}` objects with base64 data.
@@ -494,6 +559,27 @@ impl Client {
 
     pub fn queued_prompts(&self, agent_id: &str) -> Vec<QueuedPrompt> {
         self.core.queued_prompts(agent_id)
+    }
+
+    /// The agent's background processes, in the daemon's order.
+    pub fn background_processes(&self, agent_id: &str) -> Vec<BackgroundProcess> {
+        self.core.background_processes(agent_id)
+    }
+
+    /// Whether the host can stop a background process.
+    pub fn supports_background_stop(&self) -> bool {
+        self.core.supports_background_stop()
+    }
+
+    /// Stops one background process. A refused stop logs a warning.
+    pub fn stop_background_process(
+        &mut self,
+        agent_id: &str,
+        process_id: &str,
+        cx: &mut Context<Client>,
+    ) {
+        self.core.stop_background_process(agent_id, process_id);
+        self.publish(cx);
     }
 
     pub fn cancel_queued(&mut self, agent_id: &str, queued_id: &str, cx: &mut Context<Client>) {

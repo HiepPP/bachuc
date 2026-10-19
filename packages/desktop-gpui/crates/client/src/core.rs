@@ -11,10 +11,10 @@ use crate::model::{
 };
 use crate::model::{
     AgentControls, AgentFeature, AgentFeatureKind, AgentFeatureOption, AgentSummary,
-    AttentionReason, ChangedFile, CheckoutDetails, CheckoutStatus, ClientEvent, CommitList,
-    DiffStat, DirectoryEvent, FileContent, FileDiff, FileEntry, ProjectNode, ProviderSummary,
-    QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode, WorkspaceSummary,
-    provider_label,
+    AttentionReason, BackgroundProcess, ChangedFile, CheckoutDetails, CheckoutStatus, ClientEvent,
+    CommitList, DiffStat, DirectoryEvent, FileContent, FileDiff, FileEntry, ProjectNode,
+    ProviderSummary, QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
+    WorkspaceSummary, provider_label,
 };
 use crate::model::{DirectorySuggestion, MatchMode, NewEntryKind};
 use crate::model::{ForkBoundary, ForkContext, HistoryEntry, HistoryPage};
@@ -30,6 +30,7 @@ use crate::model::{RewindMode, RewindModes};
 use crate::plugins::{self, PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite};
 use crate::terminal::{self, TerminalFrame, TerminalHandle};
 use crate::timeline::{FetchPlan, LiveRow, TimelineState, TimelineSync};
+use crate::{parse_provider_subagent_key, provider_subagent_key};
 use anyhow::anyhow;
 use bachuc_protocol::ServerInfo;
 use bachuc_protocol::generated::UpsertAgentFeaturesItem;
@@ -113,6 +114,12 @@ enum Pending {
     Models(String),
     Timeline {
         agent_id: String,
+        plan: FetchPlan,
+        generation: u64,
+    },
+    /// A child timeline page; `key` is its `provider_subagent_key`.
+    ProviderTimeline {
+        key: String,
         plan: FetchPlan,
         generation: u64,
     },
@@ -275,6 +282,8 @@ struct AgentExtra {
     queue_held: bool,
     /// `capabilities.supportsRewind*`.
     rewind: RewindModes,
+    /// The snapshot `backgroundProcesses`, in the daemon's order.
+    background_processes: Vec<BackgroundProcess>,
 }
 
 /// The newest `todo` item of a viewed timeline, kept as pages and live rows arrive.
@@ -385,6 +394,8 @@ pub struct ClientCore {
     workspaces: Vec<WorkspaceSummary>,
     providers: Vec<ProviderSummary>,
     viewed: Vec<String>,
+    /// Viewed provider subagent keys, which never reach an agent request.
+    viewed_provider_subagents: Vec<String>,
     timelines: HashMap<String, TimelineSync>,
     timeline_subscription: Option<String>,
     latest_timeline_request: Option<String>,
@@ -439,6 +450,7 @@ impl ClientCore {
             workspaces: Vec::new(),
             providers: Vec::new(),
             viewed: Vec::new(),
+            viewed_provider_subagents: Vec::new(),
             timelines: HashMap::new(),
             timeline_subscription: None,
             latest_timeline_request: None,
@@ -508,6 +520,23 @@ impl ClientCore {
             .get(agent_id)
             .map(|extra| extra.queue.clone())
             .unwrap_or_default()
+    }
+
+    /// The agent's background processes, in the daemon's order.
+    pub fn background_processes(&self, agent_id: &str) -> Vec<BackgroundProcess> {
+        self.extras
+            .get(agent_id)
+            .map(|extra| extra.background_processes.clone())
+            .unwrap_or_default()
+    }
+
+    /// Whether the host can stop a background process (`features.agentBackgroundProcesses`).
+    pub fn supports_background_stop(&self) -> bool {
+        self.typed_server_info
+            .as_ref()
+            .and_then(|info| info.features.as_ref())
+            .and_then(|features| features.agent_background_processes)
+            == Some(true)
     }
 
     /// The thinking options of the agent's model. `None` when the model has none.
@@ -671,6 +700,10 @@ impl ClientCore {
                     for agent_id in self.viewed.clone() {
                         self.request_provider_subagents(&agent_id);
                     }
+                    // A reconnect starts every viewed child timeline again.
+                    for key in self.viewed_provider_subagents.clone() {
+                        self.request_provider_subagent_tail(&key);
+                    }
                     self.request_label_list();
                 }
             }
@@ -796,6 +829,10 @@ impl ClientCore {
     }
 
     fn send_plan(&mut self, agent_id: &str, plan: FetchPlan) {
+        if parse_provider_subagent_key(agent_id).is_some() {
+            self.send_provider_plan(agent_id, plan);
+            return;
+        }
         let Some(sync) = self.timelines.get(agent_id) else {
             return;
         };
@@ -809,6 +846,37 @@ impl ClientCore {
                 generation,
             },
         );
+    }
+
+    /// Sends a child timeline request for a provider subagent key.
+    fn send_provider_plan(&mut self, key: &str, plan: FetchPlan) {
+        if !self.supports_provider_subagent_timeline() {
+            return;
+        }
+        let Some((parent_agent_id, subagent_id)) = parse_provider_subagent_key(key) else {
+            return;
+        };
+        let Some(sync) = self.timelines.get(key) else {
+            return;
+        };
+        let generation = sync.generation();
+        let message = provider_subagent_timeline_request(&parent_agent_id, &subagent_id, &plan);
+        let _ = self.request(
+            message,
+            Pending::ProviderTimeline {
+                key: key.to_string(),
+                plan,
+                generation,
+            },
+        );
+    }
+
+    fn request_provider_subagent_tail(&mut self, key: &str) {
+        let Some(sync) = self.timelines.get_mut(key) else {
+            return;
+        };
+        let plan = sync.plan_tail();
+        self.send_provider_plan(key, plan);
     }
 
     fn update_timeline_subscription(&mut self) {
@@ -842,6 +910,10 @@ impl ClientCore {
     // ---- public requests ----
 
     pub fn view_agent(&mut self, agent_id: &str) {
+        if parse_provider_subagent_key(agent_id).is_some() {
+            self.view_provider_subagent(agent_id);
+            return;
+        }
         if self.viewed.iter().any(|id| id == agent_id) {
             return;
         }
@@ -872,6 +944,29 @@ impl ClientCore {
             == Some(true)
     }
 
+    /// Whether the host streams provider subagent timelines
+    /// (`features.projectedSubagentTimeline`).
+    pub fn supports_provider_subagent_timeline(&self) -> bool {
+        self.typed_server_info
+            .as_ref()
+            .and_then(|info| info.features.as_ref())
+            .and_then(|features| features.projected_subagent_timeline)
+            == Some(true)
+    }
+
+    /// Views a child timeline under its provider subagent key. A second call for the same key
+    /// sends nothing; a reconnect refetches the tail.
+    fn view_provider_subagent(&mut self, key: &str) {
+        if self.viewed_provider_subagents.iter().any(|id| id == key) {
+            return;
+        }
+        self.viewed_provider_subagents.push(key.to_string());
+        self.timelines.insert(key.to_string(), TimelineSync::new());
+        if self.ready {
+            self.request_provider_subagent_tail(key);
+        }
+    }
+
     /// Lists the provider subagents of a viewed agent when the host has them.
     fn request_provider_subagents(&mut self, agent_id: &str) {
         if !self.supports_provider_subagents() {
@@ -883,7 +978,24 @@ impl ClientCore {
         );
     }
 
+    /// The provider of a listed subagent, for a child page whose reply has no `provider`.
+    fn provider_subagent_provider(&self, key: &str) -> Option<String> {
+        let (parent, child) = parse_provider_subagent_key(key)?;
+        self.provider_subagents
+            .get(&parent)?
+            .iter()
+            .find(|subagent| subagent.row.id == child)
+            .map(|subagent| subagent.row.provider.clone())
+            .filter(|provider| !provider.is_empty())
+    }
+
     pub fn unview_agent(&mut self, agent_id: &str) {
+        if parse_provider_subagent_key(agent_id).is_some() {
+            self.viewed_provider_subagents.retain(|id| id != agent_id);
+            self.timelines.remove(agent_id);
+            self.dirty_timelines.remove(agent_id);
+            return;
+        }
         let Some(index) = self.viewed.iter().position(|id| id == agent_id) else {
             return;
         };
@@ -1973,6 +2085,15 @@ impl ClientCore {
         );
     }
 
+    /// Stops one background process of the agent. A refused stop logs a warning.
+    pub fn stop_background_process(&mut self, agent_id: &str, process_id: &str) {
+        let _ = self.request(
+            json!({"type": "agent.background_process.stop.request", "agentId": agent_id,
+                   "processId": process_id}),
+            Pending::Action("agent.background_process.stop"),
+        );
+    }
+
     pub fn set_mode(&mut self, agent_id: &str, mode_id: &str) {
         let _ = self.request(
             json!({"type": "set_agent_mode_request", "agentId": agent_id, "modeId": mode_id}),
@@ -2488,6 +2609,7 @@ impl ClientCore {
                     }
                     self.directory_changed = true;
                 }
+                Some("timeline") => self.provider_subagent_timeline_update(payload),
                 Some("remove") => {
                     let parent = payload["parentAgentId"].as_str().unwrap_or_default();
                     let id = payload["subagentId"].as_str().unwrap_or_default();
@@ -2495,10 +2617,71 @@ impl ClientCore {
                         rows.retain(|row| row.row.id != id);
                         self.directory_changed = true;
                     }
+                    // A removed child drops its timeline, as the app's store does.
+                    let key = provider_subagent_key(parent, id);
+                    if self
+                        .viewed_provider_subagents
+                        .iter()
+                        .any(|viewed| viewed == &key)
+                    {
+                        self.viewed_provider_subagents
+                            .retain(|viewed| viewed != &key);
+                        self.timelines.remove(&key);
+                        self.dirty_timelines.insert(key);
+                    }
                 }
                 _ => {}
             },
             _ => {}
+        }
+    }
+
+    /// Applies a live child timeline item for a viewed key. An item of another epoch, or one
+    /// whose seq is not above the last, is dropped.
+    fn provider_subagent_timeline_update(&mut self, payload: &Value) {
+        let (Some(parent), Some(child)) = (
+            payload["parentAgentId"].as_str(),
+            payload["subagentId"].as_str(),
+        ) else {
+            return;
+        };
+        let key = provider_subagent_key(parent, child);
+        if !self
+            .viewed_provider_subagents
+            .iter()
+            .any(|viewed| *viewed == key)
+        {
+            return;
+        }
+        let (Some(seq), Some(epoch)) = (payload["seq"].as_u64(), payload["epoch"].as_str()) else {
+            return;
+        };
+        let Some(sync) = self.timelines.get_mut(&key) else {
+            return;
+        };
+        if sync.epoch().is_some_and(|current| current != epoch) {
+            return;
+        }
+        let entry = json!({
+            "provider": payload["provider"],
+            "item": payload["item"],
+            "timestamp": payload["timestamp"],
+            "seqStart": seq,
+            "seqEnd": seq,
+            "sourceSeqRanges": [{"startSeq": seq, "endSeq": seq}],
+            "collapsed": [],
+        });
+        let version = sync.state.version;
+        let plan = sync.on_live(LiveRow {
+            seq,
+            epoch: epoch.to_string(),
+            entry,
+        });
+        if sync.state.version != version {
+            self.dirty_timelines.insert(key.clone());
+        }
+        if let Some(plan) = plan {
+            self.send_provider_plan(&key, plan);
         }
     }
 
@@ -2637,6 +2820,33 @@ impl ClientCore {
                 }
                 if let Some(next) = next {
                     self.send_plan(&agent_id, next);
+                }
+            }
+            Pending::ProviderTimeline {
+                key,
+                plan,
+                generation,
+            } => {
+                let page = match &error {
+                    Some(error) if kind == "rpc_error" => json!({"error": error}),
+                    _ => payload.clone(),
+                };
+                let provider = page["provider"]
+                    .as_str()
+                    .map(str::to_string)
+                    .or_else(|| self.provider_subagent_provider(&key))
+                    .unwrap_or_else(|| "agent".to_string());
+                let page = provider_subagent_page(&page, &provider);
+                let Some(sync) = self.timelines.get_mut(&key) else {
+                    return;
+                };
+                let version = sync.state.version;
+                let next = sync.on_page(&plan, generation, &page);
+                if sync.state.version != version {
+                    self.dirty_timelines.insert(key.clone());
+                }
+                if let Some(next) = next {
+                    self.send_provider_plan(&key, next);
                 }
             }
             Pending::TimelineSubscription => {
@@ -3394,6 +3604,7 @@ impl ClientCore {
             .or_else(|| agent["persistence"]["sessionId"].as_str())
             .map(str::to_string);
         extra.queue_held = agent["queue"]["held"] == true;
+        extra.background_processes = BackgroundProcess::parse_all(&agent["backgroundProcesses"]);
         let capabilities = &agent["capabilities"];
         extra.rewind = RewindModes {
             conversation: capabilities["supportsRewindConversation"] == true,
@@ -4005,6 +4216,95 @@ fn queued_prompts(queue: &Value) -> Vec<QueuedPrompt> {
             })
         })
         .collect()
+}
+
+/// The child timeline page size, as the app's `TIMELINE_FETCH_PAGE_SIZE`.
+const PROVIDER_TIMELINE_LIMIT: u64 = 40;
+
+/// The `agent.provider_subagents.timeline.get.request` fields for a child fetch plan.
+fn provider_subagent_timeline_request(
+    parent_agent_id: &str,
+    subagent_id: &str,
+    plan: &FetchPlan,
+) -> Value {
+    let cursor = |epoch: &str, seq: u64| json!({"epoch": epoch, "seq": seq});
+    let (direction, cursor, limit) = match plan {
+        FetchPlan::Tail => ("tail", None, PROVIDER_TIMELINE_LIMIT),
+        FetchPlan::After { epoch, seq } | FetchPlan::Resume { epoch, seq } => {
+            ("after", Some(cursor(epoch, *seq)), PROVIDER_TIMELINE_LIMIT)
+        }
+        FetchPlan::Before { epoch, seq } => {
+            ("before", Some(cursor(epoch, *seq)), PROVIDER_TIMELINE_LIMIT)
+        }
+    };
+    let mut request = json!({
+        "type": "agent.provider_subagents.timeline.get.request",
+        "parentAgentId": parent_agent_id,
+        "subagentId": subagent_id,
+        "direction": direction,
+        "limit": limit,
+    });
+    if let Some(cursor) = cursor {
+        request["cursor"] = cursor;
+    }
+    request
+}
+
+/// Maps a child timeline response into the page `TimelineSync` reads. The rows lack
+/// `provider` and `collapsed`, and carry `seq` with optional start and end.
+fn provider_subagent_page(payload: &Value, provider: &str) -> Value {
+    let mut entries: Vec<Value> = payload["rows"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let seq = row["seq"].as_u64()?;
+            let start = row["seqStart"].as_u64().unwrap_or(seq);
+            let end = row["seqEnd"].as_u64().unwrap_or(seq);
+            let ranges = row
+                .get("sourceSeqRanges")
+                .cloned()
+                .unwrap_or_else(|| json!([{"startSeq": seq, "endSeq": seq}]));
+            Some(json!({
+                "provider": provider,
+                "item": row["item"],
+                "timestamp": row["timestamp"],
+                "seqStart": start,
+                "seqEnd": end,
+                "sourceSeqRanges": ranges,
+                "collapsed": [],
+            }))
+        })
+        .collect();
+    entries.sort_by_key(|entry| entry["seqStart"].as_u64().unwrap_or(0));
+    let first = entries.first().and_then(|entry| entry["seqStart"].as_u64());
+    let last = entries
+        .iter()
+        .filter_map(|entry| entry["seqEnd"].as_u64())
+        .max();
+    let cursor = |key: &str, seq: Option<u64>| {
+        if payload[key].is_null() {
+            seq.map(|seq| json!({"seq": seq})).unwrap_or(Value::Null)
+        } else {
+            payload[key].clone()
+        }
+    };
+    let window = if payload["window"].is_object() {
+        payload["window"].clone()
+    } else {
+        json!({"maxSeq": last.unwrap_or(0)})
+    };
+    json!({
+        "epoch": payload["epoch"],
+        "reset": payload["reset"],
+        "entries": entries,
+        "startCursor": cursor("startCursor", first),
+        "endCursor": cursor("endCursor", last),
+        "window": window,
+        "hasOlder": payload["hasOlder"],
+        "hasNewer": payload["hasNewer"],
+        "error": payload["error"],
+    })
 }
 
 /// The outcome of a project config response: `ok` or an error code such as

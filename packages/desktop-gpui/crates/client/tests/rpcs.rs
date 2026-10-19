@@ -10,7 +10,7 @@ use bachuc_client::{
     ForkBoundary, ForkCursor, GitAction, GitActionReply, GitStatus, GitStatusEvent, HistoryEntry,
     HistoryPage, MatchMode, MergeMethod, NewEntryKind, PrCheck, PrMergeCapability, PrStatus,
     PrTimelineItem, ProjectNode, QueuedPrompt, RewindMode, RewindModes, StashEntry, TurnBehavior,
-    WorkspaceNode, WorkspaceScript,
+    WorkspaceNode, WorkspaceScript, parse_provider_subagent_key, provider_subagent_key,
 };
 use bachuc_protocol::generated::ServerInfoPermissionsItem;
 use common::{FakeServer, Harness, agent_snapshot, session};
@@ -2857,4 +2857,355 @@ fn a_failed_rewind_resolves_with_the_error_and_changes_no_client_state() {
         "Rewind failed"
     );
     assert_eq!(tail_fetches(&server), before);
+}
+
+// ---- background processes (TASK-264) ----
+
+fn background_process(id: &str) -> Value {
+    json!({"id": id, "kind": "bash", "description": format!("run {id}"),
+           "command": "sleep 1", "status": "running", "toolCallId": "tc1",
+           "startedAt": "2026-10-19T10:00:00.000Z", "endedAt": null, "exitCode": null,
+           "outputFile": "/tmp/out", "tail": ["a", "b"]})
+}
+
+fn agent_with_processes(id: &str, processes: Value) -> Value {
+    let mut agent = agent_snapshot(id, "running");
+    agent["backgroundProcesses"] = processes;
+    json!({"type": "agent_update", "payload": {"kind": "upsert", "agent": agent}})
+}
+
+#[test]
+fn an_agent_snapshot_keeps_its_background_processes() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    let mut completed = background_process("p1");
+    completed["command"] = Value::Null;
+    completed["status"] = json!("completed");
+    completed["endedAt"] = json!("2026-10-19T10:01:00.000Z");
+    completed["exitCode"] = json!(0);
+    let running = background_process("p2");
+    server.broadcast(agent_with_processes("a1", json!([completed, running])));
+    assert!(
+        harness.pump_until(WAIT, |h| h.core.background_processes("a1").len() == 2),
+        "both processes arrive"
+    );
+    let processes = harness.core.background_processes("a1");
+    assert_eq!(
+        processes.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        ["p1", "p2"],
+        "daemon order"
+    );
+    assert_eq!(processes[0].command, None);
+    assert_eq!(processes[0].exit_code, Some(0));
+    assert_eq!(processes[0].status, "completed");
+    assert_eq!(processes[0].tail, ["a", "b"]);
+    assert_eq!(
+        processes[0].ended_at_ms.unwrap() - processes[0].started_at_ms,
+        60_000
+    );
+    assert_eq!(processes[1].command.as_deref(), Some("sleep 1"));
+    assert_eq!(processes[1].ended_at_ms, None);
+    assert_eq!(processes[1].exit_code, None);
+    assert_eq!(processes[1].tool_call_id.as_deref(), Some("tc1"));
+    assert_eq!(processes[1].output_file.as_deref(), Some("/tmp/out"));
+}
+
+#[test]
+fn an_upsert_without_processes_clears_the_list() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    server.broadcast(agent_with_processes(
+        "a1",
+        json!([background_process("p1")]),
+    ));
+    assert!(harness.pump_until(WAIT, |h| { h.core.background_processes("a1").len() == 1 }));
+    let agent = agent_snapshot("a1", "running");
+    server
+        .broadcast(json!({"type": "agent_update", "payload": {"kind": "upsert", "agent": agent}}));
+    assert!(harness.pump_until(WAIT, |h| { h.core.background_processes("a1").is_empty() }));
+    server.broadcast(agent_with_processes("a1", json!([])));
+    harness.pump_until(Duration::from_millis(300), |_| false);
+    assert!(harness.core.background_processes("a1").is_empty());
+}
+
+#[test]
+fn a_process_with_an_unreadable_start_or_end_is_dropped_or_kept_open() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    let mut unreadable_start = background_process("bad");
+    unreadable_start["startedAt"] = json!("not a date");
+    let mut unreadable_end = background_process("p2");
+    unreadable_end["endedAt"] = json!("not a date");
+    server.broadcast(agent_with_processes(
+        "a1",
+        json!([unreadable_start, unreadable_end]),
+    ));
+    assert!(harness.pump_until(WAIT, |h| { h.core.background_processes("a1").len() == 1 }));
+    let processes = harness.core.background_processes("a1");
+    assert_eq!(processes[0].id, "p2");
+    assert_eq!(processes[0].ended_at_ms, None);
+}
+
+#[test]
+fn background_stop_follows_the_host_feature() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["agentBackgroundProcesses"]);
+    let harness = connect(&server);
+    assert!(harness.core.supports_background_stop());
+
+    let plain = FakeServer::start();
+    plain.add_agent("a1", "idle");
+    let harness = connect(&plain);
+    assert!(!harness.core.supports_background_stop());
+}
+
+#[test]
+fn stop_background_process_sends_the_request_and_survives_a_refusal() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.on("agent.background_process.stop.request", |request| {
+        vec![session(
+            "agent.background_process.stop.response",
+            json!({"requestId": request["requestId"], "agentId": request["agentId"],
+                   "processId": request["processId"], "error": "gone"}),
+        )]
+    });
+    let mut harness = connect(&server);
+    harness.core.stop_background_process("a1", "p1");
+    let request = sent(
+        &server,
+        &mut harness,
+        "agent.background_process.stop.request",
+    );
+    assert_eq!(request["agentId"], "a1");
+    assert_eq!(request["processId"], "p1");
+    assert!(request["requestId"].is_string());
+    // The refusal logs a warning and leaves the core serving requests.
+    harness.pump_until(Duration::from_millis(300), |_| false);
+    assert!(harness.core.is_connected());
+    harness.core.cancel_agent("a1");
+    let cancel = sent(&server, &mut harness, "cancel_agent_request");
+    assert_eq!(cancel["agentId"], "a1");
+}
+
+// ---- provider subagent timelines (TASK-270) ----
+
+fn provider_rows(seqs: &[u64]) -> Value {
+    Value::Array(
+        seqs.iter()
+            .map(|seq| {
+                json!({
+                    "item": {"type": "user_message", "text": format!("row {seq}"),
+                             "messageId": format!("m{seq}")},
+                    "timestamp": format!("2026-10-19T10:00:{seq:02}.000Z"),
+                    "seq": seq,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn provider_page(
+    request: &Value,
+    rows: Value,
+    start: u64,
+    end: u64,
+    has_older: bool,
+    reset: bool,
+) -> Value {
+    json!({
+        "requestId": request["requestId"],
+        "parentAgentId": "a1",
+        "subagentId": "s1",
+        "provider": "claude",
+        "direction": request["direction"],
+        "epoch": "e1",
+        "projection": "projected",
+        "startCursor": {"epoch": "e1", "seq": start},
+        "endCursor": {"epoch": "e1", "seq": end},
+        "reset": reset,
+        "staleCursor": false,
+        "gap": false,
+        "window": {"minSeq": start, "maxSeq": end, "nextSeq": end + 1},
+        "hasOlder": has_older,
+        "hasNewer": false,
+        "rows": rows,
+        "error": null,
+    })
+}
+
+/// A host with the projected subagent timeline feature, whose child tail holds rows 3 and
+/// 4 and whose older page holds rows 1 and 2.
+fn provider_timeline_harness() -> (FakeServer, Harness, String) {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["projectedSubagentTimeline"]);
+    server.on("agent.provider_subagents.timeline.get.request", |request| {
+        let payload = if request["direction"] == "before" {
+            provider_page(request, provider_rows(&[1, 2]), 1, 2, false, false)
+        } else {
+            provider_page(request, provider_rows(&[3, 4]), 3, 4, true, true)
+        };
+        vec![session(
+            "agent.provider_subagents.timeline.get.response",
+            payload,
+        )]
+    });
+    let harness = connect(&server);
+    let key = provider_subagent_key("a1", "s1");
+    (server, harness, key)
+}
+
+fn child_tail_fetches(server: &FakeServer) -> usize {
+    server
+        .requests_of("agent.provider_subagents.timeline.get.request")
+        .into_iter()
+        .filter(|request| request["direction"] == "tail")
+        .count()
+}
+
+#[test]
+fn viewing_a_provider_subagent_key_fetches_and_stores_its_tail() {
+    let (server, mut harness, key) = provider_timeline_harness();
+    assert_eq!(
+        parse_provider_subagent_key(&key),
+        Some(("a1".into(), "s1".into()))
+    );
+    harness.core.view_agent(&key);
+    let request = sent(
+        &server,
+        &mut harness,
+        "agent.provider_subagents.timeline.get.request",
+    );
+    assert_eq!(request["parentAgentId"], "a1");
+    assert_eq!(request["subagentId"], "s1");
+    assert_eq!(request["direction"], "tail");
+    assert_eq!(request["limit"], 40);
+    assert!(
+        harness.pump_until(WAIT, |h| h.entries(&key).len() == 2),
+        "the reply rows are stored"
+    );
+    let entries = harness.entries(&key);
+    assert_eq!(entries[0]["item"]["text"], "row 3");
+    assert_eq!(entries[1]["item"]["text"], "row 4");
+    assert_eq!(entries[0]["provider"], "claude");
+    assert_eq!(entries[0]["seqStart"], 3);
+    assert_eq!(
+        harness.core.timeline_epoch(&key),
+        Some("e1"),
+        "the child epoch"
+    );
+}
+
+#[test]
+fn provider_subagent_live_items_ignore_an_old_seq_or_another_epoch() {
+    let (server, mut harness, key) = provider_timeline_harness();
+    harness.core.view_agent(&key);
+    assert!(harness.pump_until(WAIT, |h| h.entries(&key).len() == 2));
+    let live = |seq: u64, epoch: &str| {
+        json!({"type": "agent.provider_subagents.update", "payload": {
+            "kind": "timeline", "parentAgentId": "a1", "subagentId": "s1",
+            "provider": "claude",
+            "item": {"type": "user_message", "text": format!("live {seq}"),
+                "messageId": format!("live{seq}")},
+            "timestamp": "2026-10-19T10:01:00.000Z", "seq": seq, "epoch": epoch}})
+    };
+    server.broadcast(live(5, "e1"));
+    assert!(harness.pump_until(WAIT, |h| h.entries(&key).len() == 3));
+    server.broadcast(live(4, "e1"));
+    server.broadcast(live(6, "e2"));
+    harness.pump_until(Duration::from_millis(300), |_| false);
+    let entries = harness.entries(&key);
+    assert_eq!(entries.len(), 3, "an old seq and another epoch are dropped");
+    assert_eq!(entries[2]["item"]["text"], "live 5");
+}
+
+#[test]
+fn loading_older_provider_rows_sends_a_before_request_and_prepends_them() {
+    let (server, mut harness, key) = provider_timeline_harness();
+    harness.core.view_agent(&key);
+    assert!(harness.pump_until(WAIT, |h| h.entries(&key).len() == 2));
+    harness.core.load_older(&key);
+    assert!(harness.pump_until(WAIT, |h| h.entries(&key).len() == 4));
+    let requests = server.requests_of("agent.provider_subagents.timeline.get.request");
+    let before = requests
+        .iter()
+        .find(|request| request["direction"] == "before")
+        .expect("a before request");
+    assert_eq!(before["cursor"]["epoch"], "e1");
+    assert_eq!(before["cursor"]["seq"], 3, "the first seq is the cursor");
+    let texts: Vec<String> = harness
+        .entries(&key)
+        .iter()
+        .map(|entry| {
+            entry["item"]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(texts, ["row 1", "row 2", "row 3", "row 4"]);
+}
+
+#[test]
+fn a_host_without_projected_subagent_timeline_sends_no_child_request() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    let key = provider_subagent_key("a1", "s1");
+    harness.core.view_agent(&key);
+    harness.pump_until(Duration::from_millis(300), |_| false);
+    assert!(
+        server
+            .requests_of("agent.provider_subagents.timeline.get.request")
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_reconnect_refetches_the_child_tail_and_never_sends_its_key_as_an_agent() {
+    let (server, mut harness, key) = provider_timeline_harness();
+    harness.core.view_agent(&key);
+    assert!(harness.pump_until(WAIT, |_| child_tail_fetches(&server) == 1));
+    server.drop_connections();
+    assert!(harness.pump_until(WAIT, |h| !h.core.is_connected()));
+    assert!(
+        harness.pump_until(WAIT, |_| child_tail_fetches(&server) == 2),
+        "a new tail goes out after the reconnect"
+    );
+    for request in server.requests_of("agent.timeline.set_subscription.request") {
+        let ids = request["agentIds"].as_array().cloned().unwrap_or_default();
+        assert!(!ids.contains(&json!(key)), "the key is not an agent id");
+    }
+    for request in server.requests_of("fetch_agent_timeline_request") {
+        assert_ne!(request["agentId"], json!(key));
+    }
+}
+
+#[test]
+fn a_remove_update_drops_a_viewed_child_timeline() {
+    let (server, mut harness, key) = provider_timeline_harness();
+    harness.core.view_agent(&key);
+    assert!(harness.pump_until(WAIT, |h| h.entries(&key).len() == 2));
+    server.broadcast(
+        json!({"type": "agent.provider_subagents.update", "payload": {
+        "kind": "remove", "parentAgentId": "a1", "subagentId": "s1"}}),
+    );
+    assert!(harness.pump_until(WAIT, |h| h.core.timeline(&key).is_none()));
+}
+
+#[test]
+fn provider_subagent_keys_round_trip_and_plain_agent_ids_do_not() {
+    let key = provider_subagent_key("a:1", "s/2");
+    assert_eq!(key, "provider:a%3A1:s%2F2");
+    assert_eq!(
+        parse_provider_subagent_key(&key),
+        Some(("a:1".into(), "s/2".into()))
+    );
+    assert_eq!(parse_provider_subagent_key("a1"), None);
+    assert_eq!(parse_provider_subagent_key("provider:a1"), None);
 }
