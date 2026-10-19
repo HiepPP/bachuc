@@ -61,6 +61,15 @@ cd packages/desktop-gpui
 - Do not enable the gpui-kit `test-support` feature or the tree-sitter `css`, `html`, `toml`, or `yaml` features. They break workspace resolution.
 - If parallel builds leave a duplicate entry in `Cargo.lock`, check it with `./cargo.sh metadata` before you commit.
 
+## Daily app
+
+`scripts/gpui-release.sh` builds the bundle, sets `BACHUC_HOST=release` in its `LSEnvironment`, signs it, and installs it as `/Applications/Bachuc GPUI.app`. Quit that app before you run the script. The script never stops the daemon, so it can run inside Paseo.
+
+- The GPUI app does not start the daemon (ADR-0041). The script installs the login item `io.github.hieppp.bachuc-daemon`, which runs `paseo daemon start` at login. Its log is `~/Library/Logs/Bachuc/daemon-login.log`.
+- The login item runs through a login shell, because agents need the user's PATH. The Electron app gets the same env from `login-shell-env.ts`.
+- Keep `/Applications/Bachuc.app` installed. The daemon and the `paseo` CLI run on its runtime, and `scripts/paseo-release.sh` still updates them.
+- Keep "Keep running after quit" on in the Electron app. If you open Electron and then quit it, it stops a daemon it started when that setting is off.
+
 ## Rules
 
 GPUI view crates have no headless test context. Put each rule (clamp, fallback, guard, threshold) in a pure function and test it; read-check the view code; then run a screen check. A layout rule on the wrong element passes every crate test.

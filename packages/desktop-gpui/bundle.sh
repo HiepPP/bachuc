@@ -19,8 +19,10 @@ case $kind in
   *) echo "bundle.sh: kind must be bin or example, not $kind" >&2; exit 2 ;;
 esac
 app=target/bundles/$name.app
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary" "$app/Contents/MacOS/$target"
+# The Electron app icon, so the Dock and Finder show the Bachuc logo.
+cp ../desktop/assets/icon.icns "$app/Contents/Resources/icon.icns"
 cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -32,6 +34,8 @@ cat > "$app/Contents/Info.plist" <<EOF
   <string>$name</string>
   <key>CFBundleExecutable</key>
   <string>$target</string>
+  <key>CFBundleIconFile</key>
+  <string>icon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
