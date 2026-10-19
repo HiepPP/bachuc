@@ -6,6 +6,7 @@ use crate::tracks::{TrackSegment, track_pill, track_row, track_separator};
 use bachuc_client::{SubagentKind, SubagentRow};
 use bachuc_icons::{IconName, icon, provider_fallback_icon, provider_logo};
 use bachuc_sidebar::model::{StatusBucket, bucket_for_agent};
+use bachuc_sidebar::{RunningRing, StatusBadge};
 use bachuc_theme::metrics::{FONT_SM, SPACE_1};
 use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::popover::PopoverState;
@@ -13,6 +14,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 /// `ROW_ICON_SIZE`: the leading and action glyphs share one size.
@@ -100,6 +102,7 @@ pub fn pill_segments(rows: &[SubagentRow]) -> (Vec<TrackSegment>, String) {
                 .count();
             (count > 0).then(|| TrackSegment {
                 bucket: Some(*bucket),
+                ring: None,
                 text: status_label(*bucket, count),
             })
         })
@@ -113,6 +116,7 @@ pub fn pill_segments(rows: &[SubagentRow]) -> (Vec<TrackSegment>, String) {
         return (
             vec![TrackSegment {
                 bucket: None,
+                ring: None,
                 text: label.clone(),
             }],
             label,
@@ -160,8 +164,13 @@ pub struct SubagentActions {
     pub archive_finished: Rc<dyn Fn(&mut App)>,
 }
 
-fn provider_icon(provider: &str, color: Hsla, cx: &App) -> AnyElement {
-    match provider_logo(provider, color) {
+fn provider_icon(
+    provider: &str,
+    color: Hsla,
+    badge: Option<Entity<StatusBadge>>,
+    cx: &App,
+) -> AnyElement {
+    let glyph = match provider_logo(provider, color) {
         Some(image) => img(image)
             .flex_none()
             .size(zoomed(ROW_ICON, cx))
@@ -170,19 +179,35 @@ fn provider_icon(provider: &str, color: Hsla, cx: &App) -> AnyElement {
             .with_size(zoomed(ROW_ICON, cx))
             .text_color(color)
             .into_any_element(),
-    }
+    };
+    // The badge is absolute inside the icon's box, as `WorkspaceTabIcon` lays it out.
+    div()
+        .flex_none()
+        .relative()
+        .size(zoomed(ROW_ICON, cx))
+        .child(glyph)
+        .children(badge)
+        .into_any_element()
 }
 
-/// The pill; `None` with no child and no bulk archive in flight.
+/// The pill; `None` with no child and no bulk archive in flight. `ring` is the composer's
+/// cached ring for the running segment.
 pub fn subagents_pill(
     rows: Vec<SubagentRow>,
     progress: Option<(usize, usize)>,
+    ring: Option<Entity<RunningRing>>,
+    badges: HashMap<String, Entity<StatusBadge>>,
     actions: SubagentActions,
 ) -> Option<AnyElement> {
     if rows.is_empty() && progress.is_none() {
         return None;
     }
-    let (segments, label) = pill_segments(&rows);
+    let (mut segments, label) = pill_segments(&rows);
+    for segment in &mut segments {
+        if segment.bucket == Some(StatusBucket::Running) {
+            segment.ring = ring.clone();
+        }
+    }
     let finished = finished_paseo_ids(&rows).len();
     Some(track_pill(
         "subagents-track-header",
@@ -243,7 +268,12 @@ pub fn subagents_pill(
                     cx,
                 )
                 .group(group.clone())
-                .child(provider_icon(&row.provider, t.foreground_muted, cx))
+                .child(provider_icon(
+                    &row.provider,
+                    t.foreground_muted,
+                    badges.get(&row.id).cloned(),
+                    cx,
+                ))
                 .child(
                     div()
                         .flex_grow(1.)
@@ -366,6 +396,7 @@ mod tests {
             segments,
             [TrackSegment {
                 bucket: None,
+                ring: None,
                 text: "2 subagents".into()
             }]
         );

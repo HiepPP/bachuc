@@ -40,7 +40,7 @@ use crate::slash::{
     insert_text, menu_matches, replace_slash, resolve_client_command, resolve_plugin_command, step,
 };
 use crate::subagents_track::{
-    ArchiveFinished, SubagentActions, finished_paseo_ids, subagents_pill,
+    ArchiveFinished, SubagentActions, finished_paseo_ids, row_bucket, subagents_pill,
 };
 use crate::task_list::task_pill;
 use crate::tracks::TrackStrip;
@@ -60,6 +60,8 @@ use bachuc_plugin_host::{
     Contributed, ContributionIndex, InterceptInput, InterceptOutcome, PluginHostEvent, SendAction,
     SendKey, SlashInput, StopButtonProps, decode_attachment_search,
 };
+use bachuc_sidebar::model::StatusBucket;
+use bachuc_sidebar::{Knockout, RunningRing, StatusBadge};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_CONTENT, FONT_SM, ICON_SM, POPUP_GAP, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2,
     SPACE_3, SPACE_4,
@@ -76,7 +78,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::json;
 use std::cell::Cell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -386,6 +388,10 @@ pub struct Composer {
     /// The 1 s tick of the live metrics; `Some` only during an active turn.
     tick: Option<Task<()>>,
     archive: ArchiveFinished,
+    /// One ring per track pill key, so a turn redraws only the ring.
+    rings: HashMap<String, Entity<RunningRing>>,
+    /// One status badge per subagent row key, so a ring does not restart its clock.
+    badges: HashMap<String, Entity<StatusBadge>>,
     draft: Option<DraftState>,
     raw_attachments: Vec<RawAttachment>,
     plugin_chips: Vec<PluginChip>,
@@ -568,6 +574,8 @@ impl Composer {
             live: LiveMetrics::default(),
             tick: None,
             archive: ArchiveFinished::default(),
+            rings: HashMap::new(),
+            badges: HashMap::new(),
             draft,
             raw_attachments: Vec::new(),
             plugin_chips: Vec::new(),
@@ -2143,28 +2151,87 @@ impl Composer {
         }
     }
 
+    /// The ring of a track pill, cached by key so its clock does not restart each frame.
+    fn ring(
+        &mut self,
+        key: String,
+        knockout: Knockout,
+        cx: &mut Context<Self>,
+    ) -> Entity<RunningRing> {
+        self.rings
+            .entry(key)
+            .or_insert_with(|| cx.new(|cx| RunningRing::new(knockout, cx)))
+            .clone()
+    }
+
+    /// The badge of a subagent row, cached by row key and set to the row's bucket.
+    fn badge(
+        &mut self,
+        key: String,
+        bucket: StatusBucket,
+        cx: &mut Context<Self>,
+    ) -> Entity<StatusBadge> {
+        let badge = self
+            .badges
+            .entry(key)
+            .or_insert_with(|| cx.new(|cx| StatusBadge::new(bucket, Knockout::Surface1, cx)));
+        if badge.read(cx).bucket() != bucket {
+            badge.update(cx, |badge, cx| badge.set_bucket(bucket, cx));
+        }
+        badge.clone()
+    }
+
     /// The docked strip: tasks, subagents, and plugin track pills, then the turn metrics and
     /// the diff stat at the right edge. `None` when nothing shows.
     fn track_strip(
-        &self,
+        &mut self,
         plugin_track: Vec<AnyElement>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let watched = &self.watched;
-        let progress = self.archive.progress(&watched.subagents);
+        let progress = self.archive.progress(&self.watched.subagents);
         let leading = has_agent_tracks(
-            watched.subagents.len(),
-            watched.tasks.len(),
+            self.watched.subagents.len(),
+            self.watched.tasks.len(),
             progress.is_some(),
             !plugin_track.is_empty(),
         );
         if !strip_visible(
-            watched.diff_stat.is_some(),
-            watched.has_turn_metrics(),
+            self.watched.diff_stat.is_some(),
+            self.watched.has_turn_metrics(),
             leading,
         ) {
             return None;
         }
+        // The pill's ring entity lives as long as the pill runs, and is dropped with the pill.
+        let key = "subagents-track-header".to_string();
+        let running = self
+            .watched
+            .subagents
+            .iter()
+            .any(|row| row_bucket(row) == StatusBucket::Running);
+        let ring = if running {
+            Some(self.ring(key.clone(), Knockout::None, cx))
+        } else {
+            self.rings.remove(&key);
+            None
+        };
+        // One badge per listed row, kept across frames so its ring does not restart.
+        let rows: Vec<(String, StatusBucket)> = self
+            .watched
+            .subagents
+            .iter()
+            .map(|row| (row.id.clone(), row_bucket(row)))
+            .collect();
+        let badges: HashMap<String, Entity<StatusBadge>> = rows
+            .iter()
+            .filter(|(_, bucket)| *bucket != StatusBucket::Done)
+            .map(|(id, bucket)| (id.clone(), self.badge(id.clone(), *bucket, cx)))
+            .collect();
+        self.badges.retain(|key, _| {
+            rows.iter()
+                .any(|(id, bucket)| id == key && *bucket != StatusBucket::Done)
+        });
+        let watched = &self.watched;
         let weak = cx.weak_entity();
         let (open_weak, archive_weak, changes_weak) = (weak.clone(), weak.clone(), weak);
         let client = self.client.clone();
@@ -2186,7 +2253,13 @@ impl Composer {
         };
         let leading: Vec<AnyElement> = task_pill(watched.tasks.clone())
             .into_iter()
-            .chain(subagents_pill(watched.subagents.clone(), progress, actions))
+            .chain(subagents_pill(
+                watched.subagents.clone(),
+                progress,
+                ring,
+                badges,
+                actions,
+            ))
             .chain(plugin_track)
             .collect();
         let workspace_id = watched.workspace_id.clone();

@@ -331,6 +331,27 @@ fn set_item_logo_on_an_unknown_key_changes_nothing() {
 }
 
 #[test]
+fn set_item_badge_on_an_unknown_key_changes_nothing() {
+    let mut extras = TabExtras::default();
+    assert!(!extras.set_badge(false, "missing", None));
+    assert!(extras.badge("missing").is_none());
+    assert!(extras.is_empty());
+}
+
+#[test]
+fn set_item_badge_clears_and_forgets() {
+    // A badge needs an `Entity`, which needs a running app, so the set and replace cases run
+    // only in the app. Clearing and forgetting need no view.
+    let mut extras = TabExtras::default();
+    assert!(extras.set_badge(true, "a", None));
+    assert!(extras.badge("a").is_none());
+    extras.set_kind(true, "a", agent());
+    extras.forget("a");
+    assert!(extras.badge("a").is_none());
+    assert!(extras.is_empty());
+}
+
+#[test]
 fn set_item_logo_sets_replaces_clears_and_forgets() {
     let mut extras = TabExtras::default();
     let first = logo();

@@ -30,9 +30,9 @@ use crate::state::{
 use crate::toast::{ToastStack, render_toasts};
 use crate::workspace_draft::{self, WorkspaceDraftPane};
 use bachuc_client::{
-    AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, Client, ClientEvent,
-    CreatedWorkspace, DirectoryEvent, GitStatusEvent, HostConfig, PrStatus, ProjectNode,
-    ThinkingControls, TimelineState, load_hosts, resume_command,
+    AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, AttentionReason, Client,
+    ClientEvent, CreatedWorkspace, DirectoryEvent, GitStatusEvent, HostConfig, PrStatus,
+    ProjectNode, ThinkingControls, TimelineState, load_hosts, resume_command,
 };
 use bachuc_command::{
     CommandCenter, CommandEvent, CommandFileEvent, FileResult, Shortcut, ShortcutsDialog,
@@ -52,8 +52,10 @@ use bachuc_plugin_host::{
 };
 use bachuc_settings::appearance::{Appearance, ZoomDirection, zoom_step};
 use bachuc_settings::{Settings, SettingsEvent};
-use bachuc_sidebar::model::archive_prompt;
-use bachuc_sidebar::{Sidebar, SidebarEvent, SidebarNavEvent, SidebarPluginEvent};
+use bachuc_sidebar::model::{StatusBucket, archive_prompt, bucket_for_agent};
+use bachuc_sidebar::{
+    Knockout, Sidebar, SidebarEvent, SidebarNavEvent, SidebarPluginEvent, StatusBadge,
+};
 use bachuc_terminal::{TerminalEvent, TerminalView};
 use bachuc_theme::metrics::TRAFFIC_LIGHT_WIDTH;
 use bachuc_theme::{tokens, zoomed};
@@ -184,6 +186,9 @@ pub(crate) struct Pane {
     /// The provider of an agent tab whose logo is set; `None` while the agent is not in the
     /// list yet, so `complete_logos` can set it once.
     provider: Option<String>,
+    /// The tab's status badge. The shell keeps it to follow the agent's bucket; the workspace
+    /// only holds its view.
+    badge: Option<Entity<StatusBadge>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -534,6 +539,22 @@ impl Shell {
             .collect();
         for (workspace_id, key, title) in titles {
             self.retitle(&workspace_id, &key, title, cx);
+        }
+        // A tab's badge follows its agent's bucket. The badge keeps its own ring, so only a
+        // bucket change redraws it.
+        for open in self.workspaces.values() {
+            for pane in open.panes.values() {
+                let Some(agent_id) = pane.identity.as_deref().and_then(agent_of_key) else {
+                    continue;
+                };
+                let Some(badge) = &pane.badge else {
+                    continue;
+                };
+                let bucket = self.agent_bucket(agent_id, cx);
+                if badge.read(cx).bucket() != bucket {
+                    badge.update(cx, |badge, cx| badge.set_bucket(bucket, cx));
+                }
+            }
         }
         self.complete_logos(cx);
     }
@@ -1081,6 +1102,16 @@ impl Shell {
         let logo = provider
             .as_deref()
             .and_then(|provider| provider_logo(provider, tokens(cx).foreground));
+        // The tab badge follows the agent's bucket from the first frame; the tab bar surface is
+        // `surface0` at rest.
+        let (badge, badge_view) = match identity.as_deref().and_then(agent_of_key) {
+            Some(agent_id) => {
+                let bucket = self.agent_bucket(agent_id, cx);
+                let badge = cx.new(|cx| StatusBadge::new(bucket, Knockout::Surface0, cx));
+                (Some(badge.clone()), Some(AnyView::from(badge)))
+            }
+            None => (None, None),
+        };
         let Some(open) = self.workspaces.get_mut(workspace_id) else {
             content.release(cx);
             return;
@@ -1102,6 +1133,7 @@ impl Shell {
                 frame,
                 title,
                 provider,
+                badge,
                 _subscriptions: subscriptions,
             },
         );
@@ -1113,6 +1145,7 @@ impl Shell {
             workspace.open(item, window, cx);
             workspace.set_item_kind(&key, kind, cx);
             workspace.set_item_logo(&key, logo, cx);
+            workspace.set_item_badge(&key, badge_view, cx);
         });
         // A tab replaced in place (a new tab that becomes a draft) emits no `Activated`.
         self.sync_chat_target(cx);
@@ -1128,6 +1161,23 @@ impl Shell {
             .find(|agent| agent.id == agent_id)
             .or_else(|| client.archived_agent(agent_id))
             .map(|agent| agent.provider.clone())
+    }
+
+    /// The agent's tab bucket, from its status, permissions, and attention
+    /// (`bucket_for_agent`). A tab whose agent left the list is done.
+    fn agent_bucket(&self, agent_id: &str, cx: &App) -> StatusBucket {
+        let client = self.client.read(cx);
+        let Some(agent) = client.agents().iter().find(|agent| agent.id == agent_id) else {
+            return StatusBucket::Done;
+        };
+        let (requires_attention, reason) =
+            client.agent_attention(agent_id).unwrap_or((false, None));
+        bucket_for_agent(
+            &agent.status,
+            agent.pending_permissions,
+            requires_attention,
+            reason.map(attention_name),
+        )
     }
 
     /// Rebuilds the logo of each agent tab when the theme changed its fill.
@@ -3591,6 +3641,15 @@ impl Shell {
             Some(open) => open.view.clone().into_any_element(),
             None => div().into_any_element(),
         }
+    }
+}
+
+/// The wire name of an attention reason, as `bucket_for_agent` reads it.
+fn attention_name(reason: AttentionReason) -> &'static str {
+    match reason {
+        AttentionReason::Finished => "finished",
+        AttentionReason::Error => "error",
+        AttentionReason::Permission => "permission",
     }
 }
 

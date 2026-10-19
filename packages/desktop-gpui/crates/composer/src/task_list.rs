@@ -48,6 +48,7 @@ pub fn task_pill(tasks: Vec<TaskEntry>) -> Option<AnyElement> {
     let label = task_label(&tasks);
     let segments = vec![TrackSegment {
         bucket: None,
+        ring: None,
         text: label.clone(),
     }];
     Some(track_pill(

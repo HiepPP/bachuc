@@ -34,14 +34,20 @@ const SLEEP_AFTER: Duration = Duration::from_millis(200);
 /// Points on the arc. The arc is 90 degrees of a 12 px circle.
 const ARC_STEPS: usize = 10;
 
-/// Where the ring sits.
+/// Where the ring sits. The fill comes from the token at paint, so a theme change follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Knockout {
-    /// On the flat sidebar: no fill behind the ring.
+    /// Nothing behind the ring.
     None,
     /// On a project icon: the frame is filled with the sidebar color, so the ring reads as a hole
     /// punched in the icon.
     Sidebar,
+    /// On `surface0`: a tab bar with no hover or active fill.
+    Surface0,
+    /// On `surface1`: a hovered tab or a resting subagent row.
+    Surface1,
+    /// On `surface2`: an active tab or a hovered subagent row.
+    Surface2,
 }
 
 pub struct RunningRing {
@@ -97,11 +103,18 @@ impl Render for RunningRing {
                 let scaled = |length: f32| px(length * zoom);
                 let square =
                     |side: f32| Bounds::centered_at(center, size(scaled(side), scaled(side)));
-                if knockout == Knockout::Sidebar {
+                let fill = match knockout {
+                    Knockout::None => None,
+                    Knockout::Sidebar => Some(t.surface_sidebar),
+                    Knockout::Surface0 => Some(t.surface0),
+                    Knockout::Surface1 => Some(t.surface1),
+                    Knockout::Surface2 => Some(t.surface2),
+                };
+                if let Some(fill) = fill {
                     window.paint_quad(quad(
                         square(FRAME),
                         Corners::all(scaled(FRAME / 2.)),
-                        t.surface_sidebar,
+                        fill,
                         Edges::all(px(0.)),
                         transparent_black(),
                         BorderStyle::Solid,
