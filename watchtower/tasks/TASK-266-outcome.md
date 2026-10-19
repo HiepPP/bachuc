@@ -107,3 +107,13 @@ Occlusion finding: the display is 2560x1664 Retina; a 2400x1400 window is clampe
 - Reads, 60 s each: BASE running 0.3%, CHECK running 0.3%, BASE running 0.3%, CHECK running 0.3%; idle BASE 0.1%, CHECK 0.1%.
 - Rendering: both apps showed the identical running turn after a forced resize (`Working 2:12` / `Working 2:15`, Step 1, `$ sleep 900`), but no frame was drawn during any measurement.
 - Verdict: UNVERIFIED for the CPU A/B. The 0.3% values are not evidence for or against the 10% cap; a window that does not draw cannot show the motion cost. Round 2's 33.6% came from a different occlusion state (display asleep), so the anti-goal has no valid new read.
+
+## UI Checks Round 4 (CPU A/B, foreground)
+
+Run 2026-10-19 on live (6768) with owner approval: Hiep was away, so each app was in front. BASE `74c6266ad` (`/tmp/wt-base-app/Bachuc GPUI Base.app`) and CHECK `083620d10` (check bundle, no `packages/desktop-gpui` change since then), one at a time, default 1200x800 window, same agent `e46054b` (Claude Haiku, foreground `sleep 900` in `/tmp/wt-mock-244`). Each app showed the same running turn, and the `Working` clock advanced between screenshots. The agent was archived and both apps were quit.
+
+Method finding: an app launched from the agent shell runs with `nice` (`ps` state `SN`) and never draws past "Connecting". Launch with `open -n <bundle>` instead.
+
+- Reads, `measure.sh 60`, in order: BASE 43.1%, CHECK 44.2%, CHECK 44.1%, BASE 33.2%, BASE 42.6%, CHECK 43.9%.
+- Medians: BASE 42.6%, CHECK 44.1% -> +1.5 points. PASS for baseline + 2 points. The mean gap is 4.5 points only because of the single 33.2% BASE read.
+- 10% cap: FAIL on both apps. The cost is not new in this plan; it exists on main. Q-175 is ANSWERED.
