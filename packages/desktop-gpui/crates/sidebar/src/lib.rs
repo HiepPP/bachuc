@@ -10,6 +10,7 @@
 mod metrics;
 pub mod model;
 pub mod plugin;
+pub mod prefs;
 mod ring;
 mod sidebar;
 

@@ -7,17 +7,23 @@
 
 use crate::metrics::{ADD_PROJECT_MIN, LABEL_LINE, NAV_ROW_MIN};
 use crate::model::{
-    Facts, Group, ProjectRow, Row, RowShape, StatusBucket, ViewState, WorkspaceRow,
-    archive_prompt_for_checkout, changed_range, clamp_width, format_diff_count, identity_color,
-    project_initial, workspace_label,
+    Facts, Group, Grouping, LabelOption, MetaItem, ProjectRow, Row, RowShape, StatusBucket,
+    TrailingSlot, WorkspaceRow, archive_prompt_for_checkout, changed_range, clamp_width,
+    compact_time_ago, format_diff_count, identity_color, label_color, label_filter_visible,
+    label_options, meta_items, natural_compare, project_filter_value, project_filter_visible,
+    project_initial, row_title, trailing_slot, workspace_label_for,
 };
 use crate::plugin::{
     NavPress, NavRow, SwipeGesture, SwipeStep, added_sidebar_project, drag_frame, filtered_rows,
     is_horizontal, nav_press, nav_rows, pick_title, run_in_order, slide_frame, slide_out_ms,
     submenu_row_label, submenu_trailing, visible_projects, wheel_deltas,
 };
+use crate::prefs::{ChecksDisplay, RowItem, SidebarPrefs, TitleSource, Trailing};
 use crate::ring::{FRAME as RING_FRAME, Knockout, RunningRing};
-use bachuc_client::{Client, ClientEvent, DirectoryEvent, ProjectNode};
+use bachuc_client::{
+    CheckSummaryState, Client, ClientEvent, DirectoryEvent, GitStatusEvent, ProjectNode,
+    PullRequestState,
+};
 use bachuc_icons::{IconName, icon};
 use bachuc_plugin_host::{
     PluginHost, PluginHostEvent, ProjectMenuItem, SidebarProject, SwipeDirection, ViewFactory,
@@ -33,14 +39,16 @@ use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::menu::{DropdownMenu, PopupMenu, PopupMenuItem};
 use gpui_kit::component::theme::Theme;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Selectable, Side, Sizable as _, WindowExt as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// How far the list draws beyond the visible rows.
 const OVERDRAW: f32 = 400.;
@@ -170,6 +178,8 @@ struct KebabButton {
     open: bool,
     group: SharedString,
     fill: Hsla,
+    /// The button shows without its row hovered, like the display preferences button.
+    always_visible: bool,
 }
 
 impl Selectable for KebabButton {
@@ -201,20 +211,25 @@ impl RenderOnce for KebabButton {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let fill = self.fill;
         let group = self.group;
-        self.base
-            .when(self.open, |button| button.bg(fill))
-            .when(!self.open, |button| {
+        self.base.when(self.open, |button| button.bg(fill)).when(
+            !self.open && !self.always_visible,
+            |button| {
                 button
                     .invisible()
                     .group_hover(group, |style| style.visible())
-            })
+            },
+        )
     }
 }
 
 pub struct Sidebar {
     client: Entity<Client>,
     selected: Option<String>,
-    state: ViewState,
+    prefs: SidebarPrefs,
+    /// Where `sidebar.json` lives. None keeps the prefs in memory only.
+    data_dir: Option<PathBuf>,
+    /// Whether the first project list already dropped the prefs of projects that went.
+    pruned: bool,
     rows: Vec<Row>,
     shapes: Vec<RowShape>,
     list: ListState,
@@ -243,7 +258,23 @@ pub struct Sidebar {
 }
 
 impl Sidebar {
+    /// A sidebar that keeps its collapse state in memory only.
     pub fn new(client: Entity<Client>, window: &mut Window, cx: &mut Context<Sidebar>) -> Sidebar {
+        Self::with_data_dir(client, None, window, cx)
+    }
+
+    /// A sidebar that loads its prefs from `sidebar.json` in `data_dir` and saves them there on
+    /// each toggle.
+    pub fn with_data_dir(
+        client: Entity<Client>,
+        data_dir: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Sidebar>,
+    ) -> Sidebar {
+        let prefs = data_dir
+            .as_deref()
+            .map(SidebarPrefs::load_from)
+            .unwrap_or_default();
         let subscriptions = vec![
             cx.subscribe(&client, |this, _, event: &ClientEvent, cx| match event {
                 ClientEvent::Connected
@@ -256,13 +287,20 @@ impl Sidebar {
                 // The daemon pushes the diff counts with each workspace update.
                 DirectoryEvent::CheckoutChanged { .. } => {}
             }),
+            // The Services item of a row follows the running scripts.
+            cx.subscribe(&client, |this, _, event: &GitStatusEvent, cx| match event {
+                GitStatusEvent::ScriptsChanged { .. } => this.refresh(cx),
+                GitStatusEvent::Changed { .. } => {}
+            }),
             // set_theme and set_font_scale write the gpui-kit theme global.
             cx.observe_global::<Theme>(|_, cx| cx.notify()),
         ];
         let mut sidebar = Sidebar {
             client,
             selected: None,
-            state: ViewState::default(),
+            prefs,
+            data_dir,
+            pruned: false,
             rows: Vec::new(),
             shapes: Vec::new(),
             list: ListState::new(0, ListAlignment::Top, px(OVERDRAW)),
@@ -434,6 +472,7 @@ impl Sidebar {
 
     /// Builds the rows again from the client and redraws only when something changed.
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.prune_stale_prefs(cx);
         let client = self.client.read(cx);
         let rows = if client.projects().is_empty() && !client.is_connected() {
             // Nothing to say before the first answer.
@@ -465,13 +504,18 @@ impl Sidebar {
                 &visible,
                 client.agents(),
                 &facts,
-                &self.state,
+                &self.prefs.view,
             )
         };
-        if rows == self.rows {
+        // A row with a meta line is taller, so the Show choices are part of the shape.
+        let (items, checks) = (self.prefs.row_items, self.prefs.checks_display);
+        let shapes: Vec<RowShape> = rows
+            .iter()
+            .map(|row| row.shape_with(&items, checks))
+            .collect();
+        if rows == self.rows && shapes == self.shapes {
             return;
         }
-        let shapes: Vec<RowShape> = rows.iter().map(Row::shape).collect();
         if let Some((range, count)) = changed_range(&self.shapes, &shapes) {
             self.list.splice(range, count);
         }
@@ -495,23 +539,144 @@ impl Sidebar {
         cx.notify();
     }
 
-    fn toggle_project(&mut self, id: &str, cx: &mut Context<Self>) {
-        if !self.state.collapsed_projects.remove(id) {
-            self.state.collapsed_projects.insert(id.to_string());
+    /// The first project list drops the stored ids of projects that no longer exist. An empty
+    /// list proves nothing, because it is also the state before the first answer.
+    fn prune_stale_prefs(&mut self, cx: &mut Context<Self>) {
+        if self.pruned {
+            return;
         }
+        let projects = self.client.read(cx).projects();
+        if projects.is_empty() {
+            return;
+        }
+        let known: HashSet<&str> = projects.iter().map(|project| project.id.as_str()).collect();
+        let changed = self.prefs.retain_projects(&known);
+        self.pruned = true;
+        if changed {
+            self.save_prefs();
+        }
+    }
+
+    /// Called on a toggle only. A failed save logs a warning and the sidebar keeps working.
+    fn save_prefs(&self) {
+        let Some(dir) = &self.data_dir else {
+            return;
+        };
+        if let Err(error) = self.prefs.save_to(dir) {
+            log::warn!("cannot save sidebar.json: {error}");
+        }
+    }
+
+    fn toggle_project(&mut self, id: &str, cx: &mut Context<Self>) {
+        let collapsed = &mut self.prefs.view.collapsed_projects;
+        if !collapsed.remove(id) {
+            collapsed.insert(id.to_string());
+        }
+        self.save_prefs();
         self.refresh(cx);
     }
 
     fn toggle_pinned(&mut self, cx: &mut Context<Self>) {
-        self.state.pinned_collapsed = !self.state.pinned_collapsed;
+        self.prefs.view.pinned_collapsed = !self.prefs.view.pinned_collapsed;
+        self.save_prefs();
         self.refresh(cx);
     }
 
     fn toggle_group(&mut self, group: Group, cx: &mut Context<Self>) {
-        if !self.state.expanded_groups.remove(&group) {
-            self.state.expanded_groups.insert(group);
+        let expanded = &mut self.prefs.view.expanded_groups;
+        if !expanded.remove(&group) {
+            expanded.insert(group);
         }
+        self.save_prefs();
         self.refresh(cx);
+    }
+
+    // ---- display preferences ----
+
+    /// Saves after a display choice and redraws. The rows rebuild when the choice changes them.
+    fn display_changed(&mut self, cx: &mut Context<Self>) {
+        self.save_prefs();
+        self.refresh(cx);
+        cx.notify();
+    }
+
+    fn set_grouping(&mut self, grouping: Grouping, cx: &mut Context<Self>) {
+        self.prefs.view.grouping = grouping;
+        self.display_changed(cx);
+    }
+
+    fn set_title_source(&mut self, source: TitleSource, cx: &mut Context<Self>) {
+        self.prefs.title_source = source;
+        self.display_changed(cx);
+    }
+
+    fn toggle_row_item(&mut self, item: RowItem, cx: &mut Context<Self>) {
+        self.prefs.row_items.toggle(item);
+        self.display_changed(cx);
+    }
+
+    fn set_checks_display(&mut self, display: ChecksDisplay, cx: &mut Context<Self>) {
+        self.prefs.checks_display = display;
+        self.display_changed(cx);
+    }
+
+    fn toggle_trailing(&mut self, choice: Trailing, cx: &mut Context<Self>) {
+        self.prefs.trailing = Trailing::toggled(self.prefs.trailing, choice);
+        self.display_changed(cx);
+    }
+
+    fn toggle_project_filter(&mut self, id: &str, cx: &mut Context<Self>) {
+        let filter = &mut self.prefs.view.project_filter;
+        if !filter.remove(id) {
+            filter.insert(id.to_string());
+        }
+        self.display_changed(cx);
+    }
+
+    fn clear_project_filter(&mut self, cx: &mut Context<Self>) {
+        self.prefs.view.project_filter.clear();
+        self.display_changed(cx);
+    }
+
+    fn toggle_label_filter(&mut self, key: &str, cx: &mut Context<Self>) {
+        let filter = &mut self.prefs.view.label_filter;
+        if !filter.remove(key) {
+            filter.insert(key.to_string());
+        }
+        self.display_changed(cx);
+    }
+
+    fn clear_label_filter(&mut self, cx: &mut Context<Self>) {
+        self.prefs.view.label_filter.clear();
+        self.display_changed(cx);
+    }
+
+    fn toggle_status_group(&mut self, bucket: StatusBucket, cx: &mut Context<Self>) {
+        let collapsed = &mut self.prefs.view.collapsed_statuses;
+        if !collapsed.remove(&bucket) {
+            collapsed.insert(bucket);
+        }
+        self.save_prefs();
+        self.refresh(cx);
+    }
+
+    /// What the display menu reads when it opens: the prefs, the projects by name, and the labels
+    /// the workspaces carry.
+    fn display_snapshot(&self, cx: &App) -> DisplaySnapshot {
+        let client = self.client.read(cx);
+        let mut projects: Vec<(String, String)> = client
+            .projects()
+            .iter()
+            .map(|project| (project.id.clone(), project.name.clone()))
+            .collect();
+        projects.sort_by(|left, right| {
+            natural_compare(&left.1, &right.1).then_with(|| left.0.cmp(&right.0))
+        });
+        DisplaySnapshot {
+            prefs: self.prefs.clone(),
+            projects,
+            labels: label_options(client.projects()),
+        }
     }
 
     fn open_workspace(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -856,6 +1021,9 @@ impl Sidebar {
                 render_section_title(title, &t, cx)
             }
             Row::Project(project) => self.render_project(ix, project, &t, cx),
+            Row::StatusHeader {
+                bucket, collapsed, ..
+            } => self.render_status_header(ix, *bucket, *collapsed, &t, cx),
             Row::Workspace(workspace) => self.render_workspace(ix, workspace, &t, cx),
             Row::ShowMore {
                 group, expanded, ..
@@ -863,7 +1031,7 @@ impl Sidebar {
             Row::Empty => render_empty(&t, cx),
         };
         let below = match &row {
-            Row::Project(_) => PROJECT_GAP,
+            Row::Project(_) | Row::StatusHeader { .. } => PROJECT_GAP,
             Row::Workspace(WorkspaceRow {
                 block_end, group, ..
             })
@@ -1067,6 +1235,89 @@ impl Sidebar {
             .into_any_element()
     }
 
+    /// The heading of a status group: its status mark, its label, and a chevron on hover
+    /// (`StatusGroupHeader`).
+    fn render_status_header(
+        &mut self,
+        ix: usize,
+        bucket: StatusBucket,
+        collapsed: bool,
+        t: &Tokens,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let group = SharedString::from(format!("status-{ix}"));
+        let (mark, color) = match bucket {
+            StatusBucket::NeedsInput => (IconName::CircleAlert, t.dot_warning),
+            StatusBucket::Failed => (IconName::CircleX, t.dot_danger),
+            StatusBucket::Attention => (IconName::CircleCheck, t.dot_success),
+            StatusBucket::Running => (IconName::CircleDot, t.dot_running),
+            StatusBucket::Done => (IconName::CircleCheck, t.foreground_muted),
+        };
+        let chevron = if collapsed {
+            IconName::ChevronRight
+        } else {
+            IconName::ChevronDown
+        };
+        let leading = div()
+            .relative()
+            .w(zoomed(ICON_MD, cx))
+            .h(zoomed(LINE_HEIGHT, cx))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .group_hover(group.clone(), |style| style.invisible())
+                    .text_color(color)
+                    .child(icon(mark).with_size(zoomed(ICON_SM, cx))),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .invisible()
+                    .group_hover(group.clone(), |style| style.visible())
+                    .text_color(t.foreground_muted)
+                    .child(icon(chevron).with_size(zoomed(ICON_SM, cx))),
+            );
+        div()
+            .id(("status-group", ix))
+            .group(group)
+            .role(Role::Button)
+            .aria_label(format!("{} group", bucket.label()))
+            .aria_expanded(!collapsed)
+            .w_full()
+            .min_h(zoomed(ROW_HEIGHT, cx))
+            .p(zoomed(SPACE_2, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(zoomed(SPACE_2, cx))
+            .cursor_pointer()
+            .hover(|style| style.bg(t.surface_sidebar_hover))
+            .active(|style| style.bg(t.surface2))
+            .on_press(cx, move |this, _, cx| this.toggle_status_group(bucket, cx))
+            .child(leading)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(ui_font_size(FONT_BASE, cx))
+                    .line_height(zoomed(LINE_HEIGHT, cx))
+                    .text_color(t.foreground_muted)
+                    .child(bucket.label()),
+            )
+            .into_any_element()
+    }
+
     fn render_workspace(
         &mut self,
         ix: usize,
@@ -1077,7 +1328,9 @@ impl Sidebar {
         let group = SharedString::from(format!("workspace-{ix}"));
         let selected = self.selected.as_deref() == Some(row.id.as_str());
         let archiving = self.archiving.contains(&row.id);
-        let pinned_section = row.group == Group::Pinned;
+        // A row outside a project heading has no project row above it, so the project icon
+        // leads (the pinned section and the status groups).
+        let pinned_section = !matches!(row.group, Group::Project(_));
         let leading = if pinned_section {
             // A pinned row has no project row above it, so the project icon leads.
             let badge = (row.bucket != StatusBucket::Done).then_some(row.bucket);
@@ -1119,11 +1372,11 @@ impl Sidebar {
             .line_height(zoomed(LINE_HEIGHT, cx))
             .text_color(t.foreground.opacity(0.76))
             .group_hover(group.clone(), |style| style.text_color(t.foreground))
-            .child(row.name.clone());
-        // `DiffStat` in the trailing slot: 4 px apart, small type, the status colors.
-        // A `0/0` stat shows `+0 -0`, as Electron does; no stat shows nothing.
-        let diff = row.diff.map(|(added, removed)| {
-            h_flex()
+            .child(row_title(row, self.prefs.title_source).to_string());
+        let trailing = trailing_slot(row, self.prefs.trailing).map(|slot| match slot {
+            // `DiffStat`: 4 px apart, small type, the status colors. A `0/0` stat shows `+0 -0`,
+            // as Electron does; no stat shows nothing.
+            TrailingSlot::Diff { added, removed } => h_flex()
                 .flex_shrink_0()
                 .h(zoomed(LINE_HEIGHT, cx))
                 .gap(zoomed(SPACE_1, cx))
@@ -1138,11 +1391,46 @@ impl Sidebar {
                         .text_color(t.status_danger)
                         .child(format!("-{}", format_diff_count(removed))),
                 )
+                .into_any_element(),
+            // `WorkspaceTimestamp`: the bottom of the muted ramp.
+            TrailingSlot::LastActivity(entered_at) => div()
+                .flex_shrink_0()
+                .h(zoomed(LINE_HEIGHT, cx))
+                .line_height(zoomed(LINE_HEIGHT, cx))
+                .text_size(ui_font_size(FONT_SM, cx))
+                .text_color(t.foreground_extra_muted)
+                .child(compact_time_ago(entered_at, now_ms()))
+                .into_any_element(),
         });
+        let meta = meta_items(
+            row,
+            &self.prefs.row_items,
+            self.prefs.checks_display,
+            pinned_section,
+        );
+        let meta_line = (!meta.is_empty()).then(|| render_meta_row(ix, meta, t, cx));
+        let content = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_0()
+            .child(
+                h_flex()
+                    .w_full()
+                    .items_start()
+                    .gap(zoomed(SPACE_2, cx))
+                    .child(title)
+                    .children(trailing),
+            )
+            .children(meta_line);
         let click = div()
             .id(("workspace", ix))
             .role(Role::Button)
-            .aria_label(workspace_label(row, pinned_section))
+            .aria_label(workspace_label_for(
+                row,
+                pinned_section,
+                self.prefs.title_source,
+            ))
             .aria_selected(selected)
             .w_full()
             .min_h(zoomed(ROW_HEIGHT, cx))
@@ -1152,7 +1440,8 @@ impl Sidebar {
             .rounded(zoomed(RADIUS_LG, cx))
             .flex()
             .flex_row()
-            .items_center()
+            // The status mark stays on the title line when the meta line makes the row taller.
+            .items_start()
             .gap(zoomed(SPACE_2, cx))
             .cursor_pointer()
             .when(selected, |this| this.bg(t.surface_sidebar_selected))
@@ -1164,8 +1453,7 @@ impl Sidebar {
                 this.on_press(cx, move |this, _, cx| this.open_workspace(&click_id, cx))
             })
             .child(leading)
-            .child(title)
-            .children(diff);
+            .child(content);
 
         let weak = cx.weak_entity();
         let menu_row = row.clone();
@@ -1494,7 +1782,7 @@ fn block_gap(block_end: bool, group: &Group) -> f32 {
     match (block_end, group) {
         (false, _) => 0.,
         (true, Group::Pinned) => PINNED_BLOCK_GAP,
-        (true, Group::Project(_)) => PROJECT_BLOCK_GAP,
+        (true, Group::Project(_) | Group::Status(_)) => PROJECT_BLOCK_GAP,
     }
 }
 
@@ -1502,10 +1790,10 @@ fn block_gap(block_end: bool, group: &Group) -> f32 {
 fn ring_key(row: &Row) -> Option<String> {
     match row {
         Row::Workspace(w) if w.bucket == StatusBucket::Running => {
-            Some(if w.group == Group::Pinned {
-                format!("w:{}:icon", w.id)
-            } else {
+            Some(if matches!(w.group, Group::Project(_)) {
                 format!("w:{}:dot", w.id)
+            } else {
+                format!("w:{}:icon", w.id)
             })
         }
         Row::Project(p) if p.collapsed && p.bucket == StatusBucket::Running => {
@@ -1549,8 +1837,12 @@ fn builtin_nav_row(
 }
 
 fn render_section_title(title: SharedString, t: &Tokens, cx: &mut Context<Sidebar>) -> AnyElement {
-    // `workspacesSectionHeader`: the title with the display menu, which is out of scope. A
-    // plugin filter title replaces "Workspaces".
+    // `workspacesSectionHeader`: the title with the display preferences button. A plugin filter
+    // title replaces "Workspaces".
+    let weak = cx.weak_entity();
+    let button = display_button(t, cx, move |menu, window, cx| {
+        display_menu(menu, &weak, window, cx)
+    });
     div()
         .id("sidebar-workspaces-title")
         .role(Role::Heading)
@@ -1564,12 +1856,45 @@ fn render_section_title(title: SharedString, t: &Tokens, cx: &mut Context<Sideba
         .py(zoomed(SPACE_1, cx))
         .text_size(ui_font_size(FONT_SM, cx))
         .text_color(t.foreground_muted)
-        .child(div().min_w_0().truncate().child(title))
+        .child(div().flex_1().min_w_0().truncate().child(title))
+        .child(button)
         .into_any_element()
 }
 
-/// The height of the "Workspaces" heading row: the 24 px display button plus its padding.
-const SECTION_TITLE_HEIGHT: f32 = 32.;
+/// `SidebarDisplayPreferencesMenu` trigger: `Settings2` at 14 px in a 28 px hover button.
+fn display_button<B>(t: &Tokens, cx: &App, build: B) -> impl IntoElement + use<B>
+where
+    B: Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+{
+    let fg = t.foreground;
+    let base = div()
+        .id("sidebar-display-preferences-menu")
+        .role(Role::Button)
+        .aria_label("Display preferences")
+        .flex_shrink_0()
+        .w(zoomed(28., cx))
+        .h(zoomed(28., cx))
+        .rounded(zoomed(RADIUS_MD, cx))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .text_color(t.foreground_muted)
+        .hover(move |style| style.bg(t.surface_sidebar_hover).text_color(fg))
+        .tooltip(|window, cx| Tooltip::new("Display preferences").build(window, cx))
+        .child(icon(IconName::Settings2).with_size(zoomed(ICON_SM, cx)));
+    KebabButton {
+        base,
+        open: false,
+        group: SharedString::default(),
+        fill: t.surface_sidebar_hover,
+        always_visible: true,
+    }
+    .dropdown_menu_with_anchor(Anchor::TopRight, build)
+}
+
+/// The height of the "Workspaces" heading row: the 28 px display button plus its padding.
+const SECTION_TITLE_HEIGHT: f32 = 36.;
 
 /// `SidebarProjectEmptyState` without its two buttons (open project and import are out of scope).
 fn render_empty(t: &Tokens, cx: &mut Context<Sidebar>) -> AnyElement {
@@ -1602,6 +1927,213 @@ fn render_empty(t: &Tokens, cx: &mut Context<Sidebar>) -> AnyElement {
                 .child("Add a project to get started"),
         )
         .into_any_element()
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as i64)
+}
+
+/// `lineHeight` of the meta line and the glyph size of its items (`META_ICON_SIZE`).
+const META_LINE: f32 = 16.;
+const META_ICON: f32 = ICON_XS;
+
+/// A muted glyph with its text (`IdentityItem`).
+fn meta_identity(glyph: IconName, text: &str, t: &Tokens, cx: &App) -> AnyElement {
+    h_flex()
+        .min_w_0()
+        .items_center()
+        .gap(zoomed(3., cx))
+        .child(
+            div()
+                .flex_shrink_0()
+                .text_color(t.foreground_muted)
+                .child(icon(glyph).with_size(zoomed(META_ICON, cx))),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(ui_font_size(FONT_SM, cx))
+                .line_height(zoomed(META_LINE, cx))
+                .text_color(t.foreground_muted)
+                .child(text.to_string()),
+        )
+        .into_any_element()
+}
+
+/// The glyph and color of a pull request state (`PullRequestStateIcon`).
+fn pull_request_mark(state: PullRequestState, t: &Tokens) -> (IconName, Hsla) {
+    match state {
+        PullRequestState::Open => (IconName::GitPullRequest, t.status_success),
+        PullRequestState::Merged => (IconName::GitMerge, t.status_merged),
+        PullRequestState::Closed => (IconName::GitPullRequestClosed, t.status_danger),
+    }
+}
+
+/// `CheckIndicator` as a lucide mark: a check, a cross, or a dot while the run goes on.
+fn check_mark(state: CheckSummaryState, t: &Tokens) -> (IconName, Hsla, &'static str) {
+    match state {
+        CheckSummaryState::Passed => (IconName::CircleCheck, t.status_success, "passed"),
+        CheckSummaryState::Failed => (IconName::CircleX, t.status_danger, "failed"),
+        CheckSummaryState::Running => (IconName::CircleDot, t.status_warning, "running"),
+    }
+}
+
+fn render_meta_item(
+    ix: usize,
+    item: MetaItem<'_>,
+    t: &Tokens,
+    cx: &mut Context<Sidebar>,
+) -> AnyElement {
+    match item {
+        MetaItem::Branch(name) => meta_identity(IconName::GitBranch, name, t, cx),
+        MetaItem::Project(name) => meta_identity(IconName::Folder, name, t, cx),
+        MetaItem::PullRequest(pr) => {
+            let (glyph, color) = pull_request_mark(pr.state, t);
+            let merge_request = pr.forge == "gitlab";
+            let label = if merge_request {
+                format!("Merge request !{}", pr.number)
+            } else {
+                format!("Pull request #{}", pr.number)
+            };
+            let text = match pr.state {
+                PullRequestState::Open => pr.number.to_string(),
+                PullRequestState::Merged => format!("{} Merged", pr.number),
+                PullRequestState::Closed => format!("{} Closed", pr.number),
+            };
+            let url = pr.url.clone();
+            let (muted, fg) = (t.foreground_muted, t.foreground);
+            div()
+                .id(("workspace-pr", ix))
+                .role(Role::Link)
+                .aria_label(label)
+                .flex_shrink_0()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(zoomed(3., cx))
+                .cursor_pointer()
+                .text_size(ui_font_size(FONT_SM, cx))
+                .line_height(zoomed(META_LINE, cx))
+                .text_color(muted)
+                .hover(move |style| style.text_color(fg))
+                .active(|style| style.opacity(0.82))
+                // The row under the chip must not open its workspace.
+                .on_press(cx, move |_, _, cx| {
+                    cx.stop_propagation();
+                    cx.open_url(&url);
+                })
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .text_color(color)
+                        .child(icon(glyph).with_size(zoomed(META_ICON, cx))),
+                )
+                .child(text)
+                .into_any_element()
+        }
+        MetaItem::Checks { summary, label } => {
+            let (glyph, color, word) = check_mark(summary.state, t);
+            h_flex()
+                .flex_shrink_0()
+                .items_center()
+                .gap(zoomed(3., cx))
+                .child(
+                    div()
+                        .text_color(color)
+                        .child(icon(glyph).with_size(zoomed(META_ICON, cx))),
+                )
+                .when(label, |this| {
+                    this.child(
+                        div()
+                            .text_size(ui_font_size(FONT_SM, cx))
+                            .line_height(zoomed(META_LINE, cx))
+                            .text_color(color)
+                            .child(word),
+                    )
+                })
+                .into_any_element()
+        }
+        MetaItem::Services(service) => {
+            let color = if service.unhealthy() {
+                t.status_danger
+            } else {
+                t.status_success
+            };
+            h_flex()
+                .min_w_0()
+                .items_center()
+                .gap(zoomed(3., cx))
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .text_color(color)
+                        .child(icon(IconName::Globe).with_size(zoomed(META_ICON, cx))),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(ui_font_size(FONT_SM, cx))
+                        .line_height(zoomed(META_LINE, cx))
+                        .text_color(color)
+                        .child(service.name.clone()),
+                )
+                .into_any_element()
+        }
+        MetaItem::Labels(labels) => h_flex()
+            .min_w_0()
+            .overflow_hidden()
+            .items_center()
+            .gap(zoomed(SPACE_1, cx))
+            .children(labels.iter().map(|label| {
+                // `WorkspaceLabelChip`: the label's own color on a tint of it.
+                let color: Hsla =
+                    label_color(&label.color).map_or(t.foreground_muted, |hex| rgb(hex).into());
+                div()
+                    .flex_shrink_0()
+                    .px(zoomed(SPACE_1, cx))
+                    .rounded(zoomed(RADIUS_BASE, cx))
+                    .bg(color.opacity(0.15))
+                    .text_size(ui_font_size(FONT_SM, cx))
+                    .line_height(zoomed(META_LINE, cx))
+                    .text_color(color)
+                    .child(label.name.clone())
+            }))
+            .into_any_element(),
+    }
+}
+
+/// The line under a workspace title: its items, a dot apart (`WorkspaceMetaRow`).
+fn render_meta_row(
+    ix: usize,
+    items: Vec<MetaItem<'_>>,
+    t: &Tokens,
+    cx: &mut Context<Sidebar>,
+) -> Div {
+    let mut line = h_flex()
+        .w_full()
+        .min_w_0()
+        .overflow_hidden()
+        .items_center()
+        .gap(zoomed(SPACE_1_5, cx))
+        .h(zoomed(META_LINE, cx));
+    for (at, item) in items.into_iter().enumerate() {
+        if at > 0 {
+            line = line.child(
+                div()
+                    .flex_shrink_0()
+                    .text_size(ui_font_size(FONT_SM, cx))
+                    .line_height(zoomed(META_LINE, cx))
+                    .text_color(t.foreground_extra_muted)
+                    .child("·"),
+            );
+        }
+        line = line.child(render_meta_item(ix, item, t, cx));
+    }
+    line
 }
 
 /// A disc of the alert color with a bang, which Electron draws as a filled `CircleAlert`.
@@ -1947,6 +2479,277 @@ fn new_workspace_button(
         .child(icon(IconName::Plus).with_size(zoomed(PROJECT_PLUS_GLYPH, cx)))
 }
 
+/// What the display menu reads when it opens.
+struct DisplaySnapshot {
+    prefs: SidebarPrefs,
+    /// (id, name) of each project, by name.
+    projects: Vec<(String, String)>,
+    labels: Vec<LabelOption>,
+}
+
+/// One option row of the display menu: a muted icon, the label, and a check at the right when
+/// it is the chosen one. The menu closes after a click, because the gpui-kit popup always does.
+fn display_option(
+    label: impl Into<SharedString>,
+    glyph: Option<IconName>,
+    selected: bool,
+    view: &WeakEntity<Sidebar>,
+    cx: &App,
+    run: impl Fn(&mut Sidebar, &mut Context<Sidebar>) + 'static,
+) -> PopupMenuItem {
+    let view = view.clone();
+    PopupMenuItem::new(label)
+        .when_some(glyph, |item, glyph| {
+            item.icon(icon(glyph).with_size(zoomed(ICON_SM, cx)))
+        })
+        .checked(selected)
+        .on_click(move |_, _, cx| {
+            view.update(cx, |this, cx| run(this, cx)).ok();
+        })
+}
+
+/// A submenu row. The gpui-kit menu has no trailing slot on a submenu row, so the value follows
+/// the title (see `submenu_row_label`).
+fn display_row_label(title: &'static str, value: Option<&str>) -> SharedString {
+    submenu_row_label(&title.into(), value.map(|value| value.to_string().into()))
+}
+
+/// `SidebarDisplayPreferencesMenu`: one row per decision with its current value, and the
+/// options one level down. The Host row item and the Host filter do not exist in this client.
+fn display_menu(
+    menu: PopupMenu,
+    view: &WeakEntity<Sidebar>,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let Ok(snapshot) = view.read_with(&*cx, |this, cx| this.display_snapshot(cx)) else {
+        return menu;
+    };
+    let prefs = &snapshot.prefs;
+    let grouping = prefs.view.grouping;
+    let title_source = prefs.title_source;
+    let mut menu = menu.min_w(zoomed(232., cx)).check_side(Side::Right);
+
+    menu = menu.submenu(
+        display_row_label(
+            "Grouping",
+            Some(match grouping {
+                Grouping::Project => "Project",
+                Grouping::Status => "Status",
+            }),
+        ),
+        window,
+        cx,
+        {
+            let view = view.clone();
+            move |sub, _, cx| {
+                sub.check_side(Side::Right)
+                    .item(display_option(
+                        "Project",
+                        Some(IconName::Folder),
+                        grouping == Grouping::Project,
+                        &view,
+                        cx,
+                        |this, cx| this.set_grouping(Grouping::Project, cx),
+                    ))
+                    .item(display_option(
+                        "Status",
+                        Some(IconName::CircleDashed),
+                        grouping == Grouping::Status,
+                        &view,
+                        cx,
+                        |this, cx| this.set_grouping(Grouping::Status, cx),
+                    ))
+            }
+        },
+    );
+
+    menu = menu.submenu(
+        display_row_label(
+            "Title",
+            Some(match title_source {
+                TitleSource::Title => "Title",
+                TitleSource::Branch => "Branch name",
+            }),
+        ),
+        window,
+        cx,
+        {
+            let view = view.clone();
+            move |sub, _, cx| {
+                sub.check_side(Side::Right)
+                    .item(display_option(
+                        "Title",
+                        Some(IconName::Type),
+                        title_source == TitleSource::Title,
+                        &view,
+                        cx,
+                        |this, cx| this.set_title_source(TitleSource::Title, cx),
+                    ))
+                    .item(display_option(
+                        "Branch name",
+                        Some(IconName::GitBranch),
+                        title_source == TitleSource::Branch,
+                        &view,
+                        cx,
+                        |this, cx| this.set_title_source(TitleSource::Branch, cx),
+                    ))
+            }
+        },
+    );
+
+    menu = menu.submenu(display_row_label("Show", None), window, cx, {
+        let view = view.clone();
+        let items = prefs.row_items;
+        let checks = prefs.checks_display;
+        let trailing = prefs.trailing;
+        move |sub, window, cx| {
+            let mut sub = sub.check_side(Side::Right);
+            for (item, label, glyph) in [
+                (RowItem::Branch, "Branch", IconName::GitBranch),
+                (RowItem::Project, "Project", IconName::Folder),
+                (
+                    RowItem::PullRequest,
+                    "Pull request",
+                    IconName::GitPullRequest,
+                ),
+                (RowItem::Services, "Services", IconName::Globe),
+                (RowItem::Labels, "Labels", IconName::Tag),
+            ] {
+                sub = sub.item(display_option(
+                    label,
+                    Some(glyph),
+                    items.is_on(item),
+                    &view,
+                    cx,
+                    move |this, cx| this.toggle_row_item(item, cx),
+                ));
+            }
+            // Checks has three answers, so it opens a page instead of ticking.
+            sub = sub.submenu(display_row_label("Checks", None), window, cx, {
+                let view = view.clone();
+                move |checks_menu, _, cx| {
+                    let mut checks_menu = checks_menu.check_side(Side::Right);
+                    for (choice, label, glyph) in [
+                        (
+                            ChecksDisplay::IconAndText,
+                            "Icon and text",
+                            IconName::Captions,
+                        ),
+                        (ChecksDisplay::IconOnly, "Icon only", IconName::CircleCheck),
+                        (ChecksDisplay::Hidden, "Hidden", IconName::EyeOff),
+                    ] {
+                        checks_menu = checks_menu.item(display_option(
+                            label,
+                            Some(glyph),
+                            checks == choice,
+                            &view,
+                            cx,
+                            move |this, cx| this.set_checks_display(choice, cx),
+                        ));
+                    }
+                    checks_menu
+                }
+            });
+            sub = sub.separator();
+            // The slot holds one thing; a second click on the shown choice clears it.
+            for (choice, label, glyph) in [
+                (Trailing::DiffStats, "Diff stats", IconName::Diff),
+                (Trailing::LastActivity, "Last activity", IconName::Clock),
+            ] {
+                sub = sub.item(display_option(
+                    label,
+                    Some(glyph),
+                    trailing == Some(choice),
+                    &view,
+                    cx,
+                    move |this, cx| this.toggle_trailing(choice, cx),
+                ));
+            }
+            sub
+        }
+    });
+
+    if project_filter_visible(snapshot.projects.len()) {
+        let value = project_filter_value(&prefs.view.project_filter, &snapshot.projects);
+        let selected = prefs.view.project_filter.clone();
+        let projects = snapshot.projects.clone();
+        menu = menu
+            .separator()
+            .submenu(display_row_label("Project", Some(&value)), window, cx, {
+                let view = view.clone();
+                move |sub, _, cx| {
+                    let none_applies = !projects.iter().any(|(id, _)| selected.contains(id));
+                    let mut sub = sub.check_side(Side::Right).item(display_option(
+                        "All projects",
+                        None,
+                        none_applies,
+                        &view,
+                        cx,
+                        |this, cx| this.clear_project_filter(cx),
+                    ));
+                    for (id, name) in &projects {
+                        let id = id.clone();
+                        sub = sub.item(display_option(
+                            name.clone(),
+                            None,
+                            selected.contains(&id),
+                            &view,
+                            cx,
+                            move |this, cx| this.toggle_project_filter(&id, cx),
+                        ));
+                    }
+                    sub
+                }
+            });
+    }
+
+    let label_filter = prefs.view.label_filter.clone();
+    if label_filter_visible(!snapshot.labels.is_empty(), !label_filter.is_empty()) {
+        let labels = snapshot.labels.clone();
+        menu = menu
+            .separator()
+            .submenu(display_row_label("Labels", None), window, cx, {
+                let view = view.clone();
+                move |sub, _, cx| {
+                    let mut sub = sub.check_side(Side::Right);
+                    for label in &labels {
+                        let key = label.key.clone();
+                        sub = sub.item(display_option(
+                            label.name.clone(),
+                            None,
+                            label_filter.contains(&key),
+                            &view,
+                            cx,
+                            move |this, cx| this.toggle_label_filter(&key, cx),
+                        ));
+                    }
+                    // The empty key selects a workspace that carries no label.
+                    sub = sub.item(display_option(
+                        "Unlabelled",
+                        None,
+                        label_filter.contains(""),
+                        &view,
+                        cx,
+                        |this, cx| this.toggle_label_filter("", cx),
+                    ));
+                    if !label_filter.is_empty() {
+                        sub = sub.separator().item(display_option(
+                            "Clear filter",
+                            None,
+                            false,
+                            &view,
+                            cx,
+                            |this, cx| this.clear_label_filter(cx),
+                        ));
+                    }
+                    sub
+                }
+            });
+    }
+    menu
+}
+
 fn kebab<B>(
     id: (&'static str, usize),
     label: &'static str,
@@ -1983,6 +2786,7 @@ where
         open: false,
         group,
         fill: t.surface2,
+        always_visible: false,
     }
     .dropdown_menu_with_anchor(Anchor::TopRight, build)
 }

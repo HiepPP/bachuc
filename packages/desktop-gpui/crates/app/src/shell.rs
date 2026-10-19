@@ -38,7 +38,7 @@ use bachuc_command::{
     CommandCenter, CommandEvent, CommandFileEvent, FileResult, Shortcut, ShortcutsDialog,
     ShortcutsDialogEvent, data_dir, load_shortcuts,
 };
-use bachuc_composer::{ComposerEvent, DraftSeed};
+use bachuc_composer::{Composer, ComposerEvent, DraftSeed};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_explorer::{
     DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerFileEvent, ExplorerNoticeEvent,
@@ -58,7 +58,10 @@ use bachuc_terminal::{TerminalEvent, TerminalView};
 use bachuc_theme::metrics::TRAFFIC_LIGHT_WIDTH;
 use bachuc_theme::{tokens, zoomed};
 use bachuc_timeline::grouping::{item_type, message_key};
-use bachuc_timeline::{ForkTarget, TimelineEvent, TimelineForkEvent, TimelineView};
+use bachuc_timeline::{
+    ForkTarget, TimelineEvent, TimelineForkEvent, TimelineRewindEvent, TimelineView,
+    restores_composer,
+};
 use bachuc_workspace::model::Rect;
 use bachuc_workspace::{PaneEvent, PaneItem, SplitAxis, TabKind, TabMenuEvent, Workspace};
 use gpui_kit::component::button::ButtonVariant;
@@ -281,7 +284,8 @@ impl Shell {
         let host_index = initial_host(&hosts, preferred.as_deref());
         let client = Client::connect(hosts[host_index].clone(), cx);
         let diagrams = cx.new(|cx| DiagramRenderer::new(window, cx));
-        let sidebar = cx.new(|cx| Sidebar::new(client.clone(), window, cx));
+        let sidebar =
+            cx.new(|cx| Sidebar::with_data_dir(client.clone(), Some(data_dir()), window, cx));
         let shortcuts = load_shortcuts();
         let bindings = binding_specs(&shortcuts);
         cx.bind_keys(bindings.iter().map(BindingSpec::binding));
@@ -645,7 +649,8 @@ impl Shell {
             let _ = this.update(cx, |shell, _| shell.retired = None);
         })
         .detach();
-        self.sidebar = cx.new(|cx| Sidebar::new(client.clone(), window, cx));
+        self.sidebar =
+            cx.new(|cx| Sidebar::with_data_dir(client.clone(), Some(data_dir()), window, cx));
         if let Some(explorer) = self.explorer.take() {
             explorer.update(cx, |explorer, cx| explorer.set_visible(false, cx));
         }
@@ -1476,7 +1481,8 @@ impl Shell {
         view
     }
 
-    /// Opens the New workspace screen in a new tab of the home view and shows it.
+    /// Opens the New workspace screen in a new tab of the home view and shows it. A page surface
+    /// closes, as for a route change, so a Board card's repo link shows the screen.
     pub(crate) fn open_new_workspace(
         &mut self,
         preset: NewWorkspacePreset,
@@ -1485,6 +1491,7 @@ impl Shell {
     ) -> Entity<NewWorkspaceScreen> {
         self.ensure_home(window, cx);
         let screen = self.open_new_workspace_screen(HOME, None, preset, window, cx);
+        self.close_page_surface(cx);
         self.select(HOME.to_string(), window, cx);
         screen
     }
@@ -1656,6 +1663,44 @@ impl Shell {
         })
         .detach();
         cx.notify();
+    }
+
+    /// A rewind picked under a prompt, as `useRewindAgentMutation`: asks the client, and on success
+    /// of a mode that removes the conversation puts the prompt back in the composer. On failure it
+    /// shows the error and leaves the composer as it is.
+    fn rewind(
+        &mut self,
+        timeline: Entity<TimelineView>,
+        composer: Entity<Composer>,
+        event: &TimelineRewindEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let TimelineRewindEvent::Rewind {
+            agent_id,
+            message_id,
+            mode,
+            text,
+        } = event;
+        let (mode, text) = (*mode, text.clone());
+        timeline.update(cx, |timeline, cx| timeline.set_rewind_pending(true, cx));
+        let task = self.client.update(cx, |client, cx| {
+            client.rewind(agent_id, message_id, mode, cx)
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            let _ = this.update_in(cx, |shell, window, cx| {
+                timeline.update(cx, |timeline, cx| timeline.set_rewind_pending(false, cx));
+                match result {
+                    Ok(()) if restores_composer(mode) => {
+                        composer.update(cx, |composer, cx| composer.set_text(text, window, cx));
+                    }
+                    Ok(()) => {}
+                    Err(error) => shell.show_toast(false, rewind_error(&error), cx),
+                }
+            });
+        })
+        .detach();
     }
 
     /// A fork picked in a turn footer, as `useForkAgent`: asks the chat history, then opens a
@@ -2390,6 +2435,12 @@ impl Shell {
                 let workspace = workspace.clone();
                 move |this: &mut Shell, timeline, event: &TimelineForkEvent, window, cx| {
                     this.fork(&workspace, timeline.clone(), event, window, cx)
+                }
+            }),
+            cx.subscribe_in(&timeline, window, {
+                let composer = composer.clone();
+                move |this: &mut Shell, timeline, event: &TimelineRewindEvent, window, cx| {
+                    this.rewind(timeline.clone(), composer.clone(), event, window, cx)
                 }
             }),
             cx.subscribe_in(&composer, window, {
@@ -3896,6 +3947,8 @@ pub(crate) fn auto_opens_pr_tab(
 
 /// `message.actions.forkFailed`.
 pub(crate) const FORK_FAILED: &str = "Failed to fork chat";
+/// `rewind.errors.failed`.
+pub(crate) const REWIND_FAILED: &str = "Failed to rewind agent";
 /// `message.actions.forkMissingWorkspace`.
 pub(crate) const FORK_MISSING_WORKSPACE: &str = "This agent is not in a workspace.";
 /// The chip label of a chat history without a title, as Electron's text attachment.
@@ -4021,6 +4074,16 @@ pub(crate) fn workspace_file_attachment(path: &str) -> (String, serde_json::Valu
 
 /// The toast of a failed fork: the error, as `toErrorMessage`, but `forkFailed` for an empty
 /// context (the client's "Nothing to fork") or an empty text.
+/// The toast text of a failed rewind: the error the host gave, else the generic one.
+pub(crate) fn rewind_error(message: &str) -> String {
+    let message = message.trim();
+    if message.is_empty() {
+        REWIND_FAILED.to_string()
+    } else {
+        message.to_string()
+    }
+}
+
 pub(crate) fn fork_error(message: &str) -> String {
     let message = message.trim();
     if message.is_empty() || message == "Nothing to fork" {
@@ -4062,11 +4125,12 @@ mod tests {
     use super::{
         AGENT_CONTEXT, AgentOpen, CANNOT_RENAME, FORK_ATTACHMENT_LABEL, FORK_FAILED,
         FORK_MISSING_WORKSPACE, FocusKind, PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE,
-        RESUME_ID_UNAVAILABLE, RenameTarget, SHELL_CONTEXT, TERMINAL_NOT_OPEN, agent_open,
-        agent_target, agent_workspace, auto_opens_pr_tab, chat_target, closes_surface_on_open,
-        focus_kind, fork_attachment_label, fork_draft_seed, fork_error, fork_tab_cwd,
-        fork_workspace_preset, has_pull_request, latest_prompt_reveal, reload_error, rename_target,
-        resume_text, should_redirect_to_composer, workspace_file_attachment,
+        RESUME_ID_UNAVAILABLE, REWIND_FAILED, RenameTarget, SHELL_CONTEXT, TERMINAL_NOT_OPEN,
+        agent_open, agent_target, agent_workspace, auto_opens_pr_tab, chat_target,
+        closes_surface_on_open, focus_kind, fork_attachment_label, fork_draft_seed, fork_error,
+        fork_tab_cwd, fork_workspace_preset, has_pull_request, latest_prompt_reveal, reload_error,
+        rename_target, resume_text, rewind_error, should_redirect_to_composer,
+        workspace_file_attachment,
     };
     use bachuc_client::{
         AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, PrMergeCapability, PrStatus,
@@ -4123,6 +4187,7 @@ mod tests {
             branch: None,
             pinned: false,
             agent_ids: agent_ids.iter().map(|id| id.to_string()).collect(),
+            ..Default::default()
         }
     }
 
@@ -4369,6 +4434,16 @@ mod tests {
         assert_eq!(preset.cwd.as_deref(), Some("/agent"));
         assert_eq!(preset.project_id, None);
         assert_eq!(fork_workspace_preset(&projects, None, "").cwd, None);
+    }
+
+    #[test]
+    fn a_failed_rewind_shows_the_host_error_or_the_generic_text() {
+        assert_eq!(rewind_error(""), REWIND_FAILED);
+        assert_eq!(rewind_error("  "), REWIND_FAILED);
+        assert_eq!(
+            rewind_error("Update the host to use this."),
+            "Update the host to use this."
+        );
     }
 
     #[test]

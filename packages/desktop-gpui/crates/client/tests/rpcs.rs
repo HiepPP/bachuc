@@ -9,8 +9,8 @@ use bachuc_client::{
     DiffStat, DirectoryEvent, DirectorySuggestion, FileDiff, FileDiffStatus, FileKind,
     ForkBoundary, ForkCursor, GitAction, GitActionReply, GitStatus, GitStatusEvent, HistoryEntry,
     HistoryPage, MatchMode, MergeMethod, NewEntryKind, PrCheck, PrMergeCapability, PrStatus,
-    PrTimelineItem, ProjectNode, QueuedPrompt, StashEntry, TurnBehavior, WorkspaceNode,
-    WorkspaceScript,
+    PrTimelineItem, ProjectNode, QueuedPrompt, RewindMode, RewindModes, StashEntry, TurnBehavior,
+    WorkspaceNode, WorkspaceScript,
 };
 use bachuc_protocol::generated::ServerInfoPermissionsItem;
 use common::{FakeServer, Harness, agent_snapshot, session};
@@ -131,6 +131,7 @@ fn project_tree_joins_projects_workspaces_and_agents() {
                     branch: Some("main".into()),
                     pinned: true,
                     agent_ids: vec!["a1".into(), "a2".into()],
+                    ..Default::default()
                 },
                 WorkspaceNode {
                     id: "w2".into(),
@@ -139,6 +140,7 @@ fn project_tree_joins_projects_workspaces_and_agents() {
                     branch: None,
                     pinned: false,
                     agent_ids: vec![],
+                    ..Default::default()
                 },
             ],
         },
@@ -2726,4 +2728,133 @@ fn discard_changes_sends_the_paths_and_needs_one() {
         harness.wait(reply, WAIT).unwrap_err().to_string(),
         "pathspec did not match"
     );
+}
+
+fn rewind_reply(ok: bool, error: Value) -> Value {
+    json!({"agentId": "a1", "ok": ok, "error": error})
+}
+
+/// A host with the `rewind` feature, an agent with a short timeline, and a viewed timeline.
+fn rewind_harness() -> (FakeServer, Harness) {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    with_features(&server, &["rewind"]);
+    for (id, text) in [("u1", "first"), ("u2", "second")] {
+        server.append(
+            "a1",
+            json!({"type": "user_message", "text": text, "messageId": id}),
+            id,
+            false,
+        );
+    }
+    let mut harness = connect(&server);
+    harness.core.view_agent("a1");
+    assert!(harness.pump_until(WAIT, |h| h.entries("a1").len() == 2));
+    (server, harness)
+}
+
+fn tail_fetches(server: &FakeServer) -> usize {
+    server.requests_of("fetch_agent_timeline_request").len()
+}
+
+#[test]
+fn rewind_modes_come_from_the_agent_capabilities_of_a_host_with_rewind() {
+    let (server, mut harness) = rewind_harness();
+    assert_eq!(harness.core.rewind_modes("a1"), RewindModes::default());
+    let mut agent = agent_snapshot("a1", "idle");
+    agent["capabilities"] = json!({"supportsRewindConversation": true, "supportsRewindBoth": true});
+    server
+        .broadcast(json!({"type": "agent_update", "payload": {"kind": "upsert", "agent": agent}}));
+    let expected = RewindModes {
+        conversation: true,
+        files: false,
+        both: true,
+    };
+    assert!(harness.pump_until(WAIT, |h| h.core.rewind_modes("a1") == expected));
+    assert_eq!(harness.core.rewind_modes("missing"), RewindModes::default());
+}
+
+#[test]
+fn a_host_without_rewind_offers_no_modes_and_refuses_the_call() {
+    let server = FakeServer::start();
+    let mut agent = agent_snapshot("a1", "idle");
+    agent["capabilities"] = json!({"supportsRewindConversation": true,
+                                   "supportsRewindFiles": true, "supportsRewindBoth": true});
+    server.with(|s| s.agents.push(agent));
+    let mut harness = connect(&server);
+    assert_eq!(harness.core.rewind_modes("a1"), RewindModes::default());
+    let reply = harness.core.rewind("a1", "u1", RewindMode::Both);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Update the host to use this."
+    );
+    assert!(server.requests_of("agent.rewind.request").is_empty());
+}
+
+#[test]
+fn rewind_sends_the_wire_request_and_resolves_on_the_reply() {
+    let (server, mut harness) = rewind_harness();
+    server.reply(
+        "agent.rewind.request",
+        "agent.rewind.response",
+        rewind_reply(true, Value::Null),
+    );
+    let before = tail_fetches(&server);
+    let reply = harness.core.rewind("a1", "u2", RewindMode::Conversation);
+    harness.wait(reply, WAIT).unwrap();
+    let request = &server.requests_of("agent.rewind.request")[0];
+    assert_eq!(request["type"], json!("agent.rewind.request"));
+    assert_eq!(request["agentId"], json!("a1"));
+    assert_eq!(request["messageId"], json!("u2"));
+    assert_eq!(request["mode"], json!("conversation"));
+    assert!(request["requestId"].is_string());
+    assert!(
+        harness.pump_until(WAIT, |_| tail_fetches(&server) > before),
+        "a rewound conversation reloads the timeline tail"
+    );
+
+    // The files alone leave the timeline as it is.
+    let before = tail_fetches(&server);
+    let reply = harness.core.rewind("a1", "u1", RewindMode::Files);
+    harness.wait(reply, WAIT).unwrap();
+    assert_eq!(
+        server.requests_of("agent.rewind.request")[1]["mode"],
+        json!("files")
+    );
+    harness.pump_until(Duration::from_millis(300), |_| false);
+    assert_eq!(tail_fetches(&server), before);
+}
+
+#[test]
+fn a_failed_rewind_resolves_with_the_error_and_changes_no_client_state() {
+    let (server, mut harness) = rewind_harness();
+    server.reply(
+        "agent.rewind.request",
+        "agent.rewind.response",
+        rewind_reply(false, json!("Cannot rewind a running agent")),
+    );
+    let entries = harness.entries("a1");
+    let before = tail_fetches(&server);
+    let reply = harness.core.rewind("a1", "u1", RewindMode::Both);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Cannot rewind a running agent"
+    );
+    harness.pump_until(Duration::from_millis(300), |_| false);
+    assert_eq!(harness.entries("a1").len(), 2, "the timeline item count");
+    assert_eq!(harness.entries("a1"), entries);
+    assert_eq!(tail_fetches(&server), before, "no tail reload");
+
+    // `ok: false` without an error text still fails.
+    server.reply(
+        "agent.rewind.request",
+        "agent.rewind.response",
+        rewind_reply(false, Value::Null),
+    );
+    let reply = harness.core.rewind("a1", "u1", RewindMode::Both);
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap_err().to_string(),
+        "Rewind failed"
+    );
+    assert_eq!(tail_fetches(&server), before);
 }

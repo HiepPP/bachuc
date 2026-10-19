@@ -19,6 +19,7 @@ fn workspace(project: usize, n: usize, pinned: bool) -> WorkspaceNode {
         branch: None,
         pinned,
         agent_ids: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -51,6 +52,7 @@ fn row_ids(rows: &[Row]) -> Vec<String> {
             Row::Workspace(w) => format!("w:{}", w.id),
             Row::ShowMore { .. } => "more".to_string(),
             Row::Empty => "empty".to_string(),
+            Row::StatusHeader { bucket, .. } => format!("s:{}", bucket.key()),
         })
         .collect()
 }

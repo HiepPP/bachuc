@@ -150,6 +150,7 @@ mod tests {
             branch: None,
             pinned: false,
             agent_ids: vec![],
+            ..Default::default()
         };
         let projects = [
             ProjectNode {

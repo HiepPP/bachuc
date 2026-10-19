@@ -77,7 +77,7 @@ pub struct ProjectNode {
 }
 
 /// One workspace of a project. `agent_ids` follow the agent list order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WorkspaceNode {
     pub id: String,
     pub name: String,
@@ -85,6 +85,196 @@ pub struct WorkspaceNode {
     pub branch: Option<String>,
     pub pinned: bool,
     pub agent_ids: Vec<String>,
+    /// The pull request of `githubRuntime`, `None` without one or without a readable number.
+    pub pull_request: Option<WorkspacePullRequest>,
+    /// The workspace labels that the host label catalog knows, in the workspace's order.
+    pub labels: Vec<WorkspaceLabel>,
+    /// `statusEnteredAt` in milliseconds since the epoch; `None` when absent or unreadable.
+    pub status_entered_at: Option<i64>,
+}
+
+/// How a pull request stands, as the app's `selectPrHintFromStatus` normalizes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PullRequestState {
+    Open,
+    Merged,
+    Closed,
+}
+
+/// The pull request of a workspace. `forge` is the workspace `forge`, `github` when absent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspacePullRequest {
+    pub number: u64,
+    pub title: String,
+    pub url: String,
+    pub state: PullRequestState,
+    pub is_merged: bool,
+    pub is_draft: bool,
+    pub forge: String,
+    pub checks: Option<CheckSummary>,
+}
+
+/// A workspace label with the color of the host label catalog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceLabel {
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckSummaryState {
+    Passed,
+    Failed,
+    Running,
+}
+
+/// What a sidebar row shows of a pull request's CI. `completed` equals `total` unless
+/// the state is `Running`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CheckSummary {
+    pub state: CheckSummaryState,
+    pub completed: u32,
+    pub total: u32,
+}
+
+/// What a rewind undoes: the conversation, the files, or both.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RewindMode {
+    Conversation,
+    Files,
+    Both,
+}
+
+impl RewindMode {
+    pub(crate) fn wire(self) -> &'static str {
+        match self {
+            RewindMode::Conversation => "conversation",
+            RewindMode::Files => "files",
+            RewindMode::Both => "both",
+        }
+    }
+}
+
+/// The rewind modes an agent offers (`capabilities.supportsRewind*`). All false for a host
+/// without the `rewind` feature.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RewindModes {
+    pub conversation: bool,
+    pub files: bool,
+    pub both: bool,
+}
+
+/// Port of the app's `selectCheckSummary`. `statuses` are the check statuses; a status that is
+/// not `success`, `failure`, `skipped`, or `cancelled` counts as pending. One failure makes the
+/// summary failed. With no checks, `checks_status` gives an empty or full summary.
+pub fn select_check_summary(
+    statuses: &[&str],
+    checks_status: Option<&str>,
+) -> Option<CheckSummary> {
+    let summary = |state, completed, total| {
+        Some(CheckSummary {
+            state,
+            completed,
+            total,
+        })
+    };
+    if !statuses.is_empty() {
+        let total = statuses.len() as u32;
+        let failed = statuses.contains(&"failure");
+        let completed = statuses
+            .iter()
+            .filter(|status| matches!(**status, "success" | "failure" | "skipped" | "cancelled"))
+            .count() as u32;
+        return match (failed, completed == total) {
+            (true, _) => summary(CheckSummaryState::Failed, total, total),
+            (false, true) => summary(CheckSummaryState::Passed, total, total),
+            (false, false) => summary(CheckSummaryState::Running, completed, total),
+        };
+    }
+    match checks_status {
+        Some("success") => summary(CheckSummaryState::Passed, 1, 1),
+        Some("failure") => summary(CheckSummaryState::Failed, 1, 1),
+        Some("pending") => summary(CheckSummaryState::Running, 0, 1),
+        _ => None,
+    }
+}
+
+/// An ISO 8601 time such as `2026-10-09T10:00:00.000Z`, as epoch milliseconds. `None` when
+/// unreadable. A time without a zone counts as UTC.
+pub(crate) fn parse_iso_ms(text: &str) -> Option<i64> {
+    let bytes = text.trim().as_bytes();
+    let digits = |from: usize, count: usize| -> Option<i64> {
+        let part = bytes.get(from..from + count)?;
+        part.iter().all(u8::is_ascii_digit).then(|| {
+            part.iter()
+                .fold(0, |sum, digit| sum * 10 + i64::from(digit - b'0'))
+        })
+    };
+    let separator =
+        |at: usize, expected: &[u8]| bytes.get(at).is_some_and(|b| expected.contains(b));
+    if !(separator(4, b"-") && separator(7, b"-") && separator(10, b"T ") && separator(13, b":")) {
+        return None;
+    }
+    let (year, month, day) = (digits(0, 4)?, digits(5, 2)?, digits(8, 2)?);
+    let (hour, minute) = (digits(11, 2)?, digits(14, 2)?);
+    let mut at = 16;
+    let mut second = 0;
+    if separator(at, b":") {
+        second = digits(at + 1, 2)?;
+        at += 3;
+    }
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 {
+        return None;
+    }
+    if second > 59 {
+        return None;
+    }
+    // The first three fraction digits are the milliseconds.
+    let mut millis = 0;
+    if separator(at, b".") {
+        let fraction: Vec<u8> = bytes[at + 1..]
+            .iter()
+            .copied()
+            .take_while(u8::is_ascii_digit)
+            .collect();
+        if fraction.is_empty() {
+            return None;
+        }
+        millis = fraction
+            .iter()
+            .copied()
+            .chain([b'0'; 2])
+            .take(3)
+            .fold(0, |sum, digit| sum * 10 + i64::from(digit - b'0'));
+        at += 1 + fraction.len();
+    }
+    let offset_minutes = match &bytes[at..] {
+        [] | [b'Z'] => 0,
+        [sign @ (b'+' | b'-'), rest @ ..] => {
+            let text = std::str::from_utf8(rest).ok()?.replace(':', "");
+            if text.len() != 4 || !text.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            let hours: i64 = text[..2].parse().ok()?;
+            let minutes: i64 = text[2..].parse().ok()?;
+            let total = hours * 60 + minutes;
+            if *sign == b'-' { -total } else { total }
+        }
+        _ => return None,
+    };
+    let seconds = days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second;
+    Some((seconds - offset_minutes * 60) * 1_000 + millis)
+}
+
+/// Days since 1970-01-01 of a proleptic Gregorian date (Howard Hinnant's algorithm).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let month_index = (month + 9) % 12;
+    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 /// One entry of a directory listing.

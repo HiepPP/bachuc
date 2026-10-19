@@ -23,6 +23,10 @@ use crate::model::{
     StashEntry, WorkspaceScript,
 };
 use crate::model::{PromptEntry, PromptIndex};
+use crate::model::{
+    PullRequestState, WorkspaceLabel, WorkspacePullRequest, parse_iso_ms, select_check_summary,
+};
+use crate::model::{RewindMode, RewindModes};
 use crate::plugins::{self, PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite};
 use crate::terminal::{self, TerminalFrame, TerminalHandle};
 use crate::timeline::{FetchPlan, LiveRow, TimelineState, TimelineSync};
@@ -154,6 +158,14 @@ enum Pending {
     FetchAgent(Reply<()>),
     ForkContext(Reply<ForkContext>),
     Prompts(Reply<PromptIndex>),
+    /// The `workspace.label.list` answer; it replaces or patches the label catalog.
+    LabelList,
+    /// An `agent.rewind` answer; a rewind of the conversation reloads the timeline tail.
+    Rewind {
+        agent_id: String,
+        mode: RewindMode,
+        reply: Reply<()>,
+    },
     DirectorySuggestions(Reply<Vec<DirectorySuggestion>>),
     /// An `fs.entry.*` answer with `success` and a string `error`.
     FsEntry(Reply<()>),
@@ -189,6 +201,7 @@ impl Pending {
             Pending::PluginCatalog(reply) => send(reply, error),
             Pending::PluginRpc(finish) => finish(Err(error)),
             Pending::Accepted(reply) => send(reply, error),
+            Pending::Rewind { reply, .. } => send(reply, error),
             Pending::Queue {
                 reply: Some(reply), ..
             } => send(reply, error),
@@ -260,6 +273,8 @@ struct AgentExtra {
     /// `runtimeInfo.sessionId`, else `persistence.sessionId`.
     session_id: Option<String>,
     queue_held: bool,
+    /// `capabilities.supportsRewind*`.
+    rewind: RewindModes,
 }
 
 /// The newest `todo` item of a viewed timeline, kept as pages and live rows arrive.
@@ -308,6 +323,27 @@ struct WorkspaceMeta {
     pinned_at: Option<String>,
     diff_stat: Option<DiffStat>,
     is_dirty: Option<bool>,
+    pull_request: Option<WorkspacePullRequest>,
+    /// `workspace_label_key` of each `labels` name, which `rebuild_projects` looks up in the
+    /// label catalog.
+    label_keys: Vec<String>,
+    status_entered_at: Option<i64>,
+}
+
+/// The host label catalog (`workspace.label.list`), keyed by `workspace_label_key`, with the
+/// cursor that orders its `workspace.label.update` pushes.
+#[derive(Default)]
+struct LabelCatalog {
+    labels: HashMap<String, WorkspaceLabel>,
+    cursor: Option<(String, u64)>,
+}
+
+/// The key the app compares label names by: whitespace collapsed, trimmed, lower case.
+fn workspace_label_key(name: &str) -> String {
+    name.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Thinking options of one model, as `(id, label)`, and its default.
@@ -363,6 +399,7 @@ pub struct ClientCore {
     /// `emptyProjects` of the workspace list, for a daemon without `project.list`.
     empty_projects: Vec<ProjectInfo>,
     workspace_meta: HashMap<String, WorkspaceMeta>,
+    label_catalog: LabelCatalog,
     projects: Vec<ProjectNode>,
     projects_dirty: bool,
     directory_events: Vec<DirectoryEvent>,
@@ -415,6 +452,7 @@ impl ClientCore {
             project_list: Vec::new(),
             empty_projects: Vec::new(),
             workspace_meta: HashMap::new(),
+            label_catalog: LabelCatalog::default(),
             projects: Vec::new(),
             projects_dirty: false,
             directory_events: Vec::new(),
@@ -633,6 +671,7 @@ impl ClientCore {
                     for agent_id in self.viewed.clone() {
                         self.request_provider_subagents(&agent_id);
                     }
+                    self.request_label_list();
                 }
             }
             WorkerEvent::Closed { generation, reason } => self.closed(generation, reason),
@@ -1302,6 +1341,37 @@ impl ClientCore {
             json!({"type": "agent.timeline.list_prompts.request", "agentId": agent_id}),
             Pending::Prompts,
         )
+    }
+
+    /// The rewind modes of the agent: none for a host without `features.rewind`.
+    pub fn rewind_modes(&self, agent_id: &str) -> RewindModes {
+        if !self.server_feature("rewind") {
+            return RewindModes::default();
+        }
+        self.extras
+            .get(agent_id)
+            .map(|extra| extra.rewind)
+            .unwrap_or_default()
+    }
+
+    /// Rewinds the agent to the user message `message_id`.
+    pub fn rewind(
+        &mut self,
+        agent_id: &str,
+        message_id: &str,
+        mode: RewindMode,
+    ) -> oneshot::Receiver<anyhow::Result<()>> {
+        if !self.server_feature("rewind") {
+            return failed("Update the host to use this.");
+        }
+        let message = json!({"type": "agent.rewind.request", "agentId": agent_id,
+                             "messageId": message_id, "mode": mode.wire()});
+        let agent_id = agent_id.to_string();
+        self.request_reply(message, |reply| Pending::Rewind {
+            agent_id,
+            mode,
+            reply,
+        })
     }
 
     /// Whether the host builds fork contexts (`features.agentForkContext`).
@@ -2338,6 +2408,7 @@ impl ClientCore {
                 }
                 _ => {}
             },
+            "workspace.label.update" => self.label_update(payload),
             "project.update" => match payload["kind"].as_str() {
                 Some("upsert") => {
                     if let Some(project) = project_info(&payload["project"]) {
@@ -2656,6 +2727,12 @@ impl ClientCore {
         // A checkout error is `{code, message}`, which `error` above does not read.
         let rpc_error = (kind == "rpc_error").then(|| error.clone()).flatten();
         match pending {
+            Pending::LabelList => {
+                if let Some(error) = error {
+                    return log::warn!("workspace.label.list failed: {error}");
+                }
+                self.label_list(payload);
+            }
             Pending::Projects => {
                 if let Some(error) = error {
                     return log::warn!("project.list failed: {error}");
@@ -2911,6 +2988,26 @@ impl ClientCore {
                     None if payload["accepted"] != true => Err(anyhow!("request refused")),
                     None => Ok(()),
                 };
+                let _ = reply.send(result);
+            }
+            Pending::Rewind {
+                agent_id,
+                mode,
+                reply,
+            } => {
+                let result = match error {
+                    Some(error) => Err(anyhow!(error)),
+                    None if payload["ok"] != true => Err(anyhow!("Rewind failed")),
+                    None => Ok(()),
+                };
+                // Only a rewind that worked changes the timeline.
+                if result.is_ok()
+                    && mode != RewindMode::Files
+                    && let Some(sync) = self.timelines.get_mut(&agent_id)
+                {
+                    let plan = sync.plan_tail();
+                    self.send_plan(&agent_id, plan);
+                }
                 let _ = reply.send(result);
             }
             pending => self.composer_response(pending, kind, payload, error),
@@ -3297,6 +3394,12 @@ impl ClientCore {
             .or_else(|| agent["persistence"]["sessionId"].as_str())
             .map(str::to_string);
         extra.queue_held = agent["queue"]["held"] == true;
+        let capabilities = &agent["capabilities"];
+        extra.rewind = RewindModes {
+            conversation: capabilities["supportsRewindConversation"] == true,
+            files: capabilities["supportsRewindFiles"] == true,
+            both: capabilities["supportsRewindBoth"] == true,
+        };
         self.set_permissions(id, permissions);
         self.directory_changed = true;
     }
@@ -3386,6 +3489,14 @@ impl ClientCore {
                         .as_f64()
                         .unwrap_or_default() as u32,
                 }),
+                pull_request: workspace_pull_request(workspace),
+                label_keys: workspace["labels"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|name| name.as_str().map(workspace_label_key))
+                    .collect(),
+                status_entered_at: workspace["statusEnteredAt"].as_str().and_then(parse_iso_ms),
             };
             self.workspace_meta.insert(id.to_string(), meta);
         }
@@ -3402,6 +3513,80 @@ impl ClientCore {
             None => self.workspaces.push(summary),
         }
         self.directory_changed = true;
+    }
+
+    /// Asks for the host label catalog and its updates. A host without `workspaceLabels`
+    /// sends no labels, so none are shown.
+    fn request_label_list(&mut self) {
+        if !self.server_feature("workspaceLabels") {
+            return;
+        }
+        let _ = self.request(
+            json!({"type": "workspace.label.list.request", "subscribe": {}}),
+            Pending::LabelList,
+        );
+    }
+
+    /// A `workspace.label.list` answer: a snapshot replaces the catalog, changes patch it.
+    fn label_list(&mut self, payload: &Value) {
+        let catalog = &mut self.label_catalog;
+        if payload["sync"]["mode"] == "snapshot" {
+            catalog.labels.clear();
+        }
+        for removal in payload["sync"]["removals"].as_array().into_iter().flatten() {
+            if let Some(name) = removal["name"].as_str() {
+                catalog.labels.remove(&workspace_label_key(name));
+            }
+        }
+        for label in payload["labels"].as_array().into_iter().flatten() {
+            if let Some(label) = label_definition(label) {
+                catalog
+                    .labels
+                    .insert(workspace_label_key(&label.name), label);
+            }
+        }
+        catalog.cursor = payload["sync"]["generation"]
+            .as_str()
+            .zip(payload["sync"]["headSeq"].as_u64())
+            .map(|(generation, seq)| (generation.to_string(), seq));
+        self.projects_dirty = true;
+    }
+
+    /// A `workspace.label.update` push. One that does not follow the cursor asks for a
+    /// fresh snapshot.
+    fn label_update(&mut self, update: &Value) {
+        let catalog = &mut self.label_catalog;
+        let in_order = catalog.cursor.as_ref().is_some_and(|(generation, seq)| {
+            update["generation"].as_str() == Some(generation.as_str())
+                && update["seq"].as_u64() == Some(seq + 1)
+        });
+        if !in_order {
+            self.request_label_list();
+            return;
+        }
+        match update["kind"].as_str() {
+            Some("remove") => {
+                if let Some(name) = update["name"].as_str() {
+                    catalog.labels.remove(&workspace_label_key(name));
+                }
+            }
+            Some("upsert") => {
+                if let Some(previous) = update["previousName"].as_str() {
+                    catalog.labels.remove(&workspace_label_key(previous));
+                }
+                if let Some(label) = label_definition(&update["label"]) {
+                    catalog
+                        .labels
+                        .insert(workspace_label_key(&label.name), label);
+                }
+            }
+            _ => {}
+        }
+        catalog.cursor = update["generation"]
+            .as_str()
+            .zip(update["seq"].as_u64())
+            .map(|(generation, seq)| (generation.to_string(), seq));
+        self.projects_dirty = true;
     }
 
     fn providers_list(&mut self, payload: &Value) {
@@ -3580,6 +3765,13 @@ impl ClientCore {
                     agent_ids: agents_by_workspace
                         .remove(workspace.id.as_str())
                         .unwrap_or_default(),
+                    pull_request: meta.pull_request.clone(),
+                    labels: meta
+                        .label_keys
+                        .iter()
+                        .filter_map(|key| self.label_catalog.labels.get(key).cloned())
+                        .collect(),
+                    status_entered_at: meta.status_entered_at,
                 });
         }
         let projects: Vec<ProjectNode> = order
@@ -3598,6 +3790,72 @@ impl ClientCore {
             self.directory_events.push(DirectoryEvent::ProjectsChanged);
         }
     }
+}
+
+fn label_definition(label: &Value) -> Option<WorkspaceLabel> {
+    Some(WorkspaceLabel {
+        name: label["name"].as_str()?.to_string(),
+        color: label["color"].as_str()?.to_string(),
+    })
+}
+
+/// The pull request number of a change request URL, as the app's `parsePullRequestNumber`
+/// reads it: GitHub `/pull/N`, Gitea and Forgejo `/pulls/N`, GitLab `/-/merge_requests/N`.
+fn pull_request_number(url: &str) -> Option<u64> {
+    let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let path = after_scheme
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default()
+        .split_once('/')?
+        .1;
+    let segments: Vec<&str> = path.split('/').collect();
+    segments.windows(2).find_map(|pair| {
+        let number = pair[1];
+        (matches!(pair[0], "pull" | "pulls" | "merge_requests")
+            && !number.is_empty()
+            && number.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| number.parse().ok())
+        .flatten()
+    })
+}
+
+/// The `githubRuntime.pullRequest` of a workspace descriptor, as `selectPrHintFromStatus`
+/// reads it. `None` without a URL or a number.
+fn workspace_pull_request(workspace: &Value) -> Option<WorkspacePullRequest> {
+    let pull_request = &workspace["githubRuntime"]["pullRequest"];
+    let url = pull_request["url"].as_str().filter(|url| !url.is_empty())?;
+    let number = pull_request_number(url).or_else(|| pull_request["number"].as_u64())?;
+    let is_merged = pull_request["isMerged"] == true;
+    let state = match pull_request["state"].as_str() {
+        _ if is_merged => PullRequestState::Merged,
+        Some("merged") => PullRequestState::Merged,
+        Some("open") => PullRequestState::Open,
+        _ => PullRequestState::Closed,
+    };
+    let statuses: Vec<&str> = pull_request["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|check| check["status"].as_str().unwrap_or("pending"))
+        .collect();
+    Some(WorkspacePullRequest {
+        number,
+        title: pull_request["title"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        url: url.to_string(),
+        state,
+        is_merged,
+        is_draft: pull_request["isDraft"] == true,
+        forge: workspace["forge"]
+            .as_str()
+            .filter(|forge| !forge.is_empty())
+            .unwrap_or("github")
+            .to_string(),
+        checks: select_check_summary(&statuses, pull_request["checksStatus"].as_str()),
+    })
 }
 
 /// A project from a project or workspace descriptor; both carry the same project fields.

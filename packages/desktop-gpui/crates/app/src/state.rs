@@ -681,6 +681,7 @@ mod tests {
             branch: None,
             pinned,
             agent_ids: agents.iter().map(|id| id.to_string()).collect(),
+            ..Default::default()
         }
     }
 

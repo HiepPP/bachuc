@@ -9,7 +9,8 @@ use crate::state::JUMP_TO_TAB;
 use bachuc_command::{Shortcut, gpui_keystrokes};
 use bachuc_workspace::KEY_CONTEXT as WORKSPACE_CONTEXT;
 use bachuc_workspace::actions::OpenTabMenu;
-use gpui_kit::{Action, KeyBinding, Unbind, actions};
+use gpui_kit::base::input;
+use gpui_kit::{Action, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType, Unbind, actions};
 
 /// Runs a shortcut action by its `bachuc_command` action id, for example
 /// `workspace.pane.split.right`.
@@ -23,6 +24,22 @@ pub struct RunAction(pub String);
 pub struct JumpToTab(pub usize);
 
 actions!(bachuc, [FindInTimeline]);
+
+// The app and window menu items. The shell shortcut table has no entry for them, so
+// `fixed_bindings` binds their keys.
+actions!(
+    bachuc,
+    [
+        Quit,
+        Hide,
+        HideOthers,
+        ShowAll,
+        Minimize,
+        Zoom,
+        ToggleFullScreen,
+        About
+    ]
+);
 
 /// Key context of the root view. The shortcuts apply anywhere inside it.
 pub const SHELL_CONTEXT: &str = "BachucShell";
@@ -186,6 +203,54 @@ pub fn fixed_bindings() -> Vec<KeyBinding> {
         // The keyboard route to the context menu of the active tab.
         KeyBinding::new("menu", OpenTabMenu, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("shift-f10", OpenTabMenu, Some(WORKSPACE_CONTEXT)),
+        // The standard macOS app keys. No context: they work wherever focus is.
+        KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("cmd-h", Hide, None),
+        KeyBinding::new("alt-cmd-h", HideOthers, None),
+        KeyBinding::new("cmd-m", Minimize, None),
+    ]
+}
+
+/// The menu bar, as in Electron's `features/menu.ts` without Reload, Force Reload, and DevTools.
+/// Settings and the zoom items run the shortcut actions, so the shortcut table stays the one
+/// source of their keys. The Edit items are OS actions on the gpui-kit input actions: they reach
+/// the focused input and grey out when none handles them.
+pub fn app_menus() -> Vec<Menu> {
+    let run = |name: &'static str, id: &str| MenuItem::action(name, RunAction(id.into()));
+    vec![
+        Menu::new("Bachuc GPUI").items([
+            MenuItem::action("About Bachuc GPUI", About),
+            MenuItem::separator(),
+            run("Settings…", "settings.toggle"),
+            MenuItem::separator(),
+            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::separator(),
+            MenuItem::action("Hide Bachuc GPUI", Hide),
+            MenuItem::action("Hide Others", HideOthers),
+            MenuItem::action("Show All", ShowAll),
+            MenuItem::separator(),
+            MenuItem::action("Quit Bachuc GPUI", Quit),
+        ]),
+        Menu::new("Edit").items([
+            MenuItem::os_action("Undo", input::Undo, OsAction::Undo),
+            MenuItem::os_action("Redo", input::Redo, OsAction::Redo),
+            MenuItem::separator(),
+            MenuItem::os_action("Cut", input::Cut, OsAction::Cut),
+            MenuItem::os_action("Copy", input::Copy, OsAction::Copy),
+            MenuItem::os_action("Paste", input::Paste, OsAction::Paste),
+            MenuItem::os_action("Select All", input::SelectAll, OsAction::SelectAll),
+        ]),
+        Menu::new("View").items([
+            run("Zoom In", ZOOM_IN),
+            run("Zoom Out", ZOOM_OUT),
+            run("Actual Size", ZOOM_RESET),
+            MenuItem::separator(),
+            MenuItem::action("Enter Full Screen", ToggleFullScreen),
+        ]),
+        Menu::new("Window").items([
+            MenuItem::action("Minimize", Minimize),
+            MenuItem::action("Zoom", Zoom),
+        ]),
     ]
 }
 
@@ -362,6 +427,107 @@ mod tests {
         // Every other shortcut keeps its context.
         assert_eq!(binding_context("command-center.toggle"), SHELL_CONTEXT);
         assert_eq!(binding_context("agent.interrupt"), AGENT_CONTEXT);
+    }
+
+    /// The pieces of a binding context predicate that name one context, for matching a fixed
+    /// binding against a shortcut binding.
+    fn context_path(context: &str) -> Vec<KeyContext> {
+        let first = context.split(" && ").next().unwrap_or(context);
+        vec![KeyContext::try_from(first).unwrap()]
+    }
+
+    #[test]
+    fn no_fixed_binding_repeats_a_shortcut_table_keystroke_in_the_same_context() {
+        let specs = binding_specs(&default_shortcuts());
+        let fixed = fixed_bindings();
+        assert!(!fixed.is_empty() && !specs.is_empty());
+        for binding in &fixed {
+            for spec in &specs {
+                let typed: Vec<Keystroke> = spec
+                    .keys
+                    .split(' ')
+                    .map(|keys| Keystroke::parse(keys).unwrap())
+                    .collect();
+                if binding.match_keystrokes(&typed) != Some(false) {
+                    continue;
+                }
+                // The same keys may bind in another context, such as Escape in Settings
+                // against Escape in an agent pane.
+                let shares_context = binding
+                    .predicate()
+                    .is_none_or(|predicate| predicate.eval(&context_path(spec.context)));
+                assert!(
+                    !shares_context,
+                    "{} is bound by both the fixed bindings and {:?}",
+                    spec.keys, spec.action
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_app_keys_bind_their_actions_in_every_context() {
+        let fixed = fixed_bindings();
+        let bound = |keys: &str, action: &dyn gpui_kit::Action| {
+            fixed.iter().any(|binding| {
+                binding.match_keystrokes(&[Keystroke::parse(keys).unwrap()]) == Some(false)
+                    && binding.action().partial_eq(action)
+                    && binding.predicate().is_none()
+            })
+        };
+        assert!(bound("cmd-q", &Quit));
+        assert!(bound("cmd-h", &Hide));
+        assert!(bound("alt-cmd-h", &HideOthers));
+        assert!(bound("cmd-m", &Minimize));
+    }
+
+    #[test]
+    fn the_menu_bar_has_the_four_menus_without_the_electron_only_items() {
+        let menus = app_menus();
+        let names: Vec<_> = menus.iter().map(|menu| menu.name.to_string()).collect();
+        assert_eq!(names, ["Bachuc GPUI", "Edit", "View", "Window"]);
+        let mut labels = Vec::new();
+        for menu in &menus {
+            for item in &menu.items {
+                if let MenuItem::Action { name, .. } = item {
+                    labels.push(name.to_string());
+                }
+            }
+        }
+        for expected in [
+            "Settings…",
+            "Undo",
+            "Redo",
+            "Cut",
+            "Copy",
+            "Paste",
+            "Select All",
+            "Zoom In",
+            "Zoom Out",
+            "Actual Size",
+            "Minimize",
+            "Zoom",
+        ] {
+            assert!(labels.iter().any(|label| label == expected), "{expected}");
+        }
+        for left_out in ["Reload", "Force Reload", "Toggle Developer Tools"] {
+            assert!(!labels.iter().any(|label| label == left_out), "{left_out}");
+        }
+    }
+
+    #[test]
+    fn the_menu_runs_the_shortcut_actions_that_the_table_binds() {
+        // A menu item shows the keys of the keymap binding of its action, so these ids must
+        // be the ones the shortcut table binds.
+        let specs = binding_specs(&default_shortcuts());
+        for id in ["settings.toggle", ZOOM_IN, ZOOM_OUT, ZOOM_RESET] {
+            assert!(
+                specs
+                    .iter()
+                    .any(|spec| spec.action == Bound::Run(id.into())),
+                "{id}"
+            );
+        }
     }
 
     #[test]
