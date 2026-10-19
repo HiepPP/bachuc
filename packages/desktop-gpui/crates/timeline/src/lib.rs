@@ -4,6 +4,8 @@
 //! Electron agent panel: `message.tsx`, `tool-calls/detail-level/turn/view.tsx`, the tool detail
 //! views, the permission cards, and the pane find bar.
 
+pub mod background;
+mod background_view;
 mod card_view;
 pub mod cards;
 pub mod diff;
@@ -13,6 +15,7 @@ pub mod grouping;
 mod image_view;
 pub mod links;
 pub mod markdown;
+pub mod motion;
 pub mod outline;
 mod plugin_view;
 pub mod plugins;
@@ -29,7 +32,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bachuc_client::{Client, ClientEvent, ForkBoundary, ForkCursor, RewindMode, RewindModes};
+use bachuc_client::{
+    BackgroundProcess, Client, ClientEvent, ForkBoundary, ForkCursor, RewindMode, RewindModes,
+};
 use bachuc_diagram::{DiagramReady, DiagramRenderer, image_size};
 use bachuc_explorer::syntax::Run;
 use bachuc_icons::{IconName, icon};
@@ -94,6 +99,22 @@ pub enum TimelineRewindEvent {
 pub enum ForkTarget {
     Tab,
     Workspace,
+}
+
+/// What the fork menu forks: a completed response, or the whole chat while a turn runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ForkSource {
+    Response { start: Option<usize>, end: usize },
+    Running,
+}
+
+impl ForkSource {
+    fn menu_key(self) -> ForkMenuKey {
+        match self {
+            ForkSource::Response { end, .. } => ForkMenuKey::Footer(end),
+            ForkSource::Running => ForkMenuKey::Running,
+        }
+    }
 }
 
 /// A fork the user picked in a turn footer. The app calls `Client::fork_context` with the
@@ -199,6 +220,12 @@ enum RowKey {
     Step(u64),
     /// The footer of the response that ends at this entry.
     Footer(u64),
+    /// The Background card under a turn, by the turn's key.
+    TurnCard(u64),
+    /// The running turn's footer.
+    RunningFooter,
+    /// The Background card at the stream bottom.
+    BottomCard,
     Permission(String),
 }
 
@@ -213,7 +240,35 @@ enum RowKind {
         start: Option<usize>,
         end: usize,
     },
+    /// A turn's Background card; `rule` moves the finished-turn rule under the card.
+    TurnCard {
+        slot: background::TurnSlot,
+        rule: bool,
+    },
+    /// The running footer: its start time, for the clock.
+    RunningFooter {
+        started: Option<i64>,
+    },
+    /// The Background card at the stream bottom.
+    BottomCard(background::TurnSlot),
     Permission(Value),
+}
+
+/// The open fork menu: a completed footer's, or the running footer's. A separate type, so the
+/// running footer's key can collide with no entry key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum ForkMenuKey {
+    Footer(usize),
+    Running,
+}
+
+/// One animated mark the timeline keeps alive, keyed by the row or step it belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum MotionKey {
+    RunningFooter,
+    Segment(u64),
+    StepNumber(u64),
+    Badge(u64),
 }
 
 /// The space under a message row for the row below it. A user message gets
@@ -289,6 +344,8 @@ type CodeHighlighter = Arc<dyn Fn(&CodeBlock) -> Vec<Run> + Send + Sync>;
 pub struct TimelineView {
     client: Entity<Client>,
     agent_id: String,
+    /// A provider subagent's key: every action that needs a real agent is hidden.
+    read_only: bool,
     /// The agent folder: links resolve under it and images read from it.
     cwd: String,
     diagrams: Entity<DiagramRenderer>,
@@ -356,10 +413,10 @@ pub struct TimelineView {
     toolbar_size: Rc<Cell<Size<Pixels>>>,
     pending_reveal: Option<PendingReveal>,
     reveal_highlight: Option<Task<()>>,
-    /// The footer whose fork menu is open, by the response's last entry.
-    fork_menu: Option<u64>,
+    /// The footer whose fork menu is open.
+    fork_menu: Option<ForkMenuKey>,
     /// The footer whose fork menu an outside press closed, and when.
-    fork_menu_dismissed: Option<(u64, Instant)>,
+    fork_menu_dismissed: Option<(ForkMenuKey, Instant)>,
     /// A fork runs: the app set it, and every fork trigger is disabled.
     fork_pending: bool,
     /// A rewind runs: the app set it, and every rewind trigger is disabled.
@@ -381,6 +438,16 @@ pub struct TimelineView {
     prompt_scan: (usize, Option<u64>),
     /// A prompt the reader picked that waits for older pages to load.
     pending_jump: Option<u64>,
+    /// The agent's background processes, and the hash `sync` compares.
+    processes: Vec<BackgroundProcess>,
+    processes_hash: Option<u64>,
+    /// Background process rows the user opened, by process id.
+    expanded_processes: HashSet<String>,
+    /// The turns that showed a Background card at the last sync, to rebuild a reused turn's
+    /// step rows when a card comes or goes.
+    turn_cards: HashSet<u64>,
+    /// One animated mark per key, with the hash of what its draw closure shows.
+    motions: HashMap<MotionKey, (u64, Entity<motion::Motion>)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -398,6 +465,29 @@ impl TimelineView {
     pub fn new(
         client: Entity<Client>,
         agent_id: String,
+        diagrams: Entity<DiagramRenderer>,
+        window: &mut Window,
+        cx: &mut Context<TimelineView>,
+    ) -> TimelineView {
+        Self::build(client, agent_id, false, diagrams, window, cx)
+    }
+
+    /// A read-only view of a provider subagent: the child's timeline, with no fork, rewind, or
+    /// permission control.
+    pub fn read_only(
+        client: Entity<Client>,
+        key: String,
+        diagrams: Entity<DiagramRenderer>,
+        window: &mut Window,
+        cx: &mut Context<TimelineView>,
+    ) -> TimelineView {
+        Self::build(client, key, true, diagrams, window, cx)
+    }
+
+    fn build(
+        client: Entity<Client>,
+        agent_id: String,
+        read_only: bool,
         diagrams: Entity<DiagramRenderer>,
         window: &mut Window,
         cx: &mut Context<TimelineView>,
@@ -482,6 +572,7 @@ impl TimelineView {
         let mut this = TimelineView {
             client,
             agent_id,
+            read_only,
             cwd: String::new(),
             diagrams,
             list,
@@ -535,6 +626,11 @@ impl TimelineView {
             prompt_fetch: None,
             prompt_scan: (0, None),
             pending_jump: None,
+            processes: Vec::new(),
+            processes_hash: None,
+            expanded_processes: HashSet::new(),
+            turn_cards: HashSet::new(),
+            motions: HashMap::new(),
             _subscriptions: subscriptions,
         };
         this.sync(cx);
@@ -574,23 +670,24 @@ impl TimelineView {
         }
     }
 
-    /// Where a fork of the response that ends at `end` stops, or `None` when it cannot fork.
-    fn footer_fork_boundary(
-        &self,
-        start: Option<usize>,
-        end: usize,
-        cx: &App,
-    ) -> Option<ForkBoundary> {
-        let client = self.client.read(cx);
-        if !client.fork_supported() {
+    /// Where a fork from this source stops, or `None` when it cannot fork. The running footer
+    /// forks the whole chat, so it uses no boundary.
+    fn fork_boundary_for(&self, source: ForkSource, cx: &App) -> Option<ForkBoundary> {
+        if self.read_only || !self.client.read(cx).fork_supported() {
             return None;
         }
-        let epoch = client.timeline_epoch(&self.agent_id);
-        latest_assistant(&self.entries, start, end)
-            .and_then(|entry| fork_boundary(entry, epoch, client.fork_cursor_supported()))
+        match source {
+            ForkSource::Running => Some(ForkBoundary::default()),
+            ForkSource::Response { start, end } => {
+                let client = self.client.read(cx);
+                let epoch = client.timeline_epoch(&self.agent_id);
+                latest_assistant(&self.entries, start, end)
+                    .and_then(|entry| fork_boundary(entry, epoch, client.fork_cursor_supported()))
+            }
+        }
     }
 
-    fn toggle_fork_menu(&mut self, key: u64, cx: &mut Context<Self>) {
+    fn toggle_fork_menu(&mut self, key: ForkMenuKey, cx: &mut Context<Self>) {
         if self.fork_pending {
             return;
         }
@@ -613,19 +710,13 @@ impl TimelineView {
         }
     }
 
-    fn pick_fork(
-        &mut self,
-        target: ForkTarget,
-        start: Option<usize>,
-        end: usize,
-        cx: &mut Context<Self>,
-    ) {
+    fn pick_fork(&mut self, target: ForkTarget, source: ForkSource, cx: &mut Context<Self>) {
         self.fork_menu = None;
         cx.notify();
         if self.fork_pending {
             return;
         }
-        if let Some(boundary) = self.footer_fork_boundary(start, end, cx) {
+        if let Some(boundary) = self.fork_boundary_for(source, cx) {
             cx.emit(TimelineForkEvent::Fork {
                 agent_id: self.agent_id.clone(),
                 target,
@@ -665,7 +756,9 @@ impl TimelineView {
     /// Whether the rail's prompt index is wanted: the host lists prompts and Settings keep the
     /// outline on.
     fn outline_enabled(&self, cx: &App) -> bool {
-        bachuc_theme::chat_outline(cx) && self.client.read(cx).prompt_index_supported()
+        !self.read_only
+            && bachuc_theme::chat_outline(cx)
+            && self.client.read(cx).prompt_index_supported()
     }
 
     /// The seq of the latest user prompt among the entries. Only entries added since the last
@@ -689,6 +782,10 @@ impl TimelineView {
     /// Requests the prompt index when the timeline epoch or the latest prompt changed, and clears
     /// it when the outline is off.
     fn refresh_prompts(&mut self, cx: &mut Context<Self>) {
+        if self.read_only {
+            // A provider subagent key is no agent id: the daemon request would be refused.
+            return;
+        }
         if !self.outline_enabled(cx) {
             if self.prompts_enabled || self.prompt_key.is_some() {
                 self.prompts_enabled = false;
@@ -783,7 +880,12 @@ impl TimelineView {
             .agents()
             .iter()
             .find(|agent| agent.id == self.agent_id);
-        let turn_active = agent.is_some_and(|agent| agent.status == "running");
+        // A provider subagent key never appears in `agents()`; the child's own row runs it.
+        let turn_active = if self.read_only {
+            provider_subagent_running(client, &self.agent_id)
+        } else {
+            agent.is_some_and(|agent| agent.status == "running")
+        };
         if let Some(agent) = agent {
             if agent.cwd != self.cwd {
                 self.cwd = agent.cwd.clone();
@@ -802,10 +904,14 @@ impl TimelineView {
         let Some(state) = client.timeline(&self.agent_id) else {
             return;
         };
+        // Processes arrive in `agent_update`, so they are not part of the timeline version.
+        let processes = client.background_processes(&self.agent_id);
+        let processes_hash = background::processes_hash(&processes);
         if self.version == Some(state.version)
             && self.turn_active == turn_active
             && self.plugin_revision == revision
             && self.labels_hash == Some(labels_hash)
+            && self.processes_hash == Some(processes_hash)
         {
             return;
         }
@@ -815,7 +921,17 @@ impl TimelineView {
         self.labels_hash = Some(labels_hash);
         self.loaded = true;
         self.has_older = state.has_older;
-        let permissions = state.pending_permissions.clone();
+        self.processes = processes;
+        self.processes_hash = Some(processes_hash);
+        self.expanded_processes
+            .retain(|id| self.processes.iter().any(|process| process.id == *id));
+        let supports_stop = client.supports_background_stop();
+        let active_turn = client.agent_active_turn(&self.agent_id);
+        let permissions = if shows_permissions(self.read_only) {
+            state.pending_permissions.clone()
+        } else {
+            Vec::new()
+        };
         copy_changed(&mut self.entries, &state.entries);
         let pending = |id: &String| permissions.iter().any(|request| request["id"] == **id);
         self.responding.retain(|id, _| pending(id));
@@ -875,6 +991,8 @@ impl TimelineView {
                 .collect()
         };
         self.rows_stale = false;
+        let placement = background::place(&self.placement_rows(), &self.processes);
+        let previous_cards = self.turn_cards.clone();
         let mut rows: Vec<ViewRow> = Vec::new();
         // A footer closes each response with an answer, as `layout.ts` places them; the facts
         // the loop reads are cached by the grouper, so a flush reads no entry for it.
@@ -898,11 +1016,32 @@ impl TimelineView {
                     response.end = group.run.items.last().copied();
                     response.has_answer =
                         response.has_answer || group.steps.iter().any(|step| !step.note.is_empty());
-                    match old_turns.get(&Rc::as_ptr(group)) {
+                    let turn_key = group
+                        .run
+                        .items
+                        .first()
+                        .map(|&index| self.grouper.key(index));
+                    let slot = turn_key
+                        .and_then(|key| placement.by_turn.get(&key))
+                        .filter(|slot| slot.is_shown());
+                    // The last step draws the finished-turn rule, or leaves it to the card.
+                    // A card that comes or goes rebuilds the reused step rows.
+                    let card_changed =
+                        turn_key.is_some_and(|key| previous_cards.contains(&key) != slot.is_some());
+                    let reuse = old_turns.get(&Rc::as_ptr(group)).filter(|_| !card_changed);
+                    match reuse {
                         Some(&header) => {
                             rows.extend_from_slice(&self.rows[header..=header + group.steps.len()])
                         }
-                        None => self.push_turn_rows(group, &mut rows),
+                        None => self.push_turn_rows(group, slot.is_some(), &mut rows),
+                    }
+                    if let (Some(key), Some(slot)) = (turn_key, slot) {
+                        rows.push(self.background_turn_row(
+                            key,
+                            slot,
+                            !group.is_loading,
+                            supports_stop,
+                        ));
                     }
                 }
             }
@@ -910,6 +1049,25 @@ impl TimelineView {
         // The response still running gets no completed footer.
         if !turn_active {
             self.push_footer(&response, &mut rows);
+        } else {
+            let started = running_start_ms(
+                active_turn.clone(),
+                response.start.map(|index| self.grouper.at(index)),
+            );
+            rows.push(self.running_footer_row(started));
+        }
+        // The running footer takes its fork menu with it.
+        if !turn_active && self.fork_menu == Some(ForkMenuKey::Running) {
+            self.fork_menu = None;
+        }
+        if !placement.bottom.is_empty() {
+            rows.push(self.bottom_card_row(
+                background::TurnSlot {
+                    processes: placement.bottom.clone(),
+                    moved_count: 0,
+                },
+                supports_stop,
+            ));
         }
         rows.extend(permissions.into_iter().map(|request| {
             let id = request["id"].as_str().unwrap_or("").to_string();
@@ -924,6 +1082,13 @@ impl TimelineView {
                 kind: RowKind::Permission(request),
             }
         }));
+        self.turn_cards = placement
+            .by_turn
+            .iter()
+            .filter(|(_, slot)| slot.is_shown())
+            .map(|(key, _)| *key)
+            .collect();
+        self.ensure_motions(&rows, cx);
         // A message row's height follows the row below it, so a new row under it redraws it.
         for index in 0..rows.len() {
             if let Some(space) = self.space_below(&rows[index], rows.get(index + 1), cx) {
@@ -1112,8 +1277,8 @@ impl TimelineView {
     }
 
     /// A turn takes one list item for its header and one per step, so a long turn lays out
-    /// only the steps on screen.
-    fn push_turn_rows(&self, group: &Rc<TurnGroup>, rows: &mut Vec<ViewRow>) {
+    /// only the steps on screen. `card_follows` moves the finished-turn rule to the card.
+    fn push_turn_rows(&self, group: &Rc<TurnGroup>, card_follows: bool, rows: &mut Vec<ViewRow>) {
         let selected = group
             .steps
             .iter()
@@ -1146,8 +1311,10 @@ impl TimelineView {
             (step.label as u8).hash(&mut hasher);
             step.is_running.hash(&mut hasher);
             (selected == Some(position)).hash(&mut hasher);
-            // The last step draws the rule under a finished turn.
-            (position + 1 == group.steps.len() && !group.is_loading).hash(&mut hasher);
+            // The last step draws the rule under a finished turn, unless a card follows.
+            let last_of_finished = position + 1 == group.steps.len() && !group.is_loading;
+            (last_of_finished && !card_follows).hash(&mut hasher);
+            (last_of_finished && card_follows).hash(&mut hasher);
             let key = self.grouper.key(step.id);
             let last = step
                 .note
@@ -1164,6 +1331,127 @@ impl TimelineView {
                 kind: RowKind::Step(group.clone(), position),
             });
         }
+    }
+
+    /// The rows the background placement reads: each turn with its call ids, and each user
+    /// message as the newest-turn reset.
+    fn placement_rows(&self) -> Vec<background::PlacementRow> {
+        self.grouper
+            .rows()
+            .iter()
+            .filter_map(|row| match row {
+                SharedRow::Item(index) if self.grouper.is_user(*index) => {
+                    Some(background::PlacementRow::UserMessage)
+                }
+                SharedRow::Turn(group) => {
+                    group
+                        .run
+                        .items
+                        .first()
+                        .map(|&index| background::PlacementRow::Turn {
+                            key: self.grouper.key(index),
+                            call_ids: group
+                                .run
+                                .items
+                                .iter()
+                                .filter(|&&index| item_type(&self.entries[index]) == "tool_call")
+                                .filter_map(|&index| {
+                                    self.entries[index]["item"]["callId"]
+                                        .as_str()
+                                        .map(str::to_string)
+                                })
+                                .collect(),
+                        })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A turn's Background card. Its fingerprint covers only what the card draws, so a process
+    /// change rebuilds no turn or step row (ADR-0039).
+    fn background_turn_row(
+        &self,
+        turn_key: u64,
+        slot: &background::TurnSlot,
+        rule: bool,
+        supports_stop: bool,
+    ) -> ViewRow {
+        let mut hasher = DefaultHasher::new();
+        turn_key.hash(&mut hasher);
+        slot.moved_count.hash(&mut hasher);
+        rule.hash(&mut hasher);
+        supports_stop.hash(&mut hasher);
+        for process in &slot.processes {
+            background::hash_process(
+                process,
+                self.expanded_processes.contains(&process.id),
+                &mut hasher,
+            );
+        }
+        ViewRow {
+            key: RowKey::TurnCard(turn_key),
+            fingerprint: hasher.finish(),
+            anchor: None,
+            last: None,
+            has_diagram: false,
+            kind: RowKind::TurnCard {
+                slot: slot.clone(),
+                rule,
+            },
+        }
+    }
+
+    /// The Background card at the stream bottom, above the permission rows.
+    fn bottom_card_row(&self, slot: background::TurnSlot, supports_stop: bool) -> ViewRow {
+        let mut hasher = DefaultHasher::new();
+        supports_stop.hash(&mut hasher);
+        for process in &slot.processes {
+            background::hash_process(
+                process,
+                self.expanded_processes.contains(&process.id),
+                &mut hasher,
+            );
+        }
+        ViewRow {
+            key: RowKey::BottomCard,
+            fingerprint: hasher.finish(),
+            anchor: None,
+            last: None,
+            has_diagram: false,
+            kind: RowKind::BottomCard(slot),
+        }
+    }
+
+    /// The running footer: the loader, the fork button, and the turn's elapsed time.
+    fn running_footer_row(&self, started: Option<i64>) -> ViewRow {
+        let mut hasher = DefaultHasher::new();
+        started.hash(&mut hasher);
+        self.read_only.hash(&mut hasher);
+        ViewRow {
+            key: RowKey::RunningFooter,
+            fingerprint: hasher.finish(),
+            anchor: None,
+            last: None,
+            has_diagram: false,
+            kind: RowKind::RunningFooter { started },
+        }
+    }
+
+    /// A click on a process row opens or closes its log. The open set is part of the card's
+    /// fingerprint, so the card row rebuilds.
+    fn toggle_process_log(&mut self, id: String, cx: &mut Context<Self>) {
+        if !self.expanded_processes.remove(&id) {
+            self.expanded_processes.insert(id);
+        }
+        self.refresh(cx);
+    }
+
+    fn stop_background_process(&mut self, id: String, cx: &mut Context<Self>) {
+        let agent_id = self.agent_id.clone();
+        self.client.update(cx, |client, cx| {
+            client.stop_background_process(&agent_id, &id, cx)
+        });
     }
 
     /// Closes a response with its footer when it holds an assistant message.
@@ -1363,12 +1651,113 @@ impl TimelineView {
         images
     }
 
-    /// Ticks once a second while a turn runs, for its clock and the running step's time.
+    /// Keeps one `Motion` view per running mark, and drops the views of marks that stopped.
+    /// A mark's draw closure is replaced when what it draws changed.
+    fn ensure_motions(&mut self, rows: &[ViewRow], cx: &mut Context<Self>) {
+        let mut live: HashSet<MotionKey> = HashSet::new();
+        let frames = motion::FRAME_INTERVAL;
+        let loader_frame = Duration::from_millis((motion::LOADER_PERIOD_MS / 6) as u64);
+        for row in rows {
+            match &row.kind {
+                RowKind::RunningFooter { .. } => {
+                    live.insert(MotionKey::RunningFooter);
+                    self.ensure_motion(
+                        MotionKey::RunningFooter,
+                        0,
+                        loader_frame,
+                        motion::loader_draw(),
+                        cx,
+                    );
+                }
+                RowKind::TurnHeader(group) => {
+                    let Some(step) = group.running_step.and_then(|pos| group.steps.get(pos)) else {
+                        continue;
+                    };
+                    let key = self.grouper.key(step.id);
+                    live.insert(MotionKey::Segment(key));
+                    self.ensure_motion(MotionKey::Segment(key), key, frames, segment_draw(), cx);
+                    let position = group.running_step.unwrap_or(0);
+                    live.insert(MotionKey::StepNumber(key));
+                    self.ensure_motion(
+                        MotionKey::StepNumber(key),
+                        position as u64,
+                        frames,
+                        step_number_draw(position),
+                        cx,
+                    );
+                }
+                _ => {}
+            }
+        }
+        let mut calls: Vec<usize> = Vec::new();
+        for row in rows {
+            match &row.kind {
+                RowKind::Entry(index) => calls.push(*index),
+                RowKind::Step(group, position) => {
+                    calls.extend(group.steps[*position].items.iter().copied());
+                }
+                _ => {}
+            }
+        }
+        for index in calls {
+            if item_type(&self.entries[index]) != "tool_call" {
+                continue;
+            }
+            let item = &self.entries[index];
+            let status = item["status"].as_str().unwrap_or("");
+            if !matches!(status, "running" | "executing") {
+                continue;
+            }
+            let key = entry_key(item);
+            let shown = tools::presentation(item, &self.cwd);
+            let mut hasher = DefaultHasher::new();
+            shown.name.hash(&mut hasher);
+            shown.summary.hash(&mut hasher);
+            live.insert(MotionKey::Badge(key));
+            self.ensure_motion(
+                MotionKey::Badge(key),
+                hasher.finish(),
+                frames,
+                tool_view::shimmer_draw(shown.name, shown.summary),
+                cx,
+            );
+        }
+        self.motions.retain(|key, _| live.contains(key));
+    }
+
+    fn ensure_motion(
+        &mut self,
+        key: MotionKey,
+        content: u64,
+        interval: Duration,
+        draw: impl Fn(u128, &mut Window, &mut App) -> AnyElement + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        match self.motions.get(&key).cloned() {
+            Some((hash, _)) if hash == content => {}
+            Some((_, entity)) => {
+                entity.update(cx, |motion, cx| motion.set_draw(draw, cx));
+                self.motions.insert(key, (content, entity));
+            }
+            None => {
+                let entity = cx.new(|cx| motion::Motion::new(interval, draw, cx));
+                self.motions.insert(key, (content, entity));
+            }
+        }
+    }
+
+    /// Ticks once a second while a turn runs, for its clock and the running step's time. A
+    /// running background process keeps it ticking even after its turn ends.
     fn update_clock(&mut self, cx: &mut Context<Self>) {
-        let running = self
-            .rows
-            .iter()
-            .any(|row| matches!(&row.kind, RowKind::TurnHeader(group) if group.is_loading));
+        let running = self.turn_active
+            || self
+                .processes
+                .iter()
+                .any(|process| process.status == "running")
+            || self
+                .rows
+                .iter()
+                .any(|row| matches!(&row.kind, RowKind::TurnHeader(group) if group.is_loading));
         if !running {
             self.clock = None;
             return;
@@ -1454,8 +1843,17 @@ impl TimelineView {
         let content = match &row.kind {
             RowKind::Entry(entry) => this.render_entry(*entry, cx),
             RowKind::TurnHeader(group) => this.render_turn_header(index, group, cx),
-            RowKind::Step(group, position) => this.render_step(*position, group, cx),
+            RowKind::Step(group, position) => {
+                let card_follows = matches!(
+                    this.rows.get(index + 1).map(|row| &row.kind),
+                    Some(RowKind::TurnCard { .. })
+                );
+                this.render_step(*position, group, card_follows, cx)
+            }
             RowKind::Footer { start, end } => this.render_footer(*start, *end, cx),
+            RowKind::TurnCard { slot, rule } => this.render_background_card(slot, *rule, index, cx),
+            RowKind::RunningFooter { started } => this.render_running_footer(*started, cx),
+            RowKind::BottomCard(slot) => this.render_background_card(slot, false, index, cx),
             RowKind::Permission(request) => this.render_permission(request, cx),
         };
         let space = this.space_below(row, this.rows.get(index + 1), cx);
@@ -1510,7 +1908,7 @@ impl TimelineView {
         }
         let below = match next.map(|next| &next.kind) {
             None => Below::Nothing,
-            Some(RowKind::Footer { .. }) => Below::Footer,
+            Some(RowKind::Footer { .. } | RowKind::RunningFooter { .. }) => Below::Footer,
             Some(RowKind::Entry(next)) if self.grouper.is_user(*next) => Below::User,
             Some(RowKind::Entry(next)) if self.grouper.is_assistant(*next) => Below::Assistant,
             Some(RowKind::Entry(next))
@@ -1964,14 +2362,55 @@ impl TimelineView {
                     .on_click(cx.listener(move |this, _, _, cx| this.copy_turn(start, end, cx))),
             )
             .children(
-                self.footer_fork_boundary(start, end, cx)
-                    .map(|_| self.render_fork_menu(key, start, end, cx)),
+                self.fork_boundary_for(ForkSource::Response { start, end }, cx)
+                    .map(|_| self.render_fork_menu(ForkSource::Response { start, end }, cx)),
             )
             .children(label.map(|label| {
                 div()
                     .text_size(ui_font_size(METADATA_SIZE, cx))
                     .text_color(t.foreground_muted)
                     .child(label)
+            }))
+            .into_any_element()
+    }
+
+    /// `WorkingIndicator`: the synced loader, the fork button, and the turn's elapsed time.
+    fn render_running_footer(&self, started: Option<i64>, cx: &mut Context<Self>) -> AnyElement {
+        let t = tokens(cx);
+        let loader = self
+            .motions
+            .get(&MotionKey::RunningFooter)
+            .map(|(_, motion)| motion.clone().into_any_element())
+            .unwrap_or_else(|| div().size(zoomed(14., cx)).into_any_element());
+        let elapsed = started.map(|started| {
+            let now = chrono::Utc::now().timestamp_millis();
+            format_elapsed(now - started)
+        });
+        h_flex()
+            .id("running-turn-footer")
+            .role(Role::Group)
+            .aria_label("Working")
+            .mt(zoomed(FOOTER_TOP, cx))
+            .pb(zoomed(SPACE_8, cx))
+            .h(zoomed(FOOTER_HEIGHT + SPACE_8, cx))
+            .gap(zoomed(SPACE_3, cx))
+            .items_center()
+            .child(
+                div()
+                    .relative()
+                    .left(zoomed(-2., cx))
+                    .flex_none()
+                    .child(loader),
+            )
+            .children(
+                self.fork_boundary_for(ForkSource::Running, cx)
+                    .map(|_| self.render_fork_menu(ForkSource::Running, cx)),
+            )
+            .children(elapsed.map(|elapsed| {
+                div()
+                    .text_size(ui_font_size(METADATA_SIZE, cx))
+                    .text_color(t.foreground_muted)
+                    .child(elapsed)
             }))
             .into_any_element()
     }
@@ -2032,7 +2471,7 @@ impl TimelineView {
         }))
         .children(
             message_id
-                .filter(|_| !choices.is_empty())
+                .filter(|_| shows_rewind(self.read_only) && !choices.is_empty())
                 .map(|message_id| self.render_rewind(key, choices, message_id, text, cx)),
         )
         .child(
@@ -2134,19 +2573,14 @@ impl TimelineView {
 
     /// `AssistantForkMenu`: a split icon that opens "Fork in a new tab" and "Fork in a new
     /// workspace" below it, disabled while a fork runs.
-    fn render_fork_menu(
-        &self,
-        key: u64,
-        start: Option<usize>,
-        end: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_fork_menu(&self, source: ForkSource, cx: &mut Context<Self>) -> AnyElement {
         let t = tokens(cx);
+        let key = source.menu_key();
         let open = self.fork_menu == Some(key);
         let locked = self.fork_pending;
         let view = cx.weak_entity();
         let trigger = div()
-            .id(("fork-turn", key))
+            .id(ElementId::Name(format!("fork-turn-{key:?}").into()))
             .role(Role::Button)
             .aria_label(FORK_MENU_LABEL)
             .p(zoomed(SPACE_1, cx))
@@ -2193,11 +2627,9 @@ impl TimelineView {
                     .rounded(zoomed(RADIUS_MD, cx))
                     .cursor_pointer()
                     .hover(move |style| style.bg(t.surface2))
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.pick_fork(target, start, end, cx)),
-                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.pick_fork(target, source, cx)))
                     .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
-                        view.update(cx, |this, cx| this.pick_fork(target, start, end, cx))
+                        view.update(cx, |this, cx| this.pick_fork(target, source, cx))
                             .ok();
                     })
                     .child(
@@ -2225,7 +2657,7 @@ impl TimelineView {
                             .snap_to_window_with_margin(zoomed(8., cx))
                             .child(
                                 v_flex()
-                                    .id(("fork-menu", key))
+                                    .id(ElementId::Name(format!("fork-menu-{key:?}").into()))
                                     .role(Role::Menu)
                                     .aria_label(FORK_MENU_LABEL)
                                     .min_w(zoomed(FORK_MENU_WIDTH, cx))
@@ -2259,7 +2691,6 @@ impl TimelineView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let t = tokens(cx);
-        let mono = mono_font_family(cx);
         let now = chrono::Utc::now().timestamp_millis();
         let started_at = group.run.started_at;
         let last_end = group
@@ -2325,6 +2756,14 @@ impl TimelineView {
                     };
                     let key = self.grouper.key(step.id);
                     let dimmed = selected.is_some_and(|picked| picked != key);
+                    let fill = if step.is_running {
+                        self.motions
+                            .get(&MotionKey::Segment(key))
+                            .map(|(_, motion)| motion.clone().into_any_element())
+                            .unwrap_or_else(|| div().size_full().into_any_element())
+                    } else {
+                        div().size_full().bg(color).into_any_element()
+                    };
                     div()
                         .id(("segment", key))
                         .role(Role::Button)
@@ -2332,12 +2771,12 @@ impl TimelineView {
                         .h_full()
                         .flex_shrink(1.)
                         .w(zoomed(STRIP_WIDTH * weight / weight_sum, cx))
-                        .bg(color)
                         .when(dimmed, |segment| segment.opacity(DIMMED_OPACITY))
                         .cursor_pointer()
                         .on_click(
                             cx.listener(move |this, _, _, cx| this.select_step(key, true, cx)),
                         )
+                        .child(fill)
                 },
             ));
 
@@ -2355,7 +2794,7 @@ impl TimelineView {
                 line.child(
                     div()
                         .truncate()
-                        .font_family(mono)
+                        .font_family(bachuc_theme::ui_font_family(cx))
                         .text_size(code_font_size(FONT_CODE, cx))
                         .text_color(t.foreground)
                         .child(short_path(&files[0])),
@@ -2389,7 +2828,7 @@ impl TimelineView {
             )
             .children(group.is_loading.then(|| {
                 div()
-                    .font_family(mono)
+                    .font_family(bachuc_theme::ui_font_family(cx))
                     .text_size(code_font_size(TURN_CLOCK_SIZE, cx))
                     .text_color(t.foreground_muted)
                     .child(format_clock(now - started_at))
@@ -2414,15 +2853,16 @@ impl TimelineView {
         &self,
         position: usize,
         group: &TurnGroup,
+        card_follows: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let step = &group.steps[position];
         let run_started_at = group.run.started_at;
         let is_first = position == 0;
         let is_last = position + 1 == group.steps.len();
-        let is_last_of_finished = is_last && !group.is_loading;
+        let is_last_of_finished = is_last && !group.is_loading && !card_follows;
         let t = tokens(cx);
-        let mono = mono_font_family(cx);
+        let ui = bachuc_theme::ui_font_family(cx);
         let colors = turn_label_colors(step.label, scheme(cx));
         let (text_color, border_color) = if step.is_running {
             (t.dot_running, t.dot_running)
@@ -2452,14 +2892,18 @@ impl TimelineView {
             .items_center()
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| this.select_step(step_key, false, cx)))
-            .child(
+            .child(if step.is_running {
+                self.motions
+                    .get(&MotionKey::StepNumber(step_key))
+                    .map(|(_, motion)| motion.clone().into_any_element())
+                    .unwrap_or_else(|| div().into_any_element())
+            } else {
                 div()
                     .size(zoomed(STEP_NUMBER, cx))
                     .mr(zoomed(2., cx))
                     .flex_none()
                     .rounded_full()
                     .border_1()
-                    .when(step.is_running, |number| number.border(zoomed(1.5, cx)))
                     .border_color(border_color)
                     .bg(t.surface0)
                     .flex()
@@ -2467,10 +2911,11 @@ impl TimelineView {
                     .justify_center()
                     .text_size(small)
                     .font_weight(FontWeight::SEMIBOLD)
-                    .font_family(mono)
+                    .font_family(ui.clone())
                     .text_color(text_color)
-                    .child((position + 1).to_string()),
-            )
+                    .child((position + 1).to_string())
+                    .into_any_element()
+            })
             .child(
                 h_flex()
                     .flex_1()
@@ -2481,7 +2926,7 @@ impl TimelineView {
                         div()
                             .text_size(small)
                             .font_weight(FontWeight::SEMIBOLD)
-                            .font_family(mono)
+                            .font_family(ui.clone())
                             .text_color(text_color)
                             .child(label.to_uppercase()),
                     )
@@ -2499,7 +2944,7 @@ impl TimelineView {
                 div()
                     .w(zoomed(STEP_TIME_WIDTH, cx))
                     .text_right()
-                    .font_family(mono)
+                    .font_family(ui.clone())
                     .text_size(code_font_size(STEP_TIME_SIZE, cx))
                     .line_height(zoomed(STEP_NUMBER, cx))
                     .text_color(t.foreground_muted)
@@ -2852,6 +3297,89 @@ fn copy_changed(copies: &mut Vec<Value>, current: &[Value]) {
             Some(copy) => *copy = entry.clone(),
             None => copies.push(entry.clone()),
         }
+    }
+}
+
+/// A provider subagent runs when its row in the parent's subagent list says `running`.
+pub fn subagent_turn_active(status: Option<&str>) -> bool {
+    status == Some("running")
+}
+
+pub fn shows_fork(read_only: bool) -> bool {
+    !read_only
+}
+
+pub fn shows_rewind(read_only: bool) -> bool {
+    !read_only
+}
+
+pub fn shows_permissions(read_only: bool) -> bool {
+    !read_only
+}
+
+/// Whether a provider subagent key names a child that runs.
+fn provider_subagent_running(client: &Client, key: &str) -> bool {
+    let Some((parent, child)) = bachuc_client::parse_provider_subagent_key(key) else {
+        return false;
+    };
+    client
+        .subagents(&parent)
+        .iter()
+        .find(|row| row.id == child)
+        .is_some_and(|row| subagent_turn_active(Some(&row.status)))
+}
+
+/// The running footer's clock start: the active turn's `startedAt` when it parses (milliseconds
+/// kept), else the user message that opened the response, else `None`.
+pub fn running_start_ms(
+    active: Option<bachuc_client::ActiveTurn>,
+    user_started_at: Option<i64>,
+) -> Option<i64> {
+    active
+        .and_then(|turn| turn.started_at)
+        .and_then(|started| {
+            chrono::DateTime::parse_from_rfc3339(&started)
+                .ok()
+                .map(|at| at.timestamp_millis())
+        })
+        .or(user_started_at)
+}
+
+/// The running strip segment's fill: the color at the pulse opacity, on the dimmed outer box.
+fn segment_draw() -> impl Fn(u128, &mut Window, &mut App) -> AnyElement {
+    |ms, _window, cx| {
+        let color = tokens(cx).dot_running;
+        div()
+            .size_full()
+            .bg(color)
+            .opacity(motion::pulse_opacity(ms))
+            .into_any_element()
+    }
+}
+
+/// The running step's number, whole: border, fill, and digit pulse together.
+fn step_number_draw(position: usize) -> impl Fn(u128, &mut Window, &mut App) -> AnyElement {
+    move |ms, _window, cx| {
+        let t = tokens(cx);
+        div()
+            .size(zoomed(STEP_NUMBER, cx))
+            .mr(zoomed(2., cx))
+            .flex_none()
+            .rounded_full()
+            .border_1()
+            .border(zoomed(1.5, cx))
+            .border_color(t.dot_running)
+            .bg(t.surface0)
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(ui_font_size(STEP_LABEL_SIZE, cx))
+            .font_weight(FontWeight::SEMIBOLD)
+            .font_family(bachuc_theme::ui_font_family(cx))
+            .text_color(t.dot_running)
+            .opacity(motion::pulse_opacity(ms))
+            .child((position + 1).to_string())
+            .into_any_element()
     }
 }
 

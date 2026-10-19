@@ -20,3 +20,12 @@ This folder is the published crate gpui-base 0.7.3 from crates.io, with one chan
 2. Otherwise, copy the new gpui-base version from `~/.cargo/registry/src/index.crates.io-*/gpui-base-<version>` into a new `vendor/gpui-base`, with `cp -R`.
 3. Re-apply the change above to the `input-state` element and copy this file in.
 4. Run `./cargo.sh tree -i gpui-base` and check that it shows the `vendor/gpui-base` path. If cargo warns that the patch was not used, the version in this folder does not match the version gpui-kit requires.
+
+## Markdown look (TASK-269)
+
+`src/text/node.rs` draws assistant markdown as Electron does, per ADR-0050:
+
+- `mark_highlight` gives `strong` `FontWeight::MEDIUM` (500), Electron's `strong` weight in `markdown-styles.ts`. The node test that reads the object style expects `MEDIUM`.
+- `apply_link` replaces every link's color and clears its underline: Electron's `link` has `textDecorationLine: "none"` and the `accentBright` color. The four former `link_underline` call sites (paragraph text, inline flow text, inline objects, and inline flow objects) now call `apply_link` or set no underline; `link_underline` is removed.
+- `apply_link` keeps an inline code span's background inside a link, so a code link keeps its `surface2` pill. The object path re-applies it with `inline_code_highlight().background_color`.
+- Re-apply these edits to `src/text/node.rs` after a gpui-kit upgrade. The link color itself comes from `crates/theme/src/lib.rs`, not this crate.

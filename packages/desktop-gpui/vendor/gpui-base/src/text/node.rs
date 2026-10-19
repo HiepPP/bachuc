@@ -1401,8 +1401,7 @@ impl Paragraph {
                 let inner_range = (offset + range.start)..(offset + range.end);
                 let mut highlight = mark_highlight(style, node_cx, cx);
                 if let Some(link_mark) = style.link.clone() {
-                    highlight.style.color = Some(node_cx.style.link());
-                    highlight.style.underline = Some(link_underline(&node_cx.style));
+                    apply_link(&mut highlight, style, node_cx);
                     links.push((inner_range.clone(), link_mark));
                 }
                 node_highlights.push((inner_range, highlight));
@@ -2391,7 +2390,8 @@ impl PartialEq for NodeContext {
 fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHighlight {
     let mut highlight = HighlightStyle::default();
     if mark.bold {
-        highlight.font_weight = Some(FontWeight::BOLD);
+        // Electron draws `strong` at `theme.fontWeight.medium` (`markdown-styles.ts`).
+        highlight.font_weight = Some(FontWeight::MEDIUM);
     }
     if mark.italic {
         highlight.font_style = Some(FontStyle::Italic);
@@ -2594,8 +2594,7 @@ impl Paragraph {
                     let mut highlight = mark_highlight(style, node_cx, cx);
 
                     if let Some(mut link_mark) = style.link.clone() {
-                        highlight.style.color = Some(node_cx.style.link());
-                        highlight.style.underline = Some(link_underline(&node_cx.style));
+                        apply_link(&mut highlight, style, node_cx);
 
                         // convert link references, replace link
                         if let Some(identifier) = link_mark.identifier.as_ref() {
@@ -2711,7 +2710,11 @@ impl Paragraph {
                                 .clone(),
                         );
                         object_style.color = Some(node_cx.style.link());
-                        object_style.underline = Some(link_underline(&node_cx.style));
+                        object_style.underline = None;
+                        if mark.code {
+                            object_style.background_color =
+                                node_cx.style.inline_code_highlight().background_color;
+                        }
                     }
                 }
                 let rendered_node = node.clone();
@@ -2776,8 +2779,7 @@ impl Paragraph {
                     let mut highlight = mark_highlight(style, node_cx, cx);
 
                     if let Some(mut link_mark) = style.link.clone() {
-                        highlight.style.color = Some(node_cx.style.link());
-                        highlight.style.underline = Some(link_underline(&node_cx.style));
+                        apply_link(&mut highlight, style, node_cx);
 
                         if let Some(identifier) = link_mark.identifier.as_ref()
                             && let Some(mark) = node_cx.link_refs.get(identifier)
@@ -2836,13 +2838,13 @@ fn leaf_element_id(fade_key: Option<TextLeafKey>) -> ElementId {
     fade_key.map_or_else(|| ElementId::from("p"), ElementId::from)
 }
 
-/// A link's underline: a hairline in a translucent link color, so a run of
-/// links reads as text first and as links second.
-fn link_underline(style: &TextViewStyle) -> gpui::UnderlineStyle {
-    gpui::UnderlineStyle {
-        thickness: px(1.),
-        color: Some(style.link().opacity(0.4)),
-        ..Default::default()
+/// A link's color with no underline, as Electron's `link` style. A code span inside a link
+/// keeps its inline-code background, Electron's `surface2` pill in the link color.
+fn apply_link(highlight: &mut InlineHighlight, mark: &TextMark, node_cx: &NodeContext) {
+    highlight.style.color = Some(node_cx.style.link());
+    highlight.style.underline = None;
+    if mark.code {
+        highlight.style.background_color = node_cx.style.inline_code_highlight().background_color;
     }
 }
 
@@ -4277,7 +4279,7 @@ mod tests {
             let InlineFlowItem::Object { style, link, .. } = &items[0] else {
                 panic!()
             };
-            assert_eq!(style.font_weight, Some(FontWeight::BOLD));
+            assert_eq!(style.font_weight, Some(FontWeight::MEDIUM));
             assert_eq!(style.font_style, Some(FontStyle::Italic));
             assert!(style.strikethrough.is_some());
             assert_eq!(link.as_ref().unwrap().url.as_ref(), "https://example.com");
