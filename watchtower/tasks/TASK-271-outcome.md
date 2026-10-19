@@ -31,3 +31,9 @@ Lessons:
 - A provider subagent key is not in `agents()` and carries no extras, so `turn_active`, `agent_labels`, and `rewind_modes` must not read it as an agent id. The running state comes from the parent's subagent rows.
 - The prompt index and the outline rail stay off in read-only mode; `outline_enabled` returns false so the render never defers a prompt fetch.
 - Fork, rewind, and permissions branch on the `read_only` flag, not on a missing feature.
+
+## UI Checks
+
+Run 2026-10-19. No app was opened for this line.
+
+- Screen check: opening the read-only view is TASK-272 -> UNVERIFIED (unattended). The view opens only from a provider subagent row click, which TASK-272 owns and which is not part of this run; no other AX path opens it.

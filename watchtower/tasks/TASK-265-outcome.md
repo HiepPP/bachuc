@@ -38,3 +38,13 @@ Lessons:
 - A process change must not rebuild turn or step rows. The card fingerprints cover only card content; `card_changed` exists only to move the finished-turn rule.
 - `BackgroundProcess.kind` and `status` stay plain strings (TASK-264); the card maps `monitor` to `MONITOR` and every other kind to `BASH`.
 - The running elapsed uses `format_elapsed` and the finished duration uses `format_duration`, both private to the timeline crate root and reachable from the child module.
+
+## UI Checks
+
+Run 2026-10-19 on live (6768) with the check bundle, launched with `BACHUC_NO_ACTIVATE=1` and driven by `cua_repl` AX actions only. Agent `7a749a8d` ran `sleep 300` with `run_in_background`. The app was quit and the agent archived.
+
+- UI checker on live: running card -> PASS. The card is under the newest turn: header "Background 1 running"; row BASH, `sleep 300`, elapsed 20s -> 30s between two shots, Stop, and "no output yet".
+- UI checker on live: Stop through AX -> PASS. The running card went away; a finished row "BASH sleep 300 stopped 1m 41s" shows in the start turn.
+- UI checker on live: press the finished row through AX -> PASS. Its log opened with the tail line `[killed]` and the output file path; a second press closed it.
+- Plan Verify (NEXT.md): background `sleep 300` shows the running card, Stop ends it, and the row moves to the finished card with "stopped" -> PASS, from the three checks above.
+- Anti-goal: 1.4% over 60 s with an idle agent and a running `sleep 300` -> PASS against the 2% cap. Baseline comparison UNVERIFIED (unattended); no pre-change read exists.

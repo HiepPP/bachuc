@@ -39,3 +39,16 @@ Lessons:
 - `Icon` needs `gpui_kit::component::Sizable as _` in scope for `with_size`.
 - `bucket_for_agent` takes the attention reason as the wire string; the shell needs its own `AttentionReason` name map.
 - `cargo.sh clean --profile dev` was not run: group A still shares `packages/desktop-gpui/target`, and a clean would delete its build. The lead owns the run-end cleanup.
+
+## UI Checks
+
+Run 2026-10-19 on live (6768) with the check bundle, launched with `BACHUC_NO_ACTIVATE=1` and driven by `cua_repl` AX actions only. Agent `dd68522` ran one Agent-tool subagent (`sleep 150`); agent `be39a90` ran `sleep 240` to keep a second running tab. Both apps opened were quit; the zoom was restored to 1.25; both test agents were archived.
+
+- UI checker on live: turning ring on a subagent row and on its agent tab at two angles -> PASS. Enlarged crops show the row icon ring arc on the right in shot 1 and on the left in shot 2 (region diff 3.15); the tab icon ring also changes (diff 3.18). The row label and tab label are byte-identical (diff 0.0 and 0.008), so the text does not move.
+- UI checker on live: after the agent stops -> FAIL as written. The turning ring went, but the tab did not show "logo only": it showed the provider logo plus a green attention dot. The stopped agent is in the attention bucket ("Ready to review"), and the contract draws a success dot for attention (`badge_kind`). The ring-gone intent passes; the literal "logo only" does not.
+- Anti-goal: UNVERIFIED (unattended). No pre-change baseline exists. The after value was 35.5% over 60 s with two running agent tabs (`ui268 subagent`, `ui273b runner`) and the subagent row panel open; the subagent `sleep 150` ended near the end of the window.
+
+## Lead Review (2026-10-19)
+
+- UI check "after the agent stops -> the tab shows the logo only": the checker saw the ring go and a green dot stay, because the stopped agent was "Ready to review" (the `attention` bucket). The spec Expected result and the `badge.rs` test map `attention` to a dot and only `done` to the logo. The code follows the spec; the Verify line assumed the `done` bucket. Result: PASS by the spec mapping. A recheck needs an agent in the `done` bucket.
+- CPU anti-goal waits for the group B fix round: the 35.5% read included the TASK-266 and TASK-267 motion cost.

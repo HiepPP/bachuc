@@ -31,3 +31,12 @@ Lessons:
 - `Entity<RunningRing>` in `TrackSegment` compiles with the existing `Debug`/`PartialEq`/`Eq` derives (gpui-pre 0.3.9 `entity_map.rs`).
 - A negative margin must not be used to trim the ring halo: the 14 px view sits in an absolute child of a 12 px `relative()` box instead.
 - The composer creates the ring inside `track_strip`, which runs from `render`; this follows the sidebar's `Sidebar::ring` pattern and is safe.
+
+## UI Checks
+
+Run 2026-10-19 on live (6768) with the check bundle `packages/desktop-gpui/target/bundles/Bachuc GPUI Check.app`, launched with `BACHUC_NO_ACTIVATE=1` and driven by `cua_repl` AX actions only. A Claude agent (`dd68522`) ran one Agent-tool subagent that ran `sleep 150`. Both apps opened were quit; the zoom was restored to 1.25; every test agent was archived.
+
+- UI checker on live: arc at two angles about 200 ms apart -> PASS. Two screenshots of the composer pill "1 working": the ring region (image 868-902 x 1168-1200) changed (mean diff 2.87) and the enlarged crop shows the arc on the right in shot 1 and on the left in shot 2.
+- UI checker on live: "1 working" text x -> UNVERIFIED (unattended). No pre-change build exists to compare. The text started at 914 image px (457 logical px at 2x) in both shots and did not move; the pill text region diff was 0.22 with the ring outside the crop.
+- Plan Verify (NEXT.md): "the row and the agent tab show the turning ring while it runs" -> PASS for the ring part. The row and tab ring arcs change between two shots (row diff 3.15, tab diff 3.18). The row-click part of that line is TASK-272 and is not part of this run.
+- Anti-goal: UNVERIFIED (unattended). No 60 s read was taken in the single-subagent state and no pre-change baseline exists. A related read with two running agent tabs and the subagent row shown was 35.5% (TASK-273), far above any likely baseline plus 1.
