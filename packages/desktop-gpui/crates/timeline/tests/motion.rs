@@ -1,6 +1,8 @@
 //! The pure motion rules of TASK-266 and TASK-267: the synced loader, the running pulse, the
 //! shimmer band, and the running footer's clock start.
 
+use std::time::Duration;
+
 use bachuc_client::ActiveTurn;
 use bachuc_timeline::motion;
 use bachuc_timeline::running_start_ms;
@@ -87,6 +89,81 @@ fn the_shimmer_gradient_fades_at_both_ends() {
     assert_eq!(motion::shimmer_alpha(1.), 0.);
     assert_eq!(motion::shimmer_phase(0, 1.08), 0.);
     assert!((motion::shimmer_phase(540, 1.08) - 0.5).abs() < 0.001);
+}
+
+#[test]
+fn a_running_tool_call_gets_its_shimmer_motion() {
+    // The daemon wraps the item: status lives at `entry["item"]["status"]`, and the gate in
+    // `ensure_motions` creates `MotionKey::Badge` only when this returns true.
+    let running = serde_json::json!({
+        "seqStart": 7,
+        "item": {"type": "tool_call", "status": "running"},
+    });
+    let executing = serde_json::json!({
+        "seqStart": 8,
+        "item": {"type": "tool_call", "status": "executing"},
+    });
+    let completed = serde_json::json!({
+        "seqStart": 9,
+        "item": {"type": "tool_call", "status": "completed"},
+    });
+    let wrapper_status = serde_json::json!({
+        "seqStart": 10,
+        "status": "running",
+        "item": {"type": "tool_call"},
+    });
+    assert!(motion::tool_entry_running(&running));
+    assert!(motion::tool_entry_running(&executing));
+    assert!(!motion::tool_entry_running(&completed));
+    assert!(
+        !motion::tool_entry_running(&wrapper_status),
+        "a status on the wrapper is not the item's status"
+    );
+    // The shimmer of that entry moves across its loop.
+    let duration = motion::shimmer_duration(motion::shimmer_chars("bash", Some("sleep 90")));
+    assert_ne!(
+        motion::shimmer_state(0, duration),
+        motion::shimmer_state((duration * 500.) as u128, duration)
+    );
+}
+
+#[test]
+fn an_unchanged_quantized_frame_is_skipped() {
+    let interval = Duration::from_millis(66);
+    assert!(!motion::frame_draws(
+        Duration::from_millis(10),
+        interval,
+        true
+    ));
+    assert!(!motion::frame_draws(
+        Duration::from_millis(80),
+        interval,
+        false
+    ));
+    assert!(motion::frame_draws(
+        Duration::from_millis(80),
+        interval,
+        true
+    ));
+    // The loader state skips the frames between its 158 ms steps.
+    assert_eq!(
+        motion::loader_step(100),
+        motion::loader_step(150),
+        "one loader step"
+    );
+    // The pulse quantizes to levels: times in one level draw the same frame.
+    assert_eq!(
+        motion::pulse_state(0),
+        motion::pulse_state(5),
+        "both are full opacity"
+    );
+    assert_ne!(motion::pulse_state(0), motion::pulse_state(700));
+    let duration = motion::shimmer_duration(20);
+    assert_eq!(
+        motion::shimmer_state(10, duration),
+        motion::shimmer_state(11, duration),
+        "11 ms is inside one band step"
+    );
 }
 
 #[test]

@@ -1656,15 +1656,16 @@ impl TimelineView {
     fn ensure_motions(&mut self, rows: &[ViewRow], cx: &mut Context<Self>) {
         let mut live: HashSet<MotionKey> = HashSet::new();
         let frames = motion::FRAME_INTERVAL;
-        let loader_frame = Duration::from_millis((motion::LOADER_PERIOD_MS / 6) as u64);
         for row in rows {
             match &row.kind {
                 RowKind::RunningFooter { .. } => {
                     live.insert(MotionKey::RunningFooter);
+                    // The step state skips the frames between the loader's 158 ms steps.
                     self.ensure_motion(
                         MotionKey::RunningFooter,
                         0,
-                        loader_frame,
+                        frames,
+                        |ms| motion::loader_step(ms) as u64,
                         motion::loader_draw(),
                         cx,
                     );
@@ -1675,13 +1676,21 @@ impl TimelineView {
                     };
                     let key = self.grouper.key(step.id);
                     live.insert(MotionKey::Segment(key));
-                    self.ensure_motion(MotionKey::Segment(key), key, frames, segment_draw(), cx);
+                    self.ensure_motion(
+                        MotionKey::Segment(key),
+                        key,
+                        frames,
+                        motion::pulse_state,
+                        segment_draw(),
+                        cx,
+                    );
                     let position = group.running_step.unwrap_or(0);
                     live.insert(MotionKey::StepNumber(key));
                     self.ensure_motion(
                         MotionKey::StepNumber(key),
                         position as u64,
                         frames,
+                        motion::pulse_state,
                         step_number_draw(position),
                         cx,
                     );
@@ -1700,24 +1709,25 @@ impl TimelineView {
             }
         }
         for index in calls {
-            if item_type(&self.entries[index]) != "tool_call" {
+            let entry = &self.entries[index];
+            if item_type(entry) != "tool_call" || !motion::tool_entry_running(entry) {
                 continue;
             }
-            let item = &self.entries[index];
-            let status = item["status"].as_str().unwrap_or("");
-            if !matches!(status, "running" | "executing") {
-                continue;
-            }
-            let key = entry_key(item);
-            let shown = tools::presentation(item, &self.cwd);
+            let key = entry_key(entry);
+            let shown = tools::presentation(&entry["item"], &self.cwd);
             let mut hasher = DefaultHasher::new();
             shown.name.hash(&mut hasher);
             shown.summary.hash(&mut hasher);
+            let duration = motion::shimmer_duration(motion::shimmer_chars(
+                &shown.name,
+                shown.summary.as_deref(),
+            ));
             live.insert(MotionKey::Badge(key));
             self.ensure_motion(
                 MotionKey::Badge(key),
                 hasher.finish(),
                 frames,
+                move |ms| motion::shimmer_state(ms, duration),
                 tool_view::shimmer_draw(shown.name, shown.summary),
                 cx,
             );
@@ -1730,17 +1740,21 @@ impl TimelineView {
         key: MotionKey,
         content: u64,
         interval: Duration,
+        state: impl Fn(u128) -> u64 + 'static,
         draw: impl Fn(u128, &mut Window, &mut App) -> AnyElement + 'static,
         cx: &mut Context<Self>,
     ) {
         match self.motions.get(&key).cloned() {
             Some((hash, _)) if hash == content => {}
             Some((_, entity)) => {
-                entity.update(cx, |motion, cx| motion.set_draw(draw, cx));
+                entity.update(cx, |motion, cx| {
+                    motion.set_state(state);
+                    motion.set_draw(draw, cx);
+                });
                 self.motions.insert(key, (content, entity));
             }
             None => {
-                let entity = cx.new(|cx| motion::Motion::new(interval, draw, cx));
+                let entity = cx.new(|cx| motion::Motion::with_state(interval, state, draw, cx));
                 self.motions.insert(key, (content, entity));
             }
         }
@@ -2148,8 +2162,9 @@ impl TimelineView {
         let t = tokens(cx);
         let size = content_font_size(cx);
         // Reply text follows the reading look (1.5 under claude-look); user messages keep 1.4.
-        let line_height =
-            px((size / px(1.) * bachuc_theme::reading_look(cx).response_line_height).round());
+        // The factor is Electron's CSS `line-height`, so the box is the exact product: rounding
+        // 15 * 1.5 up to 23 made every line 0.5 px taller than Electron, whose box is 22.5.
+        let line_height = px(size / px(1.) * bachuc_theme::reading_look(cx).response_line_height);
         let view = cx.weak_entity();
         let (style, highlighter) = self.markdown_style(cx);
         let copy_color = t.foreground_muted;
@@ -3436,8 +3451,8 @@ fn format_duration(ms: i64) -> String {
     }
 }
 
-/// The body line box in whole pixels. GPUI rounds a line height to whole pixels, and the text
-/// view needs the same number the paragraph pitch is built from.
+/// The user message's body line box in whole pixels. The assistant reply keeps the reading
+/// look's fractional box; this 1.4-factor path rounds as it did.
 fn body_line_height(content: f32) -> f32 {
     (content * BODY_LINE_HEIGHT).round()
 }

@@ -1,22 +1,28 @@
 //! The running marks of the timeline: the synced 6-dot loader (`synced-loader.tsx`), the
 //! running pulse of `usePulse`, and the tool-row shimmer of `message.tsx`.
 //!
-//! Every mark is its own small view, like `sidebar/src/ring.rs`, so a frame redraws the mark
-//! and not the timeline list. It asks for a frame every `interval` while it was painted in the
-//! last 200 ms and sleeps otherwise. All marks read one clock, so they move in step.
+//! Every mark is its own small view, like `sidebar/src/ring.rs`. GPUI marks the ancestor views
+//! of a notified view dirty, so a mark's frame re-renders the timeline that holds it. One ticker
+//! for the whole app notifies every painted mark on the same frame, and a frame whose quantized
+//! output did not change asks for nothing. All marks read one clock, so they move in step.
 
-use std::cell::Cell;
-use std::rc::Rc;
+use std::cell::{Cell, RefCell};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use bachuc_theme::tokens;
 use gpui_kit::*;
 
-/// How often a painted mark asks for the next frame.
-pub const FRAME_INTERVAL: Duration = Duration::from_millis(33);
+/// How often a painted mark asks for the next frame. Every frame re-renders the timeline that
+/// holds the mark, so this rate is the CPU cost (ADR-0039). 66 ms is 15 fps: the pulse fades
+/// in 24 levels and the shimmer band steps about 10 px, which still read as motion.
+pub const FRAME_INTERVAL: Duration = Duration::from_millis(66);
 /// A mark that was not painted for this long stops asking for frames.
 const SLEEP_AFTER: Duration = Duration::from_millis(200);
+/// Opacity levels of the pulse, and position steps of the shimmer band in one loop. A frame in
+/// the same level would look the same at this resolution, so the ticker skips it.
+const PULSE_LEVELS: f32 = 24.;
+const SHIMMER_STEPS: f32 = 24.;
 
 /// One loader loop, in six steps (`SYNCED_LOADER_DURATION_MS`).
 pub const LOADER_PERIOD_MS: u128 = 950;
@@ -40,12 +46,79 @@ pub fn motion_ms() -> u128 {
     START.get_or_init(Instant::now).elapsed().as_millis()
 }
 
+thread_local! {
+    /// Every live motion, and the one task that ticks them all. Weak handles, so a dropped mark
+    /// leaves the registry at the next tick.
+    static TICKER: RefCell<Ticker> = RefCell::new(Ticker::default());
+}
+
+#[derive(Default)]
+struct Ticker {
+    motions: Vec<WeakEntity<Motion>>,
+    task: Option<Task<()>>,
+}
+
+/// Adds a mark to the one ticker and starts the ticker when it is not running.
+fn register(motion: WeakEntity<Motion>, cx: &mut Context<Motion>) {
+    let start = TICKER.with(|ticker| {
+        let mut ticker = ticker.borrow_mut();
+        let id = motion.entity_id();
+        if !ticker.motions.iter().any(|other| other.entity_id() == id) {
+            ticker.motions.push(motion);
+        }
+        ticker.task.is_none()
+    });
+    if !start {
+        return;
+    }
+    let task = cx.spawn(async move |_, cx| {
+        loop {
+            cx.background_executor().timer(FRAME_INTERVAL).await;
+            let painted = cx.update(tick_all);
+            if !painted {
+                break;
+            }
+        }
+        TICKER.with(|ticker| ticker.borrow_mut().task = None);
+    });
+    TICKER.with(|ticker| ticker.borrow_mut().task = Some(task));
+}
+
+/// One ticker step: notifies each painted mark that is due, and tells whether any mark was
+/// painted lately, so the ticker sleeps when no mark is on screen.
+fn tick_all(cx: &mut App) -> bool {
+    let motions = TICKER.with(|ticker| std::mem::take(&mut ticker.borrow_mut().motions));
+    let now = Instant::now();
+    let mut live = Vec::with_capacity(motions.len());
+    let mut painted = false;
+    for motion in motions {
+        if let Ok(seen) = motion.update(cx, |motion, cx| motion.tick(now, cx)) {
+            painted |= seen;
+            live.push(motion);
+        }
+    }
+    // A notify can render and register a new mark, so add to the registry rather than replace it.
+    TICKER.with(|ticker| {
+        let mut ticker = ticker.borrow_mut();
+        for motion in live {
+            let id = motion.entity_id();
+            if !ticker.motions.iter().any(|other| other.entity_id() == id) {
+                ticker.motions.push(motion);
+            }
+        }
+    });
+    painted
+}
+
 /// A mark that redraws itself at `interval` while it is on screen.
 pub struct Motion {
     interval: Duration,
+    /// A small number for the drawn output: equal states draw the same pixels.
+    state: Option<Box<dyn Fn(u128) -> u64>>,
     draw: Box<dyn Fn(u128, &mut Window, &mut App) -> AnyElement>,
-    painted: Rc<Cell<Instant>>,
-    _tick: Task<()>,
+    painted: Cell<Instant>,
+    notified: Cell<Instant>,
+    drawn_state: Cell<Option<u64>>,
 }
 
 impl Motion {
@@ -54,27 +127,37 @@ impl Motion {
         draw: impl Fn(u128, &mut Window, &mut App) -> AnyElement + 'static,
         cx: &mut Context<Motion>,
     ) -> Motion {
-        let painted = Rc::new(Cell::new(Instant::now()));
-        let seen = painted.clone();
-        let tick = cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(interval).await;
-                let alive = this.update(cx, |_, cx| {
-                    if seen.get().elapsed() < SLEEP_AFTER {
-                        cx.notify();
-                    }
-                });
-                if alive.is_err() {
-                    break;
-                }
-            }
-        });
-        Motion {
+        Self::with_state_opt(interval, None, draw, cx)
+    }
+
+    /// Like `new`, with a quantized `state` of what the mark draws. A frame in the same state
+    /// does not notify.
+    pub fn with_state(
+        interval: Duration,
+        state: impl Fn(u128) -> u64 + 'static,
+        draw: impl Fn(u128, &mut Window, &mut App) -> AnyElement + 'static,
+        cx: &mut Context<Motion>,
+    ) -> Motion {
+        Self::with_state_opt(interval, Some(Box::new(state)), draw, cx)
+    }
+
+    fn with_state_opt(
+        interval: Duration,
+        state: Option<Box<dyn Fn(u128) -> u64>>,
+        draw: impl Fn(u128, &mut Window, &mut App) -> AnyElement + 'static,
+        cx: &mut Context<Motion>,
+    ) -> Motion {
+        let now = Instant::now();
+        let motion = Motion {
             interval,
+            state,
             draw: Box::new(draw),
-            painted,
-            _tick: tick,
-        }
+            painted: Cell::new(now),
+            notified: Cell::new(now),
+            drawn_state: Cell::new(None),
+        };
+        register(cx.weak_entity(), cx);
+        motion
     }
 
     pub fn interval(&self) -> Duration {
@@ -89,13 +172,44 @@ impl Motion {
         self.draw = Box::new(draw);
         cx.notify();
     }
+
+    pub fn set_state(&mut self, state: impl Fn(u128) -> u64 + 'static) {
+        self.state = Some(Box::new(state));
+    }
+
+    /// One ticker step. Tells whether this mark was painted lately. A mark that is not due, or
+    /// whose quantized output did not change, does not notify.
+    fn tick(&mut self, now: Instant, cx: &mut Context<Self>) -> bool {
+        if cx.reduce_motion() || self.painted.get().elapsed() >= SLEEP_AFTER {
+            return false;
+        }
+        let ms = motion_ms();
+        let changed = self
+            .state
+            .as_ref()
+            .is_none_or(|state| self.drawn_state.get() != Some(state(ms)));
+        if frame_draws(
+            now.duration_since(self.notified.get()),
+            self.interval,
+            changed,
+        ) {
+            self.notified.set(now);
+            cx.notify();
+        }
+        true
+    }
 }
 
 impl Render for Motion {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.painted.set(Instant::now());
+        // A covered window stops drawing, so this restarts a ticker that slept meanwhile.
+        register(cx.weak_entity(), cx);
         // Reduced motion draws the still state, as `useReducedMotion` does.
         let time = if cx.reduce_motion() { 0 } else { motion_ms() };
+        if let Some(state) = &self.state {
+            self.drawn_state.set(Some(state(time)));
+        }
         (self.draw)(time, window, cx)
     }
 }
@@ -259,4 +373,29 @@ pub fn shimmer_phase(ms: u128, duration: f64) -> f32 {
         return 0.;
     }
     ((ms as f64 / (duration * 1000.)) % 1.) as f32
+}
+
+/// The pulse's opacity level. Two times in one level skip a frame, so the fade is drawn in this
+/// many steps.
+pub fn pulse_state(ms: u128) -> u64 {
+    (pulse_opacity(ms) * PULSE_LEVELS).round() as u64
+}
+
+/// The shimmer band's position, in steps of its loop.
+pub fn shimmer_state(ms: u128, duration: f64) -> u64 {
+    (shimmer_phase(ms, duration) * SHIMMER_STEPS).round() as u64
+}
+
+/// Whether a ticker step draws: the mark is due, and its quantized output changed.
+pub fn frame_draws(elapsed: Duration, interval: Duration, changed: bool) -> bool {
+    elapsed >= interval && changed
+}
+
+/// A timeline entry keeps its status one level down, at `entry["item"]["status"]`; a
+/// `tool_call` entry that is `running` or `executing` is the loading badge with the shimmer.
+pub fn tool_entry_running(entry: &serde_json::Value) -> bool {
+    matches!(
+        entry["item"]["status"].as_str(),
+        Some("running" | "executing")
+    )
 }
