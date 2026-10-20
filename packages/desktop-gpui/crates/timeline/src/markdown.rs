@@ -26,7 +26,9 @@ pub enum Segment {
 /// What a row draws for one segment.
 #[derive(Clone, Debug)]
 pub enum Block {
-    Markdown(String),
+    /// The segment at the same position, which the draw reads from the message: a frame must not
+    /// copy the text of every visible message.
+    Markdown,
     LocalImage {
         alt: String,
         source: String,
@@ -160,7 +162,7 @@ pub fn blocks(
     segments
         .iter()
         .map(|segment| match segment {
-            Segment::Markdown(text) => Block::Markdown(text.clone()),
+            Segment::Markdown(_) => Block::Markdown,
             Segment::Image { alt, source } => Block::LocalImage {
                 alt: alt.clone(),
                 source: source.clone(),
@@ -244,7 +246,8 @@ mod tests {
             }
             other => panic!("expected a code block, got {other:?}"),
         }
-        assert!(matches!(&shown[0], Block::Markdown(text) if text.starts_with("Here")));
+        // The block holds no text; the first segment, asserted above, is the text it points at.
+        assert!(matches!(&shown[0], Block::Markdown));
     }
 
     #[test]

@@ -407,6 +407,8 @@ pub struct Composer {
     drop: DropOverlay,
     picker: Option<Picker>,
     popovers: PopoverViews,
+    /// The plugin index the last frame drew from, with the host revision it was copied at.
+    index_cache: IndexCache,
     /// The corner pills' width, so the column keeps the timeline's right edge.
     corner_reserve: Pixels,
     /// The composer's width at the last paint.
@@ -427,6 +429,26 @@ fn plugin_index(cx: &App) -> ContributionIndex {
     bachuc_plugin_host::host(cx)
         .map(|host| host.read(cx).index().clone())
         .unwrap_or_default()
+}
+
+/// The index of one frame and the host revision it was copied at. `None` is no host.
+type IndexCache = Option<(Option<u64>, Rc<ContributionIndex>)>;
+
+/// The index for a frame. It is copied only when the host revision differs from the cached one,
+/// because a frame copies about 20 vectors of contributions otherwise.
+fn cached_index(
+    cache: &mut IndexCache,
+    revision: Option<u64>,
+    build: impl FnOnce() -> ContributionIndex,
+) -> Rc<ContributionIndex> {
+    match cache {
+        Some((kept, index)) if *kept == revision => Rc::clone(index),
+        _ => {
+            let index = Rc::new(build());
+            *cache = Some((revision, Rc::clone(&index)));
+            index
+        }
+    }
 }
 
 impl Composer {
@@ -589,6 +611,7 @@ impl Composer {
             drop: DropOverlay::default(),
             picker: None,
             popovers: PopoverViews::default(),
+            index_cache: None,
             corner_reserve: px(0.),
             width: Rc::new(Cell::new(px(0.))),
             _subscriptions: subscriptions,
@@ -3174,7 +3197,8 @@ impl Render for Composer {
         }
 
         // Pill `state` closures run here, in render, not on every client event.
-        let index = plugin_index(cx);
+        let revision = bachuc_plugin_host::host(cx).map(|host| host.read(cx).timeline_revision());
+        let index = cached_index(&mut self.index_cache, revision, || plugin_index(cx));
         let plugin_pills = self.plugin_pills(&index, cx);
         let matches = self.slash_matches(cx);
         let weak = cx.weak_entity();
@@ -3295,8 +3319,8 @@ impl Render for Composer {
 mod tests {
     // Named imports: `use super::*` would bring in GPUI's `test` macro over `#[test]`.
     use super::{
-        DROP_FADE, DraftPrimary, DropOverlay, FOCUS_ACTION, LOCKED_OPACITY, Watched, draft_primary,
-        drag_over, focus_hint, outgoing_text, restore_after_error, send_error_text,
+        DROP_FADE, DraftPrimary, DropOverlay, FOCUS_ACTION, LOCKED_OPACITY, Watched, cached_index,
+        draft_primary, drag_over, focus_hint, outgoing_text, restore_after_error, send_error_text,
         snapshot_changed,
     };
     use crate::draft::{DraftOptions, SubmitIcon};
@@ -3522,5 +3546,30 @@ mod tests {
         assert!((overlay.opacity(dropped) - 0.5).abs() < 0.01);
         assert_eq!(overlay.opacity(dropped + DROP_FADE), 0.);
         assert!(!overlay.fading(dropped + DROP_FADE));
+    }
+
+    #[test]
+    fn a_frame_copies_the_plugin_index_only_when_the_host_revision_changes() {
+        let builds = std::cell::Cell::new(0);
+        let mut cache = None;
+        let mut frame = |revision| {
+            cached_index(&mut cache, revision, || {
+                builds.set(builds.get() + 1);
+                Default::default()
+            })
+        };
+        let first = frame(Some(3));
+        let again = frame(Some(3));
+        assert_eq!(builds.get(), 1);
+        assert!(std::rc::Rc::ptr_eq(&first, &again));
+        frame(Some(4));
+        assert_eq!(builds.get(), 2);
+        // No host and a host that came later are different states.
+        frame(None);
+        assert_eq!(builds.get(), 3);
+        frame(None);
+        assert_eq!(builds.get(), 3);
+        frame(Some(4));
+        assert_eq!(builds.get(), 4);
     }
 }

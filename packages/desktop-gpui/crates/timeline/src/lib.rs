@@ -131,6 +131,11 @@ pub enum TimelineForkEvent {
 
 /// Rows within this many of the top load the page before the first entry.
 const LOAD_OLDER_WITHIN: usize = 2;
+/// The scroll-to-bottom button (`scrollToBottomButton`): a 48 px circle with a 24 px chevron,
+/// 16 px above the bottom edge (`resolveBottomOverlayControlOffset`).
+const SCROLL_BUTTON_SIZE: f32 = 48.;
+const SCROLL_BUTTON_ICON: f32 = 24.;
+const SCROLL_BUTTON_BOTTOM: f32 = 16.;
 /// The smallest share of the strip one step gets, so short steps stay visible.
 const MIN_SEGMENT_SHARE: f32 = 0.04;
 /// Opacity of the strip segments of the steps that are not selected.
@@ -498,7 +503,7 @@ impl TimelineView {
         let list = ListState::new(0, ListAlignment::Top, px(800.));
         list.set_follow_mode(FollowMode::Tail);
         let view = cx.entity().downgrade();
-        list.set_scroll_handler(move |event, _, cx| {
+        list.set_scroll_handler(move |event, window, cx| {
             let top = event.visible_range.start;
             let _ = view.update(cx, |this, cx| {
                 if top < LOAD_OLDER_WITHIN {
@@ -506,6 +511,18 @@ impl TimelineView {
                 }
                 this.report_reading_position(top, cx);
             });
+            // The list re-engages the tail in its next layout pass, after this render, so the
+            // button hides on one more render once the view is back at the last row.
+            if reaches_tail(
+                event.visible_range.end,
+                event.count,
+                event.is_following_tail,
+            ) {
+                let view = view.clone();
+                window.on_next_frame(move |_, cx| {
+                    view.update(cx, |_, cx| cx.notify()).ok();
+                });
+            }
         });
         let bounds = Rc::new(Cell::new(Bounds::default()));
         let outline = cx.new(|_| OutlineRail::new(bounds.clone()));
@@ -751,6 +768,55 @@ impl TimelineView {
             self.list.logical_scroll_top().item_ix
         };
         self.report_reading_position(top, cx);
+    }
+
+    /// The scroll-to-bottom press: jump to the newest row and follow the stream again.
+    fn scroll_to_bottom(&mut self, cx: &mut Context<Self>) {
+        self.list.set_follow_mode(FollowMode::Tail);
+        self.report_current_position(cx);
+        cx.notify();
+    }
+
+    /// `AgentStreamView`'s scroll-to-bottom button: a round chevron centered across the timeline.
+    fn render_scroll_to_bottom(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !shows_scroll_to_bottom(self.rows.len(), self.list.is_following_tail()) {
+            return None;
+        }
+        let t = tokens(cx);
+        let view = cx.weak_entity();
+        Some(
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom(zoomed(SCROLL_BUTTON_BOTTOM, cx))
+                .flex()
+                .justify_center()
+                .child(
+                    div()
+                        .id("scroll-to-bottom")
+                        .role(Role::Button)
+                        .aria_label(SCROLL_TO_BOTTOM_LABEL)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(zoomed(SCROLL_BUTTON_SIZE, cx))
+                        .rounded_full()
+                        .bg(t.surface2)
+                        .shadow(vec![shadow(ShadowSize::Sm, cx)])
+                        .cursor_pointer()
+                        .child(
+                            icon(IconName::ChevronDown)
+                                .with_size(zoomed(SCROLL_BUTTON_ICON, cx))
+                                .text_color(t.foreground),
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.scroll_to_bottom(cx)))
+                        .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                            view.update(cx, |this, cx| this.scroll_to_bottom(cx)).ok();
+                        }),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Whether the rail's prompt index is wanted: the host lists prompts and Settings keep the
@@ -2173,7 +2239,7 @@ impl TimelineView {
             .into_iter()
             .enumerate()
             .map(|(position, block)| match block {
-                Block::Markdown(_) => match &message.states[position] {
+                Block::Markdown => match &message.states[position] {
                     Some(state) => {
                         let view = view.clone();
                         let text = RichText::new(state)
@@ -3207,11 +3273,27 @@ impl Render for TimelineView {
         }
         base.child(measure)
             .child(body)
+            .children(self.render_scroll_to_bottom(cx))
             .child(self.outline.clone())
             .children(self.render_selection_toolbar(cx))
             .children(self.render_find_bar(window, cx))
             .children(lightbox)
     }
+}
+
+const SCROLL_TO_BOTTOM_LABEL: &str = "Scroll to bottom";
+
+/// Whether the scroll-to-bottom button shows: the list has rows and does not follow the tail.
+/// A timeline too short to fill the pane follows, so it shows none.
+fn shows_scroll_to_bottom(rows: usize, following_tail: bool) -> bool {
+    rows > 0 && !following_tail
+}
+
+/// Whether a scroll left the last row in view while the list does not yet follow the tail. The
+/// list re-engages the tail in its next layout pass, so the view redraws once more to hide the
+/// button.
+fn reaches_tail(visible_end: usize, count: usize, following_tail: bool) -> bool {
+    !following_tail && count > 0 && visible_end >= count
 }
 
 /// The row's side padding and the content column's own padding, as `streamItemWrapper`.
@@ -3695,8 +3777,8 @@ mod tests {
         BLOCK_GAP, PARAGRAPH_GAP, StepCounts, USER_TRAILING_HEIGHT, USER_TRAILING_ROW,
         body_line_height, counts_text, fence_spacing, fork_boundary, format_clock, format_duration,
         format_elapsed, format_message_timestamp, heading_style, latest_assistant, message_gap,
-        paragraph_pitch, restores_composer, rewind_choices, toggle, user_message_id,
-        user_trailing_opacity, window_rems,
+        paragraph_pitch, reaches_tail, restores_composer, rewind_choices, shows_scroll_to_bottom,
+        toggle, user_message_id, user_trailing_opacity, window_rems,
     };
     use bachuc_client::{ForkBoundary, ForkCursor, RewindMode, RewindModes};
     use bachuc_theme::metrics::FONT_CONTENT;
@@ -4071,6 +4153,23 @@ mod tests {
         // The row is always `USER_TRAILING_ROW` high: 8 above plus the 24 px controls.
         assert_eq!(USER_TRAILING_ROW, SPACE_2 + USER_TRAILING_HEIGHT);
         assert_eq!(USER_TRAILING_ROW, 32.);
+    }
+
+    #[test]
+    fn the_scroll_to_bottom_button_shows_only_when_not_following_a_filled_list() {
+        assert!(!shows_scroll_to_bottom(0, false));
+        assert!(!shows_scroll_to_bottom(0, true));
+        assert!(!shows_scroll_to_bottom(12, true));
+        assert!(shows_scroll_to_bottom(12, false));
+    }
+
+    #[test]
+    fn a_scroll_to_the_last_row_asks_for_one_more_render_until_the_tail_follows() {
+        assert!(reaches_tail(12, 12, false));
+        assert!(reaches_tail(13, 12, false));
+        assert!(!reaches_tail(11, 12, false));
+        assert!(!reaches_tail(12, 12, true));
+        assert!(!reaches_tail(0, 0, false));
     }
 
     #[test]

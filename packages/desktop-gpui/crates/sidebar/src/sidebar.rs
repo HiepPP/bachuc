@@ -230,7 +230,8 @@ pub struct Sidebar {
     data_dir: Option<PathBuf>,
     /// Whether the first project list already dropped the prefs of projects that went.
     pruned: bool,
-    rows: Vec<Row>,
+    /// Shared, so a frame hands a row to its kebab menu without copying it.
+    rows: Rc<Vec<Row>>,
     shapes: Vec<RowShape>,
     list: ListState,
     width: f32,
@@ -301,7 +302,7 @@ impl Sidebar {
             prefs,
             data_dir,
             pruned: false,
-            rows: Vec::new(),
+            rows: Rc::new(Vec::new()),
             shapes: Vec::new(),
             list: ListState::new(0, ListAlignment::Top, px(OVERDRAW)),
             width: SIDEBAR_WIDTH,
@@ -513,7 +514,7 @@ impl Sidebar {
             .iter()
             .map(|row| row.shape_with(&items, checks))
             .collect();
-        if rows == self.rows && shapes == self.shapes {
+        if rows == *self.rows && shapes == self.shapes {
             return;
         }
         if let Some((range, count)) = changed_range(&self.shapes, &shapes) {
@@ -535,7 +536,7 @@ impl Sidebar {
         let live: HashSet<String> = rows.iter().filter_map(ring_key).collect();
         self.rings.retain(|key, _| live.contains(key));
         self.shapes = shapes;
-        self.rows = rows;
+        self.rows = Rc::new(rows);
         cx.notify();
     }
 
@@ -1009,12 +1010,13 @@ impl Sidebar {
     // ---- rows ----
 
     fn render_row(&mut self, ix: usize, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let Some(row) = self.rows.get(ix).cloned() else {
+        let rows = Rc::clone(&self.rows);
+        let Some(row) = rows.get(ix) else {
             return div().into_any_element();
         };
         let t = tokens(cx);
-        let last = ix + 1 == self.rows.len();
-        let body = match &row {
+        let last = ix + 1 == rows.len();
+        let body = match row {
             Row::PinnedHeader { collapsed, .. } => self.render_pinned_header(*collapsed, &t, cx),
             Row::SectionTitle => {
                 let title = self.section_title(cx);
@@ -1030,7 +1032,7 @@ impl Sidebar {
             } => self.render_show_more(ix, group.clone(), *expanded, &t, cx),
             Row::Empty => render_empty(&t, cx),
         };
-        let below = match &row {
+        let below = match row {
             Row::Project(_) | Row::StatusHeader { .. } => PROJECT_GAP,
             Row::Workspace(WorkspaceRow {
                 block_end, group, ..
@@ -1456,7 +1458,7 @@ impl Sidebar {
             .child(content);
 
         let weak = cx.weak_entity();
-        let menu_row = row.clone();
+        let rows = Rc::clone(&self.rows);
         let kebab = kebab(
             ("workspace-kebab", ix),
             "Workspace actions",
@@ -1465,7 +1467,10 @@ impl Sidebar {
             group.clone(),
             t,
             cx,
-            move |menu, _, cx| workspace_menu(menu, &weak, &menu_row, cx),
+            move |menu, _, cx| match rows.get(ix) {
+                Some(Row::Workspace(row)) => workspace_menu(menu, &weak, row, cx),
+                _ => menu,
+            },
         );
         // The scrim fades the title tail into the row color under the kebab.
         let scrim = div()
