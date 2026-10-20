@@ -56,3 +56,12 @@ One run for TASK-278, TASK-279, and TASK-280 together (2026-10-20 14:59 to 15:00
 
 - Same re-check as TASK-278. Committed in `9cc6e3d50`.
 - Blocked: BUILT, UNVERIFIED (Q-180). Every drag check and the click anti-goal need the owner's hand, because the UI checker cannot move the pointer.
+
+## Verify
+
+2026-10-20, `/watchtower verify`:
+
+- Code checks: the lead re-check ran on the same source (`9cc6e3d50`), so the run reuses it.
+- Owner hand checks: drag of a project, a thread, and a pinned row, restart, wrong-target drops, and status grouping all pass (Hiep, Q-180, ANSWERED).
+- Anti-goal: 10 row clicks each open the thread in one press with no drag preview (Hiep, Q-180). Result: PASS.
+- Status: DONE.

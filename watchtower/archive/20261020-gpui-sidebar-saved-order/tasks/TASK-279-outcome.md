@@ -75,3 +75,12 @@ One run for TASK-278, TASK-279, and TASK-280 together (2026-10-20 14:59 to 15:00
 
 - Same re-check as TASK-278. `Cargo.lock` diff holds only the 7 new packages, the `rusty-leveldb` line, and the `errno 0.3.14` suffix on 2 old references. `./cargo.sh metadata` exit 0 was the builder's read.
 - Committed in `9cc6e3d50`. Status: DONE, implement: manual checks pending (Q-182).
+
+## Verify
+
+2026-10-20, `/watchtower verify`:
+
+- Code checks: the lead re-check above ran on the same source (`9cc6e3d50`, no later sidebar change), so the run reuses it.
+- UI checker line: Hiep checked it by hand on a check bundle and it passes (Q-182, ANSWERED).
+- Anti-goal: the real-store read was 84.6 ms with the folder unchanged, and the owner saw the import on start. Result: PASS.
+- Status: DONE.
