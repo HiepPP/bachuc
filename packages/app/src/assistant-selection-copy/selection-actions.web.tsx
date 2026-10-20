@@ -11,7 +11,9 @@ import { createPortal } from "react-dom";
 import type { PluginAssistantSelectionActionContribution } from "@getpaseo/plugin/client";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { useRetainedPanelActive } from "@/components/retained-panel";
 import { getOverlayRoot, useOverlayLayer } from "@/lib/overlay-root";
+import { usePaneFocus } from "@/panels/pane-context";
 import { useInstalledPlugins } from "@/plugins/registry";
 import { createAssistantSelectionClipboardContent } from "./content.web";
 import type { AssistantSelectionActionsProps } from "./selection-actions";
@@ -75,10 +77,14 @@ export function AssistantSelectionActions({
   const [selected, setSelected] = useState<SelectedText | null>(null);
   const [position, setPosition] = useState<ToolbarPosition | null>(null);
   const layer = useOverlayLayer("floating");
-  const hasActions = actions.length > 0;
+  // The toolbar portals out of the pane, so it must hide itself when the pane hides: a hidden tab
+  // freezes, and another route such as Board covers the workspace, both with the selection kept.
+  const { isWorkspaceFocused } = usePaneFocus();
+  const visible = useRetainedPanelActive() && isWorkspaceFocused;
+  const enabled = actions.length > 0 && visible;
 
   useEffect(() => {
-    if (!hasActions) {
+    if (!enabled) {
       setSelected(null);
       setPosition(null);
       return;
@@ -103,12 +109,14 @@ export function AssistantSelectionActions({
     document.addEventListener("selectionchange", select);
     window.addEventListener("scroll", place, true);
     window.addEventListener("resize", place);
+    // A pane shown again may still hold its selection.
+    select();
     return () => {
       document.removeEventListener("selectionchange", select);
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("resize", place);
     };
-  }, [hasActions]);
+  }, [enabled]);
 
   // Keeps the selection alive while the pointer presses a toolbar button.
   const keepSelection = useCallback((event: MouseEvent<HTMLDivElement>) => {
@@ -153,7 +161,7 @@ export function AssistantSelectionActions({
   return (
     <>
       <span ref={anchorRef} style={HIDDEN_ANCHOR} />
-      {selected && toolbarStyle
+      {enabled && selected && toolbarStyle
         ? createPortal(
             <div onMouseDown={keepSelection} style={toolbarStyle}>
               <View style={styles.toolbar} testID="assistant-selection-actions">
