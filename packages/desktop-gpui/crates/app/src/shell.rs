@@ -61,7 +61,7 @@ use bachuc_theme::metrics::TRAFFIC_LIGHT_WIDTH;
 use bachuc_theme::{tokens, zoomed};
 use bachuc_timeline::grouping::{item_type, message_key};
 use bachuc_timeline::{
-    ForkTarget, TimelineEvent, TimelineForkEvent, TimelineRewindEvent, TimelineView,
+    ForkTarget, TimelineEvent, TimelineForkEvent, TimelineRewindEvent, TimelineView, read_target,
     restores_composer,
 };
 use bachuc_workspace::model::Rect;
@@ -2738,6 +2738,9 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The daemon refuses a path outside `cwd`, so read such a file from the file system root.
+        let (cwd, path) = read_target(path, cwd).unwrap_or_else(|| (cwd.into(), path.into()));
+        let (cwd, path) = (cwd.as_str(), path.as_str());
         let workspace_id = self.selected.clone();
         let identity = file_key(cwd, path);
         if let Some(key) = self.find_identity(&workspace_id, &identity) {
