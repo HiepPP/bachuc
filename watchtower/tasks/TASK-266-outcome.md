@@ -1,6 +1,6 @@
 # TASK-266 outcome
 
-Status: DONE (screen checks deferred to the UI checker)
+Status: DONE (CPU cap met after TASK-276: median 7.2%)
 
 Changed:
 
@@ -117,3 +117,7 @@ Method finding: an app launched from the agent shell runs with `nice` (`ps` stat
 - Reads, `measure.sh 60`, in order: BASE 43.1%, CHECK 44.2%, CHECK 44.1%, BASE 33.2%, BASE 42.6%, CHECK 43.9%.
 - Medians: BASE 42.6%, CHECK 44.1% -> +1.5 points. PASS for baseline + 2 points. The mean gap is 4.5 points only because of the single 33.2% BASE read.
 - 10% cap: FAIL on both apps. The cost is not new in this plan; it exists on main. Q-175 is ANSWERED.
+
+## CPU Close
+
+CPU close (lead, 2026-10-20): the TASK-276 UI check read `measure.sh 60` on the `63321de20` check bundle (md5 `1b1d2715...`) during a running turn, 1200x800 in front: 6.9, 7.2, 7.3, median 7.2% (set 1: 7.4, 7.6, 6.9). The 10% cap of ADR-0039 is met. Caveats: no BASE read under the same procedure; BASE and NEW share a bundle id; the window froze for about 4 minutes in set 1 until a click (Q-179). Details: [TASK-276 outcome](TASK-276-outcome.md), `## UI Checks`.

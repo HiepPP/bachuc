@@ -404,3 +404,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: GPUI marks every ancestor view dirty when a child view notifies, so a 33 ms `Motion` mark re-renders the whole timeline that holds it; the frame count is the CPU lever (TASK-266 and TASK-267 fix round 1 moved to one shared 66 ms ticker). An unattended CPU read is not possible while the owner's release GPUI window covers the check window: the covered window draws nothing and reads 0.1-0.3%.
 - Source: TASK-266, TASK-267 outcomes (UI Checks rounds 1-3); `packages/desktop-gpui/crates/timeline/src/motion.rs`.
 - Use next time: plan a CPU anti-goal as an owner A/B check with a pre-plan base app, and build the base from a `git archive` of the base ref that also includes `hiep-plugins` (the board plugin embeds its assets). The lefthook `format` job fails with exit 2 when the only staged markdown is under `vendor/`; stage another markdown file, such as an outcome, in the same commit.
+
+- 2026-10-20 Learned: GPUI per-frame cost fell from 14.9% to 7.2% CPU with no `.cached` view, by removing copies in `render` (sidebar rows shared as `Rc<Vec<Row>>`, the composer plugin index cached by host revision, an unused markdown text copy dropped); `Window::draw` fell from 18% to 5.5% of main-thread samples.
+- Source: TASK-276 outcome (Step 1 profile, UI Checks); commit `63321de20`.
+- Use next time: profile `Window::draw` by the nearest `bachuc_*` frame first, then cut clones in `render` before you reach for a view boundary.

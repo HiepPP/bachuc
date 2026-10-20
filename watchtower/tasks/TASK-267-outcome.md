@@ -1,6 +1,6 @@
 # TASK-267 outcome
 
-Status: DONE (screen checks deferred to the UI checker)
+Status: DONE (CPU cap met after TASK-276: median 7.2%)
 
 Changed:
 
@@ -89,3 +89,7 @@ Run 2026-10-19 on live (6768) with the check bundle (`BACHUC_NO_ACTIVATE=1`, AX 
 - Note for the next check: with the step not selected, the running call draws the live command card ("$ sleep 600") instead of the badge, and no shimmer is drawn there. Select the running step first.
 - Anti-goal: the 60 s read gave 0.5% because the display slept mid-window; the read is invalid. A redo was blocked when the check window stopped rendering after the display mode changed and the active Space switched. -> UNVERIFIED (unattended).
 - 15 fps still reads as motion at these samples; smoothness is left to the owner hand check.
+
+## CPU Close
+
+CPU close (lead, 2026-10-20): the TASK-276 UI check read `measure.sh 60` on the `63321de20` check bundle (md5 `1b1d2715...`) during a running turn, 1200x800 in front: 6.9, 7.2, 7.3, median 7.2% (set 1: 7.4, 7.6, 6.9). The 10% cap of ADR-0039 is met. Caveats: no BASE read under the same procedure; BASE and NEW share a bundle id; the window froze for about 4 minutes in set 1 until a click (Q-179). Details: [TASK-276 outcome](TASK-276-outcome.md), `## UI Checks`.

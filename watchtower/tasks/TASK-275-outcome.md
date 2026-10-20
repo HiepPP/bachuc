@@ -1,6 +1,6 @@
 # TASK-275 outcome
 
-Status: DONE (code checks pass; every `UI checker` line and the CPU anti-goal are DEFERRED)
+Status: DONE (CPU cap met after TASK-276: median 7.2%)
 
 ## Changed
 
@@ -130,3 +130,7 @@ Main thread 5666 samples; `Window::draw` 1019 (18%; the rest is the idle event l
 ### Restore
 
 Check app quit (pid 19006, no process left); the read loop ended; agent `8ea5c737` archived; stop-orb still `running` on live; zoom not changed; `git status` unchanged except this file; Hiep's uncommitted files untouched. The cargo dev profile was not touched by this check (only `--release` was built). The mock workspace `wt-mock-275` stays on live.
+
+## CPU Close
+
+CPU close (lead, 2026-10-20): the TASK-276 UI check read `measure.sh 60` on the `63321de20` check bundle (md5 `1b1d2715...`) during a running turn, 1200x800 in front: 6.9, 7.2, 7.3, median 7.2% (set 1: 7.4, 7.6, 6.9). The 10% cap of ADR-0039 is met. Caveats: no BASE read under the same procedure; BASE and NEW share a bundle id; the window froze for about 4 minutes in set 1 until a click (Q-179). Details: [TASK-276 outcome](TASK-276-outcome.md), `## UI Checks`.
