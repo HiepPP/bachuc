@@ -4,8 +4,8 @@
 
 - Title: GPUI parity: background card, running indicators, step list look, subagent tabs, scroll-to-bottom, and running-turn CPU
 - Slug: 20261019-gpui-background-process-card
-- Status: ACTIVE
-- Updated: 2026-10-19
+- Status: ARCHIVED
+- Updated: 2026-10-20
 
 ## Tracker
 
@@ -62,4 +62,4 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Archive
 
-- None.
+- Archived: 2026-10-20 -> watchtower/archive/20261019-gpui-background-process-card/
