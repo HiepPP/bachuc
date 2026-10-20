@@ -4,7 +4,8 @@ Status: accepted
 Date: 2026-10-20
 Supersedes: -
 Scope: `packages/desktop-gpui/crates/**`, `packages/desktop-gpui/plugins/**`
-Guard: forbid-text \.cached\( in packages/desktop-gpui/crates/_ packages/desktop-gpui/plugins/_
+Guard: forbid-text \.cached\( in packages/desktop-gpui/crates/_.rs
+Guard: forbid-text \.cached\( in packages/desktop-gpui/plugins/_.rs
 
 ## Context
 
