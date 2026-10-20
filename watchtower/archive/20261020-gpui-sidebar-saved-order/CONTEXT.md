@@ -14,7 +14,7 @@
   - A thread key is `<serverId>:<workspaceId>`. The server id comes from `server_info()`: `Client` returns the typed `ServerInfo` with `server_id`, and `ClientCore` returns JSON with `serverId`.
 - The order lives in `sidebar.json` in `bachuc_command::data_dir()` (`~/Library/Application Support/BachucGpui`), per [ADR-0049](watchtower/decisions/ADR-0049-gpui-own-sidebar-json-over-shared-stores.md). It uses Electron's JSON field names `projectOrder`, `workspaceOrderByProject`, and `pinnedWorkspaceOrder`.
 - Status grouping keeps its own sort (`compare_status_rows`). The saved order applies only to project grouping and to the pinned section.
-- The worktree has uncommitted changes from another thread in `crates/client`, `crates/composer`, `crates/settings`, `crates/timeline`, `vendor/gpui-base`, and `Cargo.lock`. Preserve them. Stage only the files of your TASK. `Cargo.lock` already has one foreign line, so stage only your hunks.
+- The other thread's client, composer, settings, timeline, vendor, and `Cargo.lock` changes were committed in `c17427731` on 2026-10-20. The tree was clean at run start, so `Cargo.lock` changes come only from TASK-279.
 
 ## Decisions
 

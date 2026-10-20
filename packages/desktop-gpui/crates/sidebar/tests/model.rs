@@ -1222,3 +1222,272 @@ fn building_500_workspaces_with_meta_data_stays_under_2_ms() {
     eprintln!("build_rows project mode with PR and labels: {ms:.3} ms");
     assert!(ms < 2., "{ms:.3} ms");
 }
+
+/// Facts with a server id and a view key `key-<id>` for each project.
+fn keyed_facts(projects: &[ProjectNode]) -> Facts {
+    let mut facts = Facts {
+        server_id: Some("srv".into()),
+        ..Facts::default()
+    };
+    for project in projects {
+        facts
+            .project_keys
+            .insert(project.id.clone(), format!("key-{}", project.id));
+    }
+    facts
+}
+
+fn strings(keys: &[&str]) -> Vec<String> {
+    keys.iter().map(|key| key.to_string()).collect()
+}
+
+#[test]
+fn a_saved_order_puts_projects_and_threads_in_its_order() {
+    let projects = [
+        project(
+            "a",
+            vec![workspace("a1", false, &[]), workspace("a2", false, &[])],
+        ),
+        project("b", vec![workspace("b1", false, &[])]),
+    ];
+    let facts = keyed_facts(&projects);
+    let mut state = ViewState::default();
+    state.order.project_order = strings(&["key-b", "key-a"]);
+    state
+        .order
+        .workspace_order_by_project
+        .insert("key-a".into(), strings(&["srv:a2", "srv:a1"]));
+    let rows = build_rows_with(&projects, &[], &facts, &state);
+    assert_eq!(ids(&rows), ["title", "p:b", "w:b1", "p:a", "w:a2", "w:a1"]);
+}
+
+#[test]
+fn an_unsaved_thread_keeps_its_name_slot() {
+    let projects = [project(
+        "a",
+        vec![
+            workspace("a1", false, &[]),
+            workspace("a2", false, &[]),
+            workspace("a3", false, &[]),
+        ],
+    )];
+    let facts = keyed_facts(&projects);
+    let mut state = ViewState::default();
+    // a2 is not saved, so it keeps slot 2; a3 and a1 fill slots 1 and 3.
+    state
+        .order
+        .workspace_order_by_project
+        .insert("key-a".into(), strings(&["srv:a3", "srv:a1"]));
+    let rows = build_rows_with(&projects, &[], &facts, &state);
+    assert_eq!(ids(&rows), ["title", "p:a", "w:a3", "w:a2", "w:a1"]);
+}
+
+#[test]
+fn seeding_puts_new_threads_first_and_new_projects_last() {
+    let projects = [
+        project(
+            "a",
+            vec![workspace("a1", false, &[]), workspace("a2", false, &[])],
+        ),
+        project("b", vec![workspace("b1", false, &[])]),
+    ];
+    let facts = keyed_facts(&projects);
+    let mut order = SidebarOrder {
+        project_order: strings(&["key-b"]),
+        ..SidebarOrder::default()
+    };
+    order
+        .workspace_order_by_project
+        .insert("key-a".into(), strings(&["srv:a1"]));
+    assert!(seed_order(&mut order, &projects, &facts));
+    assert_eq!(order.project_order, strings(&["key-b", "key-a"]));
+    assert_eq!(
+        order.workspace_order_by_project["key-a"],
+        strings(&["srv:a2", "srv:a1"])
+    );
+    assert_eq!(
+        order.workspace_order_by_project["key-b"],
+        strings(&["srv:b1"])
+    );
+    assert!(
+        !seed_order(&mut order, &projects, &facts),
+        "a second seed with no new key changes nothing"
+    );
+}
+
+#[test]
+fn seeding_keeps_keys_that_are_gone() {
+    let projects = [project("a", vec![workspace("a1", false, &[])])];
+    let facts = keyed_facts(&projects);
+    let mut order = SidebarOrder {
+        project_order: strings(&["key-gone", "key-a"]),
+        ..SidebarOrder::default()
+    };
+    order
+        .workspace_order_by_project
+        .insert("key-a".into(), strings(&["srv:gone", "srv:a1"]));
+    assert!(!seed_order(&mut order, &projects, &facts));
+    assert_eq!(order.project_order, strings(&["key-gone", "key-a"]));
+}
+
+#[test]
+fn without_a_server_id_threads_keep_the_name_order_and_are_not_seeded() {
+    let projects = [project(
+        "a",
+        vec![workspace("a1", false, &[]), workspace("a2", false, &[])],
+    )];
+    let mut facts = keyed_facts(&projects);
+    facts.server_id = None;
+    let mut state = ViewState::default();
+    state
+        .order
+        .workspace_order_by_project
+        .insert("key-a".into(), strings(&["srv:a2", "srv:a1"]));
+    let rows = build_rows_with(&projects, &[], &facts, &state);
+    assert_eq!(ids(&rows), ["title", "p:a", "w:a1", "w:a2"]);
+    let mut order = SidebarOrder::default();
+    seed_order(&mut order, &projects, &facts);
+    assert!(order.workspace_order_by_project.is_empty());
+    assert_eq!(
+        order.project_order,
+        strings(&["key-a"]),
+        "projects still seed"
+    );
+}
+
+#[test]
+fn a_project_without_a_view_key_keeps_its_name_slot_and_is_not_seeded() {
+    let projects = [
+        project("a", vec![workspace("a1", false, &[])]),
+        project("b", vec![workspace("b1", false, &[])]),
+        project("c", vec![workspace("c1", false, &[])]),
+    ];
+    let mut facts = keyed_facts(&projects);
+    facts.project_keys.remove("b");
+    let mut state = ViewState::default();
+    state.order.project_order = strings(&["key-c", "key-a"]);
+    let rows = build_rows_with(&projects, &[], &facts, &state);
+    assert_eq!(
+        ids(&rows),
+        ["title", "p:c", "w:c1", "p:b", "w:b1", "p:a", "w:a1"]
+    );
+    let mut order = SidebarOrder::default();
+    seed_order(&mut order, &projects, &facts);
+    assert_eq!(order.project_order, strings(&["key-a", "key-c"]));
+}
+
+#[test]
+fn status_grouping_ignores_the_saved_order() {
+    let projects = [project(
+        "a",
+        vec![workspace("a1", false, &[]), workspace("a2", false, &[])],
+    )];
+    let facts = keyed_facts(&projects);
+    let plain = ViewState {
+        grouping: Grouping::Status,
+        ..ViewState::default()
+    };
+    let mut ordered = plain.clone();
+    ordered
+        .order
+        .workspace_order_by_project
+        .insert("key-a".into(), strings(&["srv:a2", "srv:a1"]));
+    assert_eq!(
+        ids(&build_rows_with(&projects, &[], &facts, &ordered)),
+        ids(&build_rows_with(&projects, &[], &facts, &plain))
+    );
+}
+
+#[test]
+fn a_saved_pinned_order_applies_after_the_pinned_at_sort() {
+    let projects = [project(
+        "a",
+        vec![workspace("p1", true, &[]), workspace("p2", true, &[])],
+    )];
+    let mut facts = keyed_facts(&projects);
+    facts
+        .pinned_at
+        .insert("p1".into(), "2026-10-09T00:00:00.000Z".into());
+    facts
+        .pinned_at
+        .insert("p2".into(), "2026-10-01T00:00:00.000Z".into());
+    let mut state = ViewState::default();
+    state.order.pinned_workspace_order = strings(&["srv:p2", "srv:p1"]);
+    let rows = build_rows_with(&projects, &[], &facts, &state);
+    assert_eq!(ids(&rows)[..3], ["pinned", "w:p2", "w:p1"]);
+}
+
+/// Anti-goal probe: a saved order that lists every key costs at most 1.5 times the same build
+/// with no saved order. Run with `--nocapture` to read both times.
+#[test]
+fn a_full_saved_order_stays_within_one_and_a_half_times_the_unordered_build() {
+    let (projects, agents) = large_tree();
+    let facts = keyed_facts(&projects);
+    let plain = ViewState::default();
+    let mut ordered = ViewState::default();
+    // Reverse of the name order, so the apply step does real work.
+    ordered.order.project_order = projects
+        .iter()
+        .rev()
+        .map(|project| format!("key-{}", project.id))
+        .collect();
+    for project in &projects {
+        ordered.order.workspace_order_by_project.insert(
+            format!("key-{}", project.id),
+            project
+                .workspaces
+                .iter()
+                .rev()
+                .map(|node| format!("srv:{}", node.id))
+                .collect(),
+        );
+    }
+    let before = median_ms(|| {
+        std::hint::black_box(build_rows_with(&projects, &agents, &facts, &plain));
+    });
+    let after = median_ms(|| {
+        std::hint::black_box(build_rows_with(&projects, &agents, &facts, &ordered));
+    });
+    eprintln!("build_rows no order: {before:.3} ms, full saved order: {after:.3} ms");
+    assert!(
+        after <= before * 1.5,
+        "{after:.3} ms against {before:.3} ms"
+    );
+}
+
+fn keys(items: &[&str]) -> Vec<String> {
+    items.iter().map(|item| item.to_string()).collect()
+}
+
+#[test]
+fn a_drop_moves_the_dragged_key_to_the_target_index() {
+    let visible = keys(&["a", "b", "c"]);
+    assert_eq!(reorder_visible(&visible, "a", "c"), keys(&["b", "c", "a"]));
+    assert_eq!(reorder_visible(&visible, "c", "a"), keys(&["c", "a", "b"]));
+    assert_eq!(reorder_visible(&visible, "b", "b"), visible);
+    assert_eq!(
+        reorder_visible(&visible, "x", "a"),
+        visible,
+        "an unknown dragged key changes nothing"
+    );
+}
+
+#[test]
+fn a_merge_puts_the_visible_order_first_and_keeps_hidden_keys() {
+    let current = keys(&["hidden", "a", "b", "c"]);
+    assert_eq!(
+        merge_with_remainder(&current, &keys(&["c", "a", "b"])),
+        keys(&["c", "a", "b", "hidden"])
+    );
+}
+
+#[test]
+fn only_a_changed_visible_order_counts_as_a_change() {
+    let current = keys(&["hidden", "a", "b"]);
+    assert!(!has_visible_order_changed(&current, &keys(&["a", "b"])));
+    assert!(has_visible_order_changed(&current, &keys(&["b", "a"])));
+    assert!(
+        has_visible_order_changed(&current, &keys(&["a", "b", "new"])),
+        "a visible key the saved order lacks counts as a change"
+    );
+}

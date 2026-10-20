@@ -91,6 +91,8 @@ pub trait TreeSource {
     fn workspace_diff_stat(&self, workspace_id: &str) -> Option<DiffStat>;
     fn workspace_pinned_at(&self, workspace_id: &str) -> Option<String>;
     fn workspace_scripts(&self, workspace_id: &str) -> Vec<WorkspaceScript>;
+    /// The daemon's server id, which prefixes every thread key. `None` before the first answer.
+    fn server_id(&self) -> Option<String>;
 }
 
 impl TreeSource for Client {
@@ -112,6 +114,10 @@ impl TreeSource for Client {
 
     fn workspace_scripts(&self, workspace_id: &str) -> Vec<WorkspaceScript> {
         Client::workspace_scripts(self, workspace_id)
+    }
+
+    fn server_id(&self) -> Option<String> {
+        self.server_info().map(|info| info.server_id.clone())
     }
 }
 
@@ -135,6 +141,11 @@ impl TreeSource for ClientCore {
     fn workspace_scripts(&self, workspace_id: &str) -> Vec<WorkspaceScript> {
         ClientCore::workspace_scripts(self, workspace_id)
     }
+
+    fn server_id(&self) -> Option<String> {
+        let id = self.server_info()?["serverId"].as_str()?;
+        Some(id.to_string())
+    }
 }
 
 /// The client fields the rows need, read once per refresh. An id without an entry has none.
@@ -150,6 +161,9 @@ pub struct Facts {
     pub pinned_at: HashMap<String, String>,
     /// Workspace id to the service its row reports.
     pub services: HashMap<String, ServiceSummary>,
+    /// The daemon's server id. Without it a thread key cannot be built, so threads keep the name
+    /// order and are not seeded.
+    pub server_id: Option<String>,
 }
 
 /// The one running service a row reports, by name (`WorkspaceServiceSummary`).
@@ -192,7 +206,10 @@ impl Facts {
         projects: &[ProjectNode],
         agents: &[AgentSummary],
     ) -> Facts {
-        let mut facts = Facts::default();
+        let mut facts = Facts {
+            server_id: source.server_id(),
+            ..Facts::default()
+        };
         for agent in agents {
             if let Some(attention) = source.agent_attention(&agent.id) {
                 facts.attention.insert(agent.id.clone(), attention);
@@ -442,6 +459,256 @@ pub struct ViewState {
     pub project_filter: HashSet<String>,
     /// [`label_key`]s to show; the empty key stands for "no label". Empty shows every workspace.
     pub label_filter: HashSet<String>,
+    /// The saved order of projects, threads, and pinned rows.
+    pub order: SidebarOrder,
+}
+
+/// The saved sidebar order, with Electron's keys (`sidebar-order-store.ts`): a project is its view
+/// key, a thread is [`workspace_key`]. Keys of things that went are kept, so a thread that comes
+/// back keeps its place.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SidebarOrder {
+    pub project_order: Vec<String>,
+    /// Project view key to the thread keys of that project.
+    pub workspace_order_by_project: HashMap<String, Vec<String>>,
+    pub pinned_workspace_order: Vec<String>,
+}
+
+impl SidebarOrder {
+    pub fn is_empty(&self) -> bool {
+        self.project_order.is_empty()
+            && self.workspace_order_by_project.is_empty()
+            && self.pinned_workspace_order.is_empty()
+    }
+}
+
+/// The key of a thread in the saved order: `<serverId>:<workspaceId>`.
+pub fn workspace_key(server_id: &str, workspace_id: &str) -> String {
+    format!("{server_id}:{workspace_id}")
+}
+
+/// `applyStoredOrdering`: an item that is not in the saved order keeps its slot, and the saved
+/// items fill their own slots in saved order. `key` is `None` for an item that has no key, which
+/// is never saved. Saved keys that match no item are skipped. The keys are borrowed, so a large
+/// list allocates no string per item.
+fn apply_stored_ordering<T>(
+    items: Vec<T>,
+    stored: &[&str],
+    key: impl Fn(&T) -> Option<&str>,
+) -> Vec<T> {
+    if items.len() <= 1 || stored.is_empty() {
+        return items;
+    }
+    // A sorted vector beats a hash map here: most lists have a handful of items, and a debug
+    // build hashes slowly.
+    let mut keyed: Vec<(&str, usize)> = items
+        .iter()
+        .enumerate()
+        .filter_map(|(at, item)| key(item).map(|key| (key, at)))
+        .collect();
+    keyed.sort_unstable();
+    let mut ordered = vec![false; items.len()];
+    let mut pruned: Vec<usize> = Vec::new();
+    for &saved in stored {
+        // The last item with the key wins, as in the Electron map.
+        let end = keyed.partition_point(|(key, _)| *key <= saved);
+        if let Some(&(key, at)) = end.checked_sub(1).and_then(|last| keyed.get(last))
+            && key == saved
+            && !ordered[at]
+        {
+            ordered[at] = true;
+            pruned.push(at);
+        }
+    }
+    drop(keyed);
+    if pruned.is_empty() {
+        return items;
+    }
+    let mut next = pruned.iter();
+    let permutation: Vec<usize> = (0..items.len())
+        .map(|at| {
+            if ordered[at] {
+                next.next().copied().unwrap_or(at)
+            } else {
+                at
+            }
+        })
+        .collect();
+    let mut slots: Vec<Option<T>> = items.into_iter().map(Some).collect();
+    permutation
+        .into_iter()
+        .filter_map(|at| slots[at].take())
+        .collect()
+}
+
+/// The saved keys as plain strings, for [`apply_stored_ordering`].
+fn as_strs(keys: &[String]) -> Vec<&str> {
+    keys.iter().map(String::as_str).collect()
+}
+
+/// The workspace ids of the saved thread keys of one server: `<serverId>:<id>` gives `<id>`. A
+/// key of another server matches no thread.
+fn workspace_ids<'a>(keys: &'a [String], server_id: &str) -> Vec<&'a str> {
+    keys.iter()
+        .filter_map(|key| key.strip_prefix(server_id)?.strip_prefix(':'))
+        .collect()
+}
+
+/// A drop (`handleProjectDragEnd`, `handleWorkspaceReorder`): `dragged` leaves the visible keys
+/// and goes in at the index that `target` had, so a drag down lands after the target and a drag
+/// up lands before it. An unknown key, or a drop on the dragged key itself, changes nothing.
+pub fn reorder_visible(visible: &[String], dragged: &str, target: &str) -> Vec<String> {
+    let position = |key: &str| visible.iter().position(|item| item == key);
+    let (Some(from), Some(to)) = (position(dragged), position(target)) else {
+        return visible.to_vec();
+    };
+    let mut reordered = visible.to_vec();
+    let key = reordered.remove(from);
+    reordered.insert(to, key);
+    reordered
+}
+
+/// `mergeWithRemainder`: the visible keys in their new order, then the saved keys that were not
+/// visible (hidden by a filter, "Show more", a collapse, or a pin).
+pub fn merge_with_remainder(current: &[String], reordered_visible: &[String]) -> Vec<String> {
+    let visible: HashSet<&str> = reordered_visible.iter().map(String::as_str).collect();
+    let mut merged = reordered_visible.to_vec();
+    merged.extend(
+        current
+            .iter()
+            .filter(|key| !visible.contains(key.as_str()))
+            .cloned(),
+    );
+    merged
+}
+
+/// `hasVisibleOrderChanged`: whether the visible keys differ from the saved order of the same
+/// keys. A visible key the saved order lacks counts as a change.
+pub fn has_visible_order_changed(current: &[String], reordered_visible: &[String]) -> bool {
+    let visible: HashSet<&str> = reordered_visible.iter().map(String::as_str).collect();
+    let current_visible: Vec<&str> = current
+        .iter()
+        .map(String::as_str)
+        .filter(|key| visible.contains(key))
+        .collect();
+    current_visible.len() != reordered_visible.len()
+        || reordered_visible
+            .iter()
+            .zip(&current_visible)
+            .any(|(reordered, current)| reordered != current)
+}
+
+/// One of the three saved lists a row drag can reorder, as in Electron: the projects, the
+/// unpinned threads of one project (by its view key), or the pinned rows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OrderList {
+    Projects,
+    Threads(String),
+    Pinned,
+}
+
+/// The keys of a list as the rows show them now, top to bottom. A project row without a view key
+/// has none. Thread and pinned keys need the server id.
+pub fn visible_keys(
+    rows: &[Row],
+    list: &OrderList,
+    project_keys: &HashMap<String, String>,
+    server_id: Option<&str>,
+) -> Vec<String> {
+    let thread_key = |row: &WorkspaceRow| server_id.map(|server| workspace_key(server, &row.id));
+    rows.iter()
+        .filter_map(|row| match (list, row) {
+            (OrderList::Projects, Row::Project(project)) => project_keys.get(&project.id).cloned(),
+            (OrderList::Threads(view_key), Row::Workspace(row)) => match &row.group {
+                Group::Project(id) if project_keys.get(id) == Some(view_key) => thread_key(row),
+                _ => None,
+            },
+            (OrderList::Pinned, Row::Workspace(row)) if row.group == Group::Pinned => {
+                thread_key(row)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Saves a drop in `order` with Electron's rules: the visible keys are reordered, and the saved
+/// list changes only when the visible order did. Hidden keys stay behind the visible ones.
+/// Returns whether the saved order changed, so a no-op drop writes nothing.
+pub fn apply_drop(
+    order: &mut SidebarOrder,
+    list: &OrderList,
+    visible: &[String],
+    dragged: &str,
+    target: &str,
+) -> bool {
+    if dragged == target {
+        return false;
+    }
+    let reordered = reorder_visible(visible, dragged, target);
+    let none = Vec::new();
+    let current = match list {
+        OrderList::Projects => &order.project_order,
+        OrderList::Threads(view_key) => order
+            .workspace_order_by_project
+            .get(view_key)
+            .unwrap_or(&none),
+        OrderList::Pinned => &order.pinned_workspace_order,
+    };
+    if !has_visible_order_changed(current, &reordered) {
+        return false;
+    }
+    let merged = merge_with_remainder(current, &reordered);
+    match list {
+        OrderList::Projects => order.project_order = merged,
+        OrderList::Threads(view_key) => {
+            order
+                .workspace_order_by_project
+                .insert(view_key.clone(), merged);
+        }
+        OrderList::Pinned => order.pinned_workspace_order = merged,
+    }
+    true
+}
+
+/// `computeSidebarOrderUpdates`, applied in place: a project key the order lacks goes last, and a
+/// thread key it lacks goes first, in name order. Nothing is pruned. A project without a view
+/// key is skipped, and without a server id no thread is seeded. Returns whether the order
+/// changed, so a refresh with nothing new writes nothing.
+pub fn seed_order(order: &mut SidebarOrder, projects: &[ProjectNode], facts: &Facts) -> bool {
+    let mut changed = false;
+    let mut known: HashSet<String> = order.project_order.iter().cloned().collect();
+    for entry in name_sorted(projects) {
+        let Some(view_key) = facts.project_keys.get(&entry.project.id) else {
+            continue;
+        };
+        if known.insert(view_key.clone()) {
+            order.project_order.push(view_key.clone());
+            changed = true;
+        }
+        let Some(server_id) = &facts.server_id else {
+            continue;
+        };
+        let saved = order
+            .workspace_order_by_project
+            .get(view_key)
+            .map_or(&[][..], Vec::as_slice);
+        let present: HashSet<&str> = saved.iter().map(String::as_str).collect();
+        let missing: Vec<String> = entry
+            .workspaces
+            .iter()
+            .map(|node| workspace_key(server_id, &node.id))
+            .filter(|key| !present.contains(key.as_str()))
+            .collect();
+        if !missing.is_empty() {
+            let saved = order
+                .workspace_order_by_project
+                .entry(view_key.clone())
+                .or_default();
+            saved.splice(0..0, missing);
+            changed = true;
+        }
+    }
+    changed
 }
 
 // ---- row meta items (TASK-262) ----
@@ -721,8 +988,8 @@ struct SortedProject<'a> {
 }
 
 /// `buildWorkspaceStructureProjects` order: projects by name, workspaces by name, each with the
-/// id as the tie-break. A user drag order (`applyStoredOrdering`) is not ported.
-fn sorted(projects: &[ProjectNode]) -> Vec<SortedProject<'_>> {
+/// id as the tie-break.
+fn name_sorted(projects: &[ProjectNode]) -> Vec<SortedProject<'_>> {
     let mut sorted: Vec<SortedProject> = projects
         .iter()
         .map(|project| {
@@ -742,6 +1009,39 @@ fn sorted(projects: &[ProjectNode]) -> Vec<SortedProject<'_>> {
             .then_with(|| left.project.id.cmp(&right.project.id))
     });
     sorted
+}
+
+/// [`name_sorted`], then the saved order on top (`composeWorkspaceStructure`): each project's
+/// threads by `workspace_order_by_project[view key]`, then the projects by `project_order`. A
+/// project without a view key keeps its name slot, and without a server id the threads keep
+/// theirs.
+fn sorted<'a>(
+    projects: &'a [ProjectNode],
+    facts: &'a Facts,
+    order: &SidebarOrder,
+) -> Vec<SortedProject<'a>> {
+    let mut sorted = name_sorted(projects);
+    if order.is_empty() {
+        return sorted;
+    }
+    let view_key = |entry: &SortedProject| facts.project_keys.get(&entry.project.id);
+    if let Some(server_id) = &facts.server_id {
+        for entry in &mut sorted {
+            let Some(stored) =
+                view_key(entry).and_then(|key| order.workspace_order_by_project.get(key))
+            else {
+                continue;
+            };
+            let workspaces = std::mem::take(&mut entry.workspaces);
+            entry.workspaces =
+                apply_stored_ordering(workspaces, &workspace_ids(stored, server_id), |node| {
+                    Some(node.id.as_str())
+                });
+        }
+    }
+    apply_stored_ordering(sorted, &as_strs(&order.project_order), |entry| {
+        view_key(entry).map(String::as_str)
+    })
 }
 
 /// `workspaceLabelKey`: whitespace collapsed, trimmed, lower case.
@@ -905,7 +1205,8 @@ pub fn status_groups(rows: Vec<WorkspaceRow>) -> Vec<(StatusBucket, Vec<Workspac
 /// "Workspaces" with either each project and its unpinned workspaces ([`Grouping::Project`], in
 /// the Electron sort order) or one heading per status ([`Grouping::Status`]). The project and
 /// label filters of `state` narrow both modes. The pinned rows go by `pinnedAt`, newest first,
-/// and keep the tree order when the times are equal or missing.
+/// and keep the tree order when the times are equal or missing; the saved pinned order comes
+/// next. Status grouping keeps its own sort and ignores the saved thread and project order.
 pub fn build_rows(
     projects: &[ProjectNode],
     agents: &[AgentSummary],
@@ -915,7 +1216,7 @@ pub fn build_rows(
     if projects.is_empty() {
         return vec![Row::Empty];
     }
-    let projects = filter_projects(sorted(projects), state);
+    let projects = filter_projects(sorted(projects, facts, &state.order), state);
     let by_id: HashMap<&str, &AgentSummary> = agents.iter().map(|a| (a.id.as_str(), a)).collect();
     let mut rows = Vec::new();
 
@@ -939,6 +1240,14 @@ pub fn build_rows(
             .unwrap_or_default()
     };
     pinned.sort_by(|left, right| pinned_at(right).cmp(pinned_at(left)));
+    // `splitPinnedSidebarGroups`: the saved pinned order applies after the `pinnedAt` sort.
+    if let Some(server_id) = &facts.server_id {
+        pinned = apply_stored_ordering(
+            pinned,
+            &workspace_ids(&state.order.pinned_workspace_order, server_id),
+            |row| Some(row.id.as_str()),
+        );
+    }
     if !pinned.is_empty() {
         rows.push(Row::PinnedHeader {
             collapsed: state.pinned_collapsed,
