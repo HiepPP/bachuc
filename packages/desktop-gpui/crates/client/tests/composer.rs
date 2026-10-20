@@ -731,6 +731,53 @@ fn create_workspace_with_receipts_sends_a_key_the_prompt_and_the_agent() {
 }
 
 #[test]
+fn create_workspace_resolves_when_its_agent_is_ready() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.with(|s| {
+        s.features
+            .insert("workspaceRequestReceipts".into(), json!(true));
+        s.features.insert("creationLifecycle".into(), json!(true));
+    });
+    // The daemon answers only after the first turn starts; the agent exists from `agent_ready`.
+    server.on("workspace.create.request", |request| {
+        let update = |key: &Value, phase: &str| {
+            session(
+                "workspace.create.update",
+                json!({"kind": "workspace", "idempotencyKey": key, "revision": 2, "phase": phase,
+                       "workspaceId": "wks_3", "agentId": "agent-3", "agent": {"id": "agent-3"},
+                       "error": null}),
+            )
+        };
+        vec![
+            update(&json!("other-key"), "agent_ready"),
+            update(&request["idempotencyKey"], "workspace_ready"),
+            update(&request["idempotencyKey"], "agent_ready"),
+        ]
+    });
+    let mut harness = connect(&server);
+    let reply = harness.core.create_workspace(CreateWorkspace {
+        source: WorkspaceSource::Directory {
+            path: "/repo".into(),
+            project_id: None,
+        },
+        title: None,
+        first_agent_prompt: None,
+        agent: Some(initial_agent()),
+    });
+    assert_eq!(
+        harness.wait(reply, WAIT).unwrap(),
+        CreatedWorkspace {
+            workspace_id: "wks_3".into(),
+            agent_id: Some("agent-3".into()),
+            setup_terminal_id: None,
+        }
+    );
+    let request = server.requests_of("workspace.create.request").remove(0);
+    assert_eq!(request["subscribe"], true);
+}
+
+#[test]
 fn create_agent_with_sends_the_full_config() {
     let server = FakeServer::start();
     server.add_agent("a1", "idle");

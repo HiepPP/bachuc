@@ -496,6 +496,24 @@ pub fn assistant_selection(
     })
 }
 
+/// What the selection toolbar sits over: the box from the caret line at the first selected
+/// character to the one at the last, else the whole text view when no selection was painted.
+pub fn selection_anchor(
+    view: Bounds<Pixels>,
+    edges: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
+) -> Bounds<Pixels> {
+    let Some((start, end)) = edges else {
+        return view;
+    };
+    Bounds::from_corners(
+        point(start.left().min(end.left()), start.top().min(end.top())),
+        point(
+            start.right().max(end.right()),
+            start.bottom().max(end.bottom()),
+        ),
+    )
+}
+
 /// The selection toolbar's place in the timeline, relative to the timeline's origin: centered
 /// over the top of the selected text, `gap` above it (`TOOLBAR_GAP` with the zoom), clamped
 /// inside the timeline. `None` once the text scrolled out of the timeline.

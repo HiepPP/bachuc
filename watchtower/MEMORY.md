@@ -69,6 +69,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a link underline, 700 bold, and a missing code pill in GPUI assistant markdown while the owner wants the Electron look. Reason: [ADR-0050](watchtower/decisions/ADR-0050-electron-markdown-look-over-gpui-link-underline-and-bold.md).
 - Avoid a jump to the parent's tool call in place of a provider subagent tab while the owner wants to read the child's own steps. Reason: [ADR-0051](watchtower/decisions/ADR-0051-read-only-provider-subagent-tab-over-jump-to-parent.md).
 - Avoid NSTextInputClient geometry patches, a GPUI-drawn pill, or a bubble call inside paint for the Text Replacement preview while macOS shows that bubble only to AppKit views. Reason: [ADR-0054](watchtower/decisions/ADR-0054-app-called-macos-correction-bubble-over-system-geometry.md).
+- Avoid a name-only sidebar sort, an activity sort, and a saved order with no Electron import in GPUI, while Electron's saved order is what Hiep expects to see. Reason: [ADR-0057](watchtower/decisions/ADR-0057-gpui-saved-sidebar-order-with-electron-import-over-name-sort.md).
 
 ## Learnings
 

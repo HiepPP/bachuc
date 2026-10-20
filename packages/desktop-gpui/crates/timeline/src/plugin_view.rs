@@ -370,7 +370,8 @@ impl TimelineView {
                 zoomed(TOOLBAR_ESTIMATE.1, cx),
             )
         };
-        let text = selection.state.read(cx).bounds();
+        let state = selection.state.read(cx);
+        let text = plugins::selection_anchor(state.bounds(), state.selection_edges());
         let origin = plugins::toolbar_origin(
             text,
             size,

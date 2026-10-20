@@ -20,9 +20,9 @@ use crate::attachments::{Attachment, can_send, mime_for_path};
 use crate::context_window_meter::{SLOT, context_window_meter};
 use crate::diff_stat_pill::{diff_stat_pill, visible_diff_stat};
 use crate::draft::{
-    DraftOptions, DraftSeed, DraftSubmission, Generation, SubmitIcon, apply_feature,
-    default_provider, draft_config, min_input_height, model_groups, model_key, offered,
-    outgoing_attachments, seed_feature_values, seed_provider_model, split_model_key,
+    DraftOptions, DraftSeed, DraftStart, DraftSubmission, Generation, SubmitIcon, apply_feature,
+    draft_config, draft_start, min_input_height, model_groups, model_key, offered,
+    outgoing_attachments, seed_feature_values, seeded_start, split_model_key,
 };
 use crate::input::{CONTROL, MessageInput, round_button};
 use crate::mention::{
@@ -255,6 +255,23 @@ enum CommandsState {
     Loaded,
     /// The agent cannot list commands (a mock agent, or no session yet). The next `/` tries again.
     Failed,
+}
+
+/// Where a new draft starts: the stored new agent defaults that the host offers.
+fn new_draft_start(client: &Client, providers: &[ProviderSummary]) -> DraftStart {
+    draft_start(
+        &bachuc_settings::agent_defaults::load(),
+        providers,
+        |provider| client.default_model(provider),
+        |provider, model| thinking_options(client, provider, model),
+    )
+}
+
+fn thinking_options(client: &Client, provider: &str, model: &str) -> Vec<(String, String)> {
+    client
+        .model_thinking(provider, model)
+        .map(|thinking| thinking.options)
+        .unwrap_or_default()
 }
 
 /// The agent settings a draft picks before the agent exists.
@@ -496,17 +513,14 @@ impl Composer {
         let watched = Watched::read(client.read(cx), &agent_id, is_draft);
         let draft = options.map(|options| {
             let cwd = options.cwd.clone();
-            let provider = default_provider(&watched.providers);
-            let model = provider
-                .as_deref()
-                .and_then(|provider| client.read(cx).default_model(provider));
+            let start = new_draft_start(client.read(cx), &watched.providers);
             DraftState {
                 options,
-                provider,
-                model,
+                provider: start.provider,
+                model: start.model,
                 modes: Vec::new(),
                 mode_id: None,
-                thinking_id: None,
+                thinking_id: start.thinking_id,
                 features: Vec::new(),
                 generation: Generation::default(),
                 submitting: false,
@@ -514,7 +528,7 @@ impl Composer {
                     cwd,
                     values: BTreeMap::new(),
                 }),
-                seed_mode: None,
+                seed_mode: start.mode,
                 seed_features: None,
             }
         });
@@ -681,23 +695,25 @@ impl Composer {
         let Some(draft) = self.draft.as_mut() else {
             return;
         };
-        let Some((provider, model)) =
-            seed_provider_model(&seed, draft.provider.as_deref(), &self.watched.providers)
-        else {
-            return;
+        let current = DraftStart {
+            provider: draft.provider.clone(),
+            ..DraftStart::default()
         };
         let client = self.client.read(cx);
-        let model = model.or_else(|| client.default_model(&provider));
-        let thinking = model
-            .as_deref()
-            .and_then(|model| client.model_thinking(&provider, model))
-            .map(|thinking| thinking.options)
-            .unwrap_or_default();
-        draft.thinking_id = offered(seed.thinking_option_id.as_deref(), &thinking);
-        draft.provider = Some(provider);
-        draft.model = model;
+        let Some(start) = seeded_start(
+            &seed,
+            &current,
+            &self.watched.providers,
+            |provider| client.default_model(provider),
+            |provider, model| thinking_options(client, provider, model),
+        ) else {
+            return;
+        };
+        draft.provider = start.provider;
+        draft.model = start.model;
+        draft.thinking_id = start.thinking_id;
         draft.mode_id = None;
-        draft.seed_mode = seed.mode;
+        draft.seed_mode = start.mode;
         draft.seed_features = seed.features;
         self.reload_draft(cx);
     }
@@ -805,11 +821,11 @@ impl Composer {
         if let Some(draft) = self.draft.as_mut()
             && draft.provider.is_none()
         {
-            draft.provider = default_provider(&self.watched.providers);
-            draft.model = draft
-                .provider
-                .as_deref()
-                .and_then(|provider| self.client.read(cx).default_model(provider));
+            let start = new_draft_start(self.client.read(cx), &self.watched.providers);
+            draft.provider = start.provider;
+            draft.model = start.model;
+            draft.thinking_id = start.thinking_id;
+            draft.seed_mode = start.mode;
             self.reload_draft(cx);
         }
         self.sync_tick(cx);

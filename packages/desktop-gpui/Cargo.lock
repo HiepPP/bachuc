@@ -607,6 +607,7 @@ dependencies = [
  "bachuc-command",
  "bachuc-icons",
  "bachuc-plugin-host",
+ "bachuc-settings",
  "bachuc-sidebar",
  "bachuc-theme",
  "bachuc-timeline",

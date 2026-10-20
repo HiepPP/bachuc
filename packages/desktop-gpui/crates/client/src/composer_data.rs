@@ -1,9 +1,9 @@
 //! Wire decoders and request builders for the composer, New workspace, and tab menu data.
 
 use crate::model::{
-    ActiveTurn, AgentUsage, BranchSuggestion, CreateWorkspace, DiffCompare, DiffMode, DraftConfig,
-    InitialAgent, SubagentKind, SubagentRow, TaskEntry, TaskStatus, TurnMetrics, WorkspaceSource,
-    WorktreeAction,
+    ActiveTurn, AgentUsage, BranchSuggestion, CreateWorkspace, CreatedWorkspace, DiffCompare,
+    DiffMode, DraftConfig, InitialAgent, SubagentKind, SubagentRow, TaskEntry, TaskStatus,
+    TurnMetrics, WorkspaceSource, WorktreeAction,
 };
 use serde_json::{Map, Value, json};
 
@@ -172,7 +172,12 @@ pub(crate) fn initial_agent(agent: &InitialAgent) -> Map<String, Value> {
 }
 
 /// A `workspace.create.request` without its request id.
-pub(crate) fn create_workspace(request: &CreateWorkspace, receipts: bool) -> Value {
+/// `subscribe` asks for `workspace.create.update` progress, keyed by `idempotency_key`.
+pub(crate) fn create_workspace(
+    request: &CreateWorkspace,
+    idempotency_key: Option<&str>,
+    subscribe: bool,
+) -> Value {
     fn put(value: &mut Value, key: &str, field: &Option<String>) {
         if let Some(field) = field {
             value[key] = json!(field);
@@ -209,8 +214,11 @@ pub(crate) fn create_workspace(request: &CreateWorkspace, receipts: bool) -> Val
         }
     };
     let mut message = json!({"type": "workspace.create.request", "source": source});
-    if receipts {
-        message["idempotencyKey"] = json!(uuid::Uuid::new_v4().to_string());
+    if let Some(key) = idempotency_key {
+        message["idempotencyKey"] = json!(key);
+    }
+    if subscribe {
+        message["subscribe"] = json!(true);
     }
     put(&mut message, "title", &request.title);
     if let Some(prompt) = request
@@ -224,6 +232,22 @@ pub(crate) fn create_workspace(request: &CreateWorkspace, receipts: bool) -> Val
         message["agent"] = Value::Object(initial_agent(agent));
     }
     message
+}
+
+/// A `workspace.create.update` whose agent exists. The agent's tab can open from it; the
+/// response waits until the provider starts the first turn, which takes seconds.
+pub(crate) fn created_workspace_update(payload: &Value) -> Option<CreatedWorkspace> {
+    if !matches!(
+        payload["phase"].as_str(),
+        Some("agent_ready" | "prompt_started" | "completed")
+    ) {
+        return None;
+    }
+    Some(CreatedWorkspace {
+        workspace_id: payload["workspaceId"].as_str()?.to_string(),
+        agent_id: Some(payload["agent"]["id"].as_str()?.to_string()),
+        setup_terminal_id: None,
+    })
 }
 
 /// `{mode, baseRef?, ignoreWhitespace?}`; `ignoreWhitespace` goes only when set.

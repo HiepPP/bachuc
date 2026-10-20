@@ -810,6 +810,13 @@ impl TextViewState {
         self.bounds
     }
 
+    /// The caret line boxes, in window coordinates, at the first and last
+    /// selected character the last frame painted. `None` when it painted no
+    /// selection.
+    pub fn selection_edges(&self) -> Option<(Bounds<Pixels>, Bounds<Pixels>)> {
+        self.selection_adapter.painted_selection_edges()
+    }
+
     #[doc(hidden)]
     pub fn list_state(&self) -> &ListState {
         &self.list_state

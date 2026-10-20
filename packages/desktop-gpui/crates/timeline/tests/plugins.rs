@@ -14,8 +14,8 @@ use bachuc_plugin_host::{
 use bachuc_timeline::grouping::{Row, TurnGrouper, group_turns};
 use bachuc_timeline::plugins::{
     Part, ProjectInput, Projector, RevealPlan, StepPart, TOOLBAR_GAP, assistant_selection,
-    call_listed, daemon_item, item_id, phase_of, renderer_for_item, reveal_plan, shown_parts,
-    shown_text, step_parts, toolbar_origin, transform_entry, unique_match,
+    call_listed, daemon_item, item_id, phase_of, renderer_for_item, reveal_plan, selection_anchor,
+    shown_parts, shown_text, step_parts, toolbar_origin, transform_entry, unique_match,
 };
 use gpui_kit::{AnyView, App, Window, bounds, point, px, size};
 use serde_json::{Value, json};
@@ -583,6 +583,20 @@ fn the_selection_payload_prefers_the_markdown_source() {
         assistant_selection("agent", None, "m1".into(), source, None, String::new()),
         None
     );
+}
+
+#[test]
+fn the_toolbar_anchors_to_the_selected_lines_not_the_whole_message() {
+    let view = bounds(point(px(40.), px(100.)), size(px(1000.), px(500.)));
+    // A selection from the middle of one line to the start of the next.
+    let start = bounds(point(px(700.), px(540.)), size(px(2.), px(24.)));
+    let end = bounds(point(px(40.), px(564.)), size(px(2.), px(24.)));
+    assert_eq!(
+        selection_anchor(view, Some((start, end))),
+        bounds(point(px(40.), px(540.)), size(px(662.), px(48.)))
+    );
+    // Nothing painted yet: the whole view.
+    assert_eq!(selection_anchor(view, None), view);
 }
 
 #[test]

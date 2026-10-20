@@ -223,6 +223,11 @@ impl TextViewSelectionAdapter {
         frame.selection_edges = Some((first, end));
     }
 
+    /// The selection ends the last frame painted; see [`Self::register_selection_edges`].
+    pub(super) fn painted_selection_edges(&self) -> Option<(Bounds<Pixels>, Bounds<Pixels>)> {
+        self.frame.borrow().selection_edges
+    }
+
     pub(super) fn register_text_run(&self, run: TextSelectionRun) {
         self.frame.borrow_mut().text_runs.push(run);
     }

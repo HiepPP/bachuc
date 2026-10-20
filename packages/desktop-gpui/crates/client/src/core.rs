@@ -142,7 +142,11 @@ enum Pending {
     ProviderSubagents(String),
     Modes(Reply<Vec<(String, String)>>),
     DraftFeatures(Reply<Vec<AgentFeature>>),
-    CreateWorkspace(Reply<CreatedWorkspace>),
+    /// `key` is set when the request subscribed to its creation updates.
+    CreateWorkspace {
+        key: Option<String>,
+        reply: Reply<CreatedWorkspace>,
+    },
     BranchSuggestions(Reply<Vec<BranchSuggestion>>),
     ValidateBranch(Reply<BranchValidation>),
     AddProject(Reply<AddedProject>),
@@ -214,7 +218,7 @@ impl Pending {
             } => send(reply, error),
             Pending::Modes(reply) => send(reply, error),
             Pending::DraftFeatures(reply) => send(reply, error),
-            Pending::CreateWorkspace(reply) => send(reply, error),
+            Pending::CreateWorkspace { reply, .. } => send(reply, error),
             Pending::BranchSuggestions(reply) => send(reply, error),
             Pending::ValidateBranch(reply) => send(reply, error),
             Pending::AddProject(reply) => send(reply, error),
@@ -1311,16 +1315,21 @@ impl ClientCore {
         &mut self,
         request: CreateWorkspace,
     ) -> oneshot::Receiver<anyhow::Result<CreatedWorkspace>> {
-        let receipts = self
+        let features = self
             .typed_server_info
             .as_ref()
-            .and_then(|info| info.features.as_ref())
-            .and_then(|features| features.workspace_request_receipts)
-            == Some(true);
-        self.request_reply(
-            composer_data::create_workspace(&request, receipts),
-            Pending::CreateWorkspace,
-        )
+            .and_then(|info| info.features.as_ref());
+        let receipts =
+            features.and_then(|features| features.workspace_request_receipts) == Some(true);
+        let lifecycle = features.and_then(|features| features.creation_lifecycle) == Some(true);
+        let key = receipts.then(|| uuid::Uuid::new_v4().to_string());
+        // Updates name the request by its key; without one the reply waits for the response.
+        let subscribe = lifecycle && key.is_some();
+        let message = composer_data::create_workspace(&request, key.as_deref(), subscribe);
+        self.request_reply(message, |reply| Pending::CreateWorkspace {
+            key: key.filter(|_| subscribe),
+            reply,
+        })
     }
 
     /// Creates an agent with its full config and resolves to its id.
@@ -1728,6 +1737,13 @@ impl ClientCore {
         );
     }
 
+    pub fn clear_agent_attention(&mut self, agent_id: &str) {
+        let _ = self.request(
+            json!({"type": "clear_agent_attention", "agentId": agent_id}),
+            Pending::Action("clear_agent_attention"),
+        );
+    }
+
     /// Answers a permission request with a full `AgentPermissionResponse`: question answers,
     /// plan approval, or `updatedInput`.
     pub fn respond_permission_with(&mut self, agent_id: &str, request_id: &str, response: Value) {
@@ -1737,13 +1753,6 @@ impl ClientCore {
             "requestId": request_id,
             "response": response,
         }));
-    pub fn clear_agent_attention(&mut self, agent_id: &str) {
-        let _ = self.request(
-            json!({"type": "clear_agent_attention", "agentId": agent_id}),
-            Pending::Action("clear_agent_attention"),
-        );
-    }
-
     }
 
     /// Sends a request whose answer resolves the returned receiver.
@@ -2497,6 +2506,24 @@ impl ClientCore {
         }
     }
 
+    /// Resolves a subscribed `create_workspace` reply once its agent exists, so its tab opens
+    /// before the first turn starts. The later response finds no pending request.
+    fn workspace_creation_update(&mut self, payload: &Value) {
+        let Some(created) = composer_data::created_workspace_update(payload) else {
+            return;
+        };
+        let key = payload["idempotencyKey"].as_str();
+        let request_id = self.pending.iter().find_map(|(id, pending)| {
+            matches!(pending, Pending::CreateWorkspace { key: Some(k), .. } if Some(k.as_str()) == key)
+                .then(|| id.clone())
+        });
+        if let Some(Pending::CreateWorkspace { reply, .. }) =
+            request_id.and_then(|id| self.pending.remove(&id))
+        {
+            let _ = reply.send(Ok(created));
+        }
+    }
+
     fn message(&mut self, message: Value) {
         let kind = message["type"].as_str().unwrap_or_default().to_string();
         if let Some(pending) = message["payload"]["requestId"]
@@ -2537,6 +2564,7 @@ impl ClientCore {
                 _ => {}
             },
             "workspace.label.update" => self.label_update(payload),
+            "workspace.create.update" => self.workspace_creation_update(payload),
             "project.update" => match payload["kind"].as_str() {
                 Some("upsert") => {
                     if let Some(project) = project_info(&payload["project"]) {
@@ -3278,7 +3306,7 @@ impl ClientCore {
             Pending::DraftFeatures(sender) => {
                 reply(sender, error, || Ok(agent_features(&payload["features"])))
             }
-            Pending::CreateWorkspace(sender) => reply(sender, error, || {
+            Pending::CreateWorkspace { reply: sender, .. } => reply(sender, error, || {
                 let workspace_id = payload["workspace"]["id"]
                     .as_str()
                     .ok_or_else(|| anyhow!("workspace creation failed"))?;

@@ -10,6 +10,7 @@ bachuc-client = { path = "../client" }
 bachuc-command = { path = "../command" }
 bachuc-icons = { path = "../icons" }
 bachuc-plugin-host = { path = "../plugin-host" }
+bachuc-settings = { path = "../settings" }
 bachuc-sidebar = { path = "../sidebar" }
 bachuc-theme = { path = "../theme" }
 bachuc-timeline = { path = "../timeline" }

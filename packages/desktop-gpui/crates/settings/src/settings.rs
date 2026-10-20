@@ -1,6 +1,7 @@
 //! The settings view: a section list on the left and the pane of the picked section on the right,
 //! as `settings-screen.tsx` lays them out on desktop.
 
+use crate::pane_agent_defaults::AgentDefaultsPane;
 use crate::pane_appearance::AppearancePane;
 use crate::pane_hosts::{HostsChanged, HostsPane};
 use crate::pane_projects::ProjectsPane;
@@ -43,15 +44,17 @@ enum Section {
     Appearance,
     Shortcuts,
     Providers,
+    AgentDefaults,
     Projects,
 }
 
 impl Section {
-    const ALL: [Section; 5] = [
+    const ALL: [Section; 6] = [
         Section::Hosts,
         Section::Appearance,
         Section::Shortcuts,
         Section::Providers,
+        Section::AgentDefaults,
         Section::Projects,
     ];
 
@@ -61,6 +64,7 @@ impl Section {
             Section::Appearance => "Appearance",
             Section::Shortcuts => "Shortcuts",
             Section::Providers => "Providers",
+            Section::AgentDefaults => "New agent defaults",
             Section::Projects => "Projects",
         }
     }
@@ -71,6 +75,7 @@ impl Section {
             Section::Appearance => IconName::Palette,
             Section::Shortcuts => IconName::Keyboard,
             Section::Providers => IconName::Boxes,
+            Section::AgentDefaults => IconName::Bot,
             Section::Projects => IconName::FolderGit2,
         }
     }
@@ -96,6 +101,7 @@ pub struct Settings {
     appearance: Entity<AppearancePane>,
     shortcuts: Entity<ShortcutsPane>,
     providers: Entity<ProvidersPane>,
+    agent_defaults: Entity<AgentDefaultsPane>,
     projects: Entity<ProjectsPane>,
     _subscriptions: Vec<Subscription>,
 }
@@ -112,6 +118,7 @@ impl Settings {
         let appearance = cx.new(|cx| AppearancePane::new(window, cx));
         let shortcuts = cx.new(ShortcutsPane::new);
         let providers = cx.new(|cx| ProvidersPane::new(client.clone(), cx));
+        let agent_defaults = cx.new(|cx| AgentDefaultsPane::new(client.clone(), cx));
         let projects = cx.new(|cx| ProjectsPane::new(client.clone(), cx));
         let mut subscriptions = vec![
             cx.subscribe(&hosts, |_, _, _: &HostsChanged, cx| {
@@ -159,6 +166,7 @@ impl Settings {
             appearance,
             shortcuts,
             providers,
+            agent_defaults,
             projects,
             _subscriptions: subscriptions,
         }
@@ -328,6 +336,7 @@ impl Render for Settings {
             Page::Section(Section::Appearance) => self.appearance.clone().into_any_element(),
             Page::Section(Section::Shortcuts) => self.shortcuts.clone().into_any_element(),
             Page::Section(Section::Providers) => self.providers.clone().into_any_element(),
+            Page::Section(Section::AgentDefaults) => self.agent_defaults.clone().into_any_element(),
             Page::Section(Section::Projects) => self.projects.clone().into_any_element(),
             Page::Plugin(id) => self.plugin_page(&id, &screen_rows, window, cx),
         };

@@ -5,6 +5,7 @@
 
 use bachuc_client::{AgentFeature, AgentFeatureKind, DraftConfig, ProviderSummary};
 use bachuc_plugin_host::ComposerDraft;
+use bachuc_settings::agent_defaults::AgentDefaults;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -173,6 +174,79 @@ pub fn default_provider(providers: &[ProviderSummary]) -> Option<String> {
         .iter()
         .find(|provider| provider.available)
         .map(|provider| provider.id.clone())
+}
+
+/// The fields a new draft starts with. `mode` waits for the provider's mode list, as a seeded
+/// mode does.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DraftStart {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub thinking_id: Option<String>,
+    pub mode: Option<String>,
+}
+
+/// Where a new draft starts. The stored defaults apply when their provider is available and
+/// the host offers the model and thinking option; each other field falls back to the first
+/// available provider, its default model, and no thinking option or mode. The thinking
+/// options and mode belong to the stored provider, so they never apply to a fallback provider.
+pub fn draft_start(
+    defaults: &AgentDefaults,
+    providers: &[ProviderSummary],
+    default_model: impl Fn(&str) -> Option<String>,
+    thinking_options: impl Fn(&str, &str) -> Vec<(String, String)>,
+) -> DraftStart {
+    let stored = defaults.provider.as_deref().and_then(|id| {
+        providers
+            .iter()
+            .find(|provider| provider.available && provider.id == id)
+    });
+    let Some(provider) = stored
+        .map(|provider| provider.id.clone())
+        .or_else(|| default_provider(providers))
+    else {
+        return DraftStart::default();
+    };
+    let model = stored
+        .and_then(|stored| offered(defaults.model.as_deref(), &stored.models))
+        .or_else(|| default_model(&provider));
+    let thinking_id = stored.zip(model.as_deref()).and_then(|(_, model)| {
+        offered(
+            defaults.thinking_option_id.as_deref(),
+            &thinking_options(&provider, model),
+        )
+    });
+    DraftStart {
+        mode: stored.and(defaults.mode_id.clone()),
+        provider: Some(provider),
+        model,
+        thinking_id,
+    }
+}
+
+/// The draft a seed makes from `current`: the seed replaces every field, the stored defaults
+/// too. `None` when the seed's provider is not available, so the draft keeps `current`.
+pub fn seeded_start(
+    seed: &DraftSeed,
+    current: &DraftStart,
+    providers: &[ProviderSummary],
+    default_model: impl Fn(&str) -> Option<String>,
+    thinking_options: impl Fn(&str, &str) -> Vec<(String, String)>,
+) -> Option<DraftStart> {
+    let (provider, model) = seed_provider_model(seed, current.provider.as_deref(), providers)?;
+    let model = model.or_else(|| default_model(&provider));
+    let thinking_id = model.as_deref().and_then(|model| {
+        offered(
+            seed.thinking_option_id.as_deref(),
+            &thinking_options(&provider, model),
+        )
+    });
+    Some(DraftStart {
+        provider: Some(provider),
+        model,
+        thinking_id,
+        mode: seed.mode.clone(),
+    })
 }
 
 /// The model menu: every available provider's models, grouped by provider.
@@ -515,5 +589,168 @@ mod tests {
         // No `cwd`: no config, and an empty text still submits.
         assert_eq!(submission.config, None);
         assert_eq!(submission.text, "");
+    }
+
+    fn hiep_defaults() -> AgentDefaults {
+        AgentDefaults {
+            provider: Some("claude".into()),
+            model: Some("claude-opus-5-5".into()),
+            thinking_option_id: Some("high".into()),
+            mode_id: Some("bypassPermissions".into()),
+        }
+    }
+
+    fn host() -> Vec<ProviderSummary> {
+        vec![
+            provider("codex", true),
+            ProviderSummary {
+                id: "claude".into(),
+                label: "Claude".into(),
+                available: true,
+                models: vec![
+                    ("claude-sonnet-5-5".into(), "Sonnet 5.5".into()),
+                    ("claude-opus-5-5".into(), "Opus 5.5".into()),
+                ],
+            },
+        ]
+    }
+
+    fn start(defaults: &AgentDefaults, providers: &[ProviderSummary]) -> DraftStart {
+        draft_start(
+            defaults,
+            providers,
+            |provider| Some(format!("{provider}-default")),
+            |provider, model| {
+                if provider == "claude" && model == "claude-opus-5-5" {
+                    vec![
+                        ("medium".into(), "Medium".into()),
+                        ("high".into(), "High".into()),
+                    ]
+                } else {
+                    Vec::new()
+                }
+            },
+        )
+    }
+
+    #[test]
+    fn stored_defaults_apply_when_the_host_offers_them() {
+        assert_eq!(
+            start(&hiep_defaults(), &host()),
+            DraftStart {
+                provider: Some("claude".into()),
+                model: Some("claude-opus-5-5".into()),
+                thinking_id: Some("high".into()),
+                mode: Some("bypassPermissions".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn each_field_falls_back_when_the_host_does_not_offer_it() {
+        // An unknown model takes the provider default; the thinking option of the stored model
+        // is then not offered.
+        let defaults = AgentDefaults {
+            model: Some("claude-gone".into()),
+            ..hiep_defaults()
+        };
+        assert_eq!(
+            start(&defaults, &host()),
+            DraftStart {
+                provider: Some("claude".into()),
+                model: Some("claude-default".into()),
+                thinking_id: None,
+                mode: Some("bypassPermissions".into()),
+            }
+        );
+        // An unknown thinking option is dropped alone.
+        let defaults = AgentDefaults {
+            thinking_option_id: Some("ultra".into()),
+            ..hiep_defaults()
+        };
+        let started = start(&defaults, &host());
+        assert_eq!(started.model.as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(started.thinking_id, None);
+        // An unavailable provider drops every stored field.
+        let mut providers = host();
+        providers[1].available = false;
+        assert_eq!(
+            start(&hiep_defaults(), &providers),
+            DraftStart {
+                provider: Some("codex".into()),
+                model: Some("codex-default".into()),
+                thinking_id: None,
+                mode: None,
+            }
+        );
+    }
+
+    #[test]
+    fn unset_defaults_start_as_before() {
+        for defaults in [
+            AgentDefaults::default(),
+            AgentDefaults {
+                provider: None,
+                ..hiep_defaults()
+            },
+        ] {
+            assert_eq!(
+                start(&defaults, &host()),
+                DraftStart {
+                    provider: default_provider(&host()),
+                    model: Some("codex-default".into()),
+                    thinking_id: None,
+                    mode: None,
+                }
+            );
+        }
+        assert_eq!(start(&hiep_defaults(), &[]), DraftStart::default());
+    }
+
+    #[test]
+    fn a_seed_wins_over_the_stored_defaults() {
+        let thinking = |provider: &str, model: &str| {
+            if provider == "claude" && model == "claude-opus-5-5" {
+                vec![
+                    ("medium".into(), "Medium".into()),
+                    ("high".into(), "High".into()),
+                ]
+            } else {
+                Vec::new()
+            }
+        };
+        let current = start(&hiep_defaults(), &host());
+        let seed = DraftSeed {
+            provider: Some("claude".into()),
+            model: Some("claude-sonnet-5-5".into()),
+            mode: Some("plan".into()),
+            ..DraftSeed::default()
+        };
+        assert_eq!(
+            seeded_start(&seed, &current, &host(), |_| None, thinking),
+            Some(DraftStart {
+                provider: Some("claude".into()),
+                model: Some("claude-sonnet-5-5".into()),
+                thinking_id: None,
+                mode: Some("plan".into()),
+            })
+        );
+        // A seed with the same model and no thinking or mode clears the stored ones.
+        let seed = DraftSeed {
+            model: Some("claude-opus-5-5".into()),
+            ..DraftSeed::default()
+        };
+        let seeded = seeded_start(&seed, &current, &host(), |_| None, thinking).unwrap();
+        assert_eq!(seeded.thinking_id, None);
+        assert_eq!(seeded.mode, None);
+        // A seed whose provider is not available keeps the stored start.
+        let seed = DraftSeed {
+            provider: Some("gone".into()),
+            ..DraftSeed::default()
+        };
+        assert_eq!(
+            seeded_start(&seed, &current, &host(), |_| None, thinking),
+            None
+        );
     }
 }

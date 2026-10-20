@@ -39,3 +39,7 @@ GPUI's input never asked macOS for the user's Text Replacements (System Settings
 - `apply_link` replaces every link's color and clears its underline: Electron's `link` has `textDecorationLine: "none"` and the `accentBright` color. The four former `link_underline` call sites (paragraph text, inline flow text, inline objects, and inline flow objects) now call `apply_link` or set no underline; `link_underline` is removed.
 - `apply_link` keeps an inline code span's background inside a link, so a code link keeps its `surface2` pill. The object path re-applies it with `inline_code_highlight().background_color`.
 - Re-apply these edits to `src/text/node.rs` after a gpui-kit upgrade. The link color itself comes from `crates/theme/src/lib.rs`, not this crate.
+
+## Selection edges
+
+`TextViewState::selection_edges()` (`src/text/state.rs`) returns the caret line boxes, in window coordinates, at the first and last selected character the last frame painted. It reads `TextViewSelectionAdapter::painted_selection_edges()` (`src/text/selection_adapter.rs`), the edges the touch handles already use. The timeline puts the selection toolbar, such as Cite, over them instead of over the whole message.
