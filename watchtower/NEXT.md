@@ -4,18 +4,18 @@
 
 - Title: GPUI sidebar saved order like Electron
 - Slug: 20261020-gpui-sidebar-saved-order
-- Status: ACTIVE
+- Status: ACTIVE (built; owner checks pending)
 - Updated: 2026-10-20
 
 ## Tracker
 
 One row per TASK. Group ties together items that ship as one transaction.
 
-| Order | TASK                                                        | Group | Status      | Spec                                                                                                                               | Deps     | Context                                        | Notes                                                                  |
-| ----- | ----------------------------------------------------------- | ----- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------- | ---------------------------------------------------------------------- |
-| 1     | TASK-278 Saved sidebar order with Electron's rules          | A     | IN PROGRESS | [watchtower/tasks/TASK-278-gpui-sidebar-saved-order.md](watchtower/tasks/TASK-278-gpui-sidebar-saved-order.md)                     | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Name sort, then the saved order; new threads first, new projects last. |
-| 2     | TASK-279 One-time import of Electron's saved order          | A     | IN PROGRESS | [watchtower/tasks/TASK-279-gpui-import-electron-sidebar-order.md](watchtower/tasks/TASK-279-gpui-import-electron-sidebar-order.md) | TASK-278 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Reads a temp copy of Electron's LevelDB store with `rusty-leveldb`.    |
-| 3     | TASK-280 Drag to reorder projects, threads, and pinned rows | A     | IN PROGRESS | [watchtower/tasks/TASK-280-gpui-sidebar-drag-reorder.md](watchtower/tasks/TASK-280-gpui-sidebar-drag-reorder.md)                   | TASK-278 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Drag needs the owner's hand check.                                     |
+| Order | TASK                                                        | Group | Status  | Spec                                                                                                                               | Deps     | Context                                        | Notes                                                                                                         |
+| ----- | ----------------------------------------------------------- | ----- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| 1     | TASK-278 Saved sidebar order with Electron's rules          | A     | DONE    | [watchtower/tasks/TASK-278-gpui-sidebar-saved-order.md](watchtower/tasks/TASK-278-gpui-sidebar-saved-order.md)                     | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Name sort, then the saved order; new threads first, new projects last.                                        |
+| 2     | TASK-279 One-time import of Electron's saved order          | A     | DONE    | [watchtower/tasks/TASK-279-gpui-import-electron-sidebar-order.md](watchtower/tasks/TASK-279-gpui-import-electron-sidebar-order.md) | TASK-278 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Reads a temp copy of Electron's LevelDB store with `rusty-leveldb`. implement: manual checks pending (Q-182). |
+| 3     | TASK-280 Drag to reorder projects, threads, and pinned rows | A     | BLOCKED | [watchtower/tasks/TASK-280-gpui-sidebar-drag-reorder.md](watchtower/tasks/TASK-280-gpui-sidebar-drag-reorder.md)                   | TASK-278 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Blocked: BUILT, UNVERIFIED (Q-180).                                                                           |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
@@ -35,7 +35,9 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Handoff
 
-- Next action: run `/watchtower implement`. TASK-278 goes first, then TASK-279 and TASK-280 in one group, because all three write `crates/sidebar/src/sidebar.rs`.
+- Built on `feat/gpui-sidebar-saved-order` in `9cc6e3d50`, not pushed.
+- Next action: Hiep runs the Q-180 drag checks and the Q-182 order check on a check bundle. Then answer both rows in [watchtower/QUESTIONS.md](watchtower/QUESTIONS.md) and run `/watchtower verify`.
+- Plan Verify: the crate tests pass. The clippy line fails on old code outside this plan; use `./cargo.sh clippy -p bachuc-sidebar --no-deps --lib --test model --test electron_order -- -D warnings -A clippy::too_many_arguments`.
 
 ## Archive
 

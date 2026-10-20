@@ -49,3 +49,4 @@ max_builders: 6
 
 - `bachuc-command` test `search_500_items_stays_under_16_ms_per_keystroke`: a timing test that fails under a high load average. Confirm by: `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-command --test search` alone -> pass.
 - `bachuc-plugin-watchtower-board` test `one_thousand_derives_of_a_40_task_plan_take_under_200_ms`: a timing test that fails under a high load average. Confirm by: `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-plugin-watchtower-board --lib one_thousand_derives` alone -> pass.
+- `bachuc-sidebar` tests `building_500_*` in `tests/model.rs`: timing tests that fail under parallel test threads and load (seen 2026-10-20). Confirm by: `CARGO_BUILD_JOBS=4 packages/desktop-gpui/cargo.sh test -p bachuc-sidebar --test model building_500 -- --test-threads=1` -> pass.
