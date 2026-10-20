@@ -35,6 +35,8 @@ mod indent;
 #[path = "base/inline_tokens.rs"]
 mod inline_tokens;
 mod input;
+#[path = "base/text_replacement.rs"]
+mod text_replacement;
 #[path = "base/token_presentation.rs"]
 mod token_presentation;
 pub use inline_tokens::{InlineToken, InlineTokenError, InlineTokenSpan, InputContent};

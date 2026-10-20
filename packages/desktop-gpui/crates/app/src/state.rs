@@ -8,7 +8,6 @@ use bachuc_client::{
 use bachuc_command::{CommandItem, Shortcut};
 use bachuc_explorer::ShipDefault;
 use bachuc_icons::IconName;
-use bachuc_theme::ThemeChoice;
 use gpui_kit::{Hsla, Image};
 use std::path::Path;
 use std::sync::Arc;
@@ -452,15 +451,6 @@ pub fn github_url(remote: &str, branch: Option<&str>) -> Option<String> {
         Some(branch) => format!("{base}/tree/{branch}"),
         None => base,
     })
-}
-
-/// `theme.cycle`: Light, then Claude dark, then System.
-pub fn next_theme(theme: ThemeChoice) -> ThemeChoice {
-    match theme {
-        ThemeChoice::Light => ThemeChoice::ClaudeDark,
-        ThemeChoice::ClaudeDark => ThemeChoice::System,
-        ThemeChoice::System => ThemeChoice::Light,
-    }
 }
 
 /// `message-input.mode-cycle`: the mode after the current one, wrapping. None when the agent
@@ -926,9 +916,7 @@ mod tests {
     }
 
     #[test]
-    fn theme_and_mode_cycles_wrap() {
-        assert_eq!(next_theme(ThemeChoice::Light), ThemeChoice::ClaudeDark);
-        assert_eq!(next_theme(ThemeChoice::System), ThemeChoice::Light);
+    fn mode_cycle_wraps() {
         let modes = vec![("a".to_string(), "A".to_string()), ("b".into(), "B".into())];
         assert_eq!(next_mode(&modes, Some("b")).as_deref(), Some("a"));
         assert_eq!(next_mode(&modes, None).as_deref(), Some("a"));

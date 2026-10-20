@@ -3475,6 +3475,72 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     #[inline]
+    /// The word that ends at a lone cursor in a field that takes text replacements, with
+    /// its byte range (Bachuc patch).
+    fn text_replacement_word(&self) -> Option<(Range<usize>, String)> {
+        const MAX_SHORTCUT_CHARS: usize = 64;
+        if self.ime_marked_range.is_some()
+            || self.masked
+            || self.is_code_editor()
+            || !self.is_editable()
+            || !self.selections.is_single()
+            || !self.active_selection().is_empty()
+        {
+            return None;
+        }
+        let cursor = self.cursor();
+        let mut chars: Vec<char> = self
+            .text
+            .chars_at(cursor)
+            .reversed()
+            .take_while(|c| !c.is_whitespace())
+            .take(MAX_SHORTCUT_CHARS + 1)
+            .collect();
+        if chars.is_empty() || chars.len() > MAX_SHORTCUT_CHARS {
+            return None;
+        }
+        chars.reverse();
+        let word: String = chars.into_iter().collect();
+        Some((cursor - word.len()..cursor, word))
+    }
+
+    /// The shortcut at the cursor and its phrase, for the macOS bubble (Bachuc patch).
+    pub(crate) fn text_replacement_candidate(&self) -> Option<(Range<usize>, String, String)> {
+        let (range, word) = self.text_replacement_word()?;
+        let items = super::native::system_text_replacements();
+        let phrase = super::text_replacement::phrase_for(&word, &items)?.to_string();
+        Some((range, word, phrase))
+    }
+
+    /// The edit that swaps a macOS text replacement shortcut for its phrase,
+    /// when one typed boundary follows the shortcut at a lone cursor (Bachuc patch).
+    fn text_replacement_edit(
+        &self,
+        owner: gpui::EntityId,
+        range_utf16: Option<&Range<usize>>,
+        new_text: &str,
+    ) -> Option<(Range<usize>, String)> {
+        if range_utf16.is_some_and(|range| !range.is_empty())
+            || self.silent_replace_text
+            || self.replaying_history
+            || new_text.chars().count() != 1
+            // A letter never ends a shortcut; skip the lookup.
+            || !new_text.chars().all(super::text_replacement::is_boundary)
+        {
+            return None;
+        }
+        let (range, word) = self.text_replacement_word()?;
+        if super::native::text_replacement_rejected(owner, &word) {
+            return None;
+        }
+        let items = super::native::system_text_replacements();
+        let (word_len, text) = super::text_replacement::replacement_for(&word, new_text, &items)?;
+        Some((
+            self.range_to_utf16(&(range.end - word_len..range.end)),
+            text,
+        ))
+    }
+
     pub(crate) fn range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
         self.offset_to_utf16(range.start)..self.offset_to_utf16(range.end)
     }
@@ -4141,6 +4207,11 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some((range, text)) =
+            self.text_replacement_edit(cx.entity_id(), range_utf16.as_ref(), new_text)
+        {
+            return self.replace_text_in_range(Some(range), &text, window, cx);
+        }
         let requested_intent = self.undo_manager.take_pending_intent();
         if !self.is_editable() {
             return;

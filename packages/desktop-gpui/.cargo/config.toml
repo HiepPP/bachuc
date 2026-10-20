@@ -1,0 +1,4 @@
+# block 0.1.6 (cocoa, through gpui-pre) trips a future-incompat lint on every build. It is the
+# last release and unmaintained, so the report has no fix here; hide it.
+[future-incompat-report]
+frequency = "never"

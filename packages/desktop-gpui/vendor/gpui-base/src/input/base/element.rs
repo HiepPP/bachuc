@@ -3031,6 +3031,29 @@ impl<M: InputModeKind> Element for TextElement<M> {
             cx,
         );
 
+        // The macOS bubble that previews a text replacement (Bachuc patch).
+        let candidate = if focused {
+            self.state.update(cx, |state, cx| {
+                let (range, shortcut, phrase) = state.text_replacement_candidate()?;
+                let range_utf16 = state.range_to_utf16(&range);
+                let bounds = gpui::EntityInputHandler::bounds_for_range(
+                    state,
+                    range_utf16,
+                    bounds,
+                    window,
+                    cx,
+                )?;
+                Some(super::native::ReplacementCandidate {
+                    shortcut,
+                    phrase,
+                    bounds,
+                })
+            })
+        } else {
+            None
+        };
+        super::native::update_replacement_indicator(self.state.entity_id(), window, candidate);
+
         // Paint multi line text
         let line_height = window.line_height();
         let origin = bounds.origin;

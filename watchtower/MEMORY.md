@@ -68,6 +68,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid the Electron overlap of the composer placeholder and the focus hint while the GPUI composer can be narrow. Reason: [ADR-0047](watchtower/decisions/ADR-0047-cut-placeholder-before-focus-hint-over-electron-overlap.md).
 - Avoid a link underline, 700 bold, and a missing code pill in GPUI assistant markdown while the owner wants the Electron look. Reason: [ADR-0050](watchtower/decisions/ADR-0050-electron-markdown-look-over-gpui-link-underline-and-bold.md).
 - Avoid a jump to the parent's tool call in place of a provider subagent tab while the owner wants to read the child's own steps. Reason: [ADR-0051](watchtower/decisions/ADR-0051-read-only-provider-subagent-tab-over-jump-to-parent.md).
+- Avoid NSTextInputClient geometry patches, a GPUI-drawn pill, or a bubble call inside paint for the Text Replacement preview while macOS shows that bubble only to AppKit views. Reason: [ADR-0054](watchtower/decisions/ADR-0054-app-called-macos-correction-bubble-over-system-geometry.md).
 
 ## Learnings
 
@@ -408,3 +409,6 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - 2026-10-20 Learned: GPUI per-frame cost fell from 14.9% to 7.2% CPU with no `.cached` view, by removing copies in `render` (sidebar rows shared as `Rc<Vec<Row>>`, the composer plugin index cached by host revision, an unused markdown text copy dropped); `Window::draw` fell from 18% to 5.5% of main-thread samples.
 - Source: TASK-276 outcome (Step 1 profile, UI Checks); commit `63321de20`.
 - Use next time: profile `Window::draw` by the nearest `bachuc_*` frame first, then cut clones in `render` before you reach for a view boundary.
+- 2026-10-20 Learned: an AppKit call that shows UI (the correction bubble) can spin a nested event loop that drains the main queue; inside GPUI paint a GPUI task then hits `AppCell` already borrowed and the app aborts.
+- Source: ADR-0054; crash report `bachuc-desktop-2026-10-20-120945.ips`; `packages/desktop-gpui/vendor/gpui-base/src/input/base/native.rs`.
+- Use next time: dispatch such calls with `dispatch_async_f` on the main queue; check a new symbol with `strings -a` in the binary before you debug, because cargo can reuse a build when patched files carry old mtimes.

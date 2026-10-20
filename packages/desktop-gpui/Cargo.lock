@@ -2867,6 +2867,7 @@ dependencies = [
  "anyhow",
  "ashpd",
  "async-channel",
+ "block2 0.6.2",
  "chrono",
  "data-url",
  "futures",
