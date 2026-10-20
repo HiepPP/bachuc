@@ -7,6 +7,7 @@
 //! sections, and the Add project button request their work through [`SidebarPluginEvent`], a
 //! second event type, and the built-in nav rows and the project "+" through [`SidebarNavEvent`].
 
+pub mod badge;
 mod metrics;
 pub mod model;
 pub mod plugin;
@@ -14,4 +15,6 @@ pub mod prefs;
 mod ring;
 mod sidebar;
 
+pub use badge::StatusBadge;
+pub use ring::{FRAME, Knockout, RunningRing};
 pub use sidebar::{Sidebar, SidebarEvent, SidebarNavEvent, SidebarPluginEvent};

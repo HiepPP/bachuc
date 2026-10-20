@@ -50,6 +50,7 @@ struct TabDrag {
     title: SharedString,
     icon: IconName,
     logo: Option<Arc<Image>>,
+    badge: Option<AnyView>,
 }
 
 /// The More actions menu of one group's tab bar while it shows.
@@ -78,6 +79,7 @@ enum DragPreview {
         title: SharedString,
         icon: IconName,
         logo: Option<Arc<Image>>,
+        badge: Option<AnyView>,
     },
     Divider,
 }
@@ -88,6 +90,7 @@ impl Render for DragPreview {
             title,
             icon: name,
             logo,
+            badge,
         } = self
         else {
             return div().into_any_element();
@@ -102,15 +105,28 @@ impl Render for DragPreview {
             .opacity(0.85)
             .text_size(ui_font_size(FONT_BASE, cx))
             .text_color(t.foreground)
-            .child(tab_glyph(*name, logo.as_ref(), t.foreground, cx))
+            .child(tab_glyph(
+                *name,
+                logo.as_ref(),
+                badge.clone(),
+                t.foreground,
+                cx,
+            ))
             .child(title.clone())
             .into_any_element()
     }
 }
 
-/// The tab's provider logo when it has one, else its icon.
-fn tab_glyph(name: IconName, logo: Option<&Arc<Image>>, color: Hsla, cx: &App) -> AnyElement {
-    match logo {
+/// The tab's provider logo when it has one, else its icon, with its status badge over the
+/// bottom-right corner.
+fn tab_glyph(
+    name: IconName,
+    logo: Option<&Arc<Image>>,
+    badge: Option<AnyView>,
+    color: Hsla,
+    cx: &App,
+) -> AnyElement {
+    let glyph = match logo {
         Some(logo) => img(logo.clone())
             .flex_none()
             .size(zoomed(TAB_ICON_WIDTH, cx))
@@ -119,7 +135,14 @@ fn tab_glyph(name: IconName, logo: Option<&Arc<Image>>, color: Hsla, cx: &App) -
             .with_size(zoomed(TAB_ICON_WIDTH, cx))
             .text_color(color)
             .into_any_element(),
-    }
+    };
+    div()
+        .flex_none()
+        .relative()
+        .size(zoomed(TAB_ICON_WIDTH, cx))
+        .child(glyph)
+        .children(badge)
+        .into_any_element()
 }
 
 /// An icon button that can anchor a gpui-kit dropdown menu and fills while the menu is open.
@@ -280,6 +303,20 @@ impl Workspace {
     ) {
         let open = self.layout.item(key).is_some();
         if self.extras.set_logo(open, key, logo) {
+            cx.notify();
+        }
+    }
+
+    /// Shows `badge` over the icon of the open tab `key`; `None` clears it. An unknown key
+    /// changes nothing.
+    pub fn set_item_badge(
+        &mut self,
+        key: &str,
+        badge: Option<AnyView>,
+        cx: &mut Context<Workspace>,
+    ) {
+        let open = self.layout.item(key).is_some();
+        if self.extras.set_badge(open, key, badge) {
             cx.notify();
         }
     }
@@ -1017,7 +1054,14 @@ impl Workspace {
                 });
         // Left: on hover the close button takes the icon slot, so the chip keeps its width.
         // Both layers stay in the layout and swap by opacity.
-        let glyph = tab_glyph(item.icon, self.extras.logo(&key), label_color, cx);
+        let badge = self.extras.badge(&key).cloned();
+        let glyph = tab_glyph(
+            item.icon,
+            self.extras.logo(&key),
+            badge.clone(),
+            label_color,
+            cx,
+        );
         let (icon_slot, close_overlay) = if close_left {
             let slot = div()
                 .flex_none()
@@ -1118,12 +1162,14 @@ impl Workspace {
                     title: title.clone(),
                     icon: item.icon,
                     logo: logo.clone(),
+                    badge: badge.clone(),
                 },
                 |drag, _, _, cx| {
                     cx.new(|_| DragPreview::Tab {
                         title: drag.title.clone(),
                         icon: drag.icon,
                         logo: drag.logo.clone(),
+                        badge: drag.badge.clone(),
                     })
                 },
             )

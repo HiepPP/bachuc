@@ -58,12 +58,17 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a live WebView inside each timeline row, and SVG export of diagrams, while `gpui-wry` views do not clip inside GPUI scroll lists and GPUI's usvg drops `foreignObject` labels and KaTeX HTML. Reason: [ADR-0037](watchtower/decisions/ADR-0037-hidden-webview-png-snapshots-over-svg-and-inline-webviews.md).
 - Avoid WebView panes, a hidden WebView or embedded JS engine for plugin clients, declarative plugin widgets, and moving plugin client logic into server parts, while the owner wants native Rust plugin clients and freezes Electron. Reason: [ADR-0045](watchtower/decisions/ADR-0045-native-rust-plugin-clients-over-webview-panes-or-shared-logic.md).
 - Avoid a higher GPUI CPU budget, a slower timeline redraw while a turn streams, and folding or capping old steps, while incremental sync keeps a 15-minute turn under 10%. Reason: [ADR-0039](watchtower/decisions/ADR-0039-incremental-timeline-sync-over-throttle-or-budget.md).
+- Avoid a 33 ms shared ticker, per-mark repeat timers, and `request_animation_frame` or `with_animation(..).repeat()` in a running mark, while each GPUI mark frame re-renders the window tree and main reads 42.6% during a turn. Reason: [ADR-0052](watchtower/decisions/ADR-0052-one-shared-66ms-frame-ticker-over-per-mark-timers.md).
+- Avoid `.cached(..)` GPUI view boundaries, with or without an AX check, while gpui-pre 0.3.9 drops AX nodes and click actions of a reused cached view. Reason: [ADR-0053](watchtower/decisions/ADR-0053-keep-ax-nodes-over-cached-gpui-views.md).
 - Avoid a merged "All machines" view, `wss`, the relay, and built-in SSH in the GPUI client while the owner reaches hosts through a tunnel and needs one host on screen. Reason: [ADR-0040](watchtower/decisions/ADR-0040-one-host-plain-ws-over-merged-hosts-and-relay.md).
 - Avoid daemon start, stop, updates, CLI install, and deep links in the GPUI client while Electron and the CLI own them. Reason: [ADR-0041](watchtower/decisions/ADR-0041-gpui-client-connects-only-over-daemon-management.md).
 - Avoid terminal restore mode `"full-snapshot"` (`0x05` ANSI bytes) in the GPUI client while the daemon sends the `0x04` JSON grid without a restore mode. Reason: [ADR-0042](watchtower/decisions/ADR-0042-json-grid-terminal-restore-over-ansi-snapshot.md).
 - Avoid gpui-kit default themes and the gpui-kit `IconName` set in the GPUI client, and porting every dark theme variant now, while the owner wants the exact Electron look in `light` and `claude` dark. Reason: [ADR-0043](watchtower/decisions/ADR-0043-electron-tokens-and-lucide-icons-over-gpui-kit-defaults.md).
 - Avoid generic lucide icons in the GPUI Open-in menu while the owner wants each app to show its own icon. Reason: [ADR-0046](watchtower/decisions/ADR-0046-real-app-icons-in-open-in-menu-over-lucide.md).
 - Avoid the Electron overlap of the composer placeholder and the focus hint while the GPUI composer can be narrow. Reason: [ADR-0047](watchtower/decisions/ADR-0047-cut-placeholder-before-focus-hint-over-electron-overlap.md).
+- Avoid a link underline, 700 bold, and a missing code pill in GPUI assistant markdown while the owner wants the Electron look. Reason: [ADR-0050](watchtower/decisions/ADR-0050-electron-markdown-look-over-gpui-link-underline-and-bold.md).
+- Avoid a jump to the parent's tool call in place of a provider subagent tab while the owner wants to read the child's own steps. Reason: [ADR-0051](watchtower/decisions/ADR-0051-read-only-provider-subagent-tab-over-jump-to-parent.md).
+- Avoid NSTextInputClient geometry patches, a GPUI-drawn pill, or a bubble call inside paint for the Text Replacement preview while macOS shows that bubble only to AppKit views. Reason: [ADR-0054](watchtower/decisions/ADR-0054-app-called-macos-correction-bubble-over-system-geometry.md).
 
 ## Learnings
 
@@ -394,3 +399,16 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the check bundle uses the same `~/Library/Application Support/BachucGpui` folder as the owner's daily GPUI app, so a screen check that toggles state writes the owner's real `sidebar.json`. The GPUI sidebar also opens scrolled to the end, and `cua_repl` scroll moves only a few rows per page, so a long live project list is slow to reach.
 - Source: TASK-258 and TASK-261 UI checks; `bachuc_command::data_dir`.
 - Use next time: undo any state a screen check toggles, and pick a project near the end of the list for sidebar checks. A new field on `WorkspaceNode` breaks struct literals in other crates; it now derives `Default`, so use `..Default::default()` (TASK-259).
+
+### 2026-10-19 - Implement 20261019-gpui-background-process-card
+
+- Learned: GPUI marks every ancestor view dirty when a child view notifies, so a 33 ms `Motion` mark re-renders the whole timeline that holds it; the frame count is the CPU lever (TASK-266 and TASK-267 fix round 1 moved to one shared 66 ms ticker). An unattended CPU read is not possible while the owner's release GPUI window covers the check window: the covered window draws nothing and reads 0.1-0.3%.
+- Source: TASK-266, TASK-267 outcomes (UI Checks rounds 1-3); `packages/desktop-gpui/crates/timeline/src/motion.rs`.
+- Use next time: plan a CPU anti-goal as an owner A/B check with a pre-plan base app, and build the base from a `git archive` of the base ref that also includes `hiep-plugins` (the board plugin embeds its assets). The lefthook `format` job fails with exit 2 when the only staged markdown is under `vendor/`; stage another markdown file, such as an outcome, in the same commit.
+
+- 2026-10-20 Learned: GPUI per-frame cost fell from 14.9% to 7.2% CPU with no `.cached` view, by removing copies in `render` (sidebar rows shared as `Rc<Vec<Row>>`, the composer plugin index cached by host revision, an unused markdown text copy dropped); `Window::draw` fell from 18% to 5.5% of main-thread samples.
+- Source: TASK-276 outcome (Step 1 profile, UI Checks); commit `63321de20`.
+- Use next time: profile `Window::draw` by the nearest `bachuc_*` frame first, then cut clones in `render` before you reach for a view boundary.
+- 2026-10-20 Learned: an AppKit call that shows UI (the correction bubble) can spin a nested event loop that drains the main queue; inside GPUI paint a GPUI task then hits `AppCell` already borrowed and the app aborts.
+- Source: ADR-0054; crash report `bachuc-desktop-2026-10-20-120945.ips`; `packages/desktop-gpui/vendor/gpui-base/src/input/base/native.rs`.
+- Use next time: dispatch such calls with `dispatch_async_f` on the main queue; check a new symbol with `strings -a` in the binary before you debug, because cargo can reuse a build when patched files carry old mtimes.

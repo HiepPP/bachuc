@@ -487,6 +487,58 @@ pub struct QueuedPrompt {
     pub text: String,
 }
 
+/// One background process of an agent snapshot (`AgentBackgroundProcessSchema`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackgroundProcess {
+    pub id: String,
+    pub kind: String,
+    pub description: String,
+    pub command: Option<String>,
+    pub status: String,
+    pub tool_call_id: Option<String>,
+    pub started_at_ms: i64,
+    pub ended_at_ms: Option<i64>,
+    pub exit_code: Option<i64>,
+    pub output_file: Option<String>,
+    pub tail: Vec<String>,
+}
+
+impl BackgroundProcess {
+    /// The `backgroundProcesses` of a snapshot, in the daemon's order. A missing or empty
+    /// field gives no processes; a process whose `startedAt` does not parse is left out.
+    pub(crate) fn parse_all(value: &serde_json::Value) -> Vec<Self> {
+        value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|process| {
+                let text = |key: &str| process[key].as_str().map(str::to_string);
+                Some(Self {
+                    id: text("id")?,
+                    kind: process["kind"].as_str().unwrap_or_default().to_string(),
+                    description: process["description"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    command: text("command"),
+                    status: process["status"].as_str().unwrap_or_default().to_string(),
+                    tool_call_id: text("toolCallId"),
+                    started_at_ms: parse_iso_ms(process["startedAt"].as_str()?)?,
+                    ended_at_ms: process["endedAt"].as_str().and_then(parse_iso_ms),
+                    exit_code: process["exitCode"].as_i64(),
+                    output_file: text("outputFile"),
+                    tail: process["tail"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|line| line.as_str().map(str::to_string))
+                        .collect(),
+                })
+            })
+            .collect()
+    }
+}
+
 // ---- composer, New workspace, and tab menu data (TASK-169) ----
 
 /// The daemon's metrics of one finished turn (`TurnMetricsSchema`).

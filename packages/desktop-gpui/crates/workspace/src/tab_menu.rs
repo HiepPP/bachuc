@@ -1,9 +1,10 @@
 //! The tab context menu, a port of `buildWorkspaceTabMenuEntries` for the desktop surface in
 //! `packages/app/src/screens/workspace/workspace-tab-menu.ts`, and the per-tab data the menu and
-//! the tab chip need beyond `PaneItem`. It holds no GPUI state, so the rules are plain functions.
+//! the tab chip need beyond `PaneItem`. The menu rules are plain functions; the extras only
+//! carry what the app sets on each open tab.
 
 use bachuc_icons::IconName;
-use gpui_kit::Image;
+use gpui_kit::{AnyView, Image};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -221,6 +222,9 @@ pub fn close_targets(action: TabMenuAction, keys: &[String], index: usize) -> Ve
 pub struct TabExtras {
     logos: HashMap<String, Arc<Image>>,
     kinds: HashMap<String, TabKind>,
+    /// The status badge of an agent tab, drawn over the corner of its icon. It stays an `AnyView`
+    /// so this crate needs no view dependency.
+    badges: HashMap<String, AnyView>,
 }
 
 impl TabExtras {
@@ -246,6 +250,19 @@ impl TabExtras {
         true
     }
 
+    /// Sets or clears the status badge of an open tab. Returns false, and changes nothing, when
+    /// `open` is false because the key is not open.
+    pub fn set_badge(&mut self, open: bool, key: &str, badge: Option<AnyView>) -> bool {
+        if !open {
+            return false;
+        }
+        match badge {
+            Some(badge) => self.badges.insert(key.to_owned(), badge),
+            None => self.badges.remove(key),
+        };
+        true
+    }
+
     pub fn logo(&self, key: &str) -> Option<&Arc<Image>> {
         self.logos.get(key)
     }
@@ -254,12 +271,17 @@ impl TabExtras {
         self.kinds.get(key).cloned().unwrap_or_default()
     }
 
+    pub fn badge(&self, key: &str) -> Option<&AnyView> {
+        self.badges.get(key)
+    }
+
     pub fn forget(&mut self, key: &str) {
         self.logos.remove(key);
         self.kinds.remove(key);
+        self.badges.remove(key);
     }
 
     pub fn is_empty(&self) -> bool {
-        self.logos.is_empty() && self.kinds.is_empty()
+        self.logos.is_empty() && self.kinds.is_empty() && self.badges.is_empty()
     }
 }

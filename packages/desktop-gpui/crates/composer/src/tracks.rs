@@ -3,6 +3,7 @@
 
 use crate::pill_styles::{STRIP_HEIGHT, SURFACE_PADDING_X, SURFACE_PADDING_Y, docked_pill};
 use bachuc_sidebar::model::StatusBucket;
+use bachuc_sidebar::{FRAME, RunningRing};
 use bachuc_theme::metrics::{
     FONT_BASE, RADIUS_MD, SPACE_0_5, SPACE_1, SPACE_1_5, SPACE_2, SPACE_4,
 };
@@ -18,13 +19,13 @@ const PANEL_MIN_WIDTH: f32 = 280.;
 const PANEL_MAX_WIDTH: f32 = 620.;
 const PANEL_MAX_HEIGHT: f32 = 440.;
 const PANEL_OFFSET: f32 = 12.;
-/// `STATUS_INDICATOR_FILLED_DOT_SIZE`, and the ring around the running dot
-/// (`STATUS_RING_GAP` and `STATUS_RING_STROKE`) without its halo.
+/// `STATUS_INDICATOR_FILLED_DOT_SIZE`.
 const DOT: f32 = 6.;
-const RING_STROKE: f32 = 1.5;
-const RING: f32 = DOT + (1.5 + RING_STROKE) * 2.;
-/// `STATUS_RING_TRACK_OPACITY`.
-const RING_TRACK_OPACITY: f32 = 0.3;
+/// The running ring's box without its 1 px halo, so the mark keeps the size it had before the
+/// ring became a view.
+const RING: f32 = FRAME - 2.;
+/// `STATUS_RING_HALO_INSET`: the ring view is 1 px wider than its visible circle on each side.
+const HALO: f32 = (FRAME - RING) / 2.;
 /// The row rail (`styles.row`).
 const ROW_MIN_HEIGHT: f32 = 32.;
 
@@ -33,6 +34,9 @@ const ROW_MIN_HEIGHT: f32 = 32.;
 pub struct TrackSegment {
     /// `None` draws the text on its own.
     pub bucket: Option<StatusBucket>,
+    /// The cached ring of a `Running` segment. The segment builders have no context, so the
+    /// view that builds the strip attaches it afterwards.
+    pub ring: Option<Entity<RunningRing>>,
     pub text: String,
 }
 
@@ -73,8 +77,8 @@ impl RenderOnce for TrackStrip {
     }
 }
 
-/// The state mark of a segment: the ring for running, else the status dot.
-fn track_mark(bucket: StatusBucket, cx: &App) -> AnyElement {
+/// The state mark of a segment: the turning ring for running, else the status dot.
+fn track_mark(bucket: StatusBucket, ring: Option<Entity<RunningRing>>, cx: &App) -> AnyElement {
     let t = tokens(cx);
     let dot = |color: Hsla| {
         div()
@@ -84,17 +88,23 @@ fn track_mark(bucket: StatusBucket, cx: &App) -> AnyElement {
             .bg(color)
     };
     match bucket {
-        StatusBucket::Running => div()
-            .flex_none()
-            .size(zoomed(RING, cx))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded_full()
-            .border(zoomed(RING_STROKE, cx))
-            .border_color(t.dot_running.opacity(RING_TRACK_OPACITY))
-            .child(dot(t.dot_running))
-            .into_any_element(),
+        // The ring view keeps the box the still ring had: its halo is 1 px on each side, so the
+        // visible circle lines up with the dots of the other buckets.
+        StatusBucket::Running => match ring {
+            Some(ring) => div()
+                .flex_none()
+                .relative()
+                .size(zoomed(RING, cx))
+                .child(
+                    div()
+                        .absolute()
+                        .top(zoomed(-HALO, cx))
+                        .left(zoomed(-HALO, cx))
+                        .child(ring),
+                )
+                .into_any_element(),
+            None => dot(t.dot_running).into_any_element(),
+        },
         StatusBucket::NeedsInput => dot(t.dot_warning).into_any_element(),
         StatusBucket::Failed => dot(t.dot_danger).into_any_element(),
         StatusBucket::Attention => dot(t.dot_success).into_any_element(),
@@ -136,13 +146,15 @@ impl RenderOnce for TrackPillTrigger {
                     .items_center()
                     .gap(zoomed(SPACE_4, cx))
                     .children(self.segments.into_iter().map(|segment| {
+                        let TrackSegment { bucket, ring, text } = segment;
+                        let mark = bucket.map(|bucket| track_mark(bucket, ring, cx));
                         h_flex()
                             .min_w_0()
                             .flex_shrink(1.)
                             .items_center()
                             .gap(zoomed(SPACE_2, cx))
-                            .children(segment.bucket.map(|bucket| track_mark(bucket, cx)))
-                            .child(div().truncate().child(segment.text))
+                            .children(mark)
+                            .child(div().truncate().child(text))
                     })),
             )
     }

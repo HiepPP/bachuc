@@ -24,8 +24,9 @@ use serde_json::Value;
 
 use crate::diff::{DiffLine, LineKind};
 use crate::grouping::entry_key;
+use crate::motion;
 use crate::tools::{self, Section};
-use crate::{LineRuns, TimelineEvent, TimelineView};
+use crate::{LineRuns, MotionKey, TimelineEvent, TimelineView};
 
 /// The badge reaches past the stream padding, as `marginHorizontal: -13`.
 pub(crate) const BADGE_BLEED: f32 = 13.;
@@ -89,6 +90,152 @@ pub(crate) fn icon_button(
         .cursor_pointer()
         .hover(move |button| button.bg(fill))
         .child(icon(name).with_size(zoomed(ICON_SM, cx)).text_color(color))
+}
+
+/// The running badge's label and summary with the moving shimmer band, as
+/// `buildShimmerTextStyle` draws it. GPUI cannot clip a background to text, so the glyphs under
+/// the band take its white alpha and the rest keep the loading color.
+pub(crate) fn shimmer_draw(
+    label: String,
+    summary: Option<String>,
+) -> impl Fn(u128, &mut Window, &mut App) -> AnyElement {
+    // `shape_line` shapes one line and panics on a newline.
+    let label = label.replace('\n', " ");
+    let summary = summary.map(|summary| summary.replace('\n', " "));
+    move |ms, _window, cx| {
+        let base = tokens(cx).foreground.opacity(LOADING_OPACITY);
+        let size = ui_font_size(FONT_BASE, cx);
+        let font = Font {
+            family: bachuc_theme::ui_font_family(cx),
+            ..Default::default()
+        };
+        let gap = zoomed(SPACE_2, cx);
+        let line_height = size * 1.618;
+        let label = label.clone();
+        let summary = summary.clone();
+        canvas(
+            |_, _, _| (),
+            move |bounds, (), window, cx| {
+                let run = |len: usize| TextRun {
+                    len,
+                    font: font.clone(),
+                    color: base,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                let label_line = window.text_system().shape_line(
+                    label.clone().into(),
+                    size,
+                    &[run(label.len())],
+                    None,
+                );
+                let summary_line = summary.as_deref().map(|text| {
+                    window
+                        .text_system()
+                        .shape_line(text.into(), size, &[run(text.len())], None)
+                });
+                let label_width = label_line.width();
+                let span_end = label_width
+                    + if summary.is_some() { gap } else { Pixels::ZERO }
+                    + summary_line
+                        .as_ref()
+                        .map_or(Pixels::ZERO, |line| line.width());
+                let chars = motion::shimmer_chars(&label, summary.as_deref());
+                let duration = motion::shimmer_duration(chars);
+                let phase = motion::shimmer_phase(ms, duration);
+                let band = motion::shimmer_band_width(f32::from(span_end));
+                let band_left = motion::shimmer_band_left(0., f32::from(span_end), band, phase);
+                let y = bounds.top() + (bounds.size.height - line_height) / 2.;
+                let mut paint = |text: &str, geometry: &ShapedLine, x: f32| {
+                    let runs = shimmer_runs(geometry, text, x, band_left, band, base, &font);
+                    let colored = window
+                        .text_system()
+                        .shape_line(text.into(), size, &runs, None);
+                    colored
+                        .paint(
+                            point(bounds.left() + px(x), y),
+                            line_height,
+                            TextAlign::Left,
+                            None,
+                            window,
+                            cx,
+                        )
+                        .ok();
+                };
+                paint(&label, &label_line, 0.);
+                if let Some(text) = summary.as_deref()
+                    && let Some(line) = &summary_line
+                {
+                    paint(text, line, f32::from(label_width + gap));
+                }
+            },
+        )
+        .w_full()
+        .h(line_height)
+        .into_any_element()
+    }
+}
+
+/// The text runs of one shimmer line: a glyph under the band takes white at the band's alpha,
+/// and a glyph outside it keeps `base`. Equal colors share one run.
+fn shimmer_runs(
+    geometry: &ShapedLine,
+    text: &str,
+    x: f32,
+    band_left: f32,
+    band_width: f32,
+    base: Hsla,
+    font: &Font,
+) -> Vec<TextRun> {
+    let mut boundaries: Vec<(usize, f32)> = text
+        .char_indices()
+        .map(|(index, _)| (index, f32::from(geometry.x_for_index(index))))
+        .collect();
+    boundaries.push((text.len(), f32::from(geometry.x_for_index(text.len()))));
+    let mut runs: Vec<TextRun> = Vec::new();
+    let mut current: Option<(u8, Hsla, usize)> = None;
+    for pair in boundaries.windows(2) {
+        let (start, at) = pair[0];
+        let (end, _) = pair[1];
+        let position = if band_width > 0. {
+            ((x + at - band_left) / band_width).clamp(0., 1.)
+        } else {
+            0.
+        };
+        let (key, color) = if position > 0. && position < 1. {
+            let alpha = motion::shimmer_alpha(position);
+            ((alpha * 24.).round() as u8 + 1, white().opacity(alpha))
+        } else {
+            (0, base)
+        };
+        match &mut current {
+            Some((current_key, _, len)) if *current_key == key => *len += end - start,
+            Some((_, current_color, len)) => {
+                runs.push(TextRun {
+                    len: *len,
+                    font: font.clone(),
+                    color: *current_color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                });
+                current = Some((key, color, end - start));
+            }
+            None => current = Some((key, color, end - start)),
+        }
+    }
+    if let Some((_, color, len)) = current {
+        runs.push(TextRun {
+            len,
+            font: font.clone(),
+            color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        });
+    }
+    runs
 }
 
 impl TimelineView {
@@ -252,6 +399,11 @@ impl TimelineView {
                 }
             });
         let active = |base: Hsla| if expanded { t.foreground } else { base };
+        let shimmer = is_loading
+            .then(|| self.motions.get(&MotionKey::Badge(key)).cloned())
+            .flatten()
+            .map(|(_, motion)| motion.into_any_element());
+        let has_shimmer = shimmer.is_some();
         let label = div()
             .flex_none()
             .text_color(active(t.foreground_muted))
@@ -326,8 +478,17 @@ impl TimelineView {
             })
             .text_size(size)
             .child(icon_slot)
-            .child(label)
-            .children(summary)
+            .when_some(shimmer, |header, shimmer| {
+                header.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .overflow_hidden()
+                        .child(shimmer),
+                )
+            })
+            .when(!has_shimmer, |header| header.child(label).children(summary))
             .children(open_file);
         let details = expanded.then(|| {
             div()

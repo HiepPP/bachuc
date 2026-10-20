@@ -60,7 +60,7 @@ impl ConnectionConfig {
 
 /// The capabilities this client sends in `hello`. Names come from
 /// `packages/protocol/src/client-capabilities.ts`.
-pub const CAPABILITIES: [&str; 9] = [
+pub const CAPABILITIES: [&str; 10] = [
     "hello_rejection",
     "all_providers",
     "selective_agent_timeline",
@@ -70,6 +70,7 @@ pub const CAPABILITIES: [&str; 9] = [
     "reasoning_merge_enum",
     "custom_mode_icons",
     "plugin_timeline_items",
+    "projected_subagent_timeline",
 ];
 
 /// Builds the `hello` frame.
@@ -443,6 +444,9 @@ mod tests {
         }
         // Without it the daemon withholds plugin items, such as the turn diff card.
         assert!(CAPABILITIES.contains(&"plugin_timeline_items"));
+        // Without it the daemon sends no provider subagent timelines.
+        assert_eq!(CAPABILITIES.len(), 10);
+        assert!(CAPABILITIES.contains(&"projected_subagent_timeline"));
         let without: Value = serde_json::from_str(&hello_frame("id-1", None)).unwrap();
         assert!(without.get("auth").is_none());
     }

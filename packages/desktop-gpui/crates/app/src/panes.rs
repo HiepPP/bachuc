@@ -77,6 +77,8 @@ pub struct AgentPane {
 
 /// `FOOTER_HEIGHT` of `constants/layout.ts`.
 const FOOTER_HEIGHT: f32 = 75.;
+/// The browser line height (1.2), for text that matches Electron.
+const TEXT_LINE_FACTOR: f32 = 1.2;
 
 /// The Unarchive button works only while connected and with no unarchive in flight.
 pub(crate) fn can_unarchive(connected: bool, unarchiving: bool) -> bool {
@@ -287,6 +289,71 @@ impl Render for AgentPane {
             )
             .when(archived, |pane| pane.child(self.archived_callout(cx)))
             .when(!archived, |pane| pane.child(self.composer.clone()))
+    }
+}
+
+// ----- provider subagent pane -----
+
+/// A provider subagent tab (`panels/provider-subagent-panel.tsx`): the child's subtitle over its
+/// read-only timeline. It has no composer, so its own step list is the only input.
+pub struct SubagentPane {
+    pub timeline: Entity<TimelineView>,
+    subtitle: Option<SharedString>,
+}
+
+impl SubagentPane {
+    pub fn new(
+        client: Entity<Client>,
+        key: String,
+        subtitle: Option<String>,
+        diagrams: Entity<DiagramRenderer>,
+        window: &mut Window,
+        cx: &mut Context<SubagentPane>,
+    ) -> SubagentPane {
+        let timeline = cx.new(|cx| TimelineView::read_only(client, key, diagrams, window, cx));
+        SubagentPane {
+            timeline,
+            subtitle: subtitle.map(Into::into),
+        }
+    }
+
+    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+        self.timeline.update(cx, |timeline, cx| {
+            timeline.focus_handle(cx).focus(window, cx)
+        });
+    }
+}
+
+impl Render for SubagentPane {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = tokens(cx);
+        let size = ui_font_size(FONT_SM, cx);
+        v_flex()
+            .id("pane-provider-subagent")
+            .role(Role::Group)
+            .aria_label("Subagent pane")
+            .size_full()
+            .children(self.subtitle.clone().map(|subtitle| {
+                div()
+                    .flex_none()
+                    .w_full()
+                    .truncate()
+                    .px(zoomed(SPACE_3, cx))
+                    .py(zoomed(SPACE_1, cx))
+                    .border_b(zoomed(BORDER_WIDTH_1, cx))
+                    .border_color(t.border)
+                    .text_size(size)
+                    .line_height(size * TEXT_LINE_FACTOR)
+                    .text_color(t.foreground_muted)
+                    .child(subtitle)
+            }))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .child(self.timeline.clone()),
+            )
     }
 }
 

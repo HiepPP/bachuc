@@ -6,6 +6,7 @@ use crate::tracks::{TrackSegment, track_pill, track_row, track_separator};
 use bachuc_client::{SubagentKind, SubagentRow};
 use bachuc_icons::{IconName, icon, provider_fallback_icon, provider_logo};
 use bachuc_sidebar::model::{StatusBucket, bucket_for_agent};
+use bachuc_sidebar::{RunningRing, StatusBadge};
 use bachuc_theme::metrics::{FONT_SM, SPACE_1};
 use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::popover::PopoverState;
@@ -13,6 +14,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 /// `ROW_ICON_SIZE`: the leading and action glyphs share one size.
@@ -100,6 +102,7 @@ pub fn pill_segments(rows: &[SubagentRow]) -> (Vec<TrackSegment>, String) {
                 .count();
             (count > 0).then(|| TrackSegment {
                 bucket: Some(*bucket),
+                ring: None,
                 text: status_label(*bucket, count),
             })
         })
@@ -113,6 +116,7 @@ pub fn pill_segments(rows: &[SubagentRow]) -> (Vec<TrackSegment>, String) {
         return (
             vec![TrackSegment {
                 bucket: None,
+                ring: None,
                 text: label.clone(),
             }],
             label,
@@ -152,16 +156,56 @@ pub fn finished_paseo_ids(rows: &[SubagentRow]) -> Vec<String> {
         .collect()
 }
 
+/// `message.actions.forkUnavailable`: the tooltip of a provider row when the host cannot serve
+/// its timeline.
+const UPDATE_HOST: &str = "Update the host to use this.";
+
+/// What a row press does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RowClick {
+    /// A Paseo child: open its agent tab.
+    Agent(String),
+    /// A provider child: open its read-only tab. The row has no parent, so the composer's
+    /// agent is the parent.
+    Provider {
+        parent_agent_id: String,
+        subagent_id: String,
+    },
+}
+
+/// The press target of a row. A Paseo row always opens its agent; a provider row opens a tab
+/// only when the host serves the child timeline (`projectedSubagentTimeline`).
+pub fn row_click(
+    row: &SubagentRow,
+    parent_agent_id: &str,
+    supports_open: bool,
+) -> Option<RowClick> {
+    match row.kind {
+        SubagentKind::Paseo => Some(RowClick::Agent(row.id.clone())),
+        SubagentKind::Provider => supports_open.then(|| RowClick::Provider {
+            parent_agent_id: parent_agent_id.to_string(),
+            subagent_id: row.id.clone(),
+        }),
+    }
+}
+
 /// What the panel rows do. The composer owns each.
 #[derive(Clone)]
 pub struct SubagentActions {
     pub open: Rc<dyn Fn(&str, &mut App)>,
+    /// Opens a provider child's read-only tab: its parent agent and its own id.
+    pub open_provider: Rc<dyn Fn(&str, &str, &mut App)>,
     pub archive: Rc<dyn Fn(&str, &mut App)>,
     pub archive_finished: Rc<dyn Fn(&mut App)>,
 }
 
-fn provider_icon(provider: &str, color: Hsla, cx: &App) -> AnyElement {
-    match provider_logo(provider, color) {
+fn provider_icon(
+    provider: &str,
+    color: Hsla,
+    badge: Option<Entity<StatusBadge>>,
+    cx: &App,
+) -> AnyElement {
+    let glyph = match provider_logo(provider, color) {
         Some(image) => img(image)
             .flex_none()
             .size(zoomed(ROW_ICON, cx))
@@ -170,20 +214,40 @@ fn provider_icon(provider: &str, color: Hsla, cx: &App) -> AnyElement {
             .with_size(zoomed(ROW_ICON, cx))
             .text_color(color)
             .into_any_element(),
-    }
+    };
+    // The badge is absolute inside the icon's box, as `WorkspaceTabIcon` lays it out.
+    div()
+        .flex_none()
+        .relative()
+        .size(zoomed(ROW_ICON, cx))
+        .child(glyph)
+        .children(badge)
+        .into_any_element()
 }
 
-/// The pill; `None` with no child and no bulk archive in flight.
+/// The pill; `None` with no child and no bulk archive in flight. `ring` is the composer's
+/// cached ring for the running segment. `parent_agent_id` is the composer's agent, the parent
+/// of every row. `supports_open` gates the provider row press on the host capability.
 pub fn subagents_pill(
     rows: Vec<SubagentRow>,
+    parent_agent_id: &str,
     progress: Option<(usize, usize)>,
+    ring: Option<Entity<RunningRing>>,
+    badges: HashMap<String, Entity<StatusBadge>>,
+    supports_open: bool,
     actions: SubagentActions,
 ) -> Option<AnyElement> {
     if rows.is_empty() && progress.is_none() {
         return None;
     }
-    let (segments, label) = pill_segments(&rows);
+    let (mut segments, label) = pill_segments(&rows);
+    for segment in &mut segments {
+        if segment.bucket == Some(StatusBucket::Running) {
+            segment.ring = ring.clone();
+        }
+    }
     let finished = finished_paseo_ids(&rows).len();
+    let parent_agent_id = parent_agent_id.to_string();
     Some(track_pill(
         "subagents-track-header",
         segments,
@@ -233,17 +297,24 @@ pub fn subagents_pill(
                 let paseo = row.kind == SubagentKind::Paseo;
                 let group: SharedString = format!("subagent-row-{}", row.id).into();
                 let (open, archive) = (actions.open.clone(), actions.archive.clone());
-                let (open_id, archive_id) = (row.id.clone(), row.id.clone());
+                let open_provider = actions.open_provider.clone();
+                let archive_id = row.id.clone();
                 let archive_label = format!("Archive {label}");
-                // A provider child opens nothing: the app has no provider-subagent tab.
+                let click = row_click(row, &parent_agent_id, supports_open);
+                let pressable = click.is_some();
                 track_row(
                     ElementId::Name(format!("subagents-track-row-{}", row.id).into()),
                     label.clone(),
-                    paseo,
+                    pressable,
                     cx,
                 )
                 .group(group.clone())
-                .child(provider_icon(&row.provider, t.foreground_muted, cx))
+                .child(provider_icon(
+                    &row.provider,
+                    t.foreground_muted,
+                    badges.get(&row.id).cloned(),
+                    cx,
+                ))
                 .child(
                     div()
                         .flex_grow(1.)
@@ -262,12 +333,26 @@ pub fn subagents_pill(
                         .text_color(t.foreground_muted)
                         .child(subtitle)
                 }))
-                .when(paseo, |line| {
+                .when_some(click, |line, click| {
                     let dismiss = cx.listener(move |state: &mut PopoverState, _, window, cx| {
-                        open(&open_id, cx);
+                        match &click {
+                            RowClick::Agent(agent_id) => open(agent_id, cx),
+                            RowClick::Provider {
+                                parent_agent_id,
+                                subagent_id,
+                            } => open_provider(parent_agent_id, subagent_id, cx),
+                        }
                         state.dismiss(window, cx);
                     });
-                    line.on_click(dismiss).child(
+                    line.on_click(dismiss)
+                })
+                // A provider row on a host without the child timeline opens nothing, as before.
+                .when(
+                    row.kind == SubagentKind::Provider && !supports_open,
+                    |line| line.tooltip(|window, cx| Tooltip::new(UPDATE_HOST).build(window, cx)),
+                )
+                .when(paseo, |line| {
+                    line.child(
                         // Shown on hover by opacity, never by `display` (CONTEXT).
                         div()
                             .id(ElementId::Name(
@@ -310,7 +395,8 @@ pub fn subagents_pill(
 mod tests {
     // Named imports: `use super::*` would bring in GPUI's `test` macro over `#[test]`.
     use super::{
-        ArchiveFinished, finished_paseo_ids, is_finished, pill_segments, row_label, row_subtitle,
+        ArchiveFinished, RowClick, finished_paseo_ids, is_finished, pill_segments, row_click,
+        row_label, row_subtitle,
     };
     use crate::tracks::TrackSegment;
     use bachuc_client::{SubagentKind, SubagentRow};
@@ -366,6 +452,7 @@ mod tests {
             segments,
             [TrackSegment {
                 bucket: None,
+                ring: None,
                 text: "2 subagents".into()
             }]
         );
@@ -389,6 +476,29 @@ mod tests {
         let mut provider = row("d", SubagentKind::Provider, "running", false);
         provider.subtitle = Some("opus".into());
         assert_eq!(row_subtitle(&provider).as_deref(), Some("opus"));
+    }
+
+    #[test]
+    fn a_row_press_opens_its_agent_or_its_provider_subagent_tab() {
+        let paseo = row("p1", SubagentKind::Paseo, "running", false);
+        assert_eq!(
+            row_click(&paseo, "parent", true),
+            Some(RowClick::Agent("p1".into()))
+        );
+        assert_eq!(
+            row_click(&paseo, "parent", false),
+            Some(RowClick::Agent("p1".into()))
+        );
+        let provider = row("c1", SubagentKind::Provider, "running", false);
+        assert_eq!(
+            row_click(&provider, "parent", true),
+            Some(RowClick::Provider {
+                parent_agent_id: "parent".into(),
+                subagent_id: "c1".into(),
+            })
+        );
+        // Without `projectedSubagentTimeline` the row opens nothing, as before.
+        assert_eq!(row_click(&provider, "parent", false), None);
     }
 
     #[test]

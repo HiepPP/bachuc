@@ -63,7 +63,7 @@ cd packages/desktop-gpui
 
 ## Daily app
 
-`scripts/gpui-release.sh` builds the bundle, sets `BACHUC_HOST=release` in its `LSEnvironment`, signs it, and installs it as `/Applications/Bachuc GPUI.app`. Quit that app before you run the script. The script never stops the daemon, so it can run inside Paseo.
+`scripts/gpui-release.sh` builds the bundle, sets `BACHUC_HOST=release` in its `LSEnvironment`, signs it, installs it as `/Applications/Bachuc GPUI.app`, and opens it. It quits the running app with `SIGTERM` only after the build, and stops if the app has not quit after 60 s. `--skip-build` installs the bundle already in `target/bundles`. The script never stops the daemon, so agents keep running and it can run inside Paseo. The `bachuc-gpui-build` alias in `~/.zshrc` runs it.
 
 - The GPUI app does not start the daemon (ADR-0041). The script installs the login item `io.github.hieppp.bachuc-daemon`, which runs `paseo daemon start` at login. Its log is `~/Library/Logs/Bachuc/daemon-login.log`.
 - The login item runs through a login shell, because agents need the user's PATH. The Electron app gets the same env from `login-shell-env.ts`.

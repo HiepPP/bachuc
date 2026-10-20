@@ -3,12 +3,13 @@
 # app on the release daemon (~/.bachuc on 127.0.0.1:6767). It also installs a login item that
 # starts the release daemon, so the Electron app does not need to run.
 #
-#   scripts/gpui-release.sh              build, install, add the login item
+#   scripts/gpui-release.sh              build, quit the app, install, add the login item, open
 #   scripts/gpui-release.sh --skip-build install the bundle already in target/bundles
 #
-# The script never stops or restarts the daemon, so it can run inside Paseo. Quit the installed
-# GPUI app first. /Applications/Bachuc.app must stay installed: the daemon and the paseo CLI run
-# on its runtime.
+# The script quits the running GPUI app only after the build, so the app is down only while it
+# installs. It never stops or restarts the daemon, so agents keep running and it can run inside
+# Paseo. /Applications/Bachuc.app must stay installed: the daemon and the paseo CLI run on its
+# runtime.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,15 +34,24 @@ for arg in "$@"; do
   esac
 done
 
-if pgrep -f "$APP/Contents/MacOS/" >/dev/null; then
-  echo "Quit $NAME first, then run this script again." >&2
-  exit 1
-fi
-
 if [ "$skip_build" -eq 0 ]; then
   "$GPUI_DIR/bundle.sh" bin bachuc-desktop "$NAME" "$BUNDLE_ID" >/dev/null
 fi
 [ -d "$BUILD_APP" ] || { echo "No bundle at $BUILD_APP" >&2; exit 1; }
+
+pids="$(pgrep -f "$APP/Contents/MacOS/" || true)"
+if [ -n "$pids" ]; then
+  echo "Quitting $NAME (PID $(echo $pids))"
+  kill -TERM $pids
+  for _ in $(seq 60); do
+    pgrep -f "$APP/Contents/MacOS/" >/dev/null || break
+    sleep 1
+  done
+  if pgrep -f "$APP/Contents/MacOS/" >/dev/null; then
+    echo "$NAME did not quit within 60 s; quit it, then run: $0 --skip-build" >&2
+    exit 1
+  fi
+fi
 
 plist="$BUILD_APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Delete :LSEnvironment" "$plist" 2>/dev/null || true
@@ -92,3 +102,6 @@ if ! launchctl print "gui/$(id -u)/$AGENT_LABEL" >/dev/null 2>&1; then
   launchctl bootstrap "gui/$(id -u)" "$AGENT_PLIST"
 fi
 echo "Login item $AGENT_LABEL starts the release daemon at login (log: $AGENT_LOG)"
+
+open "$APP"
+echo "Opened $APP"

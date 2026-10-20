@@ -7,6 +7,7 @@
 
 mod custom;
 pub mod metrics;
+pub mod motion;
 mod syntax;
 mod tokens;
 
@@ -532,7 +533,8 @@ fn apply(cx: &mut App) {
         c.accent_foreground = t.foreground;
         c.popover = t.popover;
         c.popover_foreground = t.foreground;
-        c.link = t.accent;
+        // Electron's `link` color is `accentBright` (`markdown-styles.ts`).
+        c.link = t.accent_bright;
         c.link_hover = t.accent_bright;
         c.link_active = t.accent;
 

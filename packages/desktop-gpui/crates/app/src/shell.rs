@@ -11,7 +11,7 @@ use crate::chrome::{ExplorerResize, HANDLE_WIDTH, HeaderMenu, NoPreview};
 use crate::dock;
 use crate::new_workspace::{self, NewWorkspacePreset, NewWorkspaceScreen, SidePanelChanged};
 use crate::panes::{
-    AgentPane, Launch, LaunchItem, LazyAgentPane, NewTabPane, PaneFrame, launch_hints,
+    AgentPane, Launch, LaunchItem, LazyAgentPane, NewTabPane, PaneFrame, SubagentPane, launch_hints,
 };
 use crate::plugin_views::{
     OpenSurface, PluginViews, surface_body, surface_header, surface_overlay, surface_page,
@@ -30,15 +30,15 @@ use crate::state::{
 use crate::toast::{ToastStack, render_toasts};
 use crate::workspace_draft::{self, WorkspaceDraftPane};
 use bachuc_client::{
-    AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, Client, ClientEvent,
-    CreatedWorkspace, DirectoryEvent, GitStatusEvent, HostConfig, PrStatus, ProjectNode,
-    ThinkingControls, TimelineState, load_hosts, resume_command,
+    AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, AttentionReason, Client,
+    ClientEvent, CreatedWorkspace, DirectoryEvent, GitStatusEvent, HostConfig, PrStatus,
+    ProjectNode, ThinkingControls, TimelineState, load_hosts, resume_command,
 };
 use bachuc_command::{
     CommandCenter, CommandEvent, CommandFileEvent, FileResult, Shortcut, ShortcutsDialog,
     ShortcutsDialogEvent, data_dir, load_shortcuts,
 };
-use bachuc_composer::{Composer, ComposerEvent, DraftSeed};
+use bachuc_composer::{Composer, ComposerEvent, DraftSeed, row_label};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_explorer::{
     DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerFileEvent, ExplorerNoticeEvent,
@@ -52,8 +52,10 @@ use bachuc_plugin_host::{
 };
 use bachuc_settings::appearance::{Appearance, ZoomDirection, zoom_step};
 use bachuc_settings::{Settings, SettingsEvent};
-use bachuc_sidebar::model::archive_prompt;
-use bachuc_sidebar::{Sidebar, SidebarEvent, SidebarNavEvent, SidebarPluginEvent};
+use bachuc_sidebar::model::{StatusBucket, archive_prompt, bucket_for_agent};
+use bachuc_sidebar::{
+    Knockout, Sidebar, SidebarEvent, SidebarNavEvent, SidebarPluginEvent, StatusBadge,
+};
 use bachuc_terminal::{TerminalEvent, TerminalView};
 use bachuc_theme::metrics::TRAFFIC_LIGHT_WIDTH;
 use bachuc_theme::{tokens, zoomed};
@@ -97,6 +99,9 @@ pub(crate) enum PaneContent {
     Agent(Entity<AgentPane>),
     /// An agent tab not shown yet; `materialize` makes its `AgentPane`.
     LazyAgent(Entity<LazyAgentPane>),
+    /// A provider subagent's read-only timeline. It is not a daemon agent, so its identity
+    /// carries no `agent:` prefix.
+    Subagent(Entity<SubagentPane>),
     /// The workspace draft tab.
     Draft(Entity<WorkspaceDraftPane>),
     /// The New workspace screen, in a tab of the home view.
@@ -120,6 +125,7 @@ impl PaneContent {
         match self {
             PaneContent::Agent(view) => view.clone().into(),
             PaneContent::LazyAgent(view) => view.clone().into(),
+            PaneContent::Subagent(view) => view.clone().into(),
             PaneContent::Draft(view) => view.clone().into(),
             PaneContent::NewWorkspace(view) => view.clone().into(),
             PaneContent::History(view) => view.clone().into(),
@@ -138,6 +144,7 @@ impl PaneContent {
         matches!(
             self,
             PaneContent::Agent(_)
+                | PaneContent::Subagent(_)
                 | PaneContent::Draft(_)
                 | PaneContent::NewWorkspace(_)
                 | PaneContent::Terminal(_)
@@ -159,6 +166,8 @@ impl PaneContent {
                     .unwrap_or_default(),
             },
             PaneContent::File(_) => TabKind::File,
+            // A provider subagent is not a daemon agent, so it gets no agent tab menu.
+            PaneContent::Subagent(_) => TabKind::Other,
             // History, Pull request, and the other panes have no tab menu of their own.
             _ => TabKind::Other,
         }
@@ -184,6 +193,9 @@ pub(crate) struct Pane {
     /// The provider of an agent tab whose logo is set; `None` while the agent is not in the
     /// list yet, so `complete_logos` can set it once.
     provider: Option<String>,
+    /// The tab's status badge. The shell keeps it to follow the agent's bucket; the workspace
+    /// only holds its view.
+    badge: Option<Entity<StatusBadge>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -241,6 +253,8 @@ pub struct Shell {
     plugin_host: Option<Entity<PluginHost>>,
     /// The workspace and agent last given to `PluginHost::set_active`.
     plugin_active: (Option<String>, Option<String>),
+    /// The agent whose tab is on screen; a page surface hides it.
+    viewed_agent: Option<String>,
     /// The plugin surface on screen, as a page or an overlay.
     surface: Option<OpenSurface>,
     /// An agent opened at its latest prompt before its timeline loaded.
@@ -337,6 +351,7 @@ impl Shell {
             pending_open: None,
             plugin_host,
             plugin_active: (None, None),
+            viewed_agent: None,
             surface: None,
             pending_prompt: None,
             plugin_views: PluginViews::default(),
@@ -534,6 +549,22 @@ impl Shell {
             .collect();
         for (workspace_id, key, title) in titles {
             self.retitle(&workspace_id, &key, title, cx);
+        }
+        // A tab's badge follows its agent's bucket. The badge keeps its own ring, so only a
+        // bucket change redraws it.
+        for open in self.workspaces.values() {
+            for pane in open.panes.values() {
+                let Some(agent_id) = pane.identity.as_deref().and_then(agent_of_key) else {
+                    continue;
+                };
+                let Some(badge) = &pane.badge else {
+                    continue;
+                };
+                let bucket = self.agent_bucket(agent_id, cx);
+                if badge.read(cx).bucket() != bucket {
+                    badge.update(cx, |badge, cx| badge.set_bucket(bucket, cx));
+                }
+            }
         }
         self.complete_logos(cx);
     }
@@ -814,6 +845,7 @@ impl Shell {
     /// Tells the plugin host the selected workspace and the focused agent tab, on a change.
     fn sync_plugin_active(&mut self, cx: &mut Context<Self>) {
         self.sync_chat_target(cx);
+        self.sync_viewed_agent(cx);
         let workspace = (self.selected != HOME).then(|| self.selected.clone());
         let active = (workspace, self.active_agent(cx));
         if active == self.plugin_active {
@@ -828,6 +860,29 @@ impl Shell {
         }
         if let Some(host) = self.plugin_host.clone() {
             host.update(cx, |host, cx| host.set_active(active.0, active.1, cx));
+        }
+    }
+
+    /// Marks read the agent the user leaves and the agent the user opens, as Electron's
+    /// `useAgentAttentionClear` does on focus entry and blur. The Board fades a read card.
+    fn sync_viewed_agent(&mut self, cx: &mut Context<Self>) {
+        let page = self
+            .surface
+            .as_ref()
+            .is_some_and(|open| open.presentation == SurfacePresentation::Page);
+        let viewed = if page { None } else { self.active_agent(cx) };
+        if viewed == self.viewed_agent {
+            return;
+        }
+        let left = std::mem::replace(&mut self.viewed_agent, viewed.clone());
+        let clear: Vec<String> = [left, viewed]
+            .into_iter()
+            .flatten()
+            .filter(|id| clears_attention(self.client.read(cx).agent_attention(id)))
+            .collect();
+        for id in clear {
+            self.client
+                .update(cx, |client, cx| client.clear_agent_attention(&id, cx));
         }
     }
 
@@ -1038,6 +1093,7 @@ impl Shell {
         };
         match &pane.content {
             PaneContent::Agent(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
+            PaneContent::Subagent(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
             PaneContent::Draft(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
             PaneContent::NewWorkspace(view) => view.update(cx, |pane, cx| pane.focus(window, cx)),
             // A terminal focuses itself when it opens and on a click.
@@ -1081,6 +1137,16 @@ impl Shell {
         let logo = provider
             .as_deref()
             .and_then(|provider| provider_logo(provider, tokens(cx).foreground));
+        // The tab badge follows the agent's bucket from the first frame; the tab bar surface is
+        // `surface0` at rest.
+        let (badge, badge_view) = match identity.as_deref().and_then(agent_of_key) {
+            Some(agent_id) => {
+                let bucket = self.agent_bucket(agent_id, cx);
+                let badge = cx.new(|cx| StatusBadge::new(bucket, Knockout::Surface0, cx));
+                (Some(badge.clone()), Some(AnyView::from(badge)))
+            }
+            None => (None, None),
+        };
         let Some(open) = self.workspaces.get_mut(workspace_id) else {
             content.release(cx);
             return;
@@ -1102,6 +1168,7 @@ impl Shell {
                 frame,
                 title,
                 provider,
+                badge,
                 _subscriptions: subscriptions,
             },
         );
@@ -1113,6 +1180,7 @@ impl Shell {
             workspace.open(item, window, cx);
             workspace.set_item_kind(&key, kind, cx);
             workspace.set_item_logo(&key, logo, cx);
+            workspace.set_item_badge(&key, badge_view, cx);
         });
         // A tab replaced in place (a new tab that becomes a draft) emits no `Activated`.
         self.sync_chat_target(cx);
@@ -1128,6 +1196,23 @@ impl Shell {
             .find(|agent| agent.id == agent_id)
             .or_else(|| client.archived_agent(agent_id))
             .map(|agent| agent.provider.clone())
+    }
+
+    /// The agent's tab bucket, from its status, permissions, and attention
+    /// (`bucket_for_agent`). A tab whose agent left the list is done.
+    fn agent_bucket(&self, agent_id: &str, cx: &App) -> StatusBucket {
+        let client = self.client.read(cx);
+        let Some(agent) = client.agents().iter().find(|agent| agent.id == agent_id) else {
+            return StatusBucket::Done;
+        };
+        let (requires_attention, reason) =
+            client.agent_attention(agent_id).unwrap_or((false, None));
+        bucket_for_agent(
+            &agent.status,
+            agent.pending_permissions,
+            requires_attention,
+            reason.map(attention_name),
+        )
     }
 
     /// Rebuilds the logo of each agent tab when the theme changed its fill.
@@ -2064,6 +2149,7 @@ impl Shell {
     fn open_surface(&mut self, surface: OpenSurface, window: &mut Window, cx: &mut Context<Self>) {
         self.settings = None;
         self.set_surface(Some(surface), cx);
+        self.sync_viewed_agent(cx);
         window.focus(&self.focus, cx);
         cx.notify();
     }
@@ -2204,6 +2290,7 @@ impl Shell {
     fn close_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.surface.is_some() {
             self.set_surface(None, cx);
+            self.sync_viewed_agent(cx);
             self.refocus(window, cx);
             cx.notify();
         }
@@ -2453,6 +2540,10 @@ impl Shell {
                         this.open_workspace_changes(workspace_id, window, cx)
                     }
                     ComposerEvent::OpenAgent { agent_id } => this.open_agent(agent_id, window, cx),
+                    ComposerEvent::OpenProviderSubagent {
+                        parent_agent_id,
+                        subagent_id,
+                    } => this.open_provider_subagent(parent_agent_id, subagent_id, window, cx),
                     _ => {}
                 }
             }),
@@ -2845,6 +2936,104 @@ impl Shell {
             Some(key) => self.activate_key(&workspace_id, &key, window, cx),
             None => self.open_agent_pane(&workspace_id, None, agent_id, window, cx),
         }
+        if workspace_id == HOME {
+            self.select(HOME.to_string(), window, cx);
+        }
+    }
+
+    /// Opens a provider child's read-only timeline in the parent's workspace, or focuses the
+    /// tab already open for it (`subagents/track.tsx` -> `provider-subagent-panel.tsx`).
+    fn open_provider_subagent(
+        &mut self,
+        parent_agent_id: &str,
+        subagent_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.client.read(cx).supports_provider_subagent_timeline() {
+            return;
+        }
+        let identity = provider_subagent_identity(parent_agent_id, subagent_id);
+        let target = {
+            let client = self.client.read(cx);
+            let workspace_id = agent_workspace(client.projects(), client.agents(), parent_agent_id);
+            agent_target(client.projects(), workspace_id.as_deref())
+        };
+        let workspace_id = match target {
+            Some(workspace_id) => {
+                self.open_workspace(workspace_id.clone(), window, cx);
+                workspace_id
+            }
+            None => {
+                self.ensure_home(window, cx);
+                self.close_page_surface(cx);
+                HOME.to_string()
+            }
+        };
+        if let Some(key) = self.find_identity(&workspace_id, &identity) {
+            self.activate_key(&workspace_id, &key, window, cx);
+            if workspace_id == HOME {
+                self.select(HOME.to_string(), window, cx);
+            }
+            return;
+        }
+        let row = self
+            .client
+            .read(cx)
+            .subagents(parent_agent_id)
+            .into_iter()
+            .find(|row| row.id == subagent_id);
+        let title: SharedString = row
+            .as_ref()
+            .and_then(row_label)
+            .map(Into::into)
+            .unwrap_or_else(|| "Subagent".into());
+        let provider = row
+            .as_ref()
+            .map(|row| row.provider.clone())
+            .unwrap_or_default();
+        let subtitle = row.as_ref().and_then(|row| {
+            let subtitle = row.subtitle.as_deref()?.trim();
+            (!subtitle.is_empty()).then(|| subtitle.to_string())
+        });
+        let key = self.next_key();
+        let client = self.client.clone();
+        let diagrams = self.diagrams.clone();
+        let timeline_key = bachuc_client::provider_subagent_key(parent_agent_id, subagent_id);
+        let view =
+            cx.new(|cx| SubagentPane::new(client, timeline_key, subtitle, diagrams, window, cx));
+        let timeline = view.read(cx).timeline.clone();
+        let subscriptions = vec![cx.subscribe_in(
+            &timeline,
+            window,
+            |this: &mut Shell, _, event: &TimelineEvent, window, cx| {
+                let TimelineEvent::OpenFile { cwd, path, line } = event;
+                this.open_file(cwd, path, *line, window, cx);
+            },
+        )];
+        let icon = agent_icon(Some(&provider));
+        self.put_pane(
+            &workspace_id,
+            key.clone(),
+            Some(identity),
+            title,
+            icon,
+            PaneContent::Subagent(view.clone()),
+            subscriptions,
+            window,
+            cx,
+        );
+        // `put_pane` reads a logo only for an agent key, so the child's provider logo is set
+        // here. The pane keeps the provider, so a theme change rebuilds it.
+        let logo = provider_logo(&provider, tokens(cx).foreground);
+        if let Some(open) = self.workspaces.get_mut(&workspace_id) {
+            if let Some(pane) = open.panes.get_mut(&key) {
+                pane.provider = Some(provider);
+            }
+            open.view
+                .update(cx, |workspace, cx| workspace.set_item_logo(&key, logo, cx));
+        }
+        view.update(cx, |pane, cx| pane.focus(window, cx));
         if workspace_id == HOME {
             self.select(HOME.to_string(), window, cx);
         }
@@ -3594,6 +3783,21 @@ impl Shell {
     }
 }
 
+/// Whether opening or leaving an agent marks it read (`shouldClearAgentAttention`): a finished
+/// or failed turn only, never a wait for permission.
+pub(crate) fn clears_attention(attention: Option<(bool, Option<AttentionReason>)>) -> bool {
+    matches!(attention, Some((true, reason)) if reason != Some(AttentionReason::Permission))
+}
+
+/// The wire name of an attention reason, as `bucket_for_agent` reads it.
+fn attention_name(reason: AttentionReason) -> &'static str {
+    match reason {
+        AttentionReason::Finished => "finished",
+        AttentionReason::Error => "error",
+        AttentionReason::Permission => "permission",
+    }
+}
+
 fn copy_text(text: String, notice: &'static str, window: &mut Window, cx: &mut App) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
     window.push_notification(notice, cx);
@@ -3881,6 +4085,15 @@ pub(crate) fn closes_surface_on_open(presentation: SurfacePresentation) -> bool 
     presentation == SurfacePresentation::Page
 }
 
+/// The tab identity of a provider subagent. The `subagent:` prefix is not `agent:`, so
+/// `agent_of_key` never treats the child as a daemon agent.
+pub(crate) fn provider_subagent_identity(parent_agent_id: &str, subagent_id: &str) -> String {
+    format!(
+        "subagent:{}",
+        bachuc_client::provider_subagent_key(parent_agent_id, subagent_id)
+    )
+}
+
 /// The workspace that holds an agent: the tree's, else the agent's own `workspace_id` when the
 /// tree lists that workspace.
 pub(crate) fn agent_workspace(
@@ -4127,14 +4340,14 @@ mod tests {
         FORK_MISSING_WORKSPACE, FocusKind, PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE,
         RESUME_ID_UNAVAILABLE, REWIND_FAILED, RenameTarget, SHELL_CONTEXT, TERMINAL_NOT_OPEN,
         agent_open, agent_target, agent_workspace, auto_opens_pr_tab, chat_target,
-        closes_surface_on_open, focus_kind, fork_attachment_label, fork_draft_seed, fork_error,
-        fork_tab_cwd, fork_workspace_preset, has_pull_request, latest_prompt_reveal, reload_error,
-        rename_target, resume_text, rewind_error, should_redirect_to_composer,
-        workspace_file_attachment,
+        clears_attention, closes_surface_on_open, focus_kind, fork_attachment_label,
+        fork_draft_seed, fork_error, fork_tab_cwd, fork_workspace_preset, has_pull_request,
+        latest_prompt_reveal, reload_error, rename_target, resume_text, rewind_error,
+        should_redirect_to_composer, workspace_file_attachment,
     };
     use bachuc_client::{
-        AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, PrMergeCapability, PrStatus,
-        ProjectNode, ThinkingControls, TimelineState, WorkspaceNode,
+        AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, AttentionReason,
+        PrMergeCapability, PrStatus, ProjectNode, ThinkingControls, TimelineState, WorkspaceNode,
     };
     use bachuc_composer::DraftSeed;
 
@@ -4458,6 +4671,22 @@ mod tests {
             fork_error("Update the host to use this."),
             "Update the host to use this."
         );
+    }
+
+    #[test]
+    fn opening_an_agent_reads_a_finished_or_failed_turn_but_not_a_permission_wait() {
+        assert!(clears_attention(Some((
+            true,
+            Some(AttentionReason::Finished)
+        ))));
+        assert!(clears_attention(Some((true, Some(AttentionReason::Error)))));
+        assert!(clears_attention(Some((true, None))));
+        assert!(!clears_attention(Some((
+            true,
+            Some(AttentionReason::Permission)
+        ))));
+        assert!(!clears_attention(Some((false, None))));
+        assert!(!clears_attention(None));
     }
 
     #[test]
