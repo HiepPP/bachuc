@@ -253,6 +253,8 @@ pub struct Shell {
     plugin_host: Option<Entity<PluginHost>>,
     /// The workspace and agent last given to `PluginHost::set_active`.
     plugin_active: (Option<String>, Option<String>),
+    /// The agent whose tab is on screen; a page surface hides it.
+    viewed_agent: Option<String>,
     /// The plugin surface on screen, as a page or an overlay.
     surface: Option<OpenSurface>,
     /// An agent opened at its latest prompt before its timeline loaded.
@@ -349,6 +351,7 @@ impl Shell {
             pending_open: None,
             plugin_host,
             plugin_active: (None, None),
+            viewed_agent: None,
             surface: None,
             pending_prompt: None,
             plugin_views: PluginViews::default(),
@@ -842,6 +845,7 @@ impl Shell {
     /// Tells the plugin host the selected workspace and the focused agent tab, on a change.
     fn sync_plugin_active(&mut self, cx: &mut Context<Self>) {
         self.sync_chat_target(cx);
+        self.sync_viewed_agent(cx);
         let workspace = (self.selected != HOME).then(|| self.selected.clone());
         let active = (workspace, self.active_agent(cx));
         if active == self.plugin_active {
@@ -856,6 +860,29 @@ impl Shell {
         }
         if let Some(host) = self.plugin_host.clone() {
             host.update(cx, |host, cx| host.set_active(active.0, active.1, cx));
+        }
+    }
+
+    /// Marks read the agent the user leaves and the agent the user opens, as Electron's
+    /// `useAgentAttentionClear` does on focus entry and blur. The Board fades a read card.
+    fn sync_viewed_agent(&mut self, cx: &mut Context<Self>) {
+        let page = self
+            .surface
+            .as_ref()
+            .is_some_and(|open| open.presentation == SurfacePresentation::Page);
+        let viewed = if page { None } else { self.active_agent(cx) };
+        if viewed == self.viewed_agent {
+            return;
+        }
+        let left = std::mem::replace(&mut self.viewed_agent, viewed.clone());
+        let clear: Vec<String> = [left, viewed]
+            .into_iter()
+            .flatten()
+            .filter(|id| clears_attention(self.client.read(cx).agent_attention(id)))
+            .collect();
+        for id in clear {
+            self.client
+                .update(cx, |client, cx| client.clear_agent_attention(&id, cx));
         }
     }
 
@@ -2122,6 +2149,7 @@ impl Shell {
     fn open_surface(&mut self, surface: OpenSurface, window: &mut Window, cx: &mut Context<Self>) {
         self.settings = None;
         self.set_surface(Some(surface), cx);
+        self.sync_viewed_agent(cx);
         window.focus(&self.focus, cx);
         cx.notify();
     }
@@ -2262,6 +2290,7 @@ impl Shell {
     fn close_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.surface.is_some() {
             self.set_surface(None, cx);
+            self.sync_viewed_agent(cx);
             self.refocus(window, cx);
             cx.notify();
         }
@@ -3754,6 +3783,12 @@ impl Shell {
     }
 }
 
+/// Whether opening or leaving an agent marks it read (`shouldClearAgentAttention`): a finished
+/// or failed turn only, never a wait for permission.
+pub(crate) fn clears_attention(attention: Option<(bool, Option<AttentionReason>)>) -> bool {
+    matches!(attention, Some((true, reason)) if reason != Some(AttentionReason::Permission))
+}
+
 /// The wire name of an attention reason, as `bucket_for_agent` reads it.
 fn attention_name(reason: AttentionReason) -> &'static str {
     match reason {
@@ -4305,14 +4340,14 @@ mod tests {
         FORK_MISSING_WORKSPACE, FocusKind, PromptReveal, RELOAD_FAILED, RESUME_COMMAND_UNAVAILABLE,
         RESUME_ID_UNAVAILABLE, REWIND_FAILED, RenameTarget, SHELL_CONTEXT, TERMINAL_NOT_OPEN,
         agent_open, agent_target, agent_workspace, auto_opens_pr_tab, chat_target,
-        closes_surface_on_open, focus_kind, fork_attachment_label, fork_draft_seed, fork_error,
-        fork_tab_cwd, fork_workspace_preset, has_pull_request, latest_prompt_reveal, reload_error,
-        rename_target, resume_text, rewind_error, should_redirect_to_composer,
-        workspace_file_attachment,
+        clears_attention, closes_surface_on_open, focus_kind, fork_attachment_label,
+        fork_draft_seed, fork_error, fork_tab_cwd, fork_workspace_preset, has_pull_request,
+        latest_prompt_reveal, reload_error, rename_target, resume_text, rewind_error,
+        should_redirect_to_composer, workspace_file_attachment,
     };
     use bachuc_client::{
-        AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, PrMergeCapability, PrStatus,
-        ProjectNode, ThinkingControls, TimelineState, WorkspaceNode,
+        AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, AttentionReason,
+        PrMergeCapability, PrStatus, ProjectNode, ThinkingControls, TimelineState, WorkspaceNode,
     };
     use bachuc_composer::DraftSeed;
 
@@ -4636,6 +4671,22 @@ mod tests {
             fork_error("Update the host to use this."),
             "Update the host to use this."
         );
+    }
+
+    #[test]
+    fn opening_an_agent_reads_a_finished_or_failed_turn_but_not_a_permission_wait() {
+        assert!(clears_attention(Some((
+            true,
+            Some(AttentionReason::Finished)
+        ))));
+        assert!(clears_attention(Some((true, Some(AttentionReason::Error)))));
+        assert!(clears_attention(Some((true, None))));
+        assert!(!clears_attention(Some((
+            true,
+            Some(AttentionReason::Permission)
+        ))));
+        assert!(!clears_attention(Some((false, None))));
+        assert!(!clears_attention(None));
     }
 
     #[test]

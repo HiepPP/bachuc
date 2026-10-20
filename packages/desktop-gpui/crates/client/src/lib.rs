@@ -427,6 +427,12 @@ impl Client {
         self.publish(cx);
     }
 
+    /// Marks the agent's finished or failed turn read on the host.
+    pub fn clear_agent_attention(&mut self, agent_id: &str, cx: &mut Context<Client>) {
+        self.core.clear_agent_attention(agent_id);
+        self.publish(cx);
+    }
+
     pub fn archive_agent(&mut self, agent_id: &str, cx: &mut Context<Client>) {
         self.core.archive_agent(agent_id);
         self.publish(cx);

@@ -1737,6 +1737,13 @@ impl ClientCore {
             "requestId": request_id,
             "response": response,
         }));
+    pub fn clear_agent_attention(&mut self, agent_id: &str) {
+        let _ = self.request(
+            json!({"type": "clear_agent_attention", "agentId": agent_id}),
+            Pending::Action("clear_agent_attention"),
+        );
+    }
+
     }
 
     /// Sends a request whose answer resolves the returned receiver.
