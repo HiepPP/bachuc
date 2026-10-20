@@ -12,6 +12,7 @@ bachuc-plugin-host = { path = "../plugin-host" }
 bachuc-theme = { path = "../theme" }
 gpui-kit.workspace = true
 log = "0.4"
+rusty-leveldb = "4"
 serde_json = "1"
 
 # The fake daemon of the client tests, included by tests/fake_daemon.rs.

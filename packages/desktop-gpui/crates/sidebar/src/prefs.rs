@@ -2,8 +2,9 @@
 //! Same pattern as the app's `LayoutPrefs`: each field falls back to its default on its own,
 //! and a save goes through a temp file and a rename.
 
-use crate::model::{Group, Grouping, StatusBucket, ViewState};
-use std::collections::HashSet;
+use crate::electron_order::read_electron_order;
+use crate::model::{Group, Grouping, SidebarOrder, StatusBucket, ViewState};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 const FILE: &str = "sidebar.json";
@@ -121,6 +122,8 @@ pub struct SidebarPrefs {
     pub checks_display: ChecksDisplay,
     /// `None` leaves the slot empty. The default is the diff stats, as in Electron's settings.
     pub trailing: Option<Trailing>,
+    /// Whether the one-time import of Electron's saved order already ran (ADR-0057).
+    pub electron_order_imported: bool,
 }
 
 impl Default for SidebarPrefs {
@@ -131,6 +134,7 @@ impl Default for SidebarPrefs {
             row_items: RowItems::default(),
             checks_display: ChecksDisplay::default(),
             trailing: Some(Trailing::DiffStats),
+            electron_order_imported: false,
         }
     }
 }
@@ -176,6 +180,18 @@ impl SidebarPrefs {
                     .into_iter()
                     .map(String::from)
                     .collect(),
+                order: SidebarOrder {
+                    project_order: string_list(&value["projectOrder"]),
+                    workspace_order_by_project: value["workspaceOrderByProject"]
+                        .as_object()
+                        .map(|map| {
+                            map.iter()
+                                .map(|(key, list)| (key.clone(), string_list(list)))
+                                .collect::<HashMap<_, _>>()
+                        })
+                        .unwrap_or_default(),
+                    pinned_workspace_order: string_list(&value["pinnedWorkspaceOrder"]),
+                },
             },
             title_source: match value["titleSource"].as_str() {
                 Some("branch") => TitleSource::Branch,
@@ -198,6 +214,7 @@ impl SidebarPrefs {
                 Some("none") => None,
                 _ => defaults.trailing,
             },
+            electron_order_imported: value["electronOrderImported"].as_bool().unwrap_or(false),
         }
     }
 
@@ -228,6 +245,14 @@ impl SidebarPrefs {
             "collapsedStatuses": collapsed_statuses,
             "projectFilter": sorted(&self.view.project_filter),
             "labelFilter": sorted(&self.view.label_filter),
+            "projectOrder": self.view.order.project_order,
+            "workspaceOrderByProject": self
+                .view
+                .order
+                .workspace_order_by_project
+                .iter()
+                .collect::<BTreeMap<_, _>>(),
+            "pinnedWorkspaceOrder": self.view.order.pinned_workspace_order,
             "titleSource": match self.title_source {
                 TitleSource::Title => "title",
                 TitleSource::Branch => "branch",
@@ -249,6 +274,7 @@ impl SidebarPrefs {
                 Some(Trailing::LastActivity) => "timestamp",
                 None => "none",
             },
+            "electronOrderImported": self.electron_order_imported,
         })
         .to_string()
     }
@@ -257,6 +283,29 @@ impl SidebarPrefs {
         std::fs::read_to_string(dir.join(FILE))
             .map(|text| Self::parse(&text))
             .unwrap_or_default()
+    }
+
+    /// [`SidebarPrefs::load_from`], then the one-time import of Electron's saved order when the
+    /// flag is not set. The flag is set after the first try, also when the folder is missing or
+    /// the read fails, so Electron's store is read at most once. A successful read replaces the
+    /// saved order; the order held before holds only keys that were seeded by name. `None` skips
+    /// the import and leaves the flag as it is.
+    pub fn load_with_import(dir: &Path, electron_user_data: Option<&Path>) -> Self {
+        let mut prefs = Self::load_from(dir);
+        let Some(user_data) = electron_user_data else {
+            return prefs;
+        };
+        if prefs.electron_order_imported {
+            return prefs;
+        }
+        if let Some(order) = read_electron_order(user_data) {
+            prefs.view.order = order;
+        }
+        prefs.electron_order_imported = true;
+        if let Err(error) = prefs.save_to(dir) {
+            log::warn!("cannot save sidebar.json after the import: {error}");
+        }
+        prefs
     }
 
     /// Writes through a temp file and a rename, so a crash leaves the old file.
@@ -287,6 +336,20 @@ impl SidebarPrefs {
             || expanded != self.view.expanded_groups.len()
             || filtered != self.view.project_filter.len()
     }
+}
+
+/// The strings of a JSON array. A value that is not an array, or an item that is not a string,
+/// gives nothing.
+fn string_list(value: &serde_json::Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn group_key(group: &Group) -> String {
@@ -328,6 +391,18 @@ mod tests {
                 collapsed_statuses: [StatusBucket::Done, StatusBucket::Failed].into(),
                 project_filter: ["p1".to_string(), "p9".to_string()].into(),
                 label_filter: ["bug".to_string(), String::new()].into(),
+                order: SidebarOrder {
+                    project_order: vec!["key-b".into(), "key-a".into()],
+                    workspace_order_by_project: [
+                        (
+                            "key-a".to_string(),
+                            vec!["srv:a2".to_string(), "srv:a1".into()],
+                        ),
+                        ("key-b".to_string(), vec!["srv:b1".to_string()]),
+                    ]
+                    .into(),
+                    pinned_workspace_order: vec!["srv:p2".into(), "srv:p1".into()],
+                },
             },
             title_source: TitleSource::Branch,
             row_items: RowItems {
@@ -339,6 +414,7 @@ mod tests {
             },
             checks_display: ChecksDisplay::Hidden,
             trailing: Some(Trailing::LastActivity),
+            electron_order_imported: true,
         }
     }
 
@@ -488,6 +564,103 @@ mod tests {
             prefs.view.expanded_groups,
             HashSet::from([Group::Pinned, Group::Project("b".into())])
         );
+    }
+
+    #[test]
+    fn the_saved_order_round_trips_and_a_bad_field_gives_empty() {
+        let prefs = sample();
+        assert!(!prefs.view.order.is_empty());
+        let back = SidebarPrefs::parse(&prefs.to_json());
+        assert_eq!(back.view.order, prefs.view.order);
+        let bad = SidebarPrefs::parse(
+            r#"{"projectOrder":5,"workspaceOrderByProject":[1],"pinnedWorkspaceOrder":["a",3]}"#,
+        );
+        assert!(bad.view.order.project_order.is_empty());
+        assert!(bad.view.order.workspace_order_by_project.is_empty());
+        assert_eq!(bad.view.order.pinned_workspace_order, ["a"]);
+    }
+
+    #[test]
+    fn the_import_flag_round_trips_and_defaults_to_false() {
+        let mut prefs = SidebarPrefs::default();
+        assert!(!prefs.electron_order_imported);
+        prefs.electron_order_imported = true;
+        assert!(SidebarPrefs::parse(&prefs.to_json()).electron_order_imported);
+        assert!(!SidebarPrefs::parse("{}").electron_order_imported);
+        assert!(!SidebarPrefs::parse(r#"{"electronOrderImported":"yes"}"#).electron_order_imported);
+    }
+
+    /// An Electron user data folder whose store holds `order` under the sidebar order key.
+    fn electron_store(name: &str, project_key: &str) -> PathBuf {
+        let user_data = temp_dir(name);
+        let options = rusty_leveldb::Options {
+            create_if_missing: true,
+            ..rusty_leveldb::Options::default()
+        };
+        let mut db =
+            rusty_leveldb::DB::open(user_data.join("Local Storage/leveldb"), options).unwrap();
+        let json = format!(
+            r#"{{"state":{{"projectOrder":["{project_key}"],"workspaceOrderByProject":{{}},"pinnedWorkspaceOrder":[]}},"version":1}}"#
+        );
+        let mut value = vec![1u8];
+        value.extend(json.bytes());
+        db.put(
+            b"_paseo://app\x00\x01sidebar-project-workspace-order",
+            &value,
+        )
+        .unwrap();
+        db.flush().unwrap();
+        user_data
+    }
+
+    #[test]
+    fn a_missing_electron_folder_sets_the_flag_keeps_the_order_and_writes_the_file() {
+        let dir = temp_dir("import-missing-data");
+        let mut saved = SidebarPrefs::default();
+        saved.view.order.project_order = vec!["kept".into()];
+        saved.save_to(&dir).unwrap();
+        let missing = temp_dir("import-missing-electron");
+        let prefs = SidebarPrefs::load_with_import(&dir, Some(&missing));
+        assert!(prefs.electron_order_imported);
+        assert_eq!(prefs.view.order.project_order, ["kept"]);
+        let written = SidebarPrefs::load_from(&dir);
+        assert!(written.electron_order_imported);
+        assert_eq!(written.view.order.project_order, ["kept"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_import_replaces_the_order_once() {
+        let dir = temp_dir("import-once-data");
+        let electron = electron_store("import-once-electron", "from-electron");
+        let mut saved = SidebarPrefs::default();
+        saved.view.order.project_order = vec!["seeded".into()];
+        saved.save_to(&dir).unwrap();
+        let prefs = SidebarPrefs::load_with_import(&dir, Some(&electron));
+        assert_eq!(prefs.view.order.project_order, ["from-electron"]);
+        assert!(prefs.electron_order_imported);
+        assert_eq!(
+            SidebarPrefs::load_from(&dir).view.order.project_order,
+            ["from-electron"]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&electron);
+    }
+
+    #[test]
+    fn a_set_flag_never_reads_the_store() {
+        let dir = temp_dir("import-flag-data");
+        let electron = electron_store("import-flag-electron", "from-electron");
+        let mut saved = SidebarPrefs {
+            electron_order_imported: true,
+            ..SidebarPrefs::default()
+        };
+        saved.view.order.project_order = vec!["mine".into()];
+        saved.save_to(&dir).unwrap();
+        let prefs = SidebarPrefs::load_with_import(&dir, Some(&electron));
+        assert_eq!(prefs.view.order.project_order, ["mine"]);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&electron);
     }
 
     #[test]

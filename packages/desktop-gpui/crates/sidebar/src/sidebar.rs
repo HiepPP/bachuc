@@ -5,13 +5,15 @@
 //! redraws nothing in the view. The list rebuilds only when the tree changes, and a status change
 //! that keeps every row's height redraws without a new measure.
 
+use crate::electron_order::electron_user_data_dir;
 use crate::metrics::{ADD_PROJECT_MIN, LABEL_LINE, NAV_ROW_MIN};
 use crate::model::{
-    Facts, Group, Grouping, LabelOption, MetaItem, ProjectRow, Row, RowShape, StatusBucket,
-    TrailingSlot, WorkspaceRow, archive_prompt_for_checkout, changed_range, clamp_width,
-    compact_time_ago, format_diff_count, identity_color, label_color, label_filter_visible,
-    label_options, meta_items, natural_compare, project_filter_value, project_filter_visible,
-    project_initial, row_title, trailing_slot, workspace_label_for,
+    Facts, Group, Grouping, LabelOption, MetaItem, OrderList, ProjectRow, Row, RowShape,
+    StatusBucket, TrailingSlot, WorkspaceRow, apply_drop, archive_prompt_for_checkout,
+    changed_range, clamp_width, compact_time_ago, format_diff_count, identity_color, label_color,
+    label_filter_visible, label_options, meta_items, natural_compare, project_filter_value,
+    project_filter_visible, project_initial, row_title, seed_order, trailing_slot, visible_keys,
+    workspace_key, workspace_label_for,
 };
 use crate::plugin::{
     NavPress, NavRow, SwipeGesture, SwipeStep, added_sidebar_project, drag_frame, filtered_rows,
@@ -161,6 +163,78 @@ struct Slide {
 #[derive(Clone, Copy)]
 struct ResizeDrag;
 
+/// What a drag of a project, thread, or pinned row carries. `list` is the saved list the row
+/// belongs to, and `key` is the row's key in that list (`SidebarOrder`). A drop target has the
+/// same shape with an empty title.
+#[derive(Clone)]
+struct RowDrag {
+    list: OrderList,
+    key: String,
+    title: SharedString,
+}
+
+/// What follows the pointer while a row is dragged: the row title.
+struct RowPreview {
+    title: SharedString,
+}
+
+impl Render for RowPreview {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = tokens(cx);
+        div()
+            .px(zoomed(SPACE_2, cx))
+            .py(zoomed(SPACE_1, cx))
+            .rounded(zoomed(RADIUS_LG, cx))
+            .bg(t.surface2)
+            .opacity(0.85)
+            .text_size(ui_font_size(FONT_BASE, cx))
+            .text_color(t.foreground)
+            .child(self.title.clone())
+    }
+}
+
+/// The client fields a row drag needs to name a row in the saved order, read on each refresh.
+#[derive(Default)]
+struct DragKeys {
+    server_id: Option<String>,
+    project_keys: HashMap<String, String>,
+}
+
+/// Makes a row draggable and a drop target for its own kind of row. The drag starts on the same
+/// element as the press handler, and GPUI clears the pending press when a drag starts, so a drag
+/// never fires the click that opens the thread (`gpui-pre` `div.rs`, `pending_mouse_down`).
+/// `None` leaves the row as it is.
+fn with_row_drag(
+    row: Stateful<Div>,
+    drag: Option<RowDrag>,
+    t: &Tokens,
+    cx: &mut Context<Sidebar>,
+) -> Stateful<Div> {
+    let Some(drag) = drag else {
+        return row;
+    };
+    let target = RowDrag {
+        title: SharedString::default(),
+        ..drag.clone()
+    };
+    let over = t.surface2;
+    let accepts = target.clone();
+    row.on_drag(drag, |drag, _, _, cx| {
+        let title = drag.title.clone();
+        cx.new(|_| RowPreview { title })
+    })
+    .drag_over::<RowDrag>(move |style, dragged, _, _| {
+        if dragged.list == accepts.list && dragged.key != accepts.key {
+            style.bg(over)
+        } else {
+            style
+        }
+    })
+    .on_drop::<RowDrag>(
+        cx.listener(move |this, dragged: &RowDrag, _, cx| this.drop_row(dragged, &target, cx)),
+    )
+}
+
 /// What follows the pointer while the handle is dragged: nothing.
 struct NoPreview;
 
@@ -230,6 +304,7 @@ pub struct Sidebar {
     data_dir: Option<PathBuf>,
     /// Whether the first project list already dropped the prefs of projects that went.
     pruned: bool,
+    drag_keys: DragKeys,
     /// Shared, so a frame hands a row to its kebab menu without copying it.
     rows: Rc<Vec<Row>>,
     shapes: Vec<RowShape>,
@@ -272,9 +347,11 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Sidebar>,
     ) -> Sidebar {
+        // The one-time import of Electron's saved order must finish before any `refresh` seeds.
+        let electron = electron_user_data_dir();
         let prefs = data_dir
             .as_deref()
-            .map(SidebarPrefs::load_from)
+            .map(|dir| SidebarPrefs::load_with_import(dir, electron.as_deref()))
             .unwrap_or_default();
         let subscriptions = vec![
             cx.subscribe(&client, |this, _, event: &ClientEvent, cx| match event {
@@ -302,6 +379,7 @@ impl Sidebar {
             prefs,
             data_dir,
             pruned: false,
+            drag_keys: DragKeys::default(),
             rows: Rc::new(Vec::new()),
             shapes: Vec::new(),
             list: ListState::new(0, ListAlignment::Top, px(OVERDRAW)),
@@ -475,11 +553,24 @@ impl Sidebar {
     fn refresh(&mut self, cx: &mut Context<Self>) {
         self.prune_stale_prefs(cx);
         let client = self.client.read(cx);
+        let mut seeded = false;
         let rows = if client.projects().is_empty() && !client.is_connected() {
             // Nothing to say before the first answer.
             Vec::new()
         } else {
             let facts = Facts::read(client, client.projects(), client.agents());
+            // Seed from the full list, not the filtered one: Electron seeds from every project.
+            // An empty list seeds nothing, so a thread is never "new" only because the list was
+            // not loaded yet.
+            seeded = seed_order(&mut self.prefs.view.order, client.projects(), &facts);
+            if self.drag_keys.server_id != facts.server_id
+                || self.drag_keys.project_keys != facts.project_keys
+            {
+                self.drag_keys = DragKeys {
+                    server_id: facts.server_id.clone(),
+                    project_keys: facts.project_keys.clone(),
+                };
+            }
             let filters = self
                 .host
                 .as_ref()
@@ -508,6 +599,9 @@ impl Sidebar {
                 &self.prefs.view,
             )
         };
+        if seeded {
+            self.save_prefs();
+        }
         // A row with a meta line is taller, so the Show choices are part of the shape.
         let (items, checks) = (self.prefs.row_items, self.prefs.checks_display);
         let shapes: Vec<RowShape> = rows
@@ -565,6 +659,57 @@ impl Sidebar {
         };
         if let Err(error) = self.prefs.save_to(dir) {
             log::warn!("cannot save sidebar.json: {error}");
+        }
+    }
+
+    /// The drag of a project row. There is none without a view key to save under.
+    fn project_drag(&self, project: &ProjectRow) -> Option<RowDrag> {
+        Some(RowDrag {
+            list: OrderList::Projects,
+            key: self.drag_keys.project_keys.get(&project.id)?.clone(),
+            title: project.name.clone().into(),
+        })
+    }
+
+    /// The drag of a thread row, or of a pinned row. Status grouping has none, as in Electron, and
+    /// a row without a server id or a project view key has no key to save.
+    fn thread_drag(&self, row: &WorkspaceRow) -> Option<RowDrag> {
+        if self.prefs.view.grouping == Grouping::Status {
+            return None;
+        }
+        let list = match &row.group {
+            Group::Project(id) => OrderList::Threads(self.drag_keys.project_keys.get(id)?.clone()),
+            Group::Pinned => OrderList::Pinned,
+            Group::Status(_) => return None,
+        };
+        Some(RowDrag {
+            list,
+            key: workspace_key(self.drag_keys.server_id.as_deref()?, &row.id),
+            title: row_title(row, self.prefs.title_source).to_string().into(),
+        })
+    }
+
+    /// A drop of `dragged` on `target`: a row of another list, or the dragged row itself, changes
+    /// nothing. Otherwise the order saves with Electron's merge rules and the rows rebuild.
+    fn drop_row(&mut self, dragged: &RowDrag, target: &RowDrag, cx: &mut Context<Self>) {
+        if dragged.list != target.list || dragged.key == target.key {
+            return;
+        }
+        let visible = visible_keys(
+            &self.rows,
+            &dragged.list,
+            &self.drag_keys.project_keys,
+            self.drag_keys.server_id.as_deref(),
+        );
+        if apply_drop(
+            &mut self.prefs.view.order,
+            &dragged.list,
+            &visible,
+            &dragged.key,
+            &target.key,
+        ) {
+            self.save_prefs();
+            self.refresh(cx);
         }
     }
 
@@ -1149,6 +1294,7 @@ impl Sidebar {
                     .child(icon(chevron).with_size(zoomed(ICON_SM, cx))),
             );
         let toggle_id = id.clone();
+        let drag = self.project_drag(project);
         let click = div()
             .id(("project", ix))
             .role(Role::Button)
@@ -1183,6 +1329,7 @@ impl Sidebar {
                     .text_color(t.foreground_muted)
                     .child(project.name.clone()),
             );
+        let click = with_row_drag(click, drag, t, cx);
         let root = project.root.clone();
         let weak = cx.weak_entity();
         let plugin_project = SidebarProject {
@@ -1456,6 +1603,12 @@ impl Sidebar {
             })
             .child(leading)
             .child(content);
+        let drag = if archiving {
+            None
+        } else {
+            self.thread_drag(row)
+        };
+        let click = with_row_drag(click, drag, t, cx);
 
         let weak = cx.weak_entity();
         let rows = Rc::clone(&self.rows);

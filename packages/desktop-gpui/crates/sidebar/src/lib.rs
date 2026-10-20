@@ -8,6 +8,7 @@
 //! second event type, and the built-in nav rows and the project "+" through [`SidebarNavEvent`].
 
 pub mod badge;
+pub mod electron_order;
 mod metrics;
 pub mod model;
 pub mod plugin;
