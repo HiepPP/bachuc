@@ -1,6 +1,6 @@
 # TASK-276 Cut the per-frame whole-window cost of a running mark
 
-Group: F (the GPUI view boundaries that the profile names; no file shared with an open group)
+Group: F (shares `crates/timeline/src/lib.rs` with TASK-277, which builds first; plus the owner views the profile names)
 Class: risky
 
 ## Brief

@@ -27,6 +27,9 @@ max_builders: 6
 - The gate has no `formatter` line. Format Rust with `packages/desktop-gpui/cargo.sh fmt -p <crate>`. Format changed JS, JSON, and markdown files with `npm run format:files -- <file> <file>` before you stage.
 - Keep the owner's uncommitted text replacement work: `packages/desktop-gpui/vendor/gpui-base/src/input/**`, `vendor/gpui-base/Cargo.toml`, the `## Text Replacement` section of `vendor/gpui-base/BACHUC-PATCH.md`, and `packages/desktop-gpui/crates/composer/tests/`. Never edit, stage, stash, or revert them. TASK-269 adds its own section to `BACHUC-PATCH.md` below the existing text; the lead stages only that hunk.
 - Group C runs as two builders in sequence (lead, 2026-10-19): C1 = TASK-268 and TASK-273 at once; C2 = TASK-272 after groups B and C1 close. They share files but never run at the same time.
+- Run 2026-10-20 (owner override for this run, replaces the deepseek line above): every builder, fix builder, and UI checker runs provider `claude`, model `claude-sonnet-5-5`, thinking `high`, mode `bypassPermissions`.
+- Run 2026-10-20 (owner away, override for this run): the UI checker may bring the check bundle to the front (`open -n`, window 1200x800) for CPU reads and screen checks. It still never takes the cursor.
+- Run 2026-10-20 BASE for TASK-276: `/tmp/wt-base-276/Bachuc GPUI Base 276.app`, a copy of the `fff8e792d` check bundle, md5 `b0bed4e801d46cbe4a25b6db6c555cb3`.
 - Builders carry the label `watchtower.task=<first TASK ID of the group>`.
 - After the last cargo command of the run, run `packages/desktop-gpui/cargo.sh clean --profile dev` when no other cargo or rustc runs.
 - Never push and never open a PR.
