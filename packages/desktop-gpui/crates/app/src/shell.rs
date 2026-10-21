@@ -419,6 +419,9 @@ impl Shell {
                         this.open_workspace(workspace_id.clone(), window, cx)
                     }
                     SidebarEvent::OpenSettings => this.open_settings(window, cx),
+                    SidebarEvent::OpenProjectSettings { root, name } => {
+                        this.open_project_settings(root, name, window, cx)
+                    }
                     SidebarEvent::OpenCommandCenter => this.open_command_center(window, cx),
                 },
             ),
@@ -3542,6 +3545,22 @@ impl Shell {
         // starts at the window root, outside the shell context, and Cmd+, and Escape do nothing.
         window.focus(&self.focus, cx);
         cx.notify();
+    }
+
+    /// Opens Settings, or keeps the open one, at the Projects section for the project.
+    fn open_project_settings(
+        &mut self,
+        root: &str,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_settings(window, cx);
+        if let Some((settings, _)) = &self.settings {
+            settings.update(cx, |settings, cx| {
+                settings.open_project(root, name, window, cx)
+            });
+        }
     }
 
     fn reload_shortcuts(&mut self, cx: &mut Context<Self>) {

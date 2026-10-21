@@ -134,6 +134,8 @@ enum Pending {
         )>,
     },
     Action(&'static str),
+    /// A `project.remove.response`: `accepted: true` drops the project, anything else reports it.
+    ProjectRemove(String),
     PluginList(Reply<Vec<PluginListItem>>),
     PluginCatalog(Reply<Vec<String>>),
     PluginRpc(RpcFinish),
@@ -1730,6 +1732,23 @@ impl ClientCore {
         );
     }
 
+    /// Asks the daemon to remove a project and its workspaces from the sidebar; the files on disk
+    /// stay. The project leaves the tree when the answer accepts.
+    pub fn remove_project(&mut self, project_id: &str) {
+        let pending = Pending::ProjectRemove(project_id.to_string());
+        if self
+            .request(
+                json!({"type": "project.remove.request", "projectId": project_id}),
+                pending,
+            )
+            .is_err()
+        {
+            self.events.push(ClientEvent::ProjectRemoveFailed {
+                project_id: project_id.to_string(),
+            });
+        }
+    }
+
     pub fn mark_workspace_unread(&mut self, workspace_id: &str) {
         let _ = self.request(
             json!({"type": "workspace.mark_unread.request", "workspaceId": workspace_id}),
@@ -2956,6 +2975,25 @@ impl ClientCore {
                 if let Some(error) = error {
                     log::warn!("{name} failed: {error}");
                 }
+            }
+            Pending::ProjectRemove(project_id) => {
+                let accepted = error.is_none() && payload["accepted"] == true;
+                if !accepted {
+                    log::warn!(
+                        "project.remove failed: {}",
+                        error.as_deref().unwrap_or("not accepted")
+                    );
+                    self.events
+                        .push(ClientEvent::ProjectRemoveFailed { project_id });
+                    return;
+                }
+                // The daemon sends workspace removals but no project update, so the project
+                // would stay as an empty row.
+                self.project_list.retain(|project| project.id != project_id);
+                self.empty_projects
+                    .retain(|project| project.id != project_id);
+                self.projects_dirty = true;
+                self.directory_changed = true;
             }
             pending => self.parity_response(pending, kind, payload, error),
         }

@@ -77,6 +77,8 @@ const SCRIM_SOLID: f32 = 0.55;
 const HANDLE_WIDTH: f32 = 10.;
 /// A workspace that did not leave the tree after this long shows its row again.
 const ARCHIVE_TIMEOUT: Duration = Duration::from_secs(10);
+/// A project that did not leave the tree after this long can be removed again.
+const REMOVE_TIMEOUT: Duration = Duration::from_secs(10);
 /// `STATUS_BADGE_SIZE` and `STATUS_BADGE_OFFSET` of the corner mark on a project icon.
 const BADGE: f32 = 12.;
 const BADGE_OFFSET: f32 = -4.;
@@ -85,11 +87,22 @@ const RING_OFFSET: f32 = BADGE_OFFSET - (RING_FRAME - BADGE) / 2.;
 /// `STATUS_INDICATOR_FILLED_DOT_SIZE`.
 const DOT: f32 = 6.;
 
+/// The Electron `projectRemove.failed` and `openFolderFailed` texts.
+const REMOVE_FAILED: &str = "Failed to remove some workspaces";
+const OPEN_FOLDER_FAILED: &str = "Couldn't open folder";
+
 /// What the sidebar asks the app to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SidebarEvent {
-    OpenWorkspace { workspace_id: String },
+    OpenWorkspace {
+        workspace_id: String,
+    },
     OpenSettings,
+    /// Settings at the Projects section for the project with this root folder.
+    OpenProjectSettings {
+        root: String,
+        name: String,
+    },
     OpenCommandCenter,
 }
 
@@ -312,6 +325,8 @@ pub struct Sidebar {
     width: f32,
     rings: HashMap<String, Entity<RunningRing>>,
     archiving: HashSet<String>,
+    /// Projects with a `project.remove.request` in flight.
+    removing: HashSet<String>,
     host: Option<Entity<PluginHost>>,
     sections: Vec<SectionView>,
     /// (plugin id, surface id) of the open plugin page, for the active nav row.
@@ -354,12 +369,21 @@ impl Sidebar {
             .map(|dir| SidebarPrefs::load_with_import(dir, electron.as_deref()))
             .unwrap_or_default();
         let subscriptions = vec![
-            cx.subscribe(&client, |this, _, event: &ClientEvent, cx| match event {
-                ClientEvent::Connected
-                | ClientEvent::Disconnected { .. }
-                | ClientEvent::AgentsChanged => this.refresh(cx),
-                _ => {}
-            }),
+            cx.subscribe_in(
+                &client,
+                window,
+                |this, _, event: &ClientEvent, window, cx| match event {
+                    ClientEvent::Connected
+                    | ClientEvent::Disconnected { .. }
+                    | ClientEvent::AgentsChanged => this.refresh(cx),
+                    ClientEvent::ProjectRemoveFailed { project_id } => {
+                        this.removing.remove(project_id);
+                        window.push_notification(REMOVE_FAILED, cx);
+                        cx.notify();
+                    }
+                    _ => {}
+                },
+            ),
             cx.subscribe(&client, |this, _, event: &DirectoryEvent, cx| match event {
                 DirectoryEvent::ProjectsChanged => this.refresh(cx),
                 // The daemon pushes the diff counts with each workspace update.
@@ -386,6 +410,7 @@ impl Sidebar {
             width: SIDEBAR_WIDTH,
             rings: HashMap::new(),
             archiving: HashSet::new(),
+            removing: HashSet::new(),
             host: None,
             sections: Vec::new(),
             active_surface: None,
@@ -626,6 +651,11 @@ impl Sidebar {
             .collect();
         for id in gone {
             self.archiving.remove(&id);
+        }
+        if !self.removing.is_empty() {
+            let client = self.client.read(cx);
+            self.removing
+                .retain(|id| client.projects().iter().any(|project| &project.id == id));
         }
         let live: HashSet<String> = rows.iter().filter_map(ring_key).collect();
         self.rings.retain(|key, _| live.contains(key));
@@ -882,6 +912,79 @@ impl Sidebar {
     fn copy_path(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(path));
         window.push_notification("Path copied", cx);
+    }
+
+    /// `handleRemoveProject`: a destructive confirm, then one `project.remove.request`. The
+    /// project leaves the tree when the daemon accepts; the files on disk stay.
+    fn remove_project(
+        &mut self,
+        id: String,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.removing.contains(&id) {
+            return;
+        }
+        let prompt = remove_project_prompt(&name);
+        let weak = cx.weak_entity();
+        window.open_alert_dialog(cx, move |dialog, _, _| {
+            let weak = weak.clone();
+            let id = id.clone();
+            dialog
+                .title(prompt.title.clone())
+                .description(prompt.message.clone())
+                .confirm()
+                .ok_text("Remove")
+                .ok_variant(ButtonVariant::Danger)
+                .cancel_text("Cancel")
+                .on_ok(move |_, _, cx| {
+                    let id = id.clone();
+                    weak.update(cx, |this, cx| this.start_remove(id, cx)).ok();
+                    true
+                })
+        });
+    }
+
+    fn start_remove(&mut self, id: String, cx: &mut Context<Self>) {
+        if !begin_remove(&mut self.removing, &id) {
+            return;
+        }
+        self.client
+            .update(cx, |client, cx| client.remove_project(&id, cx));
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(REMOVE_TIMEOUT).await;
+            this.update(cx, |this, cx| {
+                if this.removing.remove(&id) {
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Opens the project folder in Finder. `open <root>` runs off the UI thread.
+    fn open_in_finder(&mut self, root: String, window: &mut Window, cx: &mut Context<Self>) {
+        cx.spawn_in(window, async move |this, cx| {
+            let opened = cx
+                .background_executor()
+                .spawn(async move {
+                    std::process::Command::new("open")
+                        .arg(&root)
+                        .status()
+                        .is_ok_and(|status| status.success())
+                })
+                .await;
+            if !opened {
+                this.update_in(cx, |_, window, cx| {
+                    window.push_notification(OPEN_FOLDER_FAILED, cx)
+                })
+                .ok();
+            }
+        })
+        .detach();
     }
 
     /// Asks for a confirm when the workspace diff stat has a changed line or the checkout is
@@ -1331,6 +1434,8 @@ impl Sidebar {
             );
         let click = with_row_drag(click, drag, t, cx);
         let root = project.root.clone();
+        let project_id = project.id.clone();
+        let project_name = project.name.clone();
         let weak = cx.weak_entity();
         let plugin_project = SidebarProject {
             view_key: project.color_key.clone(),
@@ -1346,9 +1451,25 @@ impl Sidebar {
             t,
             cx,
             move |menu, window, cx| {
+                let settings_name = project_name.clone();
+                let remove_id = project_id.clone();
+                let remove_name = project_name.clone();
                 let menu = menu
                     .min_w(zoomed(220., cx))
                     .check_side(Side::Right)
+                    .item(menu_item(
+                        "Open project settings",
+                        IconName::Settings,
+                        weak.clone(),
+                        root.clone(),
+                        cx,
+                        move |_, root, _, cx| {
+                            cx.emit(SidebarEvent::OpenProjectSettings {
+                                root,
+                                name: settings_name.clone(),
+                            })
+                        },
+                    ))
                     .item(menu_item(
                         "Copy path",
                         IconName::Copy,
@@ -1356,10 +1477,27 @@ impl Sidebar {
                         root.clone(),
                         cx,
                         |this, path, window, cx| this.copy_path(path, window, cx),
+                    ))
+                    .item(menu_item(
+                        "Open in Finder",
+                        IconName::FolderOpen,
+                        weak.clone(),
+                        root.clone(),
+                        cx,
+                        |this, root, window, cx| this.open_in_finder(root, window, cx),
                     ));
-                // Plugin items follow "Copy path"; they are read each time the menu opens.
+                // Plugin items follow "Open in Finder"; they are read each time the menu opens.
                 let items = plugin_menu_items(&plugin_project, cx);
-                add_plugin_items(menu, items, window, cx)
+                add_plugin_items(menu, items, window, cx).item(menu_item(
+                    "Remove project",
+                    IconName::Trash2,
+                    weak.clone(),
+                    remove_id,
+                    cx,
+                    move |this, id, window, cx| {
+                        this.remove_project(id, remove_name.clone(), window, cx)
+                    },
+                ))
             },
         );
         let plus =
@@ -2540,6 +2678,26 @@ async fn add_project_and_notify(
     Ok(Some((added.id, cwd.to_string())))
 }
 
+/// The confirm of Remove project, with the Electron `projectRemove.confirm` texts.
+fn remove_project_prompt(name: &str) -> RemovePrompt {
+    RemovePrompt {
+        title: "Remove project?".to_string(),
+        message: format!(
+            "Remove \"{name}\" from the sidebar?\n\nFiles on disk will not be changed."
+        ),
+    }
+}
+
+struct RemovePrompt {
+    title: String,
+    message: String,
+}
+
+/// Marks a project as being removed. False when a request for it is already in flight.
+fn begin_remove(removing: &mut HashSet<String>, id: &str) -> bool {
+    removing.insert(id.to_string())
+}
+
 /// `SidebarWorkspaceMenuItems`, in the Electron order, for the items whose target is in scope.
 fn workspace_menu(
     menu: PopupMenu,
@@ -3043,5 +3201,29 @@ impl Render for Sidebar {
             .child(self.render_footer(&t, cx))
             // The handle hangs 5 px outside the sidebar, so it paints above its neighbor.
             .child(deferred(self.render_resize_handle(&t, cx)).with_priority(1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{begin_remove, remove_project_prompt};
+    use std::collections::HashSet;
+
+    #[test]
+    fn the_remove_confirm_uses_the_electron_texts() {
+        let prompt = remove_project_prompt("bachuc");
+        assert_eq!(prompt.title, "Remove project?");
+        assert_eq!(
+            prompt.message,
+            "Remove \"bachuc\" from the sidebar?\n\nFiles on disk will not be changed."
+        );
+    }
+
+    #[test]
+    fn a_second_remove_of_a_pending_project_is_ignored() {
+        let mut removing = HashSet::new();
+        assert!(begin_remove(&mut removing, "p1"));
+        assert!(!begin_remove(&mut removing, "p1"));
+        assert!(begin_remove(&mut removing, "p2"));
     }
 }

@@ -34,6 +34,7 @@ use crate::plugin_slots::{
     picker_sources, pill_slots, pill_states, plugin_pill, run_chain, stop_button, toggle_chip,
     upsert_chip, visible_commands,
 };
+use crate::prompt_history::{Recall, SharedHistory, history_key, on_first_line, on_last_line};
 use crate::queue::{QueueAction, move_target, queue_track};
 use crate::slash::{
     ClientCommand, DaemonCommand, SlashItem, SlashRange, arrow_delta, find_active_slash,
@@ -67,6 +68,7 @@ use bachuc_theme::metrics::{
     SPACE_3, SPACE_4,
 };
 use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size, zoomed};
+use gpui_kit::EntityInputHandler as _;
 use gpui_kit::component::input::{
     Input, InputEvent, InputState, Position, Textarea, TextareaState,
 };
@@ -390,6 +392,10 @@ pub struct Composer {
     slash_active: usize,
     /// Escape closed the menu for the text being typed.
     slash_dismissed: bool,
+    /// The prompts sent in this repo, shared by every composer.
+    history: SharedHistory,
+    /// Where Up and Down stand in them.
+    recall: Recall,
     slash_scroll: ScrollHandle,
     /// The `@` file menu.
     mention: MentionMenu,
@@ -574,7 +580,9 @@ impl Composer {
                 let key = event.keystroke.key.clone();
                 let handled = weak
                     .update(cx, |this, cx| {
-                        this.mention_key(&key, window, cx) || this.slash_key(&key, window, cx)
+                        this.mention_key(&key, window, cx)
+                            || this.slash_key(&key, window, cx)
+                            || this.history_key_press(&key, window, cx)
                     })
                     .unwrap_or(false);
                 if handled {
@@ -603,6 +611,8 @@ impl Composer {
             commands_config: None,
             slash_active: 0,
             slash_dismissed: false,
+            history: SharedHistory::get(cx),
+            recall: Recall::default(),
             slash_scroll: ScrollHandle::new(),
             mention: MentionMenu::default(),
             mention_scroll: ScrollHandle::new(),
@@ -1214,6 +1224,7 @@ impl Composer {
                 .last()
                 .map_or(0, |line| line.encode_utf16().count() as u32),
         };
+        self.recall.reset();
         self.input.update(cx, |input, cx| {
             input.set_value(text, window, cx);
             input.set_cursor_position(position, window, cx);
@@ -1239,6 +1250,86 @@ impl Composer {
                 (text, caret)
             }
         }
+    }
+
+    /// The list the prompts of this composer belong to; `None` without a folder.
+    fn history_list(&self, cx: &App) -> Option<String> {
+        let cwd = self.mention_cwd(cx).filter(|cwd| !cwd.is_empty())?;
+        Some(history_key(&cwd, self.client.read(cx).projects()))
+    }
+
+    /// Saves the typed text as the newest prompt of the repo and starts a new walk.
+    fn record_prompt(&mut self, text: &str, cx: &App) {
+        self.recall.reset();
+        if let Some(key) = self.history_list(cx) {
+            self.history.push(&key, text, cx);
+        }
+    }
+
+    /// Up on the first line recalls the next older prompt; Down on the last line, the next
+    /// newer one. Returns whether it took the key. The slash and mention menus run first, so
+    /// they keep both keys while open.
+    fn history_key_press(
+        &mut self,
+        key: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let up = match key {
+            "up" => true,
+            "down" => false,
+            _ => return false,
+        };
+        if !self.input.read(cx).focus_handle(cx).is_focused(window) {
+            return false;
+        }
+        // `cursor()` gives the end of the marked text during IME composition.
+        let composing = self.input.update(cx, |input, cx| {
+            input.marked_text_range(window, cx).is_some()
+        });
+        if composing {
+            return false;
+        }
+        let (text, cursor) = {
+            let input = self.input.read(cx);
+            (input.value().to_string(), input.cursor())
+        };
+        let at_edge = if up {
+            on_first_line(&text, cursor)
+        } else {
+            on_last_line(&text, cursor)
+        };
+        if !at_edge {
+            return false;
+        }
+        let Some(list) = self.history_list(cx) else {
+            return false;
+        };
+        let entries = self.history.entries(&list);
+        let recalled = if up {
+            if entries.is_empty() {
+                return false;
+            }
+            // At the oldest entry Up takes the key and shows the same entry.
+            self.recall.up(&entries, &text)
+        } else {
+            match self.recall.down(&entries) {
+                Some(shown) => Some(shown),
+                None => return false,
+            }
+        };
+        if let Some(shown) = recalled {
+            let caret = shown.len();
+            self.set_text_at(shown, caret, window, cx);
+            // The menus would take Up and Down from the walk for a recalled `/name` or `@file`.
+            if self.active_slash(cx).is_some() {
+                self.slash_dismissed = true;
+            }
+            if let Some(mention) = self.active_mention(cx) {
+                self.mention.dismiss(&mention);
+            }
+        }
+        true
     }
 
     /// The folder file mentions resolve in: the draft's, or the agent's.
@@ -1561,6 +1652,7 @@ impl Composer {
             return;
         }
         let value = self.value(cx);
+        self.record_prompt(&value, cx);
         let attachment_count = self.attachment_total();
         if !self.is_draft()
             && let Some(command) = resolve_client_command(&value, attachment_count)
@@ -1722,6 +1814,7 @@ impl Composer {
     }
 
     fn clear_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.recall.reset();
         self.input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.request_mentions(cx);
