@@ -2,6 +2,7 @@
 //! next to it; the views and the store only call them.
 
 pub(crate) mod colors;
+pub(crate) mod pending;
 pub(crate) mod poll;
 pub(crate) mod recaps;
 pub(crate) mod remove;
