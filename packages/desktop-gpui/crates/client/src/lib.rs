@@ -11,6 +11,7 @@ pub mod core;
 mod files;
 mod hosts;
 mod model;
+mod pending;
 mod plugins;
 mod terminal;
 pub mod timeline;
@@ -46,6 +47,7 @@ pub use model::{
 };
 pub use model::{PromptEntry, PromptIndex};
 pub use model::{RewindMode, RewindModes};
+pub use pending::{PENDING_TURN_TTL_MS, PendingTurnsChanged};
 pub use plugins::{
     PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite, PluginStatus,
 };
@@ -55,7 +57,7 @@ pub use timeline::TimelineState;
 use futures::StreamExt as _;
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Task};
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Timeline changes reach the UI at most this often.
 const FLUSH_INTERVAL: Duration = Duration::from_millis(50);
@@ -66,6 +68,7 @@ pub struct Client {
     core: ClientCore,
     last_flush: Option<Instant>,
     flush_task: Option<Task<()>>,
+    pending_turns: pending::PendingTurns,
     _reader: Task<()>,
 }
 
@@ -73,6 +76,7 @@ impl EventEmitter<ClientEvent> for Client {}
 impl EventEmitter<DirectoryEvent> for Client {}
 impl EventEmitter<PluginEvent> for Client {}
 impl EventEmitter<GitStatusEvent> for Client {}
+impl EventEmitter<PendingTurnsChanged> for Client {}
 
 /// The timeline key of a provider subagent, built as the app's stream ID: `provider:`, then
 /// both ids percent-encoded as `encodeURIComponent` does, so ids with `:` cannot collide.
@@ -132,6 +136,13 @@ fn decode_component(text: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// Milliseconds now from the wall clock, as `Date.now()`.
+fn unix_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as i64)
+}
+
 /// Waits for a core reply on the background executor.
 fn reply_task<T: Send + 'static>(
     receiver: futures::channel::oneshot::Receiver<anyhow::Result<T>>,
@@ -182,6 +193,7 @@ impl Client {
                 core,
                 last_flush: None,
                 flush_task: None,
+                pending_turns: pending::PendingTurns::default(),
                 _reader: reader,
             }
         })
@@ -234,6 +246,25 @@ impl Client {
             cx.emit(ClientEvent::TimelineChanged { agent_id });
         }
         cx.notify();
+    }
+
+    /// Marks `agent_id` as having a prompt the daemon has not confirmed. The mark lives only in
+    /// this client and hides after `PENDING_TURN_TTL_MS`.
+    pub fn mark_turn_pending(&mut self, agent_id: &str, cx: &mut Context<Self>) {
+        self.pending_turns.mark(agent_id, unix_ms());
+        cx.emit(PendingTurnsChanged);
+    }
+
+    /// Drops the mark of `agent_id`. Emits only when a mark was there.
+    pub fn clear_turn_pending(&mut self, agent_id: &str, cx: &mut Context<Self>) {
+        if self.pending_turns.clear(agent_id) {
+            cx.emit(PendingTurnsChanged);
+        }
+    }
+
+    /// The mark time of `agent_id` in UNIX milliseconds, until the limit passes.
+    pub fn pending_turn(&self, agent_id: &str) -> Option<i64> {
+        self.pending_turns.get(agent_id, unix_ms())
     }
 
     pub fn host(&self) -> &HostConfig {

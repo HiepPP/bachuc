@@ -1,7 +1,9 @@
 //! The panel rules of `client/panel.tsx` that need no `App`: candidate identity, the card
 //! faces, the busy rule, the selection texts, and the order of a Send.
 
-use crate::contracts::{Candidate, CandidateState, HostInfo, Scope, SendInput, SendKey};
+use crate::contracts::{
+    Candidate, CandidateState, HostInfo, Scope, SendInput, SendKey, SendOutput,
+};
 use crate::polling::{JEV_REVIEWING, agent_busy};
 use crate::prompts::{PromptBlock, git_action};
 use crate::selection::Group;
@@ -255,21 +257,29 @@ pub(crate) fn send_selected_label(pending: bool, chosen: &[Option<CandidateState
 /// One step of a Send, in order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SendStep {
+    /// Mark the agent's turn pending in the client, so the Board shows it running at once.
+    MarkPending(String),
     /// Leave for the Board at once; it refreshes when the prompt lands.
     OpenBoard,
     Rpc(SendInput),
 }
 
 pub(crate) fn send_plan(back_to_board: bool, scope: Scope, keys: Vec<String>) -> Vec<SendStep> {
+    let mark = SendStep::MarkPending(scope.agent_id.clone());
     let rpc = SendStep::Rpc(SendInput {
         scope,
         key: SendKey::of(keys),
     });
     if back_to_board {
-        vec![SendStep::OpenBoard, rpc]
+        vec![mark, SendStep::OpenBoard, rpc]
     } else {
-        vec![rpc]
+        vec![mark, rpc]
     }
+}
+
+/// Only an acknowledged send keeps the pending mark.
+pub(crate) fn send_landed(result: &anyhow::Result<SendOutput>) -> bool {
+    matches!(result, Ok(output) if output.sent)
 }
 
 /// The toggle command shows only while Jev can judge.
@@ -281,10 +291,10 @@ pub(crate) fn command_visible(host: Option<&HostInfo>) -> bool {
 mod tests {
     use super::{
         Face, FaceInput, SendStep, candidate_for, card_face, command_visible, footer_hint,
-        is_compact, panel_busy, row_status, send_plan, send_selected_label, shows_selection,
-        timestamp_ms,
+        is_compact, panel_busy, row_status, send_landed, send_plan, send_selected_label,
+        shows_selection, timestamp_ms,
     };
-    use crate::contracts::{Candidate, CandidateState, HostInfo, Scope};
+    use crate::contracts::{Candidate, CandidateState, HostInfo, Scope, SendOutput};
     use crate::polling::JEV_REVIEWING;
     use crate::prompts::parse_prompts;
     use bachuc_client::AttentionReason;
@@ -480,18 +490,26 @@ mod tests {
     }
 
     #[test]
-    fn back_to_board_opens_before_send() {
+    fn send_marks_the_turn_before_it_opens_the_board() {
         let scope = Scope {
             server_id: "s".into(),
             agent_id: "a".into(),
             workspace_id: "w".into(),
         };
         let on = send_plan(true, scope.clone(), vec!["k".into()]);
-        assert_eq!(on.len(), 2);
-        assert_eq!(on[0], SendStep::OpenBoard);
-        assert!(matches!(on[1], SendStep::Rpc(_)));
+        assert_eq!(on.len(), 3);
+        assert_eq!(on[0], SendStep::MarkPending("a".into()));
+        assert_eq!(on[1], SendStep::OpenBoard);
+        assert!(matches!(on[2], SendStep::Rpc(_)));
         let off = send_plan(false, scope, vec!["k".into()]);
-        assert!(matches!(off[..], [SendStep::Rpc(_)]));
+        assert!(matches!(&off[..], [SendStep::MarkPending(id), SendStep::Rpc(_)] if id == "a"));
+    }
+
+    #[test]
+    fn only_an_acknowledged_send_keeps_the_mark() {
+        assert!(send_landed(&Ok(SendOutput { sent: true })));
+        assert!(!send_landed(&Ok(SendOutput { sent: false })));
+        assert!(!send_landed(&Err(anyhow::anyhow!("Agent is busy."))));
     }
 
     #[test]

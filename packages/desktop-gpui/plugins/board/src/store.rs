@@ -3,6 +3,7 @@
 //! contribution closures hold it strongly, so deactivating the plugin drops it with its timers
 //! and requests; views hold a `WeakEntity`.
 
+use crate::model::pending::{apply_pending, shows_pending};
 use crate::model::poll::{Poller, Received};
 use crate::model::remove::{
     CloseOutput, RemoveInput, RemoveOutput, close_result, remove_finished_run,
@@ -14,7 +15,7 @@ use crate::model::settings::{
 };
 use crate::model::text::now_ms;
 use crate::model::{BoardSnapshot, ConnectionState, OrbSettings, Run};
-use bachuc_client::{Client, ClientEvent};
+use bachuc_client::{Client, ClientEvent, PENDING_TURN_TTL_MS, PendingTurnsChanged};
 use bachuc_plugin_host::{
     AgentAnchor, NewWorkspaceRequest, OpenSurfaceOptions, PluginContext, PluginSettings,
     SettingsState, SurfacePresentation,
@@ -47,8 +48,13 @@ pub(crate) struct BoardStore {
     ctx: PluginContext,
     client: Option<Entity<Client>>,
     poller: Poller,
+    /// The last decoded `board.snapshot` answer, before the pending-turn overlay.
+    raw: Option<BoardSnapshot>,
+    /// What the views and the poll cadence read: `raw` with the overlay of the client marks.
     snapshot: Option<BoardSnapshot>,
-    /// Grows with each applied snapshot, so views rebuild only on new data.
+    /// The agents whose run `snapshot` shows as Running only because of a mark.
+    pending: BTreeSet<String>,
+    /// Grows when `snapshot` changes, so views rebuild only on new data.
     revision: u64,
     /// The rail state the views last drew.
     shown: ConnectionState,
@@ -63,6 +69,7 @@ pub(crate) struct BoardStore {
     _poll: Option<Task<()>>,
     _request: Option<Task<()>>,
     _stale: Option<Task<()>>,
+    _pending_expiry: Option<Task<()>>,
     _size_save: Option<Task<()>>,
     _palette_save: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -98,12 +105,19 @@ impl BoardStore {
                 store.schedule(cx);
                 store.check_connection(cx);
             }));
+            subscriptions.push(
+                cx.subscribe(client, |store, _, _: &PendingTurnsChanged, cx| {
+                    store.pending_changed(cx)
+                }),
+            );
         }
         let mut store = Self {
             ctx,
             client,
             poller,
+            raw: None,
             snapshot: None,
+            pending: BTreeSet::new(),
             revision: 0,
             shown: ConnectionState::Connecting,
             palette,
@@ -117,6 +131,7 @@ impl BoardStore {
             _poll: None,
             _request: None,
             _stale: None,
+            _pending_expiry: None,
             _size_save: None,
             _palette_save: None,
             _subscriptions: subscriptions,
@@ -185,6 +200,7 @@ impl BoardStore {
 
     // ---- polling ----
 
+    /// Reads the shown snapshot, so the fast cadence runs while a mark shows a card as Running.
     fn interval(&self) -> i64 {
         board_poll_interval(
             self.snapshot
@@ -227,17 +243,19 @@ impl BoardStore {
         if let Err(error) = &result {
             log::warn!("board: board.snapshot failed: {error:#}");
         }
-        if self.poller.finish(result, now) == Received::Changed {
+        let received = self.poller.finish(result, now);
+        if received == Received::Changed {
             match self.poller.last_json().map(decode_snapshot) {
                 Some(Ok(snapshot)) => {
-                    self.snapshot = Some(snapshot);
-                    self.revision += 1;
-                    self.sync_palette(cx);
-                    cx.notify();
+                    self.raw = Some(snapshot);
+                    self.rebuild(cx);
                 }
                 Some(Err(error)) => log::warn!("board: {error:#}"),
                 None => {}
             }
+        }
+        if received != Received::Failed {
+            self.confirm_pending(cx);
         }
         self.check_connection(cx);
         self._stale = self.poller.stale_at().map(|at| {
@@ -249,6 +267,84 @@ impl BoardStore {
             })
         });
         self.schedule(cx);
+    }
+
+    // ---- pending turns ----
+
+    /// Builds the shown snapshot from the raw one and the client marks, and redraws only when it
+    /// differs from the last one. Returns true when a card newly shows as Running by a mark.
+    fn rebuild(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(raw) = &self.raw else {
+            return false;
+        };
+        let marks: BTreeMap<String, i64> = {
+            let client = self.client.as_ref().map(|client| client.read(cx));
+            raw.runs
+                .iter()
+                .filter_map(|run| {
+                    let marked_at = client?.pending_turn(&run.agent_id)?;
+                    shows_pending(run, marked_at).then(|| (run.agent_id.clone(), marked_at))
+                })
+                .collect()
+        };
+        let shown = apply_pending(raw, |id| marks.get(id).copied());
+        let added = marks.keys().any(|id| !self.pending.contains(id));
+        self.pending = marks.keys().cloned().collect();
+        self.arm_pending_expiry(marks.values().min().copied(), cx);
+        if self.snapshot.as_ref() == Some(&shown) {
+            return false;
+        }
+        self.snapshot = Some(shown);
+        self.revision += 1;
+        self.sync_palette(cx);
+        cx.notify();
+        added
+    }
+
+    /// A mark changed. A card that newly shows as Running asks for one early load; a clear and
+    /// a change with no card change never do, so a confirm cannot start a poll loop.
+    fn pending_changed(&mut self, cx: &mut Context<Self>) {
+        if self.rebuild(cx) {
+            self.refresh(cx);
+        }
+    }
+
+    /// Rebuilds once the earliest mark that shows ends.
+    fn arm_pending_expiry(&mut self, earliest: Option<i64>, cx: &mut Context<Self>) {
+        self._pending_expiry = earliest.map(|marked_at| {
+            let delay = (marked_at + PENDING_TURN_TTL_MS + 1 - now_ms()).max(0);
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(delay as u64))
+                    .await;
+                this.update(cx, |store, cx| {
+                    store.rebuild(cx);
+                })
+                .ok();
+            })
+        });
+    }
+
+    /// Clears the mark of each agent whose raw run no longer needs it: it runs, or it ended
+    /// after the mark. A mark with no run waits for its run or its limit.
+    fn confirm_pending(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(raw)) = (&self.client, &self.raw) else {
+            return;
+        };
+        let confirmed: Vec<String> = raw
+            .runs
+            .iter()
+            .filter(|run| {
+                client
+                    .read(cx)
+                    .pending_turn(&run.agent_id)
+                    .is_some_and(|marked_at| !shows_pending(run, marked_at))
+            })
+            .map(|run| run.agent_id.clone())
+            .collect();
+        for agent_id in confirmed {
+            client.update(cx, |client, cx| client.clear_turn_pending(&agent_id, cx));
+        }
     }
 
     /// Redraws only when the rail state changed, so an unchanged poll draws nothing.
