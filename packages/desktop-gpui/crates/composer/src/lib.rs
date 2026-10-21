@@ -17,6 +17,7 @@ mod input;
 mod mention;
 mod pill_styles;
 mod plugin_slots;
+mod prompt_history;
 mod queue;
 mod slash;
 mod subagents_track;
