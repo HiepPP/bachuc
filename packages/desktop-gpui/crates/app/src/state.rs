@@ -1,4 +1,5 @@
-//! App state that needs no window: connection text, notification choice, the dock badge count,
+//! App state that needs no window: connection text, notification choice, the dock badge count
+//! and fire,
 //! pane keys, workspace order, panel widths, the stored layout, and the command center items.
 //! The views in `shell` read these.
 
@@ -30,6 +31,26 @@ pub fn badge_count(agents: &[AgentSummary]) -> usize {
 /// The badge text. Zero clears the badge, so it has no text.
 pub fn badge_label(count: usize) -> Option<String> {
     (count > 0).then(|| count.to_string())
+}
+
+/// The threads that wait for input: agents with a pending permission.
+pub fn waiting_threads(agents: &[AgentSummary]) -> usize {
+    agents
+        .iter()
+        .filter(|agent| agent.pending_permissions > 0)
+        .count()
+}
+
+/// The dock fire for a change in waiting threads: `Some(true)` lights it when a new thread
+/// waits, `Some(false)` puts it out when none waits. It follows the Electron dock bounce.
+pub fn fire_change(before: usize, after: usize) -> Option<bool> {
+    if after > before {
+        Some(true)
+    } else if after == 0 && before > 0 {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// The title of an agent tab or command row.
@@ -708,6 +729,20 @@ mod tests {
         assert_eq!(badge_label(3), Some("3".into()));
         assert_eq!(badge_count(&[agent("a", 0)]), 0);
         assert_eq!(badge_label(0), None);
+    }
+
+    #[test]
+    fn the_fire_lights_on_a_new_waiting_thread_and_goes_out_at_zero() {
+        assert_eq!(
+            waiting_threads(&[agent("a", 2), agent("b", 1), agent("c", 0)]),
+            2
+        );
+        assert_eq!(fire_change(0, 1), Some(true));
+        assert_eq!(fire_change(1, 2), Some(true));
+        assert_eq!(fire_change(2, 1), None);
+        assert_eq!(fire_change(1, 1), None);
+        assert_eq!(fire_change(1, 0), Some(false));
+        assert_eq!(fire_change(0, 0), None);
     }
 
     #[test]

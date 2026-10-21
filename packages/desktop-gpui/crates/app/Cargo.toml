@@ -46,18 +46,21 @@ uuid = { version = "1", features = ["v4"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 # Turns off gpui's glyph dilation so text draws as thin as in Electron.
 core-foundation-sys = "0.8"
-# GPUI has no dock badge API, so the badge goes through NSDockTile.
+# GPUI has no dock tile API, so the badge and the fire go through NSDockTile.
 objc2 = "0.6"
 # The Open in editor menu draws each app's bundle icon (ADR-0046).
 objc2-app-kit = { version = "0.3", features = [
     "NSApplication",
     "NSBitmapImageRep",
+    "NSControl",
     "NSDockTile",
     "NSGraphics",
     "NSGraphicsContext",
     "NSImage",
     "NSImageRep",
+    "NSImageView",
     "NSResponder",
+    "NSView",
     "NSWorkspace",
 ] }
 objc2-foundation = { version = "0.3", features = [

@@ -9,6 +9,7 @@
 mod actions;
 mod chrome;
 mod dock;
+mod fire;
 mod new_workspace;
 mod panes;
 mod plugin_views;

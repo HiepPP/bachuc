@@ -8,7 +8,6 @@ use crate::actions::{
     ZOOM_OUT, ZOOM_RESET, binding_specs, rebind, settings_key_context,
 };
 use crate::chrome::{ExplorerResize, HANDLE_WIDTH, HeaderMenu, NoPreview};
-use crate::dock;
 use crate::new_workspace::{self, NewWorkspacePreset, NewWorkspaceScreen, SidePanelChanged};
 use crate::panes::{
     AgentPane, Launch, LaunchItem, LazyAgentPane, NewTabPane, PaneFrame, SubagentPane, launch_hints,
@@ -23,12 +22,13 @@ use crate::state::{
     AppIcons, Connection, EditorTarget, LayoutPrefs, LogoFill, absolute_path, agent_icon,
     agent_key, agent_of_key, agent_title, all_diffs_key, badge_count, badge_label, command_items,
     commit_diff_key, commit_diff_title, diff_key, editor_targets, explorer_width, file_key,
-    file_name, file_of_key, find_workspace, initial_host, load_ship_default, next_mode,
-    notification_for, pull_request_key, save_ship_default, step_index, step_workspace,
-    workspace_agents, workspace_order,
+    file_name, file_of_key, find_workspace, fire_change, initial_host, load_ship_default,
+    next_mode, notification_for, pull_request_key, save_ship_default, step_index, step_workspace,
+    waiting_threads, workspace_agents, workspace_order,
 };
 use crate::toast::{ToastStack, render_toasts};
 use crate::workspace_draft::{self, WorkspaceDraftPane};
+use crate::{dock, fire};
 use bachuc_client::{
     AgentControls, AgentFeature, AgentFeatureKind, AgentSummary, AttentionReason, Client,
     ClientEvent, CreatedWorkspace, DirectoryEvent, GitStatusEvent, HostConfig, PrStatus,
@@ -83,6 +83,8 @@ use std::time::{Duration, Instant};
 /// The old client lives this long after a host switch, so a queued terminal kill reaches the
 /// old daemon before its socket closes.
 const RETIRE_AFTER: Duration = Duration::from_secs(2);
+/// The dock fire runs at 15 frames a second.
+const FIRE_FRAME: Duration = Duration::from_millis(67);
 
 /// The workspace view shown while no workspace is selected, for example with zero projects.
 const HOME: &str = "";
@@ -224,6 +226,9 @@ pub struct Shell {
     diagrams: Entity<DiagramRenderer>,
     pub(crate) connection: Connection,
     badge: usize,
+    waiting: usize,
+    /// Draws the dock fire frames; dropping it stops them.
+    fire: Option<Task<()>>,
     logo_fill: LogoFill,
     shortcuts: Vec<Shortcut>,
     bindings: Vec<BindingSpec>,
@@ -330,6 +335,8 @@ impl Shell {
             diagrams,
             connection: Connection::Connecting,
             badge: 0,
+            waiting: 0,
+            fire: None,
             logo_fill,
             shortcuts,
             bindings,
@@ -603,6 +610,41 @@ impl Shell {
         if count != self.badge {
             self.badge = count;
             dock::set_badge(badge_label(count).as_deref());
+        }
+        let waiting = waiting_threads(self.client.read(cx).agents());
+        match fire_change(self.waiting, waiting) {
+            Some(true) => self.light_fire(cx),
+            Some(false) => self.put_out_fire(),
+            None => {}
+        }
+        self.waiting = waiting;
+    }
+
+    /// Sets the dock icon on fire until the app becomes active or no thread waits. Like a dock
+    /// bounce, it does not start while the app is active.
+    fn light_fire(&mut self, cx: &mut Context<Self>) {
+        if self.fire.is_some() || dock::app_is_active() {
+            return;
+        }
+        let lit = Instant::now();
+        self.fire = Some(cx.spawn(async move |this, cx| {
+            while !dock::app_is_active() {
+                let time = lit.elapsed().as_secs_f32();
+                let flames = cx
+                    .background_executor()
+                    .spawn(async move { fire::frame(time) })
+                    .await;
+                dock::show_fire(&flames, fire::SIDE);
+                cx.background_executor().timer(FIRE_FRAME).await;
+            }
+            dock::clear_fire();
+            let _ = this.update(cx, |shell, _| shell.fire = None);
+        }));
+    }
+
+    fn put_out_fire(&mut self) {
+        if self.fire.take().is_some() {
+            dock::clear_fire();
         }
     }
 
