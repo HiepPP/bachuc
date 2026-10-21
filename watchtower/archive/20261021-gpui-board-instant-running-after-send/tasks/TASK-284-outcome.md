@@ -25,6 +25,7 @@ DONE. Both red tests failed first, then passed. All 58 crate tests pass.
 - `fmt --check -p bachuc-plugin-next-prompt-actions` exits 0. `clippy --all-targets` shows no warning in this crate.
 - Read `PanelModel::send`: the loop has no await. `start` calls no pending method.
 - No window opened. No UI checker line in this spec.
+- Verify: `./cargo.sh test -p bachuc-client -p bachuc-plugin-board -p bachuc-plugin-next-prompt-actions -p bachuc-plugin-thread-branch` on branch head 243dbd9 -> 348 passed, 0 failed (verify, 2026-10-21 14:55); `send_marks_the_turn_before_it_opens_the_board` and `only_an_acknowledged_send_keeps_the_mark` pass, and `back_to_board_opens_before_send` no longer exists.
 
 ## Anti-goal
 
@@ -35,6 +36,9 @@ Tripwire: no await before `OpenBoard`. Source: order in `send_plan` and the loop
 | Before change           | `[OpenBoard, Rpc]`, loop has no await                                                                               | 14:39 |
 | After `model.rs` change | `[MarkPending, OpenBoard, Rpc]`, loop has no await; the only new await is inside the spawned wrapper after the loop | 14:40 |
 | Completion              | same as above                                                                                                       | 14:41 |
+
+- Verify read: `send_plan` returns `MarkPending` and `OpenBoard` before `Rpc`, and the `send` loop has no await (758dd77); verify, 2026-10-21.
+- Result: PASS; zero awaits before `OpenBoard`.
 
 ## Lessons
 

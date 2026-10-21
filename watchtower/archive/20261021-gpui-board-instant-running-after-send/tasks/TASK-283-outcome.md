@@ -2,9 +2,7 @@
 
 ## Status
 
-BLOCKED
-
-Blocked: BUILT, UNVERIFIED (Q-183). Every automated check passed. The two owner checks need Hiep on live GPUI.
+DONE
 
 ## Changed
 
@@ -30,6 +28,9 @@ Blocked: BUILT, UNVERIFIED (Q-183). Every automated check passed. The two owner 
 - Read `store.rs`: `interval` reads `self.snapshot`, the shown snapshot. `revision += 1` sits after the equality guard in `rebuild`. `refresh` is called only in `pending_changed`.
 - Owner check, Send then Board opens with the card in Running: DEFERRED (UI checker).
 - Owner check, send to a busy agent, card returns to Just finished: DEFERRED (UI checker).
+- Verify: `./cargo.sh test -p bachuc-client -p bachuc-plugin-board -p bachuc-plugin-next-prompt-actions -p bachuc-plugin-thread-branch` on branch head 243dbd9 -> 348 passed, 0 failed (verify, 2026-10-21 14:55); the 8 `model::pending` tests pass.
+- Owner check (Q-183, Hiep, 2026-10-21): Send on a What next card opens the Board with the card already in Running -> PASS.
+- Owner check (Q-183, Hiep, 2026-10-21): a send to a busy agent puts the card back in Just finished -> PASS.
 
 ## Anti-goal
 
@@ -44,6 +45,9 @@ Goal: 0 redraws per `PendingTurnsChanged` with no card change, and at most 1 `bo
 | Completion              | test `no_mark_returns_an_equal_snapshot` | pass                                                                                  | `cargo.sh test -p bachuc-plugin-board` (105 pass)                 | 07:41      |
 
 No store-level unit test covers the guard, because `BoardStore` needs a GPUI app. The checkpoint values come from the code read and the pure-function test.
+
+- Verify read: the equality guard before `revision += 1` and the refresh only in `pending_changed` are in the committed `store.rs` (a732555); `no_mark_returns_an_equal_snapshot` passes; verify, 2026-10-21.
+- Result: PASS against 0 redraws with no card change and at most 1 extra `board.snapshot` per Send.
 
 ## Lessons
 

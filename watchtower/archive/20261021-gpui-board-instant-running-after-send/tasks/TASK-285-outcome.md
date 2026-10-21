@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE. Two Owner check lines are DEFERRED (UI checker).
+DONE
 
 ## Changed
 
@@ -25,6 +25,9 @@ DONE. Two Owner check lines are DEFERRED (UI checker).
 - Impact: GitNexus gave `UNKNOWN` for `run_menu`. `rg` shows one caller (`pills.rs` `press`) and no other `MenuAction` user. The `match` stays exhaustive.
 - Owner check, clean behind branch: DEFERRED (UI checker).
 - Owner check, uncommitted change: DEFERRED (UI checker).
+- Verify: `./cargo.sh test -p bachuc-client -p bachuc-plugin-board -p bachuc-plugin-next-prompt-actions -p bachuc-plugin-thread-branch` on branch head 243dbd9 -> 348 passed, 0 failed (verify, 2026-10-21 14:55); the 3 red tests pass.
+- Owner check (Hiep, 2026-10-21): Pull on a clean branch that is behind -> the `↓` count goes to 0 -> PASS.
+- Owner check (Hiep, 2026-10-21): Pull with an uncommitted change -> the dirty message shows and nothing is pulled -> PASS.
 
 ## Anti-goal
 
@@ -37,6 +40,9 @@ Tripwire: the existing menu rows keep ids, order, and visibility.
 | Completion               | same as the checkpoint above; draft and untracked lists unchanged                                                                                     | `./cargo.sh test -p bachuc-plugin-thread-branch` passed | 2026-10-21 14:38 |
 
 The tripwire did not cross.
+
+- Verify read: the tracked-menu test lists differ from main only by `"pull"` between `"fetch"` and `"refresh"` (929cca9); verify, 2026-10-21.
+- Result: PASS; existing rows kept their ids, order, and rules.
 
 ## Lessons
 

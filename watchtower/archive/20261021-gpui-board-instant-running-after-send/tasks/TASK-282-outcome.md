@@ -26,6 +26,8 @@ DONE
 - `./cargo.sh fmt --check -p bachuc-client` -> exit 0.
 - I read `clear_turn_pending`: it emits only inside `if self.pending_turns.clear(agent_id)`.
 - `git status` shows only my two files changed in the client crate. The other changes in the checkout belong to group D and the plan file.
+- Verify: `./cargo.sh test -p bachuc-client -p bachuc-plugin-board -p bachuc-plugin-next-prompt-actions -p bachuc-plugin-thread-branch` on branch head 243dbd9 -> 348 passed, 0 failed (verify, 2026-10-21 14:55).
+- Verify: `./cargo.sh check -p bachuc-app` -> exit 0; `fmt --check -p bachuc-client` -> exit 0.
 
 ## Anti-goal
 
@@ -38,6 +40,9 @@ Tripwire: `git diff main -- packages/desktop-gpui/crates/client/src/model.rs` mu
 | Completion                | empty | same command                       | 1792568290    |
 
 The tripwire did not cross. `ClientEvent` has no new variant.
+
+- Verify read: `git diff main -- packages/desktop-gpui/crates/client/src/model.rs` -> empty; verify, 2026-10-21.
+- Result: PASS; `ClientEvent` unchanged.
 
 ## Lessons
 
