@@ -70,6 +70,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a jump to the parent's tool call in place of a provider subagent tab while the owner wants to read the child's own steps. Reason: [ADR-0051](watchtower/decisions/ADR-0051-read-only-provider-subagent-tab-over-jump-to-parent.md).
 - Avoid NSTextInputClient geometry patches, a GPUI-drawn pill, or a bubble call inside paint for the Text Replacement preview while macOS shows that bubble only to AppKit views. Reason: [ADR-0054](watchtower/decisions/ADR-0054-app-called-macos-correction-bubble-over-system-geometry.md).
 - Avoid a name-only sidebar sort, an activity sort, and a saved order with no Electron import in GPUI, while Electron's saved order is what Hiep expects to see. Reason: [ADR-0057](watchtower/decisions/ADR-0057-gpui-saved-sidebar-order-with-electron-import-over-name-sort.md).
+- Avoid a Board refresh on `AgentsChanged`, a Board surface params hint, a composer-send mark, or a placeholder card for a new thread, while Hiep needs the What next Send card in Running on the first Board frame. Reason: [ADR-0058](watchtower/decisions/ADR-0058-gpui-pending-turn-mark-over-waiting-for-the-board-poll.md).
+- Avoid a thread-branch server `git pull --ff-only` or a Pull on a dirty folder in the GPUI branch pill, while the daemon checkout pull serves the explorer Pull. Reason: [ADR-0059](watchtower/decisions/ADR-0059-gpui-branch-pill-pull-through-daemon-checkout-pull.md).
 
 ## Learnings
 
