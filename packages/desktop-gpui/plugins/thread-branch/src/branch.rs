@@ -217,7 +217,23 @@ pub(crate) enum MenuAction {
     OpenIssues,
     OpenPulls,
     Fetch,
+    Pull,
     Refresh,
+}
+
+pub(crate) const PULL_DIRTY: &str =
+    "Pull isn't available while you have local changes so commit or stash them first";
+pub(crate) const PULL_NO_UPSTREAM: &str = "No upstream branch to pull from.";
+
+/// Why a pull must not run on this fresh info; the upstream is checked before local changes.
+pub(crate) fn pull_blocked(info: &BranchInfo) -> Option<&'static str> {
+    if info.upstream.is_none() {
+        Some(PULL_NO_UPSTREAM)
+    } else if info.dirty {
+        Some(PULL_DIRTY)
+    } else {
+        None
+    }
 }
 
 /// The page a repository open row loads: the repo itself, or its GitHub issues or pulls list.
@@ -269,7 +285,7 @@ fn visible_entries(entries: Vec<(MenuEntry, bool)>) -> Vec<MenuEntry> {
 }
 
 /// The agent branch pill menu: Copy branch name, Open repository, Issues and Pull requests on
-/// GitHub (GitHub remotes only), a divider, Fetch, Refresh.
+/// GitHub (GitHub remotes only), a divider, Fetch, Pull, Refresh.
 pub(crate) fn branch_menu(info: &BranchInfo) -> Vec<MenuEntry> {
     let url = info.remote_url.as_deref();
     let github = url.is_some_and(|url| url.contains("github.com"));
@@ -328,6 +344,10 @@ pub(crate) fn branch_menu(info: &BranchInfo) -> Vec<MenuEntry> {
             info.upstream.is_some(),
         ),
         (
+            row("pull", "Pull", IconName::ArrowDownToLine, MenuAction::Pull),
+            info.upstream.is_some(),
+        ),
+        (
             row(
                 "refresh",
                 "Refresh",
@@ -380,9 +400,9 @@ pub(crate) fn copy_text(info: &BranchInfo, draft: bool) -> Result<String, &'stat
 #[cfg(test)]
 mod tests {
     use super::{
-        BranchInfo, Changes, MenuAction, MenuEntry, PullRequest, SyncState, branch_menu,
-        branch_pill, changes_pill, copy_text, draft_menu, draft_pill_label, menu_url, pill_label,
-        pill_title, pr_pill, repo_name, sync_state, sync_tone,
+        BranchInfo, Changes, MenuAction, MenuEntry, PULL_DIRTY, PULL_NO_UPSTREAM, PullRequest,
+        SyncState, branch_menu, branch_pill, changes_pill, copy_text, draft_menu, draft_pill_label,
+        menu_url, pill_label, pill_title, pr_pill, pull_blocked, repo_name, sync_state, sync_tone,
     };
     use bachuc_theme::Tokens;
 
@@ -619,6 +639,7 @@ mod tests {
                 "open-pulls",
                 "-",
                 "fetch",
+                "pull",
                 "refresh"
             ]
         );
@@ -647,6 +668,56 @@ mod tests {
                 "refresh"
             ]
         );
+    }
+
+    #[test]
+    fn branch_menu_offers_pull_after_fetch_when_the_branch_has_an_upstream() {
+        assert!(!row_ids(&branch_menu(&base())).contains(&"pull"));
+        let tracked = BranchInfo {
+            upstream: Some("origin/main".into()),
+            ..base()
+        };
+        let menu = branch_menu(&tracked);
+        let ids = row_ids(&menu);
+        let fetch = ids.iter().position(|id| *id == "fetch").unwrap();
+        assert_eq!(ids[fetch + 1], "pull");
+        assert_eq!(ids[fetch + 2], "refresh");
+        let pull = menu
+            .iter()
+            .find_map(|entry| match entry {
+                MenuEntry::Row(row) if row.id == "pull" => Some(row),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(pull.title, "Pull");
+        assert_eq!(pull.icon, bachuc_icons::IconName::ArrowDownToLine);
+        assert_eq!(pull.action, MenuAction::Pull);
+        assert!(!row_ids(&draft_menu()).contains(&"pull"));
+    }
+
+    #[test]
+    fn pull_is_blocked_by_local_changes_or_a_missing_upstream() {
+        let tracked = BranchInfo {
+            upstream: Some("origin/main".into()),
+            ..base()
+        };
+        assert_eq!(pull_blocked(&tracked), None);
+        let dirty = BranchInfo {
+            dirty: true,
+            ..tracked.clone()
+        };
+        assert_eq!(pull_blocked(&dirty), Some(PULL_DIRTY));
+        assert_eq!(pull_blocked(&base()), Some(PULL_NO_UPSTREAM));
+        let both = BranchInfo {
+            upstream: None,
+            ..dirty
+        };
+        assert_eq!(pull_blocked(&both), Some(PULL_NO_UPSTREAM));
+        assert_eq!(
+            PULL_DIRTY,
+            "Pull isn't available while you have local changes so commit or stash them first"
+        );
+        assert_eq!(PULL_NO_UPSTREAM, "No upstream branch to pull from.");
     }
 
     #[test]
@@ -810,6 +881,7 @@ mod tests {
                 "open-pulls",
                 "-",
                 "fetch",
+                "pull",
                 "refresh"
             ]
         );

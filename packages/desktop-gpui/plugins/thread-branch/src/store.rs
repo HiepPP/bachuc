@@ -7,8 +7,8 @@
 //! each asked folder that an agent or a draft still uses, one read per folder (`pills.ts:166`).
 //! It redraws the pills only when a folder's info changed (`signature`, `pills.ts:28`).
 
-use crate::branch::{BranchInfo, MenuAction, copy_text, menu_url};
-use bachuc_client::Client;
+use crate::branch::{BranchInfo, MenuAction, copy_text, menu_url, pull_blocked};
+use bachuc_client::{Client, GitAction};
 use bachuc_plugin_host::{ComposerDraft, ComposerTarget, MessageLevel, PluginContext};
 use gpui_kit::{App, ClipboardItem, Entity, SharedString, Task, WeakEntity};
 use serde_json::{Value, json};
@@ -20,6 +20,7 @@ use std::time::Duration;
 /// How often the asked folders are read again (`POLL_MS`).
 pub(crate) const POLL: Duration = Duration::from_secs(15);
 const GET: &str = "thread-branch.get";
+const NO_CONNECTION: &str = "No host connection.";
 const NO_PROJECT: &str = "Choose a project first.";
 const NO_PR: &str = "No pull request for this branch.";
 const NO_REMOTE: &str = "No remote repository for this directory.";
@@ -73,9 +74,20 @@ pub(crate) struct State {
     /// Folders whose first read failed. Pills draw often, so they wait for the next tick
     /// instead of asking the server on every draw.
     failed: BTreeSet<String>,
+    /// Folders where a Pull press runs. A second press for the same folder does nothing.
+    pulling: BTreeSet<String>,
 }
 
 impl State {
+    /// A Pull press for `cwd`. True when the caller runs the pull: none runs for the folder.
+    pub(crate) fn begin_pull(&mut self, cwd: &str) -> bool {
+        self.pulling.insert(cwd.to_string())
+    }
+
+    pub(crate) fn end_pull(&mut self, cwd: &str) {
+        self.pulling.remove(cwd);
+    }
+
     /// A pill asks for `cwd`. True when the caller starts the first read: the folder has no
     /// answer, no read runs for it, and its last first read did not just fail.
     pub(crate) fn ask(&mut self, cwd: &str) -> bool {
@@ -337,8 +349,53 @@ impl Branches {
                 }
             }
             MenuAction::Fetch => self.spawn_load(cwd, Mode::Fetch, true, cx),
+            // The New workspace menu has no Pull row.
+            MenuAction::Pull if draft => {}
+            MenuAction::Pull => self.pull(cwd, cx),
             MenuAction::Refresh => self.spawn_load(cwd, Mode::Force, true, cx),
         }
+    }
+
+    /// A Pull press on an agent pill: reads `cwd` fresh, refuses a folder with local changes,
+    /// runs the daemon pull, and reads the folder again so the pill drops its `↓` count.
+    fn pull(self: &Rc<Self>, cwd: String, cx: &mut App) {
+        if !self.state.borrow_mut().begin_pull(&cwd) {
+            return;
+        }
+        let Some(client) = self.ctx.client(cx) else {
+            self.state.borrow_mut().end_pull(&cwd);
+            self.error(NO_CONNECTION, cx);
+            return;
+        };
+        let fresh = self.load(cwd.clone(), Mode::Force, cx);
+        let store = self.clone();
+        cx.spawn(async move |cx| {
+            let outcome = async {
+                let info = fresh.await.map_err(|error| format!("{error:#}"))?;
+                if let Some(message) = pull_blocked(&info) {
+                    return Err(message.to_string());
+                }
+                cx.update(|cx| {
+                    client.update(cx, |client, cx| {
+                        client.git_action(&cwd, GitAction::Pull, cx)
+                    })
+                })
+                .await
+                .map_err(|error| format!("{error:#}"))?;
+                cx.update(|cx| store.load(cwd.clone(), Mode::Force, cx))
+                    .await
+                    .map_err(|error| format!("{error:#}"))?;
+                Ok::<(), String>(())
+            }
+            .await;
+            cx.update(|cx| {
+                store.state.borrow_mut().end_pull(&cwd);
+                if let Err(message) = outcome {
+                    store.error(message, cx);
+                }
+            });
+        })
+        .detach();
     }
 
     /// A PR pill press: opens the pull request of the agent's folder.
@@ -468,6 +525,16 @@ mod tests {
         assert_eq!(state.due(&live), vec!["/repo".to_string()]);
         assert!(state.apply("/repo", info("main")));
         assert!(!state.ask("/repo"));
+    }
+
+    #[test]
+    fn one_pull_at_a_time_per_folder() {
+        let mut state = State::default();
+        assert!(state.begin_pull("/repo"));
+        assert!(!state.begin_pull("/repo"));
+        assert!(state.begin_pull("/other"));
+        state.end_pull("/repo");
+        assert!(state.begin_pull("/repo"));
     }
 
     #[test]
