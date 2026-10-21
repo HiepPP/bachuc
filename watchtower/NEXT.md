@@ -11,12 +11,12 @@
 
 One row per TASK. Group ties together items that write the same files.
 
-| Order | TASK                                          | Group | Status      | Spec                                                                                                                                   | Deps     | Context | Notes                                             |
-| ----- | --------------------------------------------- | ----- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------------- |
-| 1     | TASK-282 Client pending turn mark             | A     | DONE        | [watchtower/tasks/TASK-282-client-pending-turn-mark.md](watchtower/tasks/TASK-282-client-pending-turn-mark.md)                         | -        | -       | Host API in `bachuc-client`.                      |
-| 2     | TASK-283 Board shows pending turns as Running | B     | IN PROGRESS | [watchtower/tasks/TASK-283-board-shows-pending-turns-as-running.md](watchtower/tasks/TASK-283-board-shows-pending-turns-as-running.md) | TASK-282 | -       | Start order only; no shared file.                 |
-| 3     | TASK-284 What next Send marks the turn        | C     | IN PROGRESS | [watchtower/tasks/TASK-284-what-next-send-marks-the-turn.md](watchtower/tasks/TASK-284-what-next-send-marks-the-turn.md)               | TASK-282 | -       | Start order only; runs in parallel with TASK-283. |
-| 4     | TASK-285 Branch pill Pull                     | D     | DONE        | [watchtower/tasks/TASK-285-branch-pill-pull.md](watchtower/tasks/TASK-285-branch-pill-pull.md)                                         | -        | -       | Independent. implement: manual checks pending.    |
+| Order | TASK                                          | Group | Status  | Spec                                                                                                                                   | Deps     | Context | Notes                                             |
+| ----- | --------------------------------------------- | ----- | ------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------------- |
+| 1     | TASK-282 Client pending turn mark             | A     | DONE    | [watchtower/tasks/TASK-282-client-pending-turn-mark.md](watchtower/tasks/TASK-282-client-pending-turn-mark.md)                         | -        | -       | Host API in `bachuc-client`.                      |
+| 2     | TASK-283 Board shows pending turns as Running | B     | BLOCKED | [watchtower/tasks/TASK-283-board-shows-pending-turns-as-running.md](watchtower/tasks/TASK-283-board-shows-pending-turns-as-running.md) | TASK-282 | -       | Blocked: BUILT, UNVERIFIED (Q-183).               |
+| 3     | TASK-284 What next Send marks the turn        | C     | DONE    | [watchtower/tasks/TASK-284-what-next-send-marks-the-turn.md](watchtower/tasks/TASK-284-what-next-send-marks-the-turn.md)               | TASK-282 | -       | Start order only; runs in parallel with TASK-283. |
+| 4     | TASK-285 Branch pill Pull                     | D     | DONE    | [watchtower/tasks/TASK-285-branch-pill-pull.md](watchtower/tasks/TASK-285-branch-pill-pull.md)                                         | -        | -       | Independent. implement: manual checks pending.    |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
@@ -38,7 +38,7 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Handoff
 
-- Next action: run `/watchtower implement`. TASK-282 and TASK-285 go first; then TASK-283 and TASK-284 can run in parallel.
+- Next action: Hiep runs the owner check in Q-183 on live GPUI, then answers it. A pass sets TASK-283 to DONE. Also run the two Pull owner checks of TASK-285.
 
 ## Archive
 
