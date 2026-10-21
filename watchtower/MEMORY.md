@@ -417,3 +417,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Source: ADR-0054; crash report `bachuc-desktop-2026-10-20-120945.ips`; `packages/desktop-gpui/vendor/gpui-base/src/input/base/native.rs`.
 - Use next time: dispatch such calls with `dispatch_async_f` on the main queue; check a new symbol with `strings -a` in the binary before you debug, because cargo can reuse a build when patched files carry old mtimes.
 - 2026-10-20 Learned: `cargo clippy -p <crate> -- -D warnings` also lints workspace path dependencies, and `bachuc-protocol` and `bachuc-theme` fail it. Use `--no-deps` in a `## Verify` clippy line. A check bundle opened with `open -g` kept a stale "Connecting" frame and an empty AX tree even after it connected, so AX reads of GPUI content need a painted window (TASK-279).
+
+### 2026-10-21 GPUI client tests and UI check setup
+
+- Learned: `Harness::connected` in the `bachuc-client` tests waits for at least one agent, so a red test that calls `connect` needs `server.add_agent("a1", "idle")` first. A new `ClientEvent` variant breaks exhaustive matches in `crates/timeline/src/lib.rs` and `crates/client/examples/client_probe.rs`.
+- Learned: `npm run cli -- run -d --provider mock/ten-second-stream --new-workspace worktree ...` makes cheap live agents for GPUI screen checks. The AX tree shows only the first line of a multi-line composer value, so check multi-line text with a screenshot.
+- Source: TASK-286 and TASK-287 outcomes.

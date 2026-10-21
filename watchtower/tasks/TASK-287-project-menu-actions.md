@@ -69,6 +69,7 @@ File: [packages/desktop-gpui/crates/client/tests/rpcs.rs](packages/desktop-gpui/
 #[test]
 fn remove_project_sends_the_project_remove_request() {
     let server = FakeServer::start();
+    server.add_agent("a1", "idle");
     let mut harness = connect(&server);
     harness.core.remove_project("p1");
     let request = sent(&server, &mut harness, "project.remove.request");
@@ -79,6 +80,7 @@ fn remove_project_sends_the_project_remove_request() {
 #[test]
 fn a_refused_project_remove_is_reported() {
     let server = FakeServer::start();
+    server.add_agent("a1", "idle");
     server.reply(
         "project.remove.request",
         "project.remove.response",

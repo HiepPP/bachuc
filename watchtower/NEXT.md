@@ -4,15 +4,15 @@
 
 - Title: GPUI composer prompt history and project menu actions
 - Slug: 20261021-gpui-prompt-history-project-menu
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-21
 
 ## Tracker
 
-| Order | TASK                                               | Group | Status      | Spec                                                                                                         | Deps | Context | Notes                                            |
-| ----- | -------------------------------------------------- | ----- | ----------- | ------------------------------------------------------------------------------------------------------------ | ---- | ------- | ------------------------------------------------ |
-| 1     | TASK-286 Composer prompt history with Up and Down  | A     | IN PROGRESS | [watchtower/tasks/TASK-286-composer-prompt-history.md](watchtower/tasks/TASK-286-composer-prompt-history.md) | -    | -       | GPUI-local history per repo, as Claude Code CLI. |
-| 2     | TASK-287 Project menu settings, Finder, and Remove | B     | IN PROGRESS | [watchtower/tasks/TASK-287-project-menu-actions.md](watchtower/tasks/TASK-287-project-menu-actions.md)       | -    | -       | Same logic as the Electron project menu.         |
+| Order | TASK                                               | Group | Status | Spec                                                                                                         | Deps | Context | Notes                                            |
+| ----- | -------------------------------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------------------ | ---- | ------- | ------------------------------------------------ |
+| 1     | TASK-286 Composer prompt history with Up and Down  | A     | DONE   | [watchtower/tasks/TASK-286-composer-prompt-history.md](watchtower/tasks/TASK-286-composer-prompt-history.md) | -    | -       | GPUI-local history per repo, as Claude Code CLI. |
+| 2     | TASK-287 Project menu settings, Finder, and Remove | B     | DONE   | [watchtower/tasks/TASK-287-project-menu-actions.md](watchtower/tasks/TASK-287-project-menu-actions.md)       | -    | -       | Same logic as the Electron project menu.         |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
@@ -31,7 +31,7 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Handoff
 
-- Next action: run `/watchtower implement`.
+- Next action: review `feat/20261021-gpui-prompt-history-project-menu`, then merge it to `main` or run `/watchtower archive`.
 
 ## Archive
 
