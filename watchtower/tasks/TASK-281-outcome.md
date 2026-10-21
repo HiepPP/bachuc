@@ -40,3 +40,7 @@ PASS. Existing menu rows keep their order, titles, and visibility. No existing t
 - 2026-10-21 lead: scope matches `Files:`; GitNexus detect-changes risk low; committed `b6b50696a`.
 - Anti-goal final: PASS; only the full-menu line of `menu_rows_visibility` changed, as the spec allows.
 - Manual pill menu check in a GPUI build: UNVERIFIED (unattended); owner check.
+
+## UI Checks
+
+- 2026-10-21 lead, round 1: built `Bachuc GPUI Check.app` from `b6b50696a` (the binary holds "Pull requests on GitHub") and opened it with `open -n -g` against live. The window painted only right after a click and then kept a stale frame, so the command center search never showed a result. Pill menu rows and the opened pages: UNVERIFIED (background frame). Owner hand check needed.
