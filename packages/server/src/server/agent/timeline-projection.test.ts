@@ -5,7 +5,17 @@ import {
   projectTimelineRows,
   selectProjectedTimelinePage,
   selectTimelineWindowByProjectedLimit,
+  TimelineProjection,
+  type TimelineProjectionEntry,
 } from "./timeline-projection.js";
+
+function projectedShape(entries: TimelineProjectionEntry[]) {
+  return entries.map((entry) => ({
+    type: entry.item.type,
+    ...(entry.item.type === "assistant_message" ? { text: entry.item.text } : {}),
+    sourceSeqRanges: entry.sourceSeqRanges.map((range) => range.startSeq),
+  }));
+}
 
 describe("projectTimelineRows", () => {
   test("merges adjacent assistant chunks in projected mode", () => {
@@ -91,6 +101,47 @@ describe("projectTimelineRows", () => {
       text: "Second answer.",
       messageId: "msg-2",
     });
+  });
+
+  test("merges one message's chunks across a background tool's lifecycle rows", () => {
+    const task = (seq: number, status: "running" | "completed"): AgentTimelineRow => ({
+      seq,
+      timestamp: `2026-02-13T00:00:0${seq}.000Z`,
+      turnId: "turn-1",
+      item: {
+        type: "tool_call",
+        callId: "task_1",
+        name: "Task",
+        status,
+        error: null,
+        detail: { type: "unknown", input: null, output: null },
+      },
+    });
+    const chunk = (seq: number, text: string, messageId: string): AgentTimelineRow => ({
+      seq,
+      timestamp: `2026-02-13T00:00:0${seq}.000Z`,
+      turnId: "turn-1",
+      item: { type: "assistant_message", text, messageId },
+    });
+    const rows: AgentTimelineRow[] = [
+      task(1, "running"),
+      chunk(2, "- Còn l", "msg-1"),
+      task(3, "running"),
+      chunk(4, "ại: x", "msg-1"),
+      task(5, "running"),
+      chunk(6, "Next.", "msg-2"),
+      task(7, "completed"),
+    ];
+    const expected = [
+      { type: "tool_call", sourceSeqRanges: [1, 3, 5, 7] },
+      { type: "assistant_message", text: "- Còn lại: x", sourceSeqRanges: [2, 4] },
+      { type: "assistant_message", text: "Next.", sourceSeqRanges: [6] },
+    ];
+    expect(projectedShape(projectTimelineRows({ rows, mode: "projected" }))).toEqual(expected);
+
+    const live = new TimelineProjection();
+    for (const row of rows) live.append(row);
+    expect(projectedShape(live.getRows())).toEqual(expected);
   });
 
   test("merges adjacent reasoning chunks in projected mode", () => {
