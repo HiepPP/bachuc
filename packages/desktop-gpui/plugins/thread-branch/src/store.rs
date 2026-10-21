@@ -7,7 +7,7 @@
 //! each asked folder that an agent or a draft still uses, one read per folder (`pills.ts:166`).
 //! It redraws the pills only when a folder's info changed (`signature`, `pills.ts:28`).
 
-use crate::branch::{BranchInfo, MenuAction, copy_text};
+use crate::branch::{BranchInfo, MenuAction, copy_text, menu_url};
 use bachuc_client::Client;
 use bachuc_plugin_host::{ComposerDraft, ComposerTarget, MessageLevel, PluginContext};
 use gpui_kit::{App, ClipboardItem, Entity, SharedString, Task, WeakEntity};
@@ -330,10 +330,12 @@ impl Branches {
                 }
                 None => self.error("No branch name to copy.", cx),
             },
-            MenuAction::OpenRepo => match self.info(&cwd).and_then(|info| info.remote_url) {
-                Some(url) => cx.open_url(&url),
-                None => self.error(NO_REMOTE, cx),
-            },
+            MenuAction::OpenRepo | MenuAction::OpenIssues | MenuAction::OpenPulls => {
+                match self.info(&cwd).and_then(|info| info.remote_url) {
+                    Some(url) => cx.open_url(&menu_url(&url, action)),
+                    None => self.error(NO_REMOTE, cx),
+                }
+            }
             MenuAction::Fetch => self.spawn_load(cwd, Mode::Fetch, true, cx),
             MenuAction::Refresh => self.spawn_load(cwd, Mode::Force, true, cx),
         }

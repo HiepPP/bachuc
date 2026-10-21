@@ -4,14 +4,14 @@
 
 - Title: GPUI branch menu issues and pull requests rows
 - Slug: 20261021-gpui-branch-menu-issues-prs
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-21
 
 ## Tracker
 
-| Order | TASK                                                    | Group | Status | Spec                                                                                                                 | Deps | Context | Notes                |
-| ----- | ------------------------------------------------------- | ----- | ------ | -------------------------------------------------------------------------------------------------------------------- | ---- | ------- | -------------------- |
-| 1     | TASK-281 GPUI branch menu issues and pull requests rows | A     | TODO   | [watchtower/tasks/TASK-281-gpui-branch-menu-issues-prs.md](watchtower/tasks/TASK-281-gpui-branch-menu-issues-prs.md) | -    | -       | GitHub remotes only. |
+| Order | TASK                                                    | Group | Status | Spec                                                                                                                 | Deps | Context | Notes                                                  |
+| ----- | ------------------------------------------------------- | ----- | ------ | -------------------------------------------------------------------------------------------------------------------- | ---- | ------- | ------------------------------------------------------ |
+| 1     | TASK-281 GPUI branch menu issues and pull requests rows | A     | DONE   | [watchtower/tasks/TASK-281-gpui-branch-menu-issues-prs.md](watchtower/tasks/TASK-281-gpui-branch-menu-issues-prs.md) | -    | -       | GitHub remotes only; implement: manual checks pending. |
 
 ## Plan Verify
 
@@ -26,7 +26,7 @@
 
 ## Handoff
 
-- Next action: run `/watchtower implement`.
+- Next action: Hiep checks the branch pill menu in a GPUI build, then merges `feat/gpui-branch-menu-issues-prs` and runs `/watchtower archive`.
 
 ## Archive
 

@@ -214,8 +214,19 @@ pub(crate) fn changes_pill(info: &BranchInfo) -> Option<ChangesPill> {
 pub(crate) enum MenuAction {
     Copy,
     OpenRepo,
+    OpenIssues,
+    OpenPulls,
     Fetch,
     Refresh,
+}
+
+/// The page a repository open row loads: the repo itself, or its GitHub issues or pulls list.
+pub(crate) fn menu_url(remote: &str, action: MenuAction) -> String {
+    match action {
+        MenuAction::OpenIssues => format!("{remote}/issues"),
+        MenuAction::OpenPulls => format!("{remote}/pulls"),
+        _ => remote.to_string(),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -257,7 +268,8 @@ fn visible_entries(entries: Vec<(MenuEntry, bool)>) -> Vec<MenuEntry> {
     shown
 }
 
-/// The agent branch pill menu: Copy branch name, Open repository, a divider, Fetch, Refresh.
+/// The agent branch pill menu: Copy branch name, Open repository, Issues and Pull requests on
+/// GitHub (GitHub remotes only), a divider, Fetch, Refresh.
 pub(crate) fn branch_menu(info: &BranchInfo) -> Vec<MenuEntry> {
     let url = info.remote_url.as_deref();
     let github = url.is_some_and(|url| url.contains("github.com"));
@@ -291,6 +303,24 @@ pub(crate) fn branch_menu(info: &BranchInfo) -> Vec<MenuEntry> {
                 MenuAction::OpenRepo,
             ),
             url.is_some(),
+        ),
+        (
+            row(
+                "open-issues",
+                "Issues on GitHub",
+                IconName::CircleDot,
+                MenuAction::OpenIssues,
+            ),
+            github,
+        ),
+        (
+            row(
+                "open-pulls",
+                "Pull requests on GitHub",
+                IconName::GitPullRequest,
+                MenuAction::OpenPulls,
+            ),
+            github,
         ),
         (MenuEntry::Separator, true),
         (
@@ -351,8 +381,8 @@ pub(crate) fn copy_text(info: &BranchInfo, draft: bool) -> Result<String, &'stat
 mod tests {
     use super::{
         BranchInfo, Changes, MenuAction, MenuEntry, PullRequest, SyncState, branch_menu,
-        branch_pill, changes_pill, copy_text, draft_menu, draft_pill_label, pill_label, pill_title,
-        pr_pill, repo_name, sync_state, sync_tone,
+        branch_pill, changes_pill, copy_text, draft_menu, draft_pill_label, menu_url, pill_label,
+        pill_title, pr_pill, repo_name, sync_state, sync_tone,
     };
     use bachuc_theme::Tokens;
 
@@ -573,6 +603,82 @@ mod tests {
     }
 
     #[test]
+    fn branch_menu_offers_github_issues_and_pull_requests_below_the_open_row() {
+        let github = BranchInfo {
+            remote_url: Some("https://github.com/o/r".into()),
+            upstream: Some("origin/feat/board-avatars".into()),
+            ..base()
+        };
+        let menu = branch_menu(&github);
+        assert_eq!(
+            row_ids(&menu),
+            [
+                "copy-branch",
+                "open-repo",
+                "open-issues",
+                "open-pulls",
+                "-",
+                "fetch",
+                "refresh"
+            ]
+        );
+        let MenuEntry::Row(issues) = &menu[2] else {
+            panic!("expected the issues row third: {menu:?}");
+        };
+        assert_eq!(issues.title, "Issues on GitHub");
+        assert_eq!(issues.action, MenuAction::OpenIssues);
+        let MenuEntry::Row(pulls) = &menu[3] else {
+            panic!("expected the pull requests row fourth: {menu:?}");
+        };
+        assert_eq!(pulls.title, "Pull requests on GitHub");
+        assert_eq!(pulls.action, MenuAction::OpenPulls);
+        let untracked = BranchInfo {
+            upstream: None,
+            ..github
+        };
+        assert_eq!(
+            row_ids(&branch_menu(&untracked)),
+            [
+                "copy-branch",
+                "open-repo",
+                "open-issues",
+                "open-pulls",
+                "-",
+                "refresh"
+            ]
+        );
+    }
+
+    #[test]
+    fn branch_menu_hides_issues_and_pull_requests_off_github() {
+        for remote_url in [None, Some("https://gitlab.com/o/r".to_string())] {
+            let ids = row_ids(&branch_menu(&BranchInfo {
+                remote_url,
+                ..base()
+            }))
+            .join(",");
+            assert!(
+                !ids.contains("open-issues") && !ids.contains("open-pulls"),
+                "{ids}"
+            );
+        }
+    }
+
+    #[test]
+    fn menu_url_appends_the_github_page() {
+        let url = "https://github.com/o/r";
+        assert_eq!(
+            menu_url(url, MenuAction::OpenIssues),
+            "https://github.com/o/r/issues"
+        );
+        assert_eq!(
+            menu_url(url, MenuAction::OpenPulls),
+            "https://github.com/o/r/pulls"
+        );
+        assert_eq!(menu_url(url, MenuAction::OpenRepo), url);
+    }
+
+    #[test]
     fn sync_state_puts_pulling_first() {
         assert_eq!(sync_state(0, 0), SyncState::Synced);
         assert_eq!(sync_state(3, 0), SyncState::Ahead);
@@ -697,7 +803,15 @@ mod tests {
         };
         assert_eq!(
             row_ids(&branch_menu(&full)),
-            ["copy-branch", "open-repo", "-", "fetch", "refresh"]
+            [
+                "copy-branch",
+                "open-repo",
+                "open-issues",
+                "open-pulls",
+                "-",
+                "fetch",
+                "refresh"
+            ]
         );
         // No remote and no upstream: the divider stays between Copy and Refresh.
         assert_eq!(
