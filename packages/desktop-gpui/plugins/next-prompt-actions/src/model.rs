@@ -6,7 +6,7 @@ use crate::contracts::{
     INSPECT, SCOPE, START, Scope, ScopeInput, SendOutput, Snapshot, StartInput, StartOutput,
 };
 use crate::polling::{inspection_activity, inspection_interval};
-use crate::rules::{SendStep, panel_busy, send_plan};
+use crate::rules::{SendStep, panel_busy, send_landed, send_plan};
 use bachuc_client::{AttentionReason, Client, ClientEvent};
 use bachuc_plugin_host::{OpenSurfaceOptions, PluginContext};
 use gpui_kit::{App, AppContext as _, Context, Entity, Subscription, Task, WeakEntity};
@@ -374,6 +374,11 @@ impl PanelModel {
         let mut rpc = None;
         for step in send_plan(back_to_board, scope, keys) {
             match step {
+                SendStep::MarkPending(agent_id) => {
+                    if let Some(client) = &self.client {
+                        client.update(cx, |client, cx| client.mark_turn_pending(&agent_id, cx));
+                    }
+                }
                 SendStep::OpenBoard => self.ctx.open_surface(
                     "board",
                     OpenSurfaceOptions {
@@ -390,9 +395,22 @@ impl PanelModel {
                 }
             }
         }
-        if let Some(rpc) = rpc {
-            self.act(rpc, cx);
-        }
+        let Some(rpc) = rpc else {
+            return;
+        };
+        let client = self.client.clone();
+        let agent_id = self.agent_id.clone();
+        // The mark clears when the send does not land; `act` still gets the result.
+        let task = cx.spawn(async move |_, cx| {
+            let result = rpc.await;
+            if !send_landed(&result)
+                && let Some(client) = client
+            {
+                client.update(cx, |client, cx| client.clear_turn_pending(&agent_id, cx));
+            }
+            result
+        });
+        self.act(task, cx);
     }
 
     pub(crate) fn start(&mut self, key: String, cx: &mut Context<Self>) {

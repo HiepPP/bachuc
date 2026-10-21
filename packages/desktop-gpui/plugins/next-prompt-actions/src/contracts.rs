@@ -128,7 +128,6 @@ pub(crate) struct ToggleInput {
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[serde(default)]
 pub(crate) struct SendOutput {
-    #[allow(dead_code)]
     pub sent: bool,
 }
 
