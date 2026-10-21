@@ -5,12 +5,13 @@ mod common;
 
 use bachuc_client::{
     AgentFeature, AgentFeatureKind, AgentFeatureOption, AttentionReason, ChangedFile,
-    ChangedFileDetails, CheckoutDetails, CheckoutStatus, CommitFile, CommitList, CommitSummary,
-    DiffStat, DirectoryEvent, DirectorySuggestion, FileDiff, FileDiffStatus, FileKind,
-    ForkBoundary, ForkCursor, GitAction, GitActionReply, GitStatus, GitStatusEvent, HistoryEntry,
-    HistoryPage, MatchMode, MergeMethod, NewEntryKind, PrCheck, PrMergeCapability, PrStatus,
-    PrTimelineItem, ProjectNode, QueuedPrompt, RewindMode, RewindModes, StashEntry, TurnBehavior,
-    WorkspaceNode, WorkspaceScript, parse_provider_subagent_key, provider_subagent_key,
+    ChangedFileDetails, CheckoutDetails, CheckoutStatus, ClientEvent, CommitFile, CommitList,
+    CommitSummary, DiffStat, DirectoryEvent, DirectorySuggestion, FileDiff, FileDiffStatus,
+    FileKind, ForkBoundary, ForkCursor, GitAction, GitActionReply, GitStatus, GitStatusEvent,
+    HistoryEntry, HistoryPage, MatchMode, MergeMethod, NewEntryKind, PrCheck, PrMergeCapability,
+    PrStatus, PrTimelineItem, ProjectNode, QueuedPrompt, RewindMode, RewindModes, StashEntry,
+    TurnBehavior, WorkspaceNode, WorkspaceScript, parse_provider_subagent_key,
+    provider_subagent_key,
 };
 use bachuc_protocol::generated::ServerInfoPermissionsItem;
 use common::{FakeServer, Harness, agent_snapshot, session};
@@ -3208,4 +3209,99 @@ fn provider_subagent_keys_round_trip_and_plain_agent_ids_do_not() {
     );
     assert_eq!(parse_provider_subagent_key("a1"), None);
     assert_eq!(parse_provider_subagent_key("provider:a1"), None);
+}
+
+#[test]
+fn remove_project_sends_the_project_remove_request() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    harness.core.remove_project("p1");
+    let request = sent(&server, &mut harness, "project.remove.request");
+    assert_eq!(request["projectId"], "p1");
+    assert!(
+        request["requestId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
+}
+
+#[test]
+fn a_refused_project_remove_is_reported() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "project.remove.request",
+        "project.remove.response",
+        json!({"projectId": "p1", "accepted": false, "removedWorkspaceIds": [], "error": "busy"}),
+    );
+    let mut harness = connect(&server);
+    harness.core.remove_project("p1");
+    assert!(harness.pump_until(WAIT, |harness| {
+        harness.events.contains(&ClientEvent::ProjectRemoveFailed {
+            project_id: "p1".to_string(),
+        })
+    }));
+}
+
+#[test]
+fn an_accepted_project_remove_drops_the_project_and_its_workspaces() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "project.list.request",
+        "project.list.response",
+        json!({"projects": [project("p1"), project("p2")]}),
+    );
+    server.reply(
+        "fetch_workspaces_request",
+        "fetch_workspaces_response",
+        json!({"subscriptionId": "sub-w", "entries": [
+            workspace("w1", "p1", Some("main"), Value::Null),
+        ], "emptyProjects": [], "pageInfo": page_info()}),
+    );
+    server.reply(
+        "project.remove.request",
+        "project.remove.response",
+        json!({"projectId": "p1", "accepted": true, "removedWorkspaceIds": ["w1"], "error": null}),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.projects().len() == 2
+        && h.core.projects()[0].workspaces.len() == 1));
+    harness.core.remove_project("p1");
+    server.broadcast(json!({"type": "workspace_update", "payload": {
+            "kind": "remove", "id": "w1", "removedProjectId": "p1"}}));
+    assert!(harness.pump_until(WAIT, |h| h.core.projects().len() == 1));
+    assert_eq!(harness.core.projects()[0].id, "p2");
+    assert!(
+        !harness
+            .events
+            .iter()
+            .any(|event| matches!(event, ClientEvent::ProjectRemoveFailed { .. }))
+    );
+}
+
+#[test]
+fn a_project_remove_with_an_error_keeps_the_project() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "project.list.request",
+        "project.list.response",
+        json!({"projects": [project("p1")]}),
+    );
+    server.reply(
+        "project.remove.request",
+        "project.remove.response",
+        json!({"projectId": "p1", "accepted": true, "removedWorkspaceIds": [], "error": "busy"}),
+    );
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.projects().len() == 1));
+    harness.core.remove_project("p1");
+    assert!(harness.pump_until(WAIT, |h| {
+        h.events.contains(&ClientEvent::ProjectRemoveFailed {
+            project_id: "p1".to_string(),
+        })
+    }));
+    assert_eq!(harness.core.projects().len(), 1);
 }

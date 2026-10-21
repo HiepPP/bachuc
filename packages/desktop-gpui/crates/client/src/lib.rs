@@ -453,6 +453,13 @@ impl Client {
         self.publish(cx);
     }
 
+    /// Removes a project and its workspaces from the host's sidebar; files on disk stay. A
+    /// refused or failed removal sends [`ClientEvent::ProjectRemoveFailed`].
+    pub fn remove_project(&mut self, project_id: &str, cx: &mut Context<Client>) {
+        self.core.remove_project(project_id);
+        self.publish(cx);
+    }
+
     pub fn mark_workspace_unread(&mut self, workspace_id: &str, cx: &mut Context<Client>) {
         self.core.mark_workspace_unread(workspace_id);
         self.publish(cx);

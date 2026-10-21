@@ -136,6 +136,9 @@ fn on_event(
             println!("permission requested: {agent_id}")
         }
         ClientEvent::AgentFinished { agent_id } => println!("finished: {agent_id}"),
+        ClientEvent::ProjectRemoveFailed { project_id } => {
+            println!("project remove failed: {project_id}")
+        }
     }
 }
 

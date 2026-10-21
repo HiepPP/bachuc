@@ -16,6 +16,8 @@ pub enum ClientEvent {
     PermissionRequested { agent_id: String },
     /// An agent left the running status.
     AgentFinished { agent_id: String },
+    /// The daemon refused or failed `project.remove.request`; the project stays.
+    ProjectRemoveFailed { project_id: String },
 }
 
 /// One agent in the directory. Archived agents are left out.

@@ -545,6 +545,7 @@ impl TimelineView {
                     cx.notify();
                 }
                 ClientEvent::Disconnected { .. } => cx.notify(),
+                ClientEvent::ProjectRemoveFailed { .. } => {}
             }),
             cx.subscribe(&diagrams, |this, _, ready: &DiagramReady, cx| {
                 for (index, row) in this.rows.iter().enumerate() {
