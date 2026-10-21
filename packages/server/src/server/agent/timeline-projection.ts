@@ -244,12 +244,15 @@ function mergeAssistantChunks(entries: readonly WorkingEntry[]): WorkingEntry[] 
 
   for (const entry of entries) {
     const previous = output[output.length - 1];
+    // A running tool's lifecycle rows merge into its earlier entry but still take a seq, so a
+    // background Task leaves seq gaps inside one message. The message id bridges those gaps.
     const shouldMerge =
       previous &&
       previous.item.type === "assistant_message" &&
       entry.item.type === "assistant_message" &&
-      previous.seqEnd + 1 === entry.seqStart &&
-      previous.turnId === entry.turnId;
+      previous.turnId === entry.turnId &&
+      (previous.seqEnd + 1 === entry.seqStart ||
+        (entry.item.messageId !== undefined && previous.item.messageId === entry.item.messageId));
 
     if (!shouldMerge || !previous) {
       output.push(entry);

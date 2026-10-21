@@ -527,7 +527,12 @@ fn merge_adjacent(previous: &Value, entry: &Value) -> Option<Value> {
         return None;
     }
     let previous_end = previous["seqEnd"].as_u64()?;
-    if entry["seqStart"].as_u64()? != previous_end + 1
+    // A running tool's lifecycle rows merge into its earlier entry but still take a seq, so a
+    // background Task leaves seq gaps inside one message. The message id bridges those gaps.
+    let same_message = kind == "assistant_message"
+        && entry["item"]["messageId"].is_string()
+        && entry["item"]["messageId"] == previous["item"]["messageId"];
+    if (entry["seqStart"].as_u64()? != previous_end + 1 && !same_message)
         || previous.get("turnId") != entry.get("turnId")
     {
         return None;
@@ -680,6 +685,37 @@ mod tests {
             ),
         );
         assert_eq!(entries[0]["item"]["error"], json!({"message": "x"}));
+    }
+
+    #[test]
+    fn message_chunks_merge_across_a_background_tool_update() {
+        let mut entries = Vec::new();
+        let task = |status: &str| {
+            json!({"type": "tool_call", "callId": "task", "name": "Task", "status": status,
+                   "detail": {"type": "unknown"}, "error": null})
+        };
+        let chunk = |text: &str, id: &str| json!({"type": "assistant_message", "text": text, "messageId": id});
+        for (index, item) in [
+            task("running"),
+            chunk("- Còn l", "m1"),
+            task("running"),
+            chunk("ại: x", "m1"),
+            task("running"),
+            chunk("Next.", "m2"),
+            task("completed"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            merge_entry(&mut entries, row(index as u64 + 1, item, "t"));
+        }
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[1]["item"]["text"], "- Còn lại: x");
+        assert_eq!(
+            entries[1]["sourceSeqRanges"],
+            json!([{"startSeq": 2, "endSeq": 2}, {"startSeq": 4, "endSeq": 4}])
+        );
+        assert_eq!(entries[2]["item"]["text"], "Next.");
     }
 
     #[test]
