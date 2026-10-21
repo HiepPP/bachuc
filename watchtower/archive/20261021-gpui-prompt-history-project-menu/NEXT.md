@@ -4,7 +4,7 @@
 
 - Title: GPUI composer prompt history and project menu actions
 - Slug: 20261021-gpui-prompt-history-project-menu
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-21
 
 ## Tracker
@@ -35,4 +35,4 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Archive
 
-- None.
+- Archived: 2026-10-21 -> watchtower/archive/20261021-gpui-prompt-history-project-menu/
