@@ -4,7 +4,7 @@
 
 - Title: GPUI branch menu issues and pull requests rows
 - Slug: 20261021-gpui-branch-menu-issues-prs
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-21
 
 ## Tracker
@@ -30,4 +30,4 @@
 
 ## Archive
 
-- None.
+- Archived: 2026-10-21 -> watchtower/archive/20261021-gpui-branch-menu-issues-prs/
