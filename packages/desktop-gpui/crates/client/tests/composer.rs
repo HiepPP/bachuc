@@ -382,6 +382,24 @@ fn snapshot_fields_active_turn_usage_session_and_updated_at() {
 }
 
 #[test]
+fn the_stored_thinking_option_id_needs_no_loaded_model_options() {
+    let server = FakeServer::start();
+    server.with(|s| {
+        let mut set = agent_snapshot("a1", "idle");
+        set["thinkingOptionId"] = json!("high");
+        s.agents = vec![set, agent_snapshot("a2", "idle")];
+    });
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.agents().len() == 2));
+    assert_eq!(
+        harness.core.agent_thinking_option_id("a1").as_deref(),
+        Some("high")
+    );
+    assert_eq!(harness.core.agent_thinking_option_id("a2"), None);
+    assert_eq!(harness.core.agent_thinking_option_id("missing"), None);
+}
+
+#[test]
 fn send_and_enqueue_carry_attachments_and_resolve_on_the_answer() {
     let server = FakeServer::start();
     server.add_agent("a1", "running");

@@ -271,7 +271,7 @@ pub(crate) fn secondary_line(
     .filter(|part| !part.is_empty())
     .collect::<Vec<_>>()
     .join(", ");
-    match (state, builder) {
+    let line = match (state, builder) {
         (RowState::Done, _) => sha.map_or(plain, |sha| format!("committed {sha}")),
         (RowState::Waiting, _) => format!("{letter} asks permission"),
         (RowState::Running, Some(builder)) => {
@@ -290,7 +290,28 @@ pub(crate) fn secondary_line(
         (RowState::Blocked, _) if plain.is_empty() => "Blocked".into(),
         (RowState::Blocked, _) => format!("Blocked, {plain}"),
         _ => plain,
+    };
+    let run = builder.map(run_part).unwrap_or_default();
+    match (line.is_empty(), run.is_empty()) {
+        (_, true) => line,
+        (true, false) => run,
+        (false, false) => format!("{line} · {run}"),
     }
+}
+
+/// `provider, model, effort` of a builder; blank or missing parts are skipped.
+fn run_part(builder: &TaskBuilder) -> String {
+    [
+        Some(builder.provider.as_str()),
+        builder.model.as_deref(),
+        builder.thinking.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .filter(|part| !part.is_empty())
+    .collect::<Vec<_>>()
+    .join(", ")
 }
 
 /// The lead row's title and line (`plan-tree-view.tsx:313-338`, Q-036 default).
@@ -760,6 +781,21 @@ mod tests {
             title: "Builder".into(),
             state,
             active_ago,
+            provider: "claude".into(),
+            model: None,
+            thinking: None,
+        }
+    }
+
+    fn run_builder(
+        state: BuilderState,
+        model: Option<&str>,
+        thinking: Option<&str>,
+    ) -> TaskBuilder {
+        TaskBuilder {
+            model: model.map(str::to_string),
+            thinking: thinking.map(str::to_string),
+            ..builder(state, Some(5 * 60_000))
         }
     }
 
@@ -930,14 +966,14 @@ mod tests {
         assert_eq!(state, RowState::Waiting);
         assert_eq!(
             secondary_line(&running, state, Some(&waiting), None, None),
-            "Builder A asks permission"
+            "Builder A asks permission · claude"
         );
         let active = builder(BuilderState::Running, Some(5 * 60_000));
         let state = row_state(&running, Some(&active));
         assert_eq!(state, RowState::Running);
         assert_eq!(
             secondary_line(&running, state, Some(&active), None, None),
-            "Builder A, active 5m ago"
+            "Builder A, active 5m ago · claude"
         );
         let idle = builder(BuilderState::Idle, None);
         assert_eq!(
@@ -948,7 +984,7 @@ mod tests {
                 None,
                 None
             ),
-            "Builder, idle"
+            "Builder, idle · claude"
         );
         let blocked = plan_row(BarKind::Blocked, None);
         assert_eq!(
@@ -967,6 +1003,77 @@ mod tests {
         assert_eq!(
             secondary_line(&planned, RowState::Planned, None, None, None),
             ""
+        );
+    }
+
+    #[test]
+    fn secondary_line_appends_the_builder_provider_model_and_effort() {
+        let running = plan_row(BarKind::Running, Some("A"));
+        let full = run_builder(BuilderState::Running, Some("claude-opus-5-5"), Some("high"));
+        assert_eq!(
+            secondary_line(&running, RowState::Running, Some(&full), None, None),
+            "Builder A, active 5m ago · claude, claude-opus-5-5, high"
+        );
+        let waiting = run_builder(BuilderState::Waiting, Some("claude-opus-5-5"), Some("high"));
+        assert_eq!(
+            secondary_line(&running, RowState::Waiting, Some(&waiting), None, None),
+            "Builder A asks permission · claude, claude-opus-5-5, high"
+        );
+        let done = plan_row(BarKind::Done, Some("A"));
+        assert_eq!(
+            secondary_line(
+                &done,
+                RowState::Done,
+                Some(&full),
+                Some("code"),
+                Some("abc1234")
+            ),
+            "committed abc1234 · claude, claude-opus-5-5, high"
+        );
+    }
+
+    #[test]
+    fn secondary_line_skips_missing_run_parts() {
+        let running = plan_row(BarKind::Running, Some("A"));
+        let bare = TaskBuilder {
+            provider: "codex".into(),
+            ..run_builder(BuilderState::Running, None, None)
+        };
+        assert_eq!(
+            secondary_line(&running, RowState::Running, Some(&bare), None, None),
+            "Builder A, active 5m ago · codex"
+        );
+        let empty = TaskBuilder {
+            provider: String::new(),
+            ..run_builder(BuilderState::Running, None, None)
+        };
+        assert_eq!(
+            secondary_line(&running, RowState::Running, Some(&empty), None, None),
+            "Builder A, active 5m ago"
+        );
+        let spaces = TaskBuilder {
+            model: Some("  ".into()),
+            ..run_builder(BuilderState::Running, None, Some("high"))
+        };
+        assert_eq!(
+            secondary_line(&running, RowState::Running, Some(&spaces), None, None),
+            "Builder A, active 5m ago · claude, high"
+        );
+        let blocked = plan_row(BarKind::Blocked, None);
+        assert_eq!(
+            secondary_line(
+                &blocked,
+                RowState::Blocked,
+                Some(&spaces),
+                Some("risky"),
+                None
+            ),
+            "Blocked, risky · claude, high"
+        );
+        let planned = plan_row(BarKind::Planned, None);
+        assert_eq!(
+            secondary_line(&planned, RowState::Planned, Some(&spaces), None, None),
+            "claude, high"
         );
     }
 

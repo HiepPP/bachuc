@@ -1662,6 +1662,14 @@ impl ClientCore {
         self.extras.get(agent_id)?.updated_at.clone()
     }
 
+    /// The stored `thinkingOptionId`; unlike `agent_thinking` it needs no loaded model options.
+    pub fn agent_thinking_option_id(&self, agent_id: &str) -> Option<String> {
+        if !self.agents.iter().any(|agent| agent.id == agent_id) {
+            return None;
+        }
+        self.extras.get(agent_id)?.thinking.clone()
+    }
+
     pub fn rename_terminal(
         &mut self,
         terminal_id: &str,

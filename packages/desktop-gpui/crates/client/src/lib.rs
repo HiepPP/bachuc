@@ -1179,6 +1179,10 @@ impl Client {
         self.core.agent_updated_at(agent_id)
     }
 
+    pub fn agent_thinking_option_id(&self, agent_id: &str) -> Option<String> {
+        self.core.agent_thinking_option_id(agent_id)
+    }
+
     pub fn rename_terminal(
         &mut self,
         terminal_id: &str,

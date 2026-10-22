@@ -63,6 +63,9 @@ pub(crate) struct AgentCandidate {
     /// `requiresAttention` with the `permission` reason.
     pub permission_attention: bool,
     pub updated_at: Option<String>,
+    pub model: Option<String>,
+    /// The raw `thinkingOptionId`.
+    pub thinking: Option<String>,
 }
 
 impl AgentCandidate {

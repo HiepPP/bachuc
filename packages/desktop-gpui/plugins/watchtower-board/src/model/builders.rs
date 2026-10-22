@@ -32,6 +32,9 @@ pub(crate) struct TaskBuilder {
     pub title: String,
     pub state: BuilderState,
     pub active_ago: Option<i64>,
+    pub provider: String,
+    pub model: Option<String>,
+    pub thinking: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -144,6 +147,9 @@ pub(crate) fn match_builders(
                     title: agent.name(),
                     state: state_of(agent),
                     active_ago: active_ago(agent, now_ms),
+                    provider: agent.provider.clone(),
+                    model: agent.model.clone(),
+                    thinking: agent.thinking.clone(),
                 },
             );
             if !winners.iter().any(|winner| winner.id == agent.id) {
@@ -419,6 +425,23 @@ mod tests {
         assert_eq!(ago("2026-10-14T11:50:00.000Z"), Some(10 * 60_000));
         assert_eq!(ago("not a date"), None);
         assert_eq!(ago("2026-10-14T12:30:00.000Z"), Some(0));
+    }
+
+    #[test]
+    fn the_run_provider_model_and_effort_are_copied_from_the_agent() {
+        let found = match_builders(
+            &[AgentCandidate {
+                model: Some("claude-opus-5-5".into()),
+                thinking: Some("high".into()),
+                ..builder("b1", "TASK-091")
+            }],
+            &tasks(),
+            now(),
+        );
+        let matched = &found.by_task["TASK-091"];
+        assert_eq!(matched.provider, "claude");
+        assert_eq!(matched.model.as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(matched.thinking.as_deref(), Some("high"));
     }
 
     #[test]
