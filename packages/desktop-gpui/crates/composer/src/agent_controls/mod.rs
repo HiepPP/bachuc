@@ -11,14 +11,14 @@ use crate::draft::{ModelGroup, model_key};
 use bachuc_client::{AgentFeature, AgentFeatureKind, ThinkingControls};
 use bachuc_icons::{IconName, icon, provider_fallback_icon, provider_logo};
 use bachuc_theme::metrics::{
-    FONT_BASE, FONT_SM, ICON_SM, POPUP_GAP, RADIUS_2XL, RADIUS_MD, SPACE_2,
+    FONT_BASE, FONT_SM, ICON_SM, POPUP_GAP, RADIUS_2XL, RADIUS_MD, SPACE_1, SPACE_2,
 };
 use bachuc_theme::{tokens, ui_font_size, zoomed};
 use control::{GLYPH, Glyph, PillTrigger, TriggerLook};
 use features::{
     FeatureRequests, feature_icon, feature_tint, feature_tooltip, select_choices, select_current,
 };
-use gpui_kit::component::popover::Popover;
+use gpui_kit::component::popover::{Popover, PopoverState};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -88,6 +88,32 @@ pub(crate) fn menu_row(
 
 pub(crate) type PickFn = Rc<dyn Fn(&str, &mut App)>;
 
+/// The model menu's "Refresh models" row id and label.
+const REFRESH_MODELS_ID: &str = "composer-refresh-models";
+const REFRESH_MODELS_LABEL: &str = "Refresh models";
+
+/// The "Refresh models" row under a model menu's choices. It closes the menu.
+fn refresh_models_row(
+    on_refresh: Rc<dyn Fn(&mut App)>,
+    cx: &mut Context<PopoverState>,
+) -> AnyElement {
+    let t = tokens(cx);
+    div()
+        .mt(zoomed(SPACE_1, cx))
+        .pt(zoomed(SPACE_1, cx))
+        .border_t_1()
+        .border_color(t.border)
+        .child(
+            menu_row(REFRESH_MODELS_ID, REFRESH_MODELS_LABEL.into(), false, cx).on_click(
+                cx.listener(move |state, _, window, cx| {
+                    on_refresh(cx);
+                    state.dismiss(window, cx);
+                }),
+            ),
+        )
+        .into_any_element()
+}
+
 /// The style of a pill's trigger box in the toolbar row: it may shrink below its content.
 fn shrinking_trigger() -> StyleRefinement {
     StyleRefinement::default().flex().min_w_0()
@@ -105,6 +131,7 @@ pub fn choice_pill(
     tooltip: Option<String>,
     look: TriggerLook,
     on_pick: impl Fn(&str, &mut App) + 'static,
+    on_refresh: Option<Rc<dyn Fn(&mut App)>>,
     cx: &App,
 ) -> AnyElement {
     let label = pill_label(&choices, current.as_deref(), fallback);
@@ -153,6 +180,9 @@ pub fn choice_pill(
                 .max_h(zoomed(320., cx))
                 .overflow_y_scroll()
                 .children(rows)
+                .when_some(on_refresh.clone(), |menu, on_refresh| {
+                    menu.child(refresh_models_row(on_refresh, cx))
+                })
         })
         .into_any_element()
 }
@@ -231,6 +261,7 @@ fn feature_pills(
                     Some(feature_tooltip(feature).to_string()),
                     look,
                     move |option_id, cx| select(&feature_id, option_id, cx),
+                    None,
                     cx,
                 )
             }
@@ -359,6 +390,7 @@ fn grouped_model_pill(
     current: Option<String>,
     look: TriggerLook,
     on_pick: PickFn,
+    on_refresh: Rc<dyn Fn(&mut App)>,
     cx: &App,
 ) -> AnyElement {
     let label = groups
@@ -437,6 +469,7 @@ fn grouped_model_pill(
                 .max_h(zoomed(320., cx))
                 .overflow_y_scroll()
                 .children(rows)
+                .child(refresh_models_row(on_refresh.clone(), cx))
         })
         .into_any_element()
 }
@@ -461,6 +494,8 @@ pub struct ControlHandlers {
     pub model: PickFn,
     pub thinking: PickFn,
     pub mode: PickFn,
+    /// Discovers the shown provider's models again.
+    pub refresh_models: Rc<dyn Fn(&mut App)>,
     pub features: FeatureHandlers,
 }
 
@@ -485,6 +520,7 @@ pub fn agent_controls(
             view.current_model,
             look,
             model,
+            handlers.refresh_models.clone(),
             cx,
         )),
         None => pills.push(choice_pill(
@@ -497,6 +533,7 @@ pub fn agent_controls(
             None,
             look,
             move |id, cx| model(id, cx),
+            Some(handlers.refresh_models.clone()),
             cx,
         )),
     }
@@ -512,6 +549,7 @@ pub fn agent_controls(
             None,
             look,
             move |id, cx| pick(id, cx),
+            None,
             cx,
         ));
     }
@@ -531,6 +569,7 @@ pub fn agent_controls(
                 icon_only: !shown.show_mode_label,
             },
             move |id, cx| pick(id, cx),
+            None,
             cx,
         ));
     }
