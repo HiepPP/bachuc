@@ -5,6 +5,9 @@ use bachuc_client::{ChangedFile, FileEntry};
 use bachuc_explorer::changes::{ChangeRow, ChangeTree, format_count};
 use bachuc_explorer::diff::{LineKind, max_number, parse};
 use bachuc_explorer::file_icons::icon_name;
+use bachuc_explorer::markdown_diff::{
+    BlockKind, RichBlock, block_diff, is_markdown_path, old_text,
+};
 use bachuc_explorer::syntax::{Run, expand_tabs, language_for, split_lines};
 use bachuc_explorer::tree::{FileTree, ROOT, RootState, Toggled};
 use gpui_kit::{HighlightStyle, hsla};
@@ -415,4 +418,101 @@ fn file_icons_follow_the_extension_table() {
     assert_eq!(icon_name("Makefile"), "_default");
     assert_eq!(icon_name("trailing."), "_default");
     assert_eq!(icon_name("a.unknownext"), "_default");
+}
+
+// ---- Markdown block diff ----
+
+fn block(kind: BlockKind, markdown: &str) -> RichBlock {
+    RichBlock {
+        kind,
+        markdown: markdown.to_string(),
+    }
+}
+
+#[test]
+fn markdown_paths_are_md_and_markdown_in_any_case() {
+    assert!(is_markdown_path("docs/README.md"));
+    assert!(is_markdown_path("Notes.MARKDOWN"));
+    assert!(!is_markdown_path("src/main.rs"));
+    assert!(!is_markdown_path("page.mdx"));
+    assert!(!is_markdown_path("md"));
+}
+
+#[test]
+fn old_text_reverses_a_matching_patch() {
+    let new = "# Title\n\nNew line\n\nEnd\n";
+    let diff =
+        "--- a/x.md\n+++ b/x.md\n@@ -1,5 +1,5 @@\n # Title\n \n-Old line\n+New line\n \n End\n";
+    assert_eq!(
+        old_text(new, diff).as_deref(),
+        Some("# Title\n\nOld line\n\nEnd\n")
+    );
+}
+
+#[test]
+fn old_text_without_hunks_is_the_new_text() {
+    assert_eq!(old_text("a\n", "").as_deref(), Some("a\n"));
+}
+
+#[test]
+fn old_text_of_a_new_file_is_empty() {
+    let diff = "--- /dev/null\n+++ b/x.md\n@@ -0,0 +1,2 @@\n+# A\n+b\n";
+    assert_eq!(old_text("# A\nb\n", diff).as_deref(), Some(""));
+}
+
+#[test]
+fn old_text_rejects_a_patch_that_does_not_match() {
+    let diff = "--- a/x.md\n+++ b/x.md\n@@ -1,1 +1,1 @@\n-old\n+new\n";
+    assert_eq!(old_text("other\n", diff), None);
+}
+
+#[test]
+fn old_text_puts_back_a_deletion_only_hunk() {
+    let diff = "--- a/x.md\n+++ b/x.md\n@@ -1,3 +1,2 @@\n a\n-b\n c\n";
+    assert_eq!(old_text("a\nc\n", diff).as_deref(), Some("a\nb\nc\n"));
+}
+
+#[test]
+fn a_huge_middle_is_all_removed_then_all_added() {
+    let old: String = (0..2001).map(|i| format!("old {i}\n\n")).collect();
+    let new: String = (0..2001).map(|i| format!("new {i}\n\n")).collect();
+    let blocks = block_diff(&old, &new);
+    assert_eq!(blocks.len(), 4002);
+    assert!(blocks[..2001].iter().all(|b| b.kind == BlockKind::Removed));
+    assert!(blocks[2001..].iter().all(|b| b.kind == BlockKind::Added));
+}
+
+#[test]
+fn a_changed_paragraph_is_removed_then_added() {
+    let old = "# Title\n\nOld line\n\nEnd\n";
+    let new = "# Title\n\nNew line\n\nEnd\n";
+    assert_eq!(
+        block_diff(old, new),
+        vec![
+            block(BlockKind::Same, "# Title"),
+            block(BlockKind::Removed, "Old line"),
+            block(BlockKind::Added, "New line"),
+            block(BlockKind::Same, "End"),
+        ]
+    );
+}
+
+#[test]
+fn a_fence_with_a_blank_line_is_one_block() {
+    let new = "Intro\n\n```rust\nfn a() {}\n\nfn b() {}\n```\n";
+    assert_eq!(
+        block_diff("Intro\n", new),
+        vec![
+            block(BlockKind::Same, "Intro"),
+            block(BlockKind::Added, "```rust\nfn a() {}\n\nfn b() {}\n```"),
+        ]
+    );
+}
+
+#[test]
+fn every_block_of_a_new_file_is_added() {
+    assert_eq!(
+        block_diff("", "# A\n\nb\n"),
+        vec![block(BlockKind::Added, "# A"), block(BlockKind::Added, "b")]
+    );
 }
