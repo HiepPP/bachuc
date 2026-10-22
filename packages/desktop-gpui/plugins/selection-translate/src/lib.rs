@@ -1,5 +1,5 @@
 //! `bachuc-plugin-selection-translate`: the native client of the selection-translate plugin
-//! (`hiep-plugins/plugins/selection-translate`, ADR-0062, ADR-0063). It adds the `Dịch` result
+//! (`hiep-plugins/plugins/selection-translate`, ADR-0062, ADR-0063). It adds the `Translate` result
 //! action on selected assistant text and the "Selection translate" settings screen. The server
 //! part stays in TypeScript; this crate calls it only through its `selection.translate` RPC and
 //! the settings record `translate`.
@@ -36,7 +36,7 @@ impl NativePlugin for SelectionTranslate {
         let settings = ctx.settings(SETTINGS_ID, cx);
         contributions.add_selection_result_action(SelectionResultAction {
             id: "translate",
-            title: "Dịch".into(),
+            title: "Translate".into(),
             loading: "Đang dịch...".into(),
             run: Rc::new(move |selection, cx| translate(&ctx, selection, cx)),
         });
