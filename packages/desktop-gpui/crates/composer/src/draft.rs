@@ -269,6 +269,44 @@ pub fn model_groups(providers: &[ProviderSummary]) -> Vec<ModelGroup> {
         .collect()
 }
 
+/// The models whose label or id holds every word of `query`, ignoring case, in their order.
+/// A word may also match `provider`, the provider label, so "opencode flint" finds Flint.
+pub fn filter_models(
+    models: &[(String, String)],
+    provider: &str,
+    query: &str,
+) -> Vec<(String, String)> {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    if words.is_empty() {
+        return models.to_vec();
+    }
+    let provider = provider.to_lowercase();
+    models
+        .iter()
+        .filter(|(id, label)| {
+            let (id, label) = (id.to_lowercase(), label.to_lowercase());
+            words
+                .iter()
+                .all(|word| label.contains(word) || id.contains(word) || provider.contains(word))
+        })
+        .cloned()
+        .collect()
+}
+
+/// The model menu groups filtered by `query`; a group with no match is left out.
+pub fn filter_model_groups(groups: &[ModelGroup], query: &str) -> Vec<ModelGroup> {
+    groups
+        .iter()
+        .filter_map(|group| {
+            let models = filter_models(&group.models, &group.label, query);
+            (!models.is_empty()).then(|| ModelGroup {
+                models,
+                ..group.clone()
+            })
+        })
+        .collect()
+}
+
 /// The id of a menu row: the provider, a slash, and the model. Provider ids hold no slash.
 pub fn model_key(provider: &str, model: &str) -> String {
     format!("{provider}/{model}")
@@ -320,6 +358,58 @@ pub fn apply_feature(features: &mut [AgentFeature], feature_id: &str, value: &Va
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn models(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(id, label)| (id.to_string(), label.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn the_model_search_keeps_rows_that_hold_every_word() {
+        let list = models(&[
+            ("opencode/flint-40b-free", "Flint 40B Free"),
+            ("opencode/big-pickle", "Big Pickle"),
+            ("opencode/beam-free", "Beam Free"),
+        ]);
+        let ids = |query: &str| -> Vec<String> {
+            filter_models(&list, "OpenCode", query)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect()
+        };
+        assert_eq!(ids("").len(), 3, "an empty query keeps every row");
+        assert_eq!(ids("  FLINT "), ["opencode/flint-40b-free"]);
+        assert_eq!(
+            ids("free"),
+            ["opencode/flint-40b-free", "opencode/beam-free"]
+        );
+        assert_eq!(ids("pickle"), ["opencode/big-pickle"], "the id matches too");
+        assert_eq!(ids("opencode beam"), ["opencode/beam-free"]);
+        assert!(ids("flint pickle").is_empty());
+    }
+
+    #[test]
+    fn the_model_search_drops_groups_with_no_match() {
+        let groups = vec![
+            ModelGroup {
+                provider: "claude".into(),
+                label: "Claude".into(),
+                models: models(&[("opus", "Opus"), ("sonnet", "Sonnet")]),
+            },
+            ModelGroup {
+                provider: "opencode".into(),
+                label: "OpenCode".into(),
+                models: models(&[("opencode/flint-40b-free", "Flint 40B Free")]),
+            },
+        ];
+        let filtered = filter_model_groups(&groups, "flint");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].provider, "opencode");
+        assert_eq!(filter_model_groups(&groups, "claude")[0].models.len(), 2);
+        assert_eq!(filter_model_groups(&groups, ""), groups);
+    }
 
     fn provider(id: &str, available: bool) -> ProviderSummary {
         ProviderSummary {
