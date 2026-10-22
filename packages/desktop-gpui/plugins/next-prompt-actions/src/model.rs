@@ -6,8 +6,8 @@ use crate::contracts::{
     INSPECT, SCOPE, START, Scope, ScopeInput, SendOutput, Snapshot, StartInput, StartOutput,
 };
 use crate::polling::{inspection_activity, inspection_interval};
-use crate::rules::{SendStep, panel_busy, send_landed, send_plan};
-use bachuc_client::{AttentionReason, Client, ClientEvent};
+use crate::rules::{SendStep, host_state_changed, panel_busy, send_landed, send_plan};
+use bachuc_client::{AttentionReason, Client, ClientEvent, PluginEvent};
 use bachuc_plugin_host::{OpenSurfaceOptions, PluginContext};
 use gpui_kit::{App, AppContext as _, Context, Entity, Subscription, Task, WeakEntity};
 use std::cell::RefCell;
@@ -31,7 +31,8 @@ enum ScopeState {
 }
 
 /// When to read. The scope is read once per agent and workspace; the snapshot after the scope,
-/// on a status change, after an action, and on a timer only while Jev reviews.
+/// on a status change, after an action, after a dependency plugin change, and on a timer only
+/// while Jev reviews.
 #[derive(Debug, Default)]
 pub(crate) struct Reads {
     connected: bool,
@@ -121,6 +122,10 @@ impl Reads {
     pub(crate) fn action_done(&self) -> Vec<Read> {
         self.poll_fired()
     }
+
+    pub(crate) fn plugin_changed(&self) -> Vec<Read> {
+        self.poll_fired()
+    }
 }
 
 pub(crate) struct PanelModel {
@@ -161,6 +166,14 @@ impl PanelModel {
                     _ => {}
                 },
             ));
+            subscriptions.push(cx.subscribe(client, |model, _, event: &PluginEvent, cx| {
+                if let PluginEvent::CatalogChanged { plugin_id } = event
+                    && host_state_changed(plugin_id)
+                {
+                    let reads = model.reads.plugin_changed();
+                    model.run(reads, cx);
+                }
+            }));
         }
         Self {
             ctx,
@@ -532,5 +545,16 @@ mod tests {
         reads.agent(false, Some("w3"), Some("running"));
         sent.extend(reads.agent(true, Some("w3"), Some("running")));
         assert_eq!(count(&sent, &Read::Scope), 4);
+    }
+
+    #[test]
+    fn plugin_change_inspects_once_the_scope_is_ready() {
+        let mut reads = Reads::default();
+        assert!(reads.plugin_changed().is_empty(), "no scope yet");
+        reads.agent(true, Some("w"), Some("idle"));
+        assert!(reads.plugin_changed().is_empty(), "scope still pending");
+        let generation = reads.scope_generation();
+        reads.scope_landed(generation, true);
+        assert_eq!(reads.plugin_changed(), vec![Read::Inspect]);
     }
 }
