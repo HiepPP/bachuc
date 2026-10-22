@@ -18,10 +18,10 @@ mod settings_view;
 use crate::contracts::{HOST, HostInfo, INSPECT, Scope, Snapshot, TOGGLE, ToggleInput};
 use crate::model::Models;
 use crate::panel::Shared;
-use crate::rules::command_visible;
+use crate::rules::{command_visible, host_state_changed};
 use crate::section::{section_intro, split_next_section, split_recap};
 use crate::settings_view::SendSettingsView;
-use bachuc_client::{Client, ClientEvent};
+use bachuc_client::{Client, ClientEvent, PluginEvent};
 use bachuc_icons::IconName;
 use bachuc_plugin_host::{
     CommandCenterItem, CommandContext, CommandInput, Contributions, MessageLevel, NativePlugin,
@@ -80,7 +80,7 @@ impl NativePlugin for NextPromptActions {
                 cx.new(|cx| SendSettingsView::new(settings, cx)).into()
             }),
         });
-        // Offered only while Jev can judge; re-enabling jev-evaluator needs a reload.
+        // Offered only while Jev can judge; `HostRead` reads that again on a plugin change.
         contributions.add_command_item(CommandCenterItem {
             id: "toggle-auto-run",
             title: "Toggle Jev next-prompt auto-run".into(),
@@ -97,37 +97,45 @@ impl NativePlugin for NextPromptActions {
     }
 }
 
-/// The one `prompts.host` read of an activation. A request sent before `Connected` fails, so
-/// it waits for the connection.
+/// The `prompts.host` reads of an activation: on each connect, and when a plugin the answer
+/// depends on changes. A request sent before `Connected` fails, so it waits for the connection.
 struct HostRead {
-    read: bool,
     /// Held strong: a subscription holds its emitter weakly.
     _client: Option<Entity<Client>>,
-    _subscription: Option<Subscription>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl HostRead {
     fn new(ctx: PluginContext, evaluator: Rc<Cell<bool>>, cx: &mut Context<Self>) -> Self {
         let client: Option<Entity<Client>> = ctx.client(cx);
-        let read = client.as_ref().is_some_and(|c| c.read(cx).is_connected());
-        if read {
-            read_host(&ctx, &evaluator, cx);
-        }
-        let subscription = client.as_ref().filter(|_| !read).map(|client| {
-            cx.subscribe(
+        let mut subscriptions = Vec::new();
+        if let Some(client) = &client {
+            if client.read(cx).is_connected() {
+                read_host(&ctx, &evaluator, cx);
+            }
+            let (on_connect, on_connect_evaluator) = (ctx.clone(), evaluator.clone());
+            subscriptions.push(cx.subscribe(
                 client,
-                move |this: &mut Self, _, event: &ClientEvent, cx| {
-                    if matches!(event, ClientEvent::Connected) && !this.read {
-                        this.read = true;
+                move |_: &mut Self, _, event: &ClientEvent, cx| {
+                    if matches!(event, ClientEvent::Connected) {
+                        read_host(&on_connect, &on_connect_evaluator, cx);
+                    }
+                },
+            ));
+            subscriptions.push(cx.subscribe(
+                client,
+                move |_: &mut Self, _, event: &PluginEvent, cx| {
+                    if let PluginEvent::CatalogChanged { plugin_id } = event
+                        && host_state_changed(plugin_id)
+                    {
                         read_host(&ctx, &evaluator, cx);
                     }
                 },
-            )
-        });
+            ));
+        }
         Self {
-            read,
             _client: client,
-            _subscription: subscription,
+            _subscriptions: subscriptions,
         }
     }
 }

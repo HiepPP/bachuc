@@ -287,12 +287,18 @@ pub(crate) fn command_visible(host: Option<&HostInfo>) -> bool {
     host.is_some_and(|host| host.evaluator)
 }
 
+/// The server derives `HostInfo::evaluator` and the snapshot warning from these plugins' config,
+/// so a catalog change of one of them makes both stale.
+pub(crate) fn host_state_changed(plugin_id: &str) -> bool {
+    matches!(plugin_id, "jev-evaluator" | "board" | crate::PLUGIN_ID)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         Face, FaceInput, SendStep, candidate_for, card_face, command_visible, footer_hint,
-        is_compact, panel_busy, row_status, send_landed, send_plan, send_selected_label,
-        shows_selection, timestamp_ms,
+        host_state_changed, is_compact, panel_busy, row_status, send_landed, send_plan,
+        send_selected_label, shows_selection, timestamp_ms,
     };
     use crate::contracts::{Candidate, CandidateState, HostInfo, Scope, SendOutput};
     use crate::polling::JEV_REVIEWING;
@@ -525,5 +531,13 @@ mod tests {
             serde_json::from_value(serde_json::json!({"serverId": "s", "evaluator": false}))
                 .unwrap();
         assert!(!command_visible(Some(&decoded)));
+    }
+
+    #[test]
+    fn host_state_changes_with_its_dependencies() {
+        assert!(host_state_changed("jev-evaluator"));
+        assert!(host_state_changed("board"));
+        assert!(host_state_changed("next-prompt-actions"));
+        assert!(!host_state_changed("edit-diffs"));
     }
 }
