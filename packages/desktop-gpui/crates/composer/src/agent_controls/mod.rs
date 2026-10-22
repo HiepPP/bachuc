@@ -7,7 +7,7 @@ pub mod control;
 pub mod features;
 pub mod layout;
 
-use crate::draft::{ModelGroup, model_key};
+use crate::draft::{ModelGroup, filter_model_groups, filter_models, model_key};
 use bachuc_client::{AgentFeature, AgentFeatureKind, ThinkingControls};
 use bachuc_icons::{IconName, icon, provider_fallback_icon, provider_logo};
 use bachuc_theme::metrics::{
@@ -18,6 +18,7 @@ use control::{GLYPH, Glyph, PillTrigger, TriggerLook};
 use features::{
     FeatureRequests, feature_icon, feature_tint, feature_tooltip, select_choices, select_current,
 };
+use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::popover::{Popover, PopoverState};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
@@ -88,30 +89,106 @@ pub(crate) fn menu_row(
 
 pub(crate) type PickFn = Rc<dyn Fn(&str, &mut App)>;
 
-/// The model menu's "Refresh models" row id and label.
-const REFRESH_MODELS_ID: &str = "composer-refresh-models";
-const REFRESH_MODELS_LABEL: &str = "Refresh models";
+/// What a model menu adds to its choices: a search box and a "Refresh models" row.
+#[derive(Clone)]
+pub struct ModelMenu {
+    /// The search text; the owner keeps it, so it lives across frames.
+    pub search: Entity<InputState>,
+    pub refresh: Rc<dyn Fn(&mut App)>,
+}
 
-/// The "Refresh models" row under a model menu's choices. It closes the menu.
-fn refresh_models_row(
-    on_refresh: Rc<dyn Fn(&mut App)>,
-    cx: &mut Context<PopoverState>,
-) -> AnyElement {
-    let t = tokens(cx);
-    div()
-        .mt(zoomed(SPACE_1, cx))
-        .pt(zoomed(SPACE_1, cx))
-        .border_t_1()
-        .border_color(t.border)
-        .child(
-            menu_row(REFRESH_MODELS_ID, REFRESH_MODELS_LABEL.into(), false, cx).on_click(
-                cx.listener(move |state, _, window, cx| {
-                    on_refresh(cx);
+impl ModelMenu {
+    fn query(&self, cx: &App) -> String {
+        self.search.read(cx).value().to_string()
+    }
+
+    /// Focuses the search box when the menu opens and clears it when the menu closes.
+    fn attach(&self, popover: Popover, cx: &App) -> Popover {
+        let search = self.search.clone();
+        popover
+            .track_focus(&self.search.focus_handle(cx))
+            .on_open_change(move |open, window, cx| {
+                if !*open {
+                    search.update(cx, |search, cx| search.set_value("", window, cx));
+                }
+            })
+    }
+
+    /// The menu panel: the search box, the scrolling `rows`, and the "Refresh models" row.
+    /// Enter in the search box picks `first`, the first row that matches.
+    fn panel(
+        &self,
+        kind: &str,
+        rows: Vec<AnyElement>,
+        first: Option<String>,
+        on_pick: PickFn,
+        min_w: f32,
+        cx: &mut Context<PopoverState>,
+    ) -> AnyElement {
+        let t = tokens(cx);
+        let refresh = self.refresh.clone();
+        let list = if rows.is_empty() {
+            vec![
+                div()
+                    .px(zoomed(SPACE_2, cx))
+                    .py(zoomed(SPACE_2, cx))
+                    .text_size(ui_font_size(FONT_SM, cx))
+                    .text_color(t.foreground_muted)
+                    .child("No matching models")
+                    .into_any_element(),
+            ]
+        } else {
+            rows
+        };
+        v_flex()
+            .min_w(zoomed(min_w, cx))
+            .capture_key_down(cx.listener(move |state, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key != "enter" {
+                    return;
+                }
+                if let Some(key) = &first {
+                    on_pick(key, cx);
                     state.dismiss(window, cx);
-                }),
-            ),
-        )
-        .into_any_element()
+                }
+                cx.stop_propagation();
+            }))
+            .child(
+                div()
+                    .pb(zoomed(SPACE_1, cx))
+                    .child(Input::new(&self.search).small().aria_label("Search models")),
+            )
+            .child(
+                v_flex()
+                    .id("composer-menu")
+                    .role(Role::Menu)
+                    .aria_label(format!("{kind} menu"))
+                    .max_h(zoomed(320., cx))
+                    .overflow_y_scroll()
+                    .children(list),
+            )
+            .child(
+                div()
+                    .mt(zoomed(SPACE_1, cx))
+                    .pt(zoomed(SPACE_1, cx))
+                    .border_t_1()
+                    .border_color(t.border)
+                    .child(
+                        menu_row(
+                            "composer-refresh-models",
+                            "Refresh models".into(),
+                            false,
+                            cx,
+                        )
+                        .on_click(cx.listener(
+                            move |state, _, window, cx| {
+                                refresh(cx);
+                                state.dismiss(window, cx);
+                            },
+                        )),
+                    ),
+            )
+            .into_any_element()
+    }
 }
 
 /// The style of a pill's trigger box in the toolbar row: it may shrink below its content.
@@ -131,7 +208,7 @@ pub fn choice_pill(
     tooltip: Option<String>,
     look: TriggerLook,
     on_pick: impl Fn(&str, &mut App) + 'static,
-    on_refresh: Option<Rc<dyn Fn(&mut App)>>,
+    model_menu: Option<ModelMenu>,
     cx: &App,
 ) -> AnyElement {
     let label = pill_label(&choices, current.as_deref(), fallback);
@@ -148,9 +225,8 @@ pub fn choice_pill(
     if choices.is_empty() {
         return trigger.into_any_element();
     }
-    let choices = Rc::new(choices);
     let on_pick: PickFn = Rc::new(on_pick);
-    Popover::new(id)
+    let popover = Popover::new(id)
         .anchor(Anchor::BottomLeft)
         .offset(zoomed(POPUP_GAP, cx))
         .p_1()
@@ -159,30 +235,46 @@ pub fn choice_pill(
         .when(!look.icon_only, |popover| {
             popover.trigger_style(shrinking_trigger())
         })
-        .trigger(trigger)
+        .trigger(trigger);
+    let popover = match &model_menu {
+        Some(menu) => menu.attach(popover, cx),
+        None => popover,
+    };
+    popover
         .content(move |_, _, cx| {
-            let current = current.clone();
-            let rows = choices.iter().enumerate().map(|(ix, (choice, name))| {
-                let selected = current.as_deref() == Some(choice.as_str());
-                let (choice, on_pick) = (choice.clone(), on_pick.clone());
-                menu_row(("composer-menu-item", ix), name.clone(), selected, cx).on_click(
-                    cx.listener(move |state, _, window, cx| {
-                        on_pick(&choice, cx);
-                        state.dismiss(window, cx);
-                    }),
-                )
-            });
-            v_flex()
-                .id("composer-menu")
-                .role(Role::Menu)
-                .aria_label(format!("{kind} menu"))
-                .min_w(zoomed(200., cx))
-                .max_h(zoomed(320., cx))
-                .overflow_y_scroll()
-                .children(rows)
-                .when_some(on_refresh.clone(), |menu, on_refresh| {
-                    menu.child(refresh_models_row(on_refresh, cx))
+            let shown = match &model_menu {
+                Some(menu) => filter_models(&choices, "", &menu.query(cx)),
+                None => choices.to_vec(),
+            };
+            let rows: Vec<AnyElement> = shown
+                .iter()
+                .enumerate()
+                .map(|(ix, (choice, name))| {
+                    let selected = current.as_deref() == Some(choice.as_str());
+                    let (choice, on_pick) = (choice.clone(), on_pick.clone());
+                    menu_row(("composer-menu-item", ix), name.clone(), selected, cx)
+                        .on_click(cx.listener(move |state, _, window, cx| {
+                            on_pick(&choice, cx);
+                            state.dismiss(window, cx);
+                        }))
+                        .into_any_element()
                 })
+                .collect();
+            match &model_menu {
+                Some(menu) => {
+                    let first = shown.first().map(|(choice, _)| choice.clone());
+                    menu.panel(&kind, rows, first, on_pick.clone(), 200., cx)
+                }
+                None => v_flex()
+                    .id("composer-menu")
+                    .role(Role::Menu)
+                    .aria_label(format!("{kind} menu"))
+                    .min_w(zoomed(200., cx))
+                    .max_h(zoomed(320., cx))
+                    .overflow_y_scroll()
+                    .children(rows)
+                    .into_any_element(),
+            }
         })
         .into_any_element()
 }
@@ -390,7 +482,7 @@ fn grouped_model_pill(
     current: Option<String>,
     look: TriggerLook,
     on_pick: PickFn,
-    on_refresh: Rc<dyn Fn(&mut App)>,
+    menu: ModelMenu,
     cx: &App,
 ) -> AnyElement {
     let label = groups
@@ -417,8 +509,7 @@ fn grouped_model_pill(
     if groups.is_empty() {
         return trigger.into_any_element();
     }
-    let groups = Rc::new(groups);
-    Popover::new("composer-model")
+    let popover = Popover::new("composer-model")
         .anchor(Anchor::BottomLeft)
         .offset(zoomed(POPUP_GAP, cx))
         .p_1()
@@ -427,12 +518,18 @@ fn grouped_model_pill(
         .when(!look.icon_only, |popover| {
             popover.trigger_style(shrinking_trigger())
         })
-        .trigger(trigger)
+        .trigger(trigger);
+    menu.attach(popover, cx)
         .content(move |_, _, cx| {
             let t = tokens(cx);
             let small = ui_font_size(FONT_SM, cx);
+            let shown = filter_model_groups(&groups, &menu.query(cx));
+            let first = shown.first().and_then(|group| {
+                let (model, _) = group.models.first()?;
+                Some(model_key(&group.provider, model))
+            });
             let mut rows: Vec<AnyElement> = Vec::new();
-            for group in groups.iter() {
+            for group in &shown {
                 rows.push(
                     div()
                         .px(zoomed(SPACE_2, cx))
@@ -461,15 +558,7 @@ fn grouped_model_pill(
                     );
                 }
             }
-            v_flex()
-                .id("composer-menu")
-                .role(Role::Menu)
-                .aria_label("Model menu")
-                .min_w(zoomed(240., cx))
-                .max_h(zoomed(320., cx))
-                .overflow_y_scroll()
-                .children(rows)
-                .child(refresh_models_row(on_refresh.clone(), cx))
+            menu.panel("Model", rows, first, on_pick.clone(), 240., cx)
         })
         .into_any_element()
 }
@@ -480,6 +569,8 @@ pub struct ControlsView<'a> {
     /// A draft lists every provider's models; an agent lists its own provider's.
     pub model_groups: Option<Vec<ModelGroup>>,
     pub models: Vec<(String, String)>,
+    /// The model menu's search text.
+    pub model_search: Entity<InputState>,
     pub current_model: Option<String>,
     pub thinking: Option<ThinkingControls>,
     pub modes: Vec<(String, String)>,
@@ -513,6 +604,10 @@ pub fn agent_controls(
     };
     let mut pills = Vec::new();
     let model = handlers.model.clone();
+    let model_menu = ModelMenu {
+        search: view.model_search,
+        refresh: handlers.refresh_models.clone(),
+    };
     match view.model_groups {
         Some(groups) => pills.push(grouped_model_pill(
             view.model_glyph,
@@ -520,7 +615,7 @@ pub fn agent_controls(
             view.current_model,
             look,
             model,
-            handlers.refresh_models.clone(),
+            model_menu,
             cx,
         )),
         None => pills.push(choice_pill(
@@ -533,7 +628,7 @@ pub fn agent_controls(
             None,
             look,
             move |id, cx| model(id, cx),
-            Some(handlers.refresh_models.clone()),
+            Some(model_menu),
             cx,
         )),
     }

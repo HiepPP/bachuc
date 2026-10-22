@@ -381,6 +381,8 @@ pub struct Composer {
     client: Entity<Client>,
     agent_id: String,
     input: Entity<TextareaState>,
+    /// The model menu's search text.
+    model_search: Entity<InputState>,
     attachments: Vec<Attachment>,
     pasted: u32,
     watched: Watched,
@@ -515,6 +517,7 @@ impl Composer {
                 .auto_grow(min_lines, max_rows.max(min_lines))
                 .submit_on_enter(true)
         });
+        let model_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search models"));
         let is_draft = options.is_some();
         let watched = Watched::read(client.read(cx), &agent_id, is_draft);
         let draft = options.map(|options| {
@@ -541,6 +544,12 @@ impl Composer {
         let weak = cx.weak_entity();
         let input_focus = input.read(cx).focus_handle(cx);
         let mut subscriptions = vec![
+            // The model menu filters as the search text changes.
+            cx.subscribe(&model_search, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            }),
             // The focus hint shows only while the input is unfocused.
             cx.on_focus(&input_focus, window, |_, _, cx| cx.notify()),
             cx.on_blur(&input_focus, window, |_, _, cx| cx.notify()),
@@ -603,6 +612,7 @@ impl Composer {
             client,
             agent_id,
             input,
+            model_search,
             attachments: Vec::new(),
             pasted: 0,
             watched,
@@ -2214,6 +2224,7 @@ impl Composer {
                         model_glyph: provider_glyph(draft.provider.as_deref(), t.foreground_muted),
                         model_groups: Some(model_groups(&self.watched.providers)),
                         models: Vec::new(),
+                        model_search: self.model_search.clone(),
                         current_model: current,
                         thinking,
                         modes,
@@ -2247,6 +2258,7 @@ impl Composer {
                         ),
                         model_groups: None,
                         models: controls.models,
+                        model_search: self.model_search.clone(),
                         current_model: controls.current_model,
                         thinking: watched.thinking.clone(),
                         modes: controls.modes,
