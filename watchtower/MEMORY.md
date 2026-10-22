@@ -433,3 +433,6 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: `cargo clippy --no-deps -D warnings` on Rust 1.97 fails on old lines in `bachuc-explorer`, `bachuc-client`, `bachuc-plugin-watchtower-board`, `bachuc-plugin-host`, and `bachuc-timeline`; judge new code with `git blame` of each reported line. `cargo metadata` repeats `"name":"gpui-kit"` once per dependent crate, so count `^name = "gpui-kit"` in `Cargo.lock` for duplicate builds.
 - Source: TASK-288, TASK-291, TASK-293, TASK-295 outcomes; `crates/app/src/shell.rs:957`.
 - Use next time: before planning UI on a GPUI view, confirm in `shell.rs` that a user path opens it.
+- 2026-10-22 Learned: TASK-297 put the only entry to the one-file diff in a row context menu, which the UI checker cannot open (AX lists only Pick; `accesskit_macos` maps no show-menu action), so its screen checks fell to the owner (Q-189). This repeats the 2026-10-18 rule.
+- Source: TASK-297 outcome, UI Checks.
+- Use next time: when a plan adds a menu item, also give it a key or AX press path, or plan the check as an owner check.

@@ -2,7 +2,7 @@
 
 ## Status
 
-BLOCKED: BUILT, UNVERIFIED (Q-186). Code committed; see UI Checks.
+BLOCKED: BUILT, UNVERIFIED (Q-189). Code committed; see UI Checks.
 
 ## Changed
 
@@ -47,4 +47,15 @@ Main finding: the one-file diff (`Source::File`) is unreachable in the app. A Ch
 - Screen check, commit diff, all-files view, deleted `.md` have no "Show rendered": PASS for the commit diff of `SECURITY.md` and the all-files view with the deleted `README.ko.md`. The AX tree has no such button in either (`288-commit-diff.png`). A one-file diff of a deleted file is unreachable.
 - Anti-goal, Lines mode sends 1 request per reload: UNVERIFIED (one-file diff unreachable, no daemon log line to read). Code read: `rg read_file diff_view.rs` has one match, inside `markdown_mode.then(...)`.
 
-Blocked: BUILT, UNVERIFIED (Q-186)
+Blocked: BUILT, UNVERIFIED (Q-189)
+
+### Round 2
+
+UI checker, 2026-10-22, check bundle at `04139fc00` on live (6768), via the new "Open file diff" menu item (TASK-297). Scratch worktree workspace `gray-kangaroo`, archived. Cause for every line below: the Changes row menu cannot be opened without the pointer. The AX row lists only "Pick" as a secondary action; `performSecondaryAction` with "ShowMenu", "Show Menu", and "ShowContextMenu" on the row failed with error -10005 (not a valid secondary action). The app registers `AccessibleAction::ShowContextMenu` at `explorer.rs:2106`, but `accesskit_macos` maps no show-menu action (MEMORY 2026-10-18). The menu key and shift-f10 open the tab menu only (`actions.rs:204-205`). A right-click needs the pointer, which is banned.
+
+- Screen check, changed `.md` one-file diff, "Show rendered", red then green block: UNVERIFIED (row menu unreachable without the pointer).
+- Screen check, new untracked `.md`, every block green: UNVERIFIED (row menu unreachable without the pointer).
+- Screen check, append a paragraph while Rendered is on: UNVERIFIED (row menu unreachable without the pointer).
+- Screen check, too-large or binary `.md` placeholder has no "Show rendered": UNVERIFIED (row menu unreachable without the pointer). The Explorer Changes tree lists `big-scratch.md` and `binary-scratch.md` as New rows with `+0 -0`.
+- Screen check, one-file diff of a deleted `.md` has no "Show rendered": UNVERIFIED (row menu unreachable without the pointer). The commit diff and all-files parts stay PASS from Round 1.
+- Anti-goal, Lines mode: one `checkout.diff.get.request` per reload and no `file_explorer_request` with `"mode": "file"` in `.dev/paseo-home/daemon.log` after one edit of an open `.rs` one-file diff: UNVERIFIED (row menu unreachable without the pointer; no one-file diff was opened, so the log has nothing to read). Code read from Round 1 stands.

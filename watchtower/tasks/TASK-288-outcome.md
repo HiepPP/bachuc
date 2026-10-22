@@ -2,7 +2,7 @@
 
 ## Status
 
-BLOCKED: BUILT, UNVERIFIED (Q-186). Code committed; see UI Checks.
+BLOCKED: BUILT, UNVERIFIED (Q-189). Code committed; see UI Checks.
 
 ## Changed
 
@@ -37,4 +37,10 @@ UI checker, 2026-10-22, check bundle at `74d73ff80` on live (6768), zoom 1.25. S
 - Screen check, 300 px pane keeps the wrap button inside the pane: UNVERIFIED at 300 px. With the Explorer open the pane never drops under 400 px (`WORKSPACE_BODY_MIN_WIDTH`); a 300 px pane has no way to open a commit diff. At 400 px (640 px window, 240 px Explorer) the wrap button sits at the right end inside the pane (`288-pane400.png`).
 - Anti-goal, all-files `diff-view-toolbar` keeps 5 controls in order: PASS. After: AX `Diff mode`, `Collapse all files`, `Hide whitespace`, `Wrap long lines`, `Refresh`. Before: `git diff d82c3b9a2 HEAD -- diff_view.rs` has no hunk inside `render_toolbar` (line 625); only its call site in `render` changed.
 
-Blocked: BUILT, UNVERIFIED (Q-186)
+Blocked: BUILT, UNVERIFIED (Q-189)
+
+### Round 2
+
+UI checker, 2026-10-22, check bundle at `04139fc00` on live (6768), via the new "Open file diff" menu item (TASK-297).
+
+- Screen check, one-file diff from Changes has `diff-file-toolbar` and "Wrap long lines"; press gives "Scroll long lines" and a long line wraps: UNVERIFIED. The menu item was not reached: the Changes row menu cannot be opened without the pointer. The AX row lists only "Pick" as a secondary action; `performSecondaryAction` with "ShowMenu", "Show Menu", and "ShowContextMenu" on the row failed with error -10005 (not a valid secondary action). The app registers `AccessibleAction::ShowContextMenu` at `explorer.rs:2106`, but `accesskit_macos` maps no show-menu action (MEMORY 2026-10-18). The menu key and shift-f10 open the tab menu only (`actions.rs:204-205`). A right-click needs the pointer, which is banned. The first line of Round 1 stays as written; its cause moved from "no emitter" to "menu unreachable by AX".
