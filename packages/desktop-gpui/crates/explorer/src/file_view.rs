@@ -2,12 +2,16 @@
 //! placeholder, as `file-pane/pane.tsx` and its CodeMirror source view draw them. No editing.
 
 use crate::code::{code_font, code_text, gutter_width};
+use crate::markdown_diff::is_markdown_path;
 use crate::syntax::{Run, ThemeSyntax, highlight, language_for};
 use crate::ui::{centered_text, file_meta_state};
 use bachuc_client::{Client, FileContent, FileKind};
-use bachuc_theme::metrics::{FONT_SM, RADIUS_SM, SPACE_2, SPACE_3, TAB_BAR_HEIGHT};
-use bachuc_theme::{syntax_colors, tokens, ui_font_size, zoom, zoomed};
+use bachuc_theme::metrics::{
+    FONT_SM, MAX_CONTENT_WIDTH, RADIUS_SM, SPACE_2, SPACE_3, SPACE_4, TAB_BAR_HEIGHT,
+};
+use bachuc_theme::{content_font_size, syntax_colors, tokens, ui_font_size, zoom, zoomed};
 use gpui_kit::component::h_flex;
+use gpui_kit::component::text::TextView;
 use gpui_kit::component::theme::Theme;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -42,6 +46,8 @@ struct TextDoc {
     language: Option<&'static str>,
     /// The syntax colors the runs were made for.
     colors: ThemeSyntax,
+    /// The text again as a shared string, for a markdown file the viewer can render.
+    markdown: Option<SharedString>,
 }
 
 impl TextDoc {
@@ -51,6 +57,7 @@ impl TextDoc {
         let longest = (0..starts.len())
             .max_by_key(|&index| line_range(&starts, text.len(), index).len())
             .unwrap_or(0);
+        let markdown = is_markdown_path(path).then(|| SharedString::from(text.clone()));
         let language = if size <= HIGHLIGHT_LIMIT {
             language_for(path)
         } else {
@@ -64,6 +71,7 @@ impl TextDoc {
             size,
             language,
             colors,
+            markdown,
         }
     }
 
@@ -97,6 +105,8 @@ pub struct FileView {
     cwd: String,
     path: String,
     line: Option<u32>,
+    /// Whether a markdown file shows rendered; kept across a reload, dropped with the view.
+    rendered: bool,
     state: State,
     scroll: UniformListScrollHandle,
     /// Bumped by each load, so a slow answer for an older load is dropped.
@@ -157,11 +167,13 @@ impl FileView {
         cx: &mut Context<FileView>,
     ) -> FileView {
         let path = relative_path(&cwd, &path);
+        let rendered = is_markdown_path(&path) && line.is_none();
         let mut view = FileView {
             client,
             cwd,
             path,
             line,
+            rendered,
             state: State::Loading,
             scroll: UniformListScrollHandle::new(),
             load: 0,
@@ -215,14 +227,26 @@ impl FileView {
         cx.notify();
     }
 
-    /// Scrolls the line (1-based) to the middle of the view.
+    /// Scrolls the line (1-based) to the middle of the view. A rendered markdown file switches to
+    /// its source first, because the line only exists there.
     pub fn scroll_to_line(&mut self, line: u32, cx: &mut Context<FileView>) {
+        self.rendered = false;
+        self.scroll_list_to(line, cx);
+    }
+
+    /// The handle keeps the target until the list draws, so it also works while Rendered.
+    fn scroll_list_to(&mut self, line: u32, cx: &mut Context<FileView>) {
         self.line = Some(line);
         if let State::Text(doc) = &self.state {
             let index = (line.max(1) as usize - 1).min(doc.line_count() - 1);
             self.scroll
                 .scroll_to_item_strict(index, ScrollStrategy::Center);
         }
+        cx.notify();
+    }
+
+    fn toggle_rendered(&mut self, cx: &mut Context<FileView>) {
+        self.rendered = !self.rendered;
         cx.notify();
     }
 
@@ -275,7 +299,7 @@ impl FileView {
         if matches!(self.state, State::Text(_)) {
             self.start_highlight(cx);
             if let Some(line) = self.line {
-                self.scroll_to_line(line, cx);
+                self.scroll_list_to(line, cx);
             }
         }
         cx.notify();
@@ -324,10 +348,32 @@ impl FileView {
         .detach();
     }
 
-    fn render_toolbar(&self, doc: &TextDoc, cx: &App) -> impl IntoElement + use<> {
+    fn render_toolbar(&self, doc: &TextDoc, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let colors = tokens(cx);
         let size = format_file_size(doc.size);
         let lines = format!("{} lines", doc.line_count());
+        let toggle = doc.markdown.is_some().then(|| {
+            let label = if self.rendered {
+                "Show source"
+            } else {
+                "Show rendered"
+            };
+            let view = cx.weak_entity();
+            div()
+                .id("file-view-toggle")
+                .role(Role::Button)
+                .aria_label(label)
+                .cursor_pointer()
+                .px(zoomed(SPACE_2, cx))
+                .rounded(zoomed(RADIUS_SM, cx))
+                .text_color(colors.foreground_muted)
+                .hover(move |style| style.bg(colors.interaction_highlight))
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_rendered(cx)))
+                .on_a11y_action(AccessibleAction::Click, move |_, _, cx| {
+                    view.update(cx, |this, cx| this.toggle_rendered(cx)).ok();
+                })
+                .child(label)
+        });
         h_flex()
             .id("file-view-bar")
             .role(Role::Status)
@@ -340,6 +386,30 @@ impl FileView {
             .text_color(colors.foreground_extra_muted)
             .child(size)
             .child(lines)
+            .when_some(toggle, |this, toggle| {
+                this.child(div().flex_1()).child(toggle)
+            })
+    }
+
+    /// The markdown body in a scroll area, in a centered column as the Electron reading frame.
+    fn render_markdown(&self, markdown: SharedString, cx: &App) -> impl IntoElement + use<> {
+        let size = content_font_size(cx);
+        div()
+            .id("file-view-text")
+            .role(Role::Document)
+            .aria_label(format!("Contents of {}", self.path))
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .p(zoomed(SPACE_4, cx))
+            .child(
+                div()
+                    .mx_auto()
+                    .max_w(zoomed(MAX_CONTENT_WIDTH, cx))
+                    .text_size(size)
+                    .text_color(tokens(cx).foreground)
+                    .child(TextView::markdown("file-view-markdown", markdown).text_size(size)),
+            )
     }
 
     fn render_lines(
@@ -459,6 +529,11 @@ impl Render for FileView {
             ),
             State::Text(doc) => {
                 let bar = self.render_toolbar(doc, cx);
+                if self.rendered
+                    && let Some(markdown) = doc.markdown.clone()
+                {
+                    return root.child(bar).child(self.render_markdown(markdown, cx));
+                }
                 let count = doc.line_count();
                 let longest = doc.longest;
                 root.child(bar).child(
