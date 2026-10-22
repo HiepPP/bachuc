@@ -5,20 +5,28 @@
 //! one `checkout_diff` request (`new_all`), or one file of one commit (`new_commit`). The rows
 //! come from `DiffDoc`, and the `list` element builds only the rows in view.
 
+use crate::changes::Change;
 use crate::code::{code_font, code_text, gutter_width};
 use crate::diff::{LineKind, NoDiff, no_diff_reason, parse};
 use crate::diff_doc::{DiffDoc, DiffRow, FileBody, Latest};
 use crate::diff_prefs::{DiffPrefs, FocusTracker, clamp_offset, code_widths, uniform_row_height};
+use crate::markdown_diff::{BlockKind, RichBlock, block_diff, is_markdown_path, old_text};
 use crate::syntax::{Run, ThemeSyntax, highlight, language_for};
 use crate::ui::{
     centered_text, change_icon, chevron, diff_mode_menu, diff_stat, read_prefs, update_prefs,
 };
-use bachuc_client::{Client, ClientEvent, DiffCompare, DirectoryEvent, FileDiff, FileDiffStatus};
+use bachuc_client::{
+    Client, ClientEvent, DiffCompare, DirectoryEvent, FileContent, FileDiff, FileDiffStatus,
+    FileKind,
+};
 use bachuc_icons::{IconName, icon};
-use bachuc_theme::metrics::{FONT_BASE, ICON_SM, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3};
+use bachuc_theme::metrics::{
+    FONT_BASE, ICON_SM, MAX_CONTENT_WIDTH, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3,
+};
 use bachuc_theme::{syntax_colors, tokens, ui_font_size, zoom, zoomed};
+use gpui_kit::component::text::TextView;
 use gpui_kit::component::theme::Theme;
-use gpui_kit::component::{Sizable as _, h_flex};
+use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -41,6 +49,11 @@ const DELETION_TINT: f32 = 0.1;
 const HIGHLIGHT_LIMIT: usize = 512 * 1024;
 /// How far past the visible rows the list builds rows.
 const OVERDRAW: f32 = 200.;
+/// The width of the bar on the left of an added or removed block in the rendered markdown.
+const BLOCK_BAR: f32 = 3.;
+const BLOCK_LINE_FACTOR: f32 = 1.4;
+const RENDERED_UNAVAILABLE: &str =
+    "Rendered diff unavailable: the file changed since the diff loaded";
 
 /// What the view shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +61,15 @@ enum Source {
     File { path: String },
     All { focus_path: Option<String> },
     Commit { sha: String, path: String },
+}
+
+/// What a reload of a one-file view found for the rendered markdown diff.
+enum Rendered {
+    /// Rendered is off, or the diff has nothing to render.
+    Off,
+    /// The file could not be read as text, or the patch does not match it.
+    Unavailable,
+    Blocks(Vec<RichBlock>),
 }
 
 enum State {
@@ -79,6 +101,13 @@ pub struct DiffView {
     compare: Option<DiffCompare>,
     /// Long lines wrap instead of scrolling sideways.
     wrap: bool,
+    /// A markdown file shows as rendered blocks instead of lines. Starts off and lives for the
+    /// view only.
+    markdown_mode: bool,
+    /// The blocks of the whole file; kept on screen while a reload is in flight.
+    rendered: Option<Vec<RichBlock>>,
+    /// The last Rendered request could not be answered, so the view fell back to lines.
+    rendered_unavailable: bool,
     /// The sideways offset of each file's code, in pixels.
     offsets: Vec<f32>,
     /// The advance width of one code character, measured at the last render.
@@ -177,6 +206,9 @@ impl DiffView {
             focus: FocusTracker::new(revision, initial_focus),
             compare: None,
             wrap,
+            markdown_mode: false,
+            rendered: None,
+            rendered_unavailable: false,
             offsets: Vec::new(),
             advance: 0.,
             pane_width: 0.,
@@ -198,7 +230,11 @@ impl DiffView {
     /// answer to an older request is dropped.
     pub fn reload(&mut self, cx: &mut Context<DiffView>) {
         enum Pending {
-            File(String, Task<anyhow::Result<String>>),
+            File(
+                String,
+                Task<anyhow::Result<String>>,
+                Option<Task<anyhow::Result<FileContent>>>,
+            ),
             All(Task<anyhow::Result<Vec<FileDiff>>>),
             Commit(Task<anyhow::Result<Option<FileDiff>>>),
         }
@@ -209,7 +245,12 @@ impl DiffView {
                 let task = self
                     .client
                     .update(cx, |client, cx| client.file_diff(&cwd, &path, cx));
-                Pending::File(path, task)
+                // The working file is read only while Rendered is on.
+                let read = self.markdown_mode.then(|| {
+                    self.client
+                        .update(cx, |client, cx| client.read_file(&cwd, &path, cx))
+                });
+                Pending::File(path, task, read)
             }
             Source::All { .. } => {
                 let compare = read_prefs(cx, |prefs| prefs.compare(&cwd));
@@ -225,12 +266,29 @@ impl DiffView {
             }
         };
         cx.spawn(async move |this, cx| {
+            let mut rendered = Rendered::Off;
             let result = match pending {
-                Pending::File(path, task) => one_file(path, task.await),
+                Pending::File(path, task, read) => {
+                    let result = one_file(path, task.await);
+                    if let Some(read) = read {
+                        let content = read.await;
+                        rendered = match result.as_ref().ok().and_then(|diffs| renderable(diffs)) {
+                            Some(diff_text) => {
+                                let blocks = cx
+                                    .background_executor()
+                                    .spawn(async move { rich_blocks(&diff_text, content) })
+                                    .await;
+                                blocks.map_or(Rendered::Unavailable, Rendered::Blocks)
+                            }
+                            None => Rendered::Off,
+                        };
+                    }
+                    result
+                }
                 Pending::All(task) => task.await,
                 Pending::Commit(task) => task.await.map(|diff| diff.into_iter().collect()),
             };
-            let _ = this.update(cx, |this, cx| this.apply(request, result, cx));
+            let _ = this.update(cx, |this, cx| this.apply(request, result, rendered, cx));
         })
         .detach();
     }
@@ -239,11 +297,22 @@ impl DiffView {
         &mut self,
         request: u64,
         result: anyhow::Result<Vec<FileDiff>>,
+        rendered: Rendered,
         cx: &mut Context<DiffView>,
     ) {
         if !self.requests.is_current(request) {
             return;
         }
+        self.rendered_unavailable = false;
+        self.rendered = match rendered {
+            Rendered::Off => None,
+            Rendered::Unavailable => {
+                self.markdown_mode = false;
+                self.rendered_unavailable = true;
+                None
+            }
+            Rendered::Blocks(blocks) => Some(blocks),
+        };
         match result {
             Err(error) => {
                 let message = format!("{error:#}");
@@ -385,6 +454,32 @@ impl DiffView {
             prefs.wrap_lines = !prefs.wrap_lines;
             true
         });
+    }
+
+    /// Whether the view can show Rendered: a changed markdown file of a one-file view with line
+    /// rows on screen. A deleted file has no working file to read.
+    fn markdown_available(&self) -> bool {
+        let Source::File { path } = &self.source else {
+            return false;
+        };
+        is_markdown_path(path)
+            && matches!(self.state, State::Ready)
+            && self.doc.files().first().is_some_and(|file| {
+                file.change != Change::Deleted && matches!(file.body, FileBody::Lines(_))
+            })
+    }
+
+    /// Switches between lines and rendered blocks. Turning Rendered on reloads, which reads the
+    /// file; this is also the retry after the "unavailable" notice.
+    fn toggle_markdown(&mut self, cx: &mut Context<DiffView>) {
+        self.markdown_mode = !self.markdown_mode;
+        self.rendered_unavailable = false;
+        if self.markdown_mode {
+            self.reload(cx);
+        } else {
+            self.rendered = None;
+        }
+        cx.notify();
     }
 
     fn toggle_whitespace(&mut self, cx: &mut Context<DiffView>) {
@@ -607,6 +702,108 @@ impl DiffView {
             .child(
                 self.toolbar_button("diff-view-refresh", "Refresh", IconName::RotateCw, cx)
                     .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
+            )
+    }
+
+    /// The toolbar of a one-file or commit view: the wrap toggle at the right end. It has no mode
+    /// menu, collapse, whitespace, or refresh control, because the view has one file and always
+    /// sends the plain uncommitted compare.
+    fn render_file_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let colors = tokens(cx);
+        let wrap_label = if self.wrap {
+            "Scroll long lines"
+        } else {
+            "Wrap long lines"
+        };
+        h_flex()
+            .id("diff-file-toolbar")
+            .role(Role::Toolbar)
+            .aria_label("Diff")
+            .flex_shrink_0()
+            .h(zoomed(TOOLBAR_HEIGHT, cx))
+            .pl(zoomed(SPACE_2, cx))
+            .pr(zoomed(HEADER_RIGHT, cx))
+            .gap(zoomed(SPACE_2, cx))
+            .bg(colors.surface0)
+            .border_b_1()
+            .border_color(colors.border)
+            .child(div().flex_1().min_w_0())
+            .when(self.markdown_available(), |this| {
+                let (label, glyph) = if self.markdown_mode {
+                    ("Show lines", IconName::Code)
+                } else {
+                    ("Show rendered", IconName::BookOpen)
+                };
+                this.child(
+                    self.toolbar_button("diff-file-markdown", label, glyph, cx)
+                        .aria_selected(self.markdown_mode)
+                        .when(self.markdown_mode, |this| {
+                            this.bg(colors.interaction_highlight)
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_markdown(cx))),
+                )
+            })
+            .child(
+                self.toolbar_button("diff-file-wrap", wrap_label, IconName::WrapText, cx)
+                    .aria_selected(self.wrap)
+                    .when(self.wrap, |this| this.bg(colors.interaction_highlight))
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_wrap(cx))),
+            )
+    }
+
+    /// The whole new file as markdown blocks in their own scroll column, apart from the line
+    /// list. Added and removed blocks get the line tints and a bar on the left.
+    fn render_rendered(&self, blocks: &[RichBlock], cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = tokens(cx);
+        let text_size = ui_font_size(FONT_BASE, cx);
+        div()
+            .id("diff-view-rendered")
+            .role(Role::Document)
+            .aria_label("Rendered changes")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(
+                v_flex()
+                    .w_full()
+                    .max_w(zoomed(MAX_CONTENT_WIDTH, cx))
+                    .mx_auto()
+                    .py(zoomed(SPACE_3, cx))
+                    .children(blocks.iter().enumerate().map(|(index, block)| {
+                        let (background, bar) = match block.kind {
+                            BlockKind::Same => (None, None),
+                            BlockKind::Added => (
+                                Some(colors.status_success.opacity(ADDITION_TINT)),
+                                Some(colors.status_success),
+                            ),
+                            BlockKind::Removed => (
+                                Some(colors.status_danger.opacity(DELETION_TINT)),
+                                Some(colors.status_danger),
+                            ),
+                        };
+                        let label = match block.kind {
+                            BlockKind::Same => "unchanged block",
+                            BlockKind::Added => "added block",
+                            BlockKind::Removed => "removed block",
+                        };
+                        div()
+                            .id(("diff-rendered-block", index))
+                            .role(Role::Group)
+                            .aria_label(label)
+                            .w_full()
+                            .border_l(px(BLOCK_BAR))
+                            .border_color(bar.unwrap_or_else(gpui::transparent_black))
+                            .px(zoomed(SPACE_3, cx))
+                            .py(zoomed(SPACE_1, cx))
+                            .when_some(background, |this, background| this.bg(background))
+                            .text_size(text_size)
+                            .line_height(text_size * BLOCK_LINE_FACTOR)
+                            .text_color(colors.foreground)
+                            .child(TextView::markdown(
+                                ElementId::Name(format!("diff-rendered-text-{index}").into()),
+                                block.markdown.clone(),
+                            ))
+                    })),
             )
     }
 
@@ -883,6 +1080,26 @@ fn one_file(path: String, result: anyhow::Result<String>) -> anyhow::Result<Vec<
     }
 }
 
+/// The diff text of a one-file view that Rendered can use: a changed file with a text diff.
+fn renderable(diffs: &[FileDiff]) -> Option<String> {
+    diffs
+        .first()
+        .filter(|diff| diff.status == FileDiffStatus::Ok && !diff.is_deleted)
+        .map(|diff| diff.text.clone())
+}
+
+/// The blocks of the working file against its old side; `None` when the file is not text or the
+/// patch does not match it.
+fn rich_blocks(diff_text: &str, content: anyhow::Result<FileContent>) -> Option<Vec<RichBlock>> {
+    let content = content.ok()?;
+    if content.kind != FileKind::Text {
+        return None;
+    }
+    let new = content.text?;
+    let old = old_text(&new, diff_text)?;
+    Some(block_diff(&old, &new))
+}
+
 impl Render for DiffView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = tokens(cx);
@@ -911,9 +1128,31 @@ impl Render for DiffView {
             .flex_col()
             .bg(colors.surface0)
             .text_color(colors.foreground);
-        let root = root.when(matches!(self.source, Source::All { .. }), |this| {
-            this.child(self.render_toolbar(cx))
-        });
+        let root = if matches!(self.source, Source::All { .. }) {
+            root.child(self.render_toolbar(cx))
+        } else {
+            root.child(self.render_file_toolbar(cx))
+        };
+        let show_blocks = self.markdown_mode && self.markdown_available();
+        let root = root.when(
+            self.rendered_unavailable && self.markdown_available(),
+            |this| {
+                this.child(
+                    div()
+                        .id("diff-view-rendered-notice")
+                        .role(Role::Status)
+                        .aria_label(RENDERED_UNAVAILABLE)
+                        .flex_shrink_0()
+                        .px(zoomed(SPACE_2, cx))
+                        .py(zoomed(SPACE_1, cx))
+                        .text_size(ui_font_size(FONT_BASE, cx))
+                        .text_color(colors.foreground_muted)
+                        .border_b_1()
+                        .border_color(colors.border)
+                        .child(RENDERED_UNAVAILABLE),
+                )
+            },
+        );
         match &self.state {
             State::Loading => root.child(centered_text(
                 "diff-view-loading",
@@ -930,6 +1169,9 @@ impl Render for DiffView {
                 false,
                 cx,
             )),
+            State::Ready if show_blocks && self.rendered.is_some() => {
+                root.child(self.render_rendered(self.rendered.as_deref().unwrap_or_default(), cx))
+            }
             State::Ready => root.child(
                 div()
                     .id("diff-view-lines")
