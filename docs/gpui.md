@@ -100,6 +100,7 @@ Focus and accessibility:
 Events and code:
 
 - GPUI calls subscribers in subscription order. A shell handler that needs a later view's state for the same event uses `cx.defer_in`.
+- A button drawn on top of a clickable row also sends its click to that row. Call `cx.stop_propagation()` in the button's handler, or `.occlude()` the button. The sidebar project "+" toggled its project until it stopped the click.
 - GPUI holds a `cx.subscribe` emitter weakly. Dropping the last `Entity<Client>` stops its socket thread.
 - In a file with `use gpui_kit::*`, a test module with `use super::*` picks up GPUI's `#[test]` macro. Import the needed items by name.
 - When you add struct fields that cross crates, update every literal in other crates, and add the `lib.rs` export.

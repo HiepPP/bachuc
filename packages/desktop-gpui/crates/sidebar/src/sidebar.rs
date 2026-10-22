@@ -2787,7 +2787,9 @@ fn new_workspace_button(
         .opacity(0.)
         .group_hover(group, |style| style.opacity(1.))
         .hover(move |style| style.bg(t.surface_sidebar_hover).text_color(fg))
+        // The project row under the "+" must not collapse or expand.
         .on_press(cx, move |_, _, cx| {
+            cx.stop_propagation();
             cx.emit(SidebarNavEvent::NewWorkspace {
                 project_id: Some(project_id.clone()),
             })
