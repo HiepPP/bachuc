@@ -11,16 +11,17 @@ use crate::rules::{
     is_suggested, reserved_faces, row_status, send_selected_label, shows_selection, timestamp_ms,
 };
 use crate::section::{Recap, RecapSection, bold_runs, commit_chip, recap_sections};
-use crate::selection::{Group, layout, reachable, toggle};
+use crate::selection::{Group, RowClick, layout, reachable, row_click, toggle};
 use crate::settings_view::back_to_board_now;
 use bachuc_icons::{IconName, icon};
-use bachuc_plugin_host::ui::markdown;
+use bachuc_plugin_host::ui::{markdown, markdown_style};
 use bachuc_plugin_host::{PluginContext, PluginSettings, TimelineRenderInput};
 use bachuc_theme::metrics::{
     CONTROL_SM, FONT_CONTENT, FONT_SM, ICON_MD, ICON_SM, ICON_XS, RADIUS_BASE, RADIUS_LG,
     RADIUS_MD, RADIUS_XL, SPACE_1, SPACE_1_5, SPACE_2, SPACE_3, SPACE_4, SPACE_6,
 };
 use bachuc_theme::{Tokens, tokens, ui_font_size, zoomed};
+use gpui_kit::base::{SelectableText, TextSelection};
 use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -91,6 +92,32 @@ pub(crate) fn build(shared: &Rc<Shared>, input: TimelineRenderInput, cx: &mut Ap
         .into()
 }
 
+/// The reason as Markdown that renders as written, except that its `**bold**` runs stay bold:
+/// every ASCII punctuation mark outside those runs is escaped.
+fn reason_markdown(why: &str) -> String {
+    let escape = |run: &str| -> String {
+        run.chars()
+            .flat_map(|c| {
+                c.is_ascii_punctuation()
+                    .then_some('\\')
+                    .into_iter()
+                    .chain([c])
+            })
+            .collect()
+    };
+    bold_runs(why)
+        .iter()
+        .enumerate()
+        .map(|(index, run)| {
+            if index % 2 == 1 {
+                format!("**{}**", escape(run))
+            } else {
+                escape(run)
+            }
+        })
+        .collect()
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Look {
     Primary,
@@ -128,6 +155,8 @@ pub(crate) struct PanelView {
     modifier: bool,
     /// The selection of each block; per panel view.
     selections: Vec<Vec<String>>,
+    /// The block and selection before the last row toggle, for a double-click to restore.
+    before_click: Option<(usize, Vec<String>)>,
     _observe: Vec<Subscription>,
 }
 
@@ -151,6 +180,7 @@ impl PanelView {
             agent_id: input.agent_id,
             item_ms: input.timestamp.as_deref().and_then(timestamp_ms),
             selections: vec![Vec::new(); blocks.len()],
+            before_click: None,
             shared,
             data,
             blocks,
@@ -318,39 +348,30 @@ impl PanelView {
             )
     }
 
-    /// The prompt text and its reason; the reason's `**bold**` runs take the foreground.
-    fn prompt_text(text: &str, why: &str, colors: &Tokens, cx: &App) -> Div {
+    /// The prompt text and its reason, both selectable. The prompt shows as written; the
+    /// reason keeps its `**bold**` runs.
+    fn prompt_text(at: (usize, usize), text: &str, why: &str, colors: &Tokens, cx: &App) -> Div {
         let mut column = v_flex().min_w_0().gap(zoomed(SPACE_1, cx)).child(
             div()
                 .text_size(ui_font_size(FONT_CONTENT, cx))
                 .line_height(zoomed(TEXT_LINE, cx))
                 .text_color(colors.foreground)
-                .child(text.to_string()),
+                .child(SelectableText::new(
+                    SharedString::from(format!("np-text-{}-{}", at.0, at.1)),
+                    text.to_string(),
+                )),
         );
         if !why.is_empty() {
-            let mut plain = String::new();
-            let mut bold = Vec::new();
-            for (index, run) in bold_runs(why).iter().enumerate() {
-                let start = plain.len();
-                plain.push_str(run);
-                if index % 2 == 1 {
-                    bold.push((
-                        start..plain.len(),
-                        HighlightStyle {
-                            color: Some(colors.foreground),
-                            font_weight: Some(FontWeight::BOLD),
-                            ..HighlightStyle::default()
-                        },
-                    ));
-                }
-            }
-            column = column.child(
-                div()
-                    .text_size(ui_font_size(SMALL_TEXT, cx))
-                    .line_height(zoomed(SMALL_LINE, cx))
-                    .text_color(colors.foreground_muted)
-                    .child(StyledText::new(plain).with_highlights(bold)),
-            );
+            let reason = markdown(
+                SharedString::from(format!("np-why-{}-{}", at.0, at.1)),
+                reason_markdown(why),
+                cx,
+            )
+            .style(markdown_style(cx).with_paragraph_gap(rems(0.)))
+            .text_size(ui_font_size(SMALL_TEXT, cx))
+            .line_height(zoomed(SMALL_LINE, cx))
+            .text_color(colors.foreground_muted);
+            column = column.child(div().text_color(colors.foreground_muted).child(reason));
         }
         column
     }
@@ -369,7 +390,7 @@ impl PanelView {
     ) -> AnyElement {
         let colors = tokens(cx);
         let column = compact;
-        let words = Self::prompt_text(text, why, &colors, cx)
+        let words = Self::prompt_text(at, text, why, &colors, cx)
             .when(column, |this| this.w_full())
             .when(!column, |this| this.flex_1());
         let content = if column {
@@ -463,6 +484,7 @@ impl PanelView {
         });
         // The badge has its own row at the card's top right, so it never covers text or buttons.
         v_flex()
+            .id(SharedString::from(format!("np-card-{}-{}", at.0, at.1)))
             .min_w_0()
             .gap(zoomed(SPACE_2, cx))
             .p(zoomed(SPACE_4, cx))
@@ -574,14 +596,39 @@ impl PanelView {
                     .when(!allowed, |this| this.opacity(DISABLED_OPACITY))
                     .when(!disabled, |this| {
                         this.cursor_pointer().on_click(cx.listener(
-                            move |this, _: &ClickEvent, _, cx| {
-                                let groups = this.blocks[index]
-                                    .declaration
-                                    .as_ref()
-                                    .map(|d| d.exclusive_groups.clone())
-                                    .unwrap_or_default();
-                                this.selections[index] =
-                                    toggle(&this.selections[index], &press, &groups);
+                            move |this, event: &ClickEvent, window, cx| {
+                                let (moved, count) = match event {
+                                    ClickEvent::Mouse(click) => (
+                                        (click.up.position - click.down.position).magnitude()
+                                            as f32,
+                                        click.up.click_count,
+                                    ),
+                                    _ => (0., 1),
+                                };
+                                match row_click(
+                                    count,
+                                    moved,
+                                    TextSelection::has_selection(window, cx),
+                                ) {
+                                    RowClick::Skip => this.before_click = None,
+                                    RowClick::Restore => {
+                                        if let Some((block, selected)) = this.before_click.take()
+                                            && block == index
+                                        {
+                                            this.selections[index] = selected;
+                                        }
+                                    }
+                                    RowClick::Toggle => {
+                                        let groups = this.blocks[index]
+                                            .declaration
+                                            .as_ref()
+                                            .map(|d| d.exclusive_groups.clone())
+                                            .unwrap_or_default();
+                                        let before = this.selections[index].clone();
+                                        this.selections[index] = toggle(&before, &press, &groups);
+                                        this.before_click = Some((index, before));
+                                    }
+                                }
                                 cx.notify();
                             },
                         ))
@@ -594,8 +641,14 @@ impl PanelView {
                             .gap(zoomed(SPACE_3, cx))
                             .child(mark)
                             .child(
-                                Self::prompt_text(&block.prompts[at], &block.whys[at], &colors, cx)
-                                    .flex_1(),
+                                Self::prompt_text(
+                                    (index, at),
+                                    &block.prompts[at],
+                                    &block.whys[at],
+                                    &colors,
+                                    cx,
+                                )
+                                .flex_1(),
                             )
                             .when(!status.is_empty(), |this| {
                                 this.child(

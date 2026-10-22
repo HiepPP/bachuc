@@ -132,9 +132,59 @@ pub(crate) fn toggle(selected: &[String], id: &str, groups: &[Vec<String>]) -> V
     next
 }
 
+/// The farthest a press may move and still count as a click, in pixels.
+const CLICK_SLOP_PX: f32 = 4.;
+
+/// Whether a pick row toggles on release. Text selection runs on a window-level layer that
+/// never stops the event, so a drag over the row text still reaches the row's click handler.
+pub(crate) fn toggles_on_release(moved_px: f32, has_selection: bool) -> bool {
+    moved_px <= CLICK_SLOP_PX && !has_selection
+}
+
+/// What a click on a pick row does, from its click count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RowClick {
+    Toggle,
+    /// The second click of a double-click: put back what the first click changed.
+    Restore,
+    Skip,
+}
+
+/// A double-click selects a word, so its second click undoes the toggle of the first click
+/// instead of leaving the row changed. Later clicks of a multi-click do nothing, because the
+/// second click already restored the row.
+pub(crate) fn row_click(click_count: usize, moved_px: f32, has_selection: bool) -> RowClick {
+    match click_count {
+        2 => RowClick::Restore,
+        0 | 1 if toggles_on_release(moved_px, has_selection) => RowClick::Toggle,
+        _ => RowClick::Skip,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::toggle;
+
+    #[test]
+    fn a_double_click_restores_and_a_triple_click_does_nothing() {
+        use super::{RowClick, row_click};
+        assert_eq!(row_click(1, 0., false), RowClick::Toggle);
+        assert_eq!(row_click(1, 9., false), RowClick::Skip);
+        assert_eq!(row_click(1, 0., true), RowClick::Skip);
+        assert_eq!(row_click(2, 0., true), RowClick::Restore);
+        assert_eq!(row_click(2, 9., true), RowClick::Restore);
+        assert_eq!(row_click(3, 0., true), RowClick::Skip);
+        assert_eq!(row_click(0, 0., false), RowClick::Toggle);
+    }
+
+    #[test]
+    fn a_still_click_toggles_and_a_drag_or_selection_does_not() {
+        use super::toggles_on_release;
+        assert!(toggles_on_release(0., false));
+        assert!(toggles_on_release(4., false));
+        assert!(!toggles_on_release(4.5, false));
+        assert!(!toggles_on_release(0., true));
+    }
 
     #[test]
     fn a_radio_press_replaces_its_group_choice_and_a_second_press_clears_it() {
