@@ -3,8 +3,8 @@
 use crate::composer::{AttachmentSource, ComposerInterceptor, ComposerPill, StopButton};
 use crate::contributions::{
     CommandCenterItem, Contributions, HeaderSubtitle, NewWorkspacePanel, PluginSlashCommand,
-    ProjectFilter, ProjectMenu, SelectionAction, SettingsScreen, Shortcut, SidebarItem,
-    SidebarSection, Surface, ThemeContribution, TimelineRenderer, TimelineTransformer,
+    ProjectFilter, ProjectMenu, SelectionAction, SelectionResultAction, SettingsScreen, Shortcut,
+    SidebarItem, SidebarSection, Surface, ThemeContribution, TimelineRenderer, TimelineTransformer,
     WorkspacePanel,
 };
 use std::collections::HashMap;
@@ -37,6 +37,7 @@ pub struct ContributionIndex {
     shortcuts: Vec<Contributed<Shortcut>>,
     header_subtitles: Vec<Contributed<HeaderSubtitle>>,
     selection_actions: Vec<Contributed<SelectionAction>>,
+    selection_result_actions: Vec<Contributed<SelectionResultAction>>,
     themes: Vec<Contributed<ThemeContribution>>,
     reading_look: Option<bachuc_theme::ReadingLook>,
     /// Transformers by item type, so the timeline's per-entry lookup allocates nothing.
@@ -85,6 +86,11 @@ impl ContributionIndex {
             tag(id, &plugin.shortcuts, &mut index.shortcuts);
             tag(id, &plugin.header_subtitles, &mut index.header_subtitles);
             tag(id, &plugin.selection_actions, &mut index.selection_actions);
+            tag(
+                id,
+                &plugin.selection_result_actions,
+                &mut index.selection_result_actions,
+            );
             tag(id, &plugin.themes, &mut index.themes);
             if plugin.reading_look.is_some() {
                 index.reading_look = plugin.reading_look;
@@ -204,6 +210,10 @@ impl ContributionIndex {
 
     pub fn selection_actions(&self) -> &[Contributed<SelectionAction>] {
         &self.selection_actions
+    }
+
+    pub fn selection_result_actions(&self) -> &[Contributed<SelectionResultAction>] {
+        &self.selection_result_actions
     }
 
     pub fn themes(&self) -> &[Contributed<ThemeContribution>] {

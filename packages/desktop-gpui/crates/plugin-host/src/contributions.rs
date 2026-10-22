@@ -295,6 +295,23 @@ pub struct SelectionAction {
     pub on_select: Handler<AssistantSelection>,
 }
 
+/// Runs a result action on the selected text and returns the text the host shows in its card.
+/// It takes no `&mut Window`: `ctx.rpc` needs only `App`.
+pub type SelectionResultHandler =
+    Rc<dyn Fn(AssistantSelection, &mut App) -> Task<anyhow::Result<String>>>;
+
+/// An action on selected assistant text whose answer is text: the host draws a card at the
+/// selection with `loading` while the task runs, then the text as markdown or the error
+/// (ADR-0063).
+#[derive(Clone)]
+pub struct SelectionResultAction {
+    pub id: &'static str,
+    pub title: SharedString,
+    /// The card body while the task runs.
+    pub loading: SharedString,
+    pub run: SelectionResultHandler,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AssistantSelection {
     pub workspace_id: Option<String>,
@@ -352,6 +369,7 @@ pub struct Contributions {
     pub(crate) timeline_transformers: Vec<TimelineTransformer>,
     pub(crate) timeline_renderers: Vec<TimelineRenderer>,
     pub(crate) selection_actions: Vec<SelectionAction>,
+    pub(crate) selection_result_actions: Vec<SelectionResultAction>,
     pub(crate) themes: Vec<ThemeContribution>,
     pub(crate) reading_look: Option<bachuc_theme::ReadingLook>,
 }
@@ -431,6 +449,10 @@ impl Contributions {
 
     pub fn add_selection_action(&mut self, action: SelectionAction) {
         self.selection_actions.push(action);
+    }
+
+    pub fn add_selection_result_action(&mut self, action: SelectionResultAction) {
+        self.selection_result_actions.push(action);
     }
 
     pub fn add_theme(&mut self, theme: ThemeContribution) {

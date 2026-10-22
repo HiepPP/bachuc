@@ -31,11 +31,12 @@ pub use contributions::{
     AssistantSelection, CommandCenterItem, CommandContext, CommandInput, Contributions,
     HeaderSubtitle, HeaderSubtitleInput, NewWorkspacePanel, NewWorkspacePanelInput, PanelContext,
     PanelInput, PanelLocation, PluginSlashCommand, PluginThemeColors, PluginTimelineItem,
-    ProjectFilter, ProjectMenu, ProjectMenuItem, SelectionAction, SettingsScreen, Shortcut,
-    SidebarAction, SidebarItem, SidebarProject, SidebarSection, SlashInput, SourcePlacement,
-    SourcePosition, Surface, SurfaceInput, SurfacePresentation, SwipeDirection, ThemeAppearance,
-    ThemeContribution, TimelinePhase, TimelineRenderInput, TimelineRenderer,
-    TimelineTransformInput, TimelineTransformResult, TimelineTransformer, WorkspacePanel,
+    ProjectFilter, ProjectMenu, ProjectMenuItem, SelectionAction, SelectionResultAction,
+    SelectionResultHandler, SettingsScreen, Shortcut, SidebarAction, SidebarItem, SidebarProject,
+    SidebarSection, SlashInput, SourcePlacement, SourcePosition, Surface, SurfaceInput,
+    SurfacePresentation, SwipeDirection, ThemeAppearance, ThemeContribution, TimelinePhase,
+    TimelineRenderInput, TimelineRenderer, TimelineTransformInput, TimelineTransformResult,
+    TimelineTransformer, WorkspacePanel,
 };
 pub use host::{PluginHost, PluginHostEvent, active_plugin_ids, host, init};
 pub use index::{Contributed, ContributionIndex};

@@ -350,6 +350,7 @@ The GPUI desktop client does not run `index.client.tsx`. A plugin's server part 
 - The client shows a crate only when the active host's `plugin.list` reports the plugin enabled and running.
 - The app registers crates in `packages/desktop-gpui/crates/app/src/plugins.rs`, in plugin id order, which is the daemon catalog order. That order decides each "first wins" rule.
 - `plugin reload` reloads only the server part. A GPUI client change needs a GPUI build.
+- A selection result action (`add_selection_result_action`) returns text; the host draws the card at the selection with the loading text, the markdown answer and a Copy button, or the error ([ADR-0063](../watchtower/decisions/ADR-0063-host-drawn-selection-result-card-over-plugin-views.md)).
 
 ## Lifecycle hooks
 
@@ -467,7 +468,8 @@ the stored draft.
 when the composer is closed. The chip's comment lives on the draft attachment and joins the agent
 text only at submit, in `pluginResourceAttachmentToAgentAttachment`.
 
-Assistant selection actions are web-only: native text selection fires no JS selection events. The
+In the React client, assistant selection actions are web-only: native text selection fires no JS
+selection events. The GPUI client supports them through `add_selection_action`. The
 toolbar in `packages/app/src/assistant-selection-copy/selection-actions.web.tsx` mounts once per
 agent stream and uses a hidden anchor to find its own pane, so a selection in another pane never
 shows it. Its `mousedown` calls `preventDefault` to keep the selection alive through the press.

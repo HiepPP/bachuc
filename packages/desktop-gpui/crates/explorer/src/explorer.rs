@@ -4,8 +4,9 @@
 //! The view does not open anything itself. A click on a file emits `ExplorerEvent::OpenFile`, a
 //! click on a changed file emits `ExplorerDiffEvent::OpenAllDiffs`, a click on a file of a
 //! commit emits `ExplorerDiffEvent::OpenCommitDiff`, and the app opens the viewer pane. A right
-//! click opens the file menu (`file_menu`); its Open to the side and Add to chat items emit
-//! `ExplorerFileEvent`, and the Explorer runs the rest itself. A failed file or branch operation
+//! click opens the file menu (`file_menu`); its Open file diff item emits `ExplorerEvent::OpenDiff`,
+//! its Open to the side and Add to chat items emit `ExplorerFileEvent`, and the Explorer runs the
+//! rest itself. A failed file or branch operation
 //! and a restored stash emit `ExplorerNoticeEvent` for the app toast.
 
 use crate::branch_switcher::{BranchSwitched, BranchSwitcher};
@@ -72,7 +73,7 @@ const REVEAL_FAILED: &str = "Failed to reveal entry";
 pub enum ExplorerEvent {
     /// A file of the Files tree was picked.
     OpenFile { cwd: String, path: String },
-    /// A changed file of the Changes tree was picked.
+    /// Open file diff was picked in the file menu of an uncommitted changed file.
     OpenDiff { cwd: String, path: String },
 }
 
@@ -923,6 +924,9 @@ impl Explorer {
                 self.collapse_change_folder(&path);
             }
             (FileAction::Reveal, _) => self.reveal(absolute_path(&cwd, &path), cx),
+            (FileAction::OpenFileDiff, MenuTarget::Change { .. }) => {
+                cx.emit(ExplorerEvent::OpenDiff { cwd, path })
+            }
             (FileAction::OpenToSide, _) => cx.emit(ExplorerFileEvent::OpenToSide { cwd, path }),
             (FileAction::AddToChat, _) => cx.emit(ExplorerFileEvent::AddToChat { cwd, path }),
             (FileAction::CopyPath, _) => {

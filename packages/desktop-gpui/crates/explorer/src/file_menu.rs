@@ -41,6 +41,7 @@ pub enum FileAction {
     NewFile,
     NewFolder,
     CollapseFolder,
+    OpenFileDiff,
     OpenToSide,
     CopyPath,
     CopyRelativePath,
@@ -66,7 +67,9 @@ impl FileAction {
     fn group(self) -> Group {
         match self {
             FileAction::NewFile | FileAction::NewFolder => Group::Create,
-            FileAction::CollapseFolder | FileAction::OpenToSide => Group::Open,
+            FileAction::CollapseFolder | FileAction::OpenFileDiff | FileAction::OpenToSide => {
+                Group::Open
+            }
             FileAction::CopyPath
             | FileAction::CopyRelativePath
             | FileAction::Reveal
@@ -82,6 +85,7 @@ impl FileAction {
             FileAction::NewFile => "New file",
             FileAction::NewFolder => "New folder",
             FileAction::CollapseFolder => "Collapse folder",
+            FileAction::OpenFileDiff => "Open file diff",
             FileAction::OpenToSide => "Open to the side",
             FileAction::CopyPath => "Copy path",
             FileAction::CopyRelativePath => "Copy relative path",
@@ -100,6 +104,7 @@ impl FileAction {
             FileAction::NewFile => IconName::FilePlus,
             FileAction::NewFolder => IconName::FolderPlus,
             FileAction::CollapseFolder => IconName::FolderMinus,
+            FileAction::OpenFileDiff => IconName::FileDiff,
             FileAction::OpenToSide => IconName::ArrowRightToLine,
             FileAction::CopyPath | FileAction::CopyRelativePath => IconName::Copy,
             FileAction::Reveal => IconName::FolderOpen,
@@ -125,7 +130,8 @@ pub enum FileMenuEntry {
 /// The menu of a row in the Electron order. `git` is `None` for a Files row and set for a changed
 /// file or folder of the Changes tree. Create, Rename, and Delete need `entry_ops`; Duplicate
 /// needs `duplicate` and a file that exists; Discard changes needs `discard`. Open to the side
-/// and Add to chat need a file that exists, and Add to chat needs `chat_target`. A Changes folder
+/// and Add to chat need a file that exists, and Add to chat needs `chat_target`. A changed file
+/// of an uncommitted tree starts with Open file diff. A Changes folder
 /// row gets `DiffFolderRow`'s items: Collapse folder while it is open, then Copy path, Copy
 /// relative path, Reveal, Duplicate, and Discard changes.
 pub fn menu_entries(
@@ -157,6 +163,7 @@ pub fn menu_entries(
         Some(git) => {
             let exists = !git.deleted;
             vec![
+                (git.uncommitted, FileAction::OpenFileDiff),
                 (exists, FileAction::OpenToSide),
                 (true, FileAction::CopyPath),
                 (true, FileAction::CopyRelativePath),
@@ -405,6 +412,7 @@ mod tests {
         assert_eq!(
             render(&entries),
             vec![
+                "Open file diff",
                 "Open to the side",
                 "---",
                 "Copy path",
@@ -421,6 +429,57 @@ mod tests {
     }
 
     #[test]
+    fn an_uncommitted_changed_file_offers_open_file_diff_first() {
+        let git = GitState {
+            untracked: false,
+            deleted: false,
+            uncommitted: true,
+            expanded: false,
+        };
+        let entries = menu_entries(EntryKind::File, Some(git), ALL);
+        assert_eq!(
+            entries.first(),
+            Some(&FileMenuEntry::Item(FileAction::OpenFileDiff))
+        );
+        assert_eq!(FileAction::OpenFileDiff.label(), "Open file diff");
+        let deleted = GitState {
+            deleted: true,
+            ..git
+        };
+        assert_eq!(
+            render(&menu_entries(EntryKind::File, Some(deleted), ALL)),
+            vec![
+                "Open file diff",
+                "---",
+                "Copy path",
+                "Copy relative path",
+                "---",
+                "Discard changes"
+            ]
+        );
+        let committed = GitState {
+            uncommitted: false,
+            ..git
+        };
+        assert!(
+            !menu_entries(EntryKind::File, Some(committed), ALL)
+                .contains(&FileMenuEntry::Item(FileAction::OpenFileDiff))
+        );
+        let folder = GitState {
+            expanded: true,
+            ..git
+        };
+        assert!(
+            !menu_entries(EntryKind::Directory, Some(folder), ALL)
+                .contains(&FileMenuEntry::Item(FileAction::OpenFileDiff))
+        );
+        assert!(
+            !menu_entries(EntryKind::File, None, ALL)
+                .contains(&FileMenuEntry::Item(FileAction::OpenFileDiff))
+        );
+    }
+
+    #[test]
     fn file_menu_of_a_changed_file_drops_what_does_not_apply() {
         let deleted = GitState {
             untracked: false,
@@ -430,7 +489,14 @@ mod tests {
         };
         assert_eq!(
             render(&menu_entries(EntryKind::File, Some(deleted), ALL)),
-            vec!["Copy path", "Copy relative path", "---", "Discard changes"]
+            vec![
+                "Open file diff",
+                "---",
+                "Copy path",
+                "Copy relative path",
+                "---",
+                "Discard changes"
+            ]
         );
         let committed = GitState {
             uncommitted: false,
@@ -537,6 +603,7 @@ mod tests {
         assert_eq!(
             render(&entries),
             vec![
+                "Open file diff",
                 "Open to the side",
                 "---",
                 "Copy path",

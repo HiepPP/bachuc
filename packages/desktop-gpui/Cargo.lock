@@ -546,6 +546,7 @@ dependencies = [
  "bachuc-plugin-next-prompt-actions",
  "bachuc-plugin-plugins-nav",
  "bachuc-plugin-prompt-translate",
+ "bachuc-plugin-selection-translate",
  "bachuc-plugin-skill-pins",
  "bachuc-plugin-stop-orb",
  "bachuc-plugin-thread-branch",
@@ -812,6 +813,18 @@ dependencies = [
  "gpui-kit",
  "log",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bachuc-plugin-selection-translate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-icons",
+ "bachuc-plugin-host",
+ "gpui-kit",
+ "log",
  "serde_json",
 ]
 

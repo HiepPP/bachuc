@@ -21,6 +21,7 @@ mod file_menu;
 mod file_view;
 pub mod git_actions;
 mod git_actions_ui;
+pub mod markdown_diff;
 mod pull_request_view;
 pub mod syntax;
 pub mod tree;

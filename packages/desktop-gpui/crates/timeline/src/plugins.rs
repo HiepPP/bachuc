@@ -19,13 +19,18 @@ use bachuc_plugin_host::{
     SourcePosition, TimelinePhase, TimelineRenderer, TimelineTransformInput,
     TimelineTransformResult, TimelineTransformer,
 };
-use gpui_kit::{Bounds, Pixels, Point, Size, point, px};
+use gpui_kit::{Bounds, Pixels, Point, Size, point, px, size};
 use serde_json::Value;
 
 use crate::grouping::{entry_key, item_type};
 
 /// `TOOLBAR_GAP`: the space between the selection toolbar and the text under it.
 pub const TOOLBAR_GAP: f32 = 8.;
+
+/// The widest a selection result card grows before the zoom.
+pub const CARD_MAX_WIDTH: f32 = 420.;
+/// The tallest a selection result card grows before the zoom; a longer body scrolls inside it.
+pub const CARD_MAX_HEIGHT: f32 = 320.;
 
 /// One plugin item that a transformer made from an entry, with its timeline-wide id.
 #[derive(Clone, Debug, PartialEq)]
@@ -531,6 +536,26 @@ pub fn toolbar_origin(
     let left = (center - toolbar.width / 2.).clamp(px(0.), max_left);
     let top = text.top().max(area.top()) - area.top() - gap - toolbar.height;
     Some(point(left, top.max(px(0.))))
+}
+
+/// The selection result card's size: its content size, at most `CARD_MAX_WIDTH` by
+/// `CARD_MAX_HEIGHT` times the zoom.
+pub fn card_size(content: Size<Pixels>, zoom: f32) -> Size<Pixels> {
+    size(
+        content.width.min(px(CARD_MAX_WIDTH * zoom)),
+        content.height.min(px(CARD_MAX_HEIGHT * zoom)),
+    )
+}
+
+/// The result card's place: the toolbar's origin it replaced, moved so the whole card stays
+/// inside the timeline (`area` is the timeline's size).
+pub fn card_origin(anchor: Point<Pixels>, card: Size<Pixels>, area: Size<Pixels>) -> Point<Pixels> {
+    let max_left = (area.width - card.width).max(px(0.));
+    let max_top = (area.height - card.height).max(px(0.));
+    point(
+        anchor.x.clamp(px(0.), max_left),
+        anchor.y.clamp(px(0.), max_top),
+    )
 }
 
 /// Where a passage text is in a message: the segment and the byte range in its source, only

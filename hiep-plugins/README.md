@@ -3,7 +3,7 @@
 See what your agents are doing. Keep projects organized. Bring task context and
 workspace checks into Paseo without leaving your conversation.
 
-Nineteen independent local plugins. Install only what you need; each owns its
+Twenty independent local plugins. Install only what you need; each owns its
 dependencies, checks, and configuration.
 
 Gallery refreshed September 22, 2026 from Paseo desktop **0.9.0-beta.2**.
@@ -147,6 +147,7 @@ status alone does not prove every plugin action works.
 | [pr-watch](plugins/pr-watch/README.md)                           | Let an agent watch its GitHub PR and wake it when checks fail or pass, someone comments, or a conflict appears.                        |
 | [assistant-cite](plugins/assistant-cite/README.md)               | Cite selected assistant text as a composer chip with an optional comment, and jump back to the quote from the chip.                    |
 | [html-reply](plugins/html-reply/README.md)                       | Let an agent publish a sandboxed, themed HTML page that renders inline in its thread.                                                  |
+| [selection-translate](plugins/selection-translate/README.md)     | Translate selected English text into Vietnamese through one server RPC; the GPUI client calls it.                                      |
 
 ## Install a plugin
 

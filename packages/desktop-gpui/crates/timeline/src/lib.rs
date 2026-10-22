@@ -65,7 +65,7 @@ use grouping::{
 use image_view::ImageLoad;
 use markdown::{Block, Segment};
 use outline::{JumpPlan, OutlineEvent, OutlineRail};
-use plugin_view::{PendingReveal, Selection};
+use plugin_view::{PendingReveal, ResultCards, Selection};
 use plugins::{Part, ProjectInput, Projector, StepPart};
 
 /// What the timeline asks of the app.
@@ -410,6 +410,8 @@ pub struct TimelineView {
     /// Plugin item views by item id, with the data hash they were built from.
     plugin_views: HashMap<String, (u64, AnyView)>,
     selection: Option<Selection>,
+    /// The selection result card (ADR-0063).
+    result_card: ResultCards,
     /// The timeline's bounds and the selection toolbar's size at the last paint.
     bounds: Rc<Cell<Bounds<Pixels>>>,
     /// The width of the plugin corner pills over the timeline, 0 while none show. Message text
@@ -626,6 +628,7 @@ impl TimelineView {
             workspace_id: None,
             plugin_views: HashMap::new(),
             selection: None,
+            result_card: ResultCards::default(),
             bounds,
             corner_reserve: px(0.),
             toolbar_size: Rc::new(Cell::new(Size::default())),

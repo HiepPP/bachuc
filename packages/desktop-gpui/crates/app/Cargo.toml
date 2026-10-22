@@ -26,6 +26,7 @@ bachuc-plugin-jev-orchestrator = { path = "../../plugins/jev-orchestrator" }
 bachuc-plugin-next-prompt-actions = { path = "../../plugins/next-prompt-actions" }
 bachuc-plugin-plugins-nav = { path = "../../plugins/plugins-nav" }
 bachuc-plugin-prompt-translate = { path = "../../plugins/prompt-translate" }
+bachuc-plugin-selection-translate = { path = "../../plugins/selection-translate" }
 bachuc-plugin-skill-pins = { path = "../../plugins/skill-pins" }
 bachuc-plugin-stop-orb = { path = "../../plugins/stop-orb" }
 bachuc-plugin-thread-branch = { path = "../../plugins/thread-branch" }

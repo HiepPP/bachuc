@@ -53,6 +53,8 @@ fn candidates(client: &Client) -> Vec<AgentCandidate> {
                 Some((true, Some(AttentionReason::Permission)))
             ),
             updated_at: client.agent_updated_at(&agent.id),
+            model: agent.model.clone(),
+            thinking: client.agent_thinking_option_id(&agent.id),
         })
         .collect()
 }
