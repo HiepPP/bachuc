@@ -1,6 +1,6 @@
 # TASK-296 Outcome
 
-Status: BLOCKED: BUILT, UNVERIFIED (Q-188). Code committed; see UI Checks.
+Status: DONE. Owner check Q-188 PASS (Hiep, 2026-10-22).
 
 ## Changed
 
@@ -46,4 +46,4 @@ UI checker, 2026-10-22, check bundle at `74d73ff80` on live (6768), zoom 1.25. T
 - Anti-goal, card height within 2 px: UNVERIFIED (no baseline). The AX tree gives no frame for the card. After: about 196 px high in the 2560 px screenshot (card edges y 723 to 919). Reason line draws with bold part "verify" visible in a heavier weight in the muted color (matches the builder lesson).
 - Owner checks (drag select and Cmd+C, reason drag, pick-row click, drag, and double-click): UNVERIFIED (owner). Text selection by drag needs a pointer.
 
-Blocked: BUILT, UNVERIFIED (Q-188)
+Resolved: owner check Q-188 PASS (Hiep, 2026-10-22).

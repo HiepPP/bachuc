@@ -2,7 +2,7 @@
 
 ## Status
 
-BLOCKED: BUILT, UNVERIFIED (Q-189). Code committed in 04139fc00; see UI Checks.
+DONE. Owner check Q-189 PASS (Hiep, 2026-10-22).
 
 ## Changed
 
@@ -38,4 +38,4 @@ Main finding: the Changes row menu cannot be opened without the pointer. The AX 
 - Screen check, TASK-288 and TASK-291 one-file lines through the item: UNVERIFIED (row menu unreachable without the pointer). See "Round 2" in both outcomes.
 - Screen check, Committed compare shows no "Open file diff" in a file row menu: UNVERIFIED (row menu unreachable without the pointer). Covered only by the unit test `an_uncommitted_changed_file_offers_open_file_diff_first`.
 
-Blocked: BUILT, UNVERIFIED (Q-189). The owner can run the UNVERIFIED lines by hand (right-click a changed file in Changes -> "Open file diff"), or a follow-up TASK can add an AX Click or key path to the row menu (MEMORY 2026-10-18: "give every control and context menu a keyboard or AX Click path").
+Resolved: owner check Q-189 PASS (Hiep, 2026-10-22).

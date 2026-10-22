@@ -2,7 +2,7 @@
 
 ## Status
 
-BLOCKED: BUILT, UNVERIFIED (Q-187). Code committed; see UI Checks.
+DONE. Owner check Q-187 PASS (Hiep, 2026-10-22).
 
 ## Changed
 
@@ -55,4 +55,4 @@ UI checker, 2026-10-22, check bundle at `74d73ff80` on live (6768), zoom 1.25, p
 - Owner check, click outside closes and Copy writes plain text: UNVERIFIED (owner).
 - Anti-goal, Cite: PASS. Select, press `Cite` -> one `Quote` attachment in the composer and the toolbar closed (`293-cite.png`). The chip was removed after. Before: code read, the plain action path (`run_selection_action`) is unchanged.
 
-Blocked: BUILT, UNVERIFIED (Q-187)
+Resolved: owner check Q-187 PASS (Hiep, 2026-10-22).

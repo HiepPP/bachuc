@@ -2,7 +2,7 @@
 
 ## Status
 
-BLOCKED: BUILT, UNVERIFIED (Q-189). Code committed; see UI Checks.
+DONE. Owner check Q-189 PASS (Hiep, 2026-10-22).
 
 ## Changed
 
@@ -47,7 +47,7 @@ Main finding: the one-file diff (`Source::File`) is unreachable in the app. A Ch
 - Screen check, commit diff, all-files view, deleted `.md` have no "Show rendered": PASS for the commit diff of `SECURITY.md` and the all-files view with the deleted `README.ko.md`. The AX tree has no such button in either (`288-commit-diff.png`). A one-file diff of a deleted file is unreachable.
 - Anti-goal, Lines mode sends 1 request per reload: UNVERIFIED (one-file diff unreachable, no daemon log line to read). Code read: `rg read_file diff_view.rs` has one match, inside `markdown_mode.then(...)`.
 
-Blocked: BUILT, UNVERIFIED (Q-189)
+Resolved: owner check Q-189 PASS (Hiep, 2026-10-22).
 
 ### Round 2
 
