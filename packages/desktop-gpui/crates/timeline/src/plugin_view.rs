@@ -1,18 +1,22 @@
 //! The plugin parts of the timeline view: plugin item views, the assistant selection toolbar,
 //! and the passage reveal. The rules live in `plugins.rs`.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
-use bachuc_plugin_host::{AssistantSelection, Handler, TimelineRenderInput};
-use bachuc_theme::metrics::{FONT_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2};
-use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size, zoomed};
+use bachuc_plugin_host::{
+    AssistantSelection, Handler, SelectionResultAction, TimelineRenderInput, ui,
+};
+use bachuc_theme::metrics::{FONT_BASE, FONT_SM, RADIUS_LG, RADIUS_MD, SPACE_1, SPACE_2};
+use bachuc_theme::{ShadowSize, shadow, tokens, ui_font_size, zoom, zoomed};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::text::{RangeHighlight, TextViewState};
 use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
 use gpui_kit::*;
 
 use crate::grouping::{item_type, message_key};
-use crate::plugins::{self, Part, Projection, RevealPlan};
+use crate::plugins::{self, CARD_MAX_HEIGHT, CARD_MAX_WIDTH, Part, Projection, RevealPlan};
 use crate::{RowKind, TimelineView};
 
 /// How long a revealed passage stays highlighted (`HIGHLIGHT_MS`).
@@ -27,6 +31,35 @@ const TOOLBAR_ESTIMATE: (f32, f32) = (120., 30.);
 pub(crate) struct Selection {
     pub state: Entity<TextViewState>,
     pub payload: AssistantSelection,
+}
+
+/// What the open result card shows.
+pub(crate) enum CardBody {
+    Loading,
+    Done(String),
+    Failed(String),
+}
+
+/// The selection result card (ADR-0063). It keeps its own copy of the toolbar's origin, because
+/// pressing the action clears the selection and its bounds.
+pub(crate) struct ResultCard {
+    id: u64,
+    origin: Point<Pixels>,
+    title: SharedString,
+    loading: SharedString,
+    body: CardBody,
+    focus: FocusHandle,
+    size: Rc<Cell<Size<Pixels>>>,
+    /// Dropping the card cancels the action's task.
+    _task: Task<()>,
+}
+
+/// The open card, and the id the next card takes. An answer applies only while the open card
+/// still has the id the answer started with.
+#[derive(Default)]
+pub(crate) struct ResultCards {
+    open: Option<ResultCard>,
+    last_id: u64,
 }
 
 /// A reveal that waits for the history to load.
@@ -293,10 +326,10 @@ impl TimelineView {
         state: Entity<TextViewState>,
         cx: &mut Context<Self>,
     ) {
-        let has_actions = self
-            .host
-            .as_ref()
-            .is_some_and(|host| !host.read(cx).index().selection_actions().is_empty());
+        let has_actions = self.host.as_ref().is_some_and(|host| {
+            let index = host.read(cx).index();
+            !index.selection_actions().is_empty() || !index.selection_result_actions().is_empty()
+        });
         let payload = has_actions
             .then(|| {
                 let text = state.read(cx);
@@ -321,6 +354,7 @@ impl TimelineView {
                     return;
                 }
                 self.selection = Some(Selection { state, payload });
+                self.result_card.open = None;
                 cx.notify();
             }
             None if current.is_some() => {
@@ -348,19 +382,68 @@ impl TimelineView {
         handler(selection.payload, window, cx);
     }
 
-    /// The selection actions over the selected assistant text, as `AssistantSelectionActions`.
-    pub(crate) fn render_selection_toolbar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let selection = self.selection.as_ref()?;
-        let actions = self
-            .host
-            .as_ref()?
-            .read(cx)
-            .index()
-            .selection_actions()
-            .to_vec();
-        if actions.is_empty() {
-            return None;
+    /// Runs the result action on the selection and opens its card where the toolbar was.
+    fn run_result_action(
+        &mut self,
+        action: SelectionResultAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let origin = self.toolbar_origin_now(cx).unwrap_or_default();
+        let Some(selection) = self.selection.take() else {
+            return;
+        };
+        selection
+            .state
+            .update(cx, |state, cx| state.clear_selection(cx));
+        self.result_card.last_id += 1;
+        let id = self.result_card.last_id;
+        let answer = (action.run)(selection.payload, cx);
+        let watch = cx.spawn(async move |this, cx| {
+            let answer = answer.await;
+            let _ = this.update(cx, |this, cx| this.finish_result_card(id, answer, cx));
+        });
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
+        self.result_card.open = Some(ResultCard {
+            id,
+            origin,
+            title: action.title,
+            loading: action.loading,
+            body: CardBody::Loading,
+            focus,
+            size: Rc::new(Cell::new(Size::default())),
+            _task: watch,
+        });
+        cx.notify();
+    }
+
+    /// Shows the answer of card `id`. An answer for a closed or replaced card is dropped.
+    fn finish_result_card<E: std::fmt::Display>(
+        &mut self,
+        id: u64,
+        answer: Result<String, E>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(card) = self.result_card.open.as_mut().filter(|card| card.id == id) else {
+            return;
+        };
+        card.body = match answer {
+            Ok(text) => CardBody::Done(text),
+            Err(error) => CardBody::Failed(format!("{error:#}")),
+        };
+        cx.notify();
+    }
+
+    fn close_result_card(&mut self, cx: &mut Context<Self>) {
+        if self.result_card.open.take().is_some() {
+            cx.notify();
         }
+    }
+
+    /// Where the toolbar sits over the selection now, relative to the timeline.
+    fn toolbar_origin_now(&self, cx: &App) -> Option<Point<Pixels>> {
+        let selection = self.selection.as_ref()?;
         let measured = self.toolbar_size.get();
         let size = if measured.width > px(0.) {
             measured
@@ -372,46 +455,76 @@ impl TimelineView {
         };
         let state = selection.state.read(cx);
         let text = plugins::selection_anchor(state.bounds(), state.selection_edges());
-        let origin = plugins::toolbar_origin(
+        plugins::toolbar_origin(
             text,
             size,
             self.bounds.get(),
             zoomed(plugins::TOOLBAR_GAP, cx),
-        )?;
+        )
+    }
+
+    /// The selection actions over the selected assistant text, as `AssistantSelectionActions`,
+    /// or the result card once a result action ran.
+    pub(crate) fn render_selection_toolbar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if let Some(card) = &self.result_card.open {
+            return Some(self.render_result_card(card, cx));
+        }
+        self.selection.as_ref()?;
+        let index = self.host.as_ref()?.read(cx).index();
+        let actions = index.selection_actions().to_vec();
+        let result_actions = index.selection_result_actions().to_vec();
+        if actions.is_empty() && result_actions.is_empty() {
+            return None;
+        }
+        let origin = self.toolbar_origin_now(cx)?;
         let t = tokens(cx);
         let font = ui_font_size(FONT_SM, cx);
         let measure = self.toolbar_size.clone();
-        let buttons: Vec<AnyElement> = actions
-            .into_iter()
-            .map(|action| {
-                let handler = action.value.on_select.clone();
-                let title = action.value.title.clone();
-                div()
-                    .id(SharedString::from(format!(
-                        "selection-action-{}-{}",
-                        action.plugin_id, action.value.id
-                    )))
-                    .role(Role::Button)
-                    .aria_label(title.clone())
-                    .px(zoomed(SPACE_2, cx))
-                    .py(zoomed(SPACE_1, cx))
-                    .rounded(zoomed(RADIUS_MD, cx))
-                    .cursor_pointer()
-                    .text_size(font)
-                    .text_color(t.foreground)
-                    .child(title)
-                    // A press anywhere clears text selections before a click lands, so the
-                    // action runs on the press, with the selection read before it.
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.run_selection_action(handler.clone(), window, cx);
-                        }),
-                    )
-                    .into_any_element()
-            })
-            .collect();
+        // Plain actions first, then result actions, each in plugin order. A press anywhere
+        // clears text selections before a click lands, so an action runs on the press, with
+        // the selection read before it.
+        let button = |key: String, title: SharedString, cx: &mut Context<Self>| {
+            div()
+                .id(SharedString::from(key))
+                .role(Role::Button)
+                .aria_label(title.clone())
+                .px(zoomed(SPACE_2, cx))
+                .py(zoomed(SPACE_1, cx))
+                .rounded(zoomed(RADIUS_MD, cx))
+                .cursor_pointer()
+                .text_size(font)
+                .text_color(t.foreground)
+                .child(title)
+        };
+        let plain = actions.into_iter().map(|action| {
+            let handler = action.value.on_select.clone();
+            let key = format!("selection-action-{}-{}", action.plugin_id, action.value.id);
+            button(key, action.value.title.clone(), cx)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.run_selection_action(handler.clone(), window, cx);
+                    }),
+                )
+                .into_any_element()
+        });
+        let mut buttons: Vec<AnyElement> = plain.collect();
+        let results = result_actions.into_iter().map(|action| {
+            let key = format!("selection-action-{}-{}", action.plugin_id, action.value.id);
+            let title = action.value.title.clone();
+            let action = action.value;
+            button(key, title, cx)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.run_result_action(action.clone(), window, cx);
+                    }),
+                )
+                .into_any_element()
+        });
+        buttons.extend(results);
         Some(
             div()
                 .absolute()
@@ -447,5 +560,120 @@ impl TimelineView {
                 )
                 .into_any_element(),
         )
+    }
+
+    /// The result card: the action title, the loading text, the answer as markdown or the
+    /// error, and a Copy button once there is an answer.
+    fn render_result_card(&self, card: &ResultCard, cx: &mut Context<Self>) -> AnyElement {
+        let t = tokens(cx);
+        let font = ui_font_size(FONT_SM, cx);
+        let origin = plugins::card_origin(
+            card.origin,
+            plugins::card_size(card.size.get(), zoom(cx)),
+            self.bounds.get().size,
+        );
+        let measure = card.size.clone();
+        let body = match &card.body {
+            CardBody::Loading => div()
+                .text_size(ui_font_size(FONT_BASE, cx))
+                .text_color(t.foreground_muted)
+                .child(card.loading.clone())
+                .into_any_element(),
+            CardBody::Done(text) => ui::markdown(
+                ElementId::Name(format!("selection-result-{}", card.id).into()),
+                text.clone(),
+                cx,
+            )
+            .into_any_element(),
+            CardBody::Failed(message) => div()
+                .text_size(ui_font_size(FONT_BASE, cx))
+                .text_color(t.destructive)
+                .child(message.clone())
+                .into_any_element(),
+        };
+        let copy = match &card.body {
+            CardBody::Done(text) => {
+                let text = text.clone();
+                Some(
+                    div()
+                        .id("selection-result-copy")
+                        .role(Role::Button)
+                        .aria_label("Copy")
+                        .px(zoomed(SPACE_2, cx))
+                        .py(zoomed(SPACE_1, cx))
+                        .rounded(zoomed(RADIUS_MD, cx))
+                        .cursor_pointer()
+                        .text_size(font)
+                        .text_color(t.foreground)
+                        .child("Copy")
+                        .on_click(move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                        }),
+                )
+            }
+            _ => None,
+        };
+        div()
+            .absolute()
+            .left(origin.x)
+            .top(origin.y)
+            .child(
+                v_flex()
+                    .id("selection-result-card")
+                    .role(Role::Group)
+                    .aria_label(card.title.clone())
+                    .track_focus(&card.focus)
+                    .relative()
+                    .max_w(zoomed(CARD_MAX_WIDTH, cx))
+                    .max_h(zoomed(CARD_MAX_HEIGHT, cx))
+                    .p(zoomed(SPACE_2, cx))
+                    .gap(zoomed(SPACE_1, cx))
+                    .bg(t.popover)
+                    .border_1()
+                    .border_color(t.border_accent)
+                    .rounded(zoomed(RADIUS_LG, cx))
+                    .shadow(vec![shadow(ShadowSize::Md, cx)])
+                    .occlude()
+                    // The card renders after the press that opened it, so that press does not
+                    // reach this listener.
+                    .on_mouse_down_out(cx.listener(|this, _, _, cx| this.close_result_card(cx)))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        if event.keystroke.key == "escape" {
+                            cx.stop_propagation();
+                            this.close_result_card(cx);
+                            window.focus(&this.focus, cx);
+                        }
+                    }))
+                    .child(
+                        canvas(
+                            move |bounds, window, _| {
+                                if measure.get() != bounds.size {
+                                    measure.set(bounds.size);
+                                    window.refresh();
+                                }
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_full(),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(font)
+                            .text_color(t.foreground_muted)
+                            .child(card.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .id("selection-result-body")
+                            .min_h_0()
+                            .flex_shrink(1.)
+                            .overflow_y_scroll()
+                            .child(body),
+                    )
+                    .children(copy.map(|copy| h_flex().flex_none().justify_end().child(copy))),
+            )
+            .into_any_element()
     }
 }

@@ -7,17 +7,18 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use bachuc_plugin_host::{
-    ContributionIndex, Contributions, PluginTimelineItem, SourcePlacement, SourcePosition,
-    TimelinePhase, TimelineRenderInput, TimelineRenderer, TimelineTransformInput,
+    ContributionIndex, Contributions, PluginTimelineItem, SelectionResultAction, SourcePlacement,
+    SourcePosition, TimelinePhase, TimelineRenderInput, TimelineRenderer, TimelineTransformInput,
     TimelineTransformResult, TimelineTransformer,
 };
 use bachuc_timeline::grouping::{Row, TurnGrouper, group_turns};
 use bachuc_timeline::plugins::{
     Part, ProjectInput, Projector, RevealPlan, StepPart, TOOLBAR_GAP, assistant_selection,
-    call_listed, daemon_item, item_id, phase_of, renderer_for_item, reveal_plan, selection_anchor,
-    shown_parts, shown_text, step_parts, toolbar_origin, transform_entry, unique_match,
+    call_listed, card_origin, card_size, daemon_item, item_id, phase_of, renderer_for_item,
+    reveal_plan, selection_anchor, shown_parts, shown_text, step_parts, toolbar_origin,
+    transform_entry, unique_match,
 };
-use gpui_kit::{AnyView, App, Window, bounds, point, px, size};
+use gpui_kit::{AnyView, App, Task, Window, bounds, point, px, size};
 use serde_json::{Value, json};
 
 type Transform = dyn Fn(&TimelineTransformInput<'_>) -> Option<TimelineTransformResult>;
@@ -629,6 +630,71 @@ fn the_toolbar_sits_above_the_text_inside_the_timeline() {
     // Text scrolled out: no toolbar.
     let out = bounds(point(px(150.), px(700.)), size(px(200.), px(20.)));
     assert_eq!(toolbar_origin(out, toolbar, area, px(TOOLBAR_GAP)), None);
+}
+
+#[test]
+fn the_result_card_fits_its_content_up_to_420_by_320_times_the_zoom() {
+    // Small content keeps its size.
+    assert_eq!(
+        card_size(size(px(200.), px(100.)), 1.),
+        size(px(200.), px(100.))
+    );
+    // Long content is capped, and the cap grows with the zoom.
+    assert_eq!(
+        card_size(size(px(900.), px(900.)), 1.),
+        size(px(420.), px(320.))
+    );
+    assert_eq!(
+        card_size(size(px(900.), px(900.)), 1.25),
+        size(px(525.), px(400.))
+    );
+    // Each side is capped alone.
+    assert_eq!(
+        card_size(size(px(300.), px(900.)), 1.),
+        size(px(300.), px(320.))
+    );
+}
+
+#[test]
+fn the_result_card_stays_inside_the_timeline() {
+    let area = size(px(800.), px(600.));
+    let card = size(px(420.), px(320.));
+    // Room enough: the toolbar's origin holds.
+    assert_eq!(
+        card_origin(point(px(100.), px(50.)), card, area),
+        point(px(100.), px(50.))
+    );
+    // Past the right and bottom edges it moves back in.
+    assert_eq!(
+        card_origin(point(px(700.), px(500.)), card, area),
+        point(px(380.), px(280.))
+    );
+    // A card larger than the timeline sits at the corner.
+    assert_eq!(
+        card_origin(point(px(30.), px(30.)), card, size(px(300.), px(200.))),
+        point(px(0.), px(0.))
+    );
+}
+
+#[test]
+fn the_index_lists_result_actions_after_registration_order() {
+    let mut contributions = Contributions::default();
+    for id in ["first", "second"] {
+        contributions.add_selection_result_action(SelectionResultAction {
+            id,
+            title: id.into(),
+            loading: "Loading...".into(),
+            run: Rc::new(|_, _| Task::ready(Ok(String::new()))),
+        });
+    }
+    let index = ContributionIndex::build([("demo", &contributions)]);
+    let ids: Vec<_> = index
+        .selection_result_actions()
+        .iter()
+        .map(|action| (action.plugin_id, action.value.id))
+        .collect();
+    assert_eq!(ids, [("demo", "first"), ("demo", "second")]);
+    assert!(index.selection_actions().is_empty());
 }
 
 #[test]
