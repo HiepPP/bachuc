@@ -343,6 +343,11 @@ impl Client {
         self.publish(cx);
     }
 
+    pub fn refresh_models(&mut self, provider: Option<&str>, cx: &mut Context<Client>) {
+        self.core.refresh_models(provider);
+        self.publish(cx);
+    }
+
     pub fn set_model(&mut self, agent_id: &str, model_id: &str, cx: &mut Context<Client>) {
         self.core.set_model(agent_id, model_id);
         self.publish(cx);

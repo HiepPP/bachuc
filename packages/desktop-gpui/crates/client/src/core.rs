@@ -112,6 +112,8 @@ enum Pending {
     },
     Providers,
     Models(String),
+    /// A provider snapshot refresh; its answer asks for these providers' models again.
+    RefreshModels(Vec<String>),
     Timeline {
         agent_id: String,
         plan: FetchPlan,
@@ -2144,6 +2146,24 @@ impl ClientCore {
         );
     }
 
+    /// Asks the daemon to discover models again, then reloads them. The daemon caches each
+    /// provider's models until a refresh or a restart. `None` refreshes every available provider.
+    pub fn refresh_models(&mut self, provider: Option<&str>) {
+        let providers: Vec<String> = match provider {
+            Some(provider) => vec![provider.to_string()],
+            None => self
+                .providers
+                .iter()
+                .filter(|p| p.available)
+                .map(|p| p.id.clone())
+                .collect(),
+        };
+        let _ = self.request(
+            json!({"type": "refresh_providers_snapshot_request", "providers": providers}),
+            Pending::RefreshModels(providers),
+        );
+    }
+
     pub fn set_model(&mut self, agent_id: &str, model_id: &str) {
         let _ = self.request(
             json!({"type": "set_agent_model_request", "agentId": agent_id, "modelId": model_id}),
@@ -2797,6 +2817,17 @@ impl ClientCore {
                     return log::warn!("list_available_providers failed: {error}");
                 }
                 self.providers_list(payload);
+            }
+            Pending::RefreshModels(providers) => {
+                if let Some(error) = error {
+                    return log::warn!("refresh_providers_snapshot failed: {error}");
+                }
+                for provider in providers {
+                    let _ = self.request(
+                        json!({"type": "list_provider_models_request", "provider": provider}),
+                        Pending::Models(provider),
+                    );
+                }
             }
             Pending::Models(provider) => {
                 if let Some(error) = error {

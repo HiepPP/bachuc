@@ -613,6 +613,70 @@ fn modes_draft_features_default_model_and_model_thinking() {
     );
 }
 
+#[test]
+fn refresh_models_rediscovers_and_reloads_the_provider_models() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    server.reply(
+        "refresh_providers_snapshot_request",
+        "refresh_providers_snapshot_response",
+        json!({"acknowledged": true}),
+    );
+    let strip = |mut request: Value| {
+        request.as_object_mut().unwrap().remove("requestId");
+        request
+    };
+    let mut harness = connect(&server);
+    let model_ids = |harness: &Harness| -> Vec<String> {
+        harness
+            .core
+            .providers()
+            .iter()
+            .find(|p| p.id == "mock")
+            .map(|p| p.models.iter().map(|(id, _)| id.clone()).collect())
+            .unwrap_or_default()
+    };
+    assert!(harness.pump_until(WAIT, |h| model_ids(h) == ["m1"]));
+
+    // The daemon discovered a new model since its snapshot.
+    server.reply(
+        "list_provider_models_request",
+        "list_provider_models_response",
+        json!({"fetchedAt": "now", "provider": "mock", "models": [
+            {"provider": "mock", "id": "m1", "label": "Model 1"},
+            {"provider": "mock", "id": "flint", "label": "Flint 40B Free"}
+        ]}),
+    );
+    harness.core.refresh_models(Some("mock"));
+    assert_eq!(
+        strip(sent(
+            &server,
+            &mut harness,
+            "refresh_providers_snapshot_request"
+        )),
+        json!({"type": "refresh_providers_snapshot_request", "providers": ["mock"]})
+    );
+    assert!(harness.pump_until(WAIT, |h| model_ids(h) == ["m1", "flint"]));
+
+    // With no provider picked, every available provider is refreshed.
+    harness.core.refresh_models(None);
+    assert!(harness.pump_until(WAIT, |_| {
+        server
+            .requests_of("refresh_providers_snapshot_request")
+            .len()
+            == 2
+    }));
+    assert_eq!(
+        strip(
+            server
+                .requests_of("refresh_providers_snapshot_request")
+                .pop()
+                .unwrap()
+        ),
+        json!({"type": "refresh_providers_snapshot_request", "providers": ["mock"]})
+    );
+}
+
 fn initial_agent() -> InitialAgent {
     InitialAgent {
         config: DraftConfig {

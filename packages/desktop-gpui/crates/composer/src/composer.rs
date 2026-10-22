@@ -1045,6 +1045,18 @@ impl Composer {
         cx.notify();
     }
 
+    /// Refreshes the shown provider's models: the draft's pick, or the agent's provider. A
+    /// draft with no provider refreshes every provider its menu lists.
+    fn refresh_models(&mut self, cx: &mut Context<Self>) {
+        let provider = match &self.draft {
+            Some(draft) => draft.provider.clone(),
+            None => self.watched.provider.clone(),
+        };
+        self.client.update(cx, |client, cx| {
+            client.refresh_models(provider.as_deref(), cx)
+        });
+    }
+
     /// A draft model pick sets the provider and the model.
     fn pick_draft_model(&mut self, key: &str, cx: &mut Context<Self>) {
         let Some((provider, model)) = split_model_key(key) else {
@@ -2132,10 +2144,16 @@ impl Composer {
             )
         };
         let (toggle_weak, select_weak) = (cx.weak_entity(), cx.weak_entity());
+        let refresh_weak = cx.weak_entity();
         ControlHandlers {
             model,
             thinking,
             mode,
+            refresh_models: Rc::new(move |cx: &mut App| {
+                refresh_weak
+                    .update(cx, |this, cx| this.refresh_models(cx))
+                    .ok();
+            }),
             features: FeatureHandlers {
                 toggle: Rc::new(move |feature_id: &str, cx: &mut App| {
                     toggle_weak
