@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE. Code checks pass. Screen and owner checks are DEFERRED (UI checker) or UNVERIFIED (owner).
+BLOCKED: BUILT, UNVERIFIED (Q-187). Code committed; see UI Checks.
 
 ## Changed
 
@@ -43,3 +43,16 @@ Cite keeps working the same way. Code evidence: the plain action path is the sam
 - `TimelineView` fields are private to the crate root, so a card state field needs a small `lib.rs` edit.
 - Clippy on this toolchain fails on old code in plugin-host and timeline; judge new code by line numbers.
 - The card body uses `bachuc_plugin_host::ui::markdown` (same style as the plugin cards). The body scroll layout (`min_h_0`, `flex_shrink(1.)`, `overflow_y_scroll` under a `max_h` card) is read-checked only; confirm on screen.
+
+## UI Checks
+
+UI checker, 2026-10-22, check bundle at `74d73ff80` on live (6768), zoom 1.25, plugin `selection-translate` running. Screenshots in `/tmp/wt-ui/` (`293-*.png`). Selection was made with the AX press on the assistant message plus `cmd+a` (no pointer).
+
+- Screen check, press "Dịch": PASS. The card shows header `Dịch` and body `Đang dịch...` (`293-loading.png`), then `Xem README.md:60 và CONTRIBUTING.md:20 để biết chi tiết.` with a `Copy` button (`293-result.png`). AX: `container Dịch` with `button Copy`.
+- Screen check, press "Dịch" twice fast: PASS with a changed method. The toolbar closes after the first press, so a literal double press is impossible. Press, select other text (card closes, `after other selection card? false`), select the assistant text, press again: one card with `Copy` at t+1.2, 2.2, 3.7, and 6.7 s (`293-second-answer.png`). The answer arrives in under 1.2 s, so a dropped late first answer was not separately observable.
+- Screen check, Esc closes the card: PASS (AX after Esc has no `container Dịch`). Select other text closes the card: PASS (the user message selection closed it; `293-newselection.png`).
+- Screen check, plugin stopped: the button hides. `npm run cli -- plugin disable selection-translate` -> the toolbar has only `Cite` (`295-disabled.png`). The error card path and its missing Copy button: UNVERIFIED (no way to reach it with the button hidden). The plugin was enabled again and `Dịch` returned.
+- Owner check, click outside closes and Copy writes plain text: UNVERIFIED (owner).
+- Anti-goal, Cite: PASS. Select, press `Cite` -> one `Quote` attachment in the composer and the toolbar closed (`293-cite.png`). The chip was removed after. Before: code read, the plain action path (`run_selection_action`) is unchanged.
+
+Blocked: BUILT, UNVERIFIED (Q-187)

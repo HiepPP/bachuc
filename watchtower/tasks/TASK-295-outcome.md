@@ -40,3 +40,11 @@ DONE. Code checks pass. Screen checks are DEFERRED (UI checker).
 
 - `./cargo.sh metadata` repeats `"name":"gpui-kit"` once per dependent crate, so a new plugin crate raises that count by 1. Check `grep -c '^name = "gpui-kit"' Cargo.lock` for the package count.
 - `InputState::value()` returns `SharedString`; pass `&value` to a `&str` helper.
+
+## UI Checks
+
+UI checker, 2026-10-22, check bundle at `74d73ff80` on live (6768), plugin installed and running. Screenshots in `/tmp/wt-ui/`.
+
+- Screen check, select an English sentence: toolbar shows "Cite" then "Dịch"; press "Dịch" -> "Đang dịch..." then Vietnamese text: PASS (AX `button Cite`, `button Dịch`; `293-loading.png`, `293-result.png`).
+- Screen check, Settings -> Selection translate: PASS. AX: `button Provider: OpenRouter`, `text field Model, Value: google/gemini-2.5-flash-lite`, `button Save` (`295-settings.png`). Nothing was saved.
+- Screen check, disable the plugin on live: PASS. "Dịch" is gone from the toolbar and "Cite" stays (`295-disabled.png`). The plugin was enabled again (`running yes`).

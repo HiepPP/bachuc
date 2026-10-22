@@ -1,6 +1,6 @@
 # TASK-296 Outcome
 
-Status: DONE (fix round 1 done: double-click restores; code checks pass; screen, owner, and anti-goal checks deferred)
+Status: BLOCKED: BUILT, UNVERIFIED (Q-188). Code committed; see UI Checks.
 
 ## Changed
 
@@ -36,3 +36,14 @@ Card height within 2 px: tripwire; DEFERRED (UI checker). Not measured. Builders
 - A double-click: the first click of the pair still toggles the row (no selection exists yet). The second click does not toggle (word selected). Net effect: a double-click leaves the row toggled once. Owner check needed.
 - `TextSelectionLayer` is not referenced in the crates; `gpui_kit::base::Root` supplies it, and the existing `np-intro` markdown text already selects through it.
 - `gpui_kit::base::{SelectableText, TextSelection}` import works; `TextView::style` takes the style from `markdown_style(cx)`, and `with_paragraph_gap(rems(0.))` removes paragraph margins.
+
+## UI Checks
+
+UI checker, 2026-10-22, check bundle at `74d73ff80` on live (6768), zoom 1.25. Test thread `UI np1` (Claude haiku, cwd `/tmp/wt-ui/np1`, archived) replied with a one-prompt What Next block. Screenshot `/tmp/wt-ui/296-np1.png`.
+
+- Screen check, prompt with a newline and a line starting with `- `: PASS. The card shows three lines: ``Run `cargo test` and check *star* stays literal.``, `- first item line`, `second line with _under_ and # hash`. No list is drawn.
+- Screen check, prompt with `` `code` `` and `*star*`: PASS on the screenshot (backticks, stars, `_under_`, `#` show as written). The AX tree does not expose the text: `container What Next` holds only `button Edit` and `button Send`, so an AX text read was not possible.
+- Anti-goal, card height within 2 px: UNVERIFIED (no baseline). The AX tree gives no frame for the card. After: about 196 px high in the 2560 px screenshot (card edges y 723 to 919). Reason line draws with bold part "verify" visible in a heavier weight in the muted color (matches the builder lesson).
+- Owner checks (drag select and Cmd+C, reason drag, pick-row click, drag, and double-click): UNVERIFIED (owner). Text selection by drag needs a pointer.
+
+Blocked: BUILT, UNVERIFIED (Q-188)

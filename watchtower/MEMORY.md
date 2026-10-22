@@ -426,3 +426,10 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: `Harness::connected` in the `bachuc-client` tests waits for at least one agent, so a red test that calls `connect` needs `server.add_agent("a1", "idle")` first. A new `ClientEvent` variant breaks exhaustive matches in `crates/timeline/src/lib.rs` and `crates/client/examples/client_probe.rs`.
 - Learned: `npm run cli -- run -d --provider mock/ten-second-stream --new-workspace worktree ...` makes cheap live agents for GPUI screen checks. The AX tree shows only the first line of a multi-line composer value, so check multi-line text with a screenshot.
 - Source: TASK-286 and TASK-287 outcomes.
+
+### 2026-10-22 - Implement 20261022-gpui-diff-wrap-markdown-render
+
+- Learned: the GPUI one-file uncommitted diff (`DiffView::new`, `Source::File`) has no entry point: `ExplorerEvent::OpenDiff` has no emitter, and a Changes row opens the all-files view. A plan that adds UI to `Source::File` builds and passes code checks but cannot be screen-checked or used (Q-186).
+- Learned: `cargo clippy --no-deps -D warnings` on Rust 1.97 fails on old lines in `bachuc-explorer`, `bachuc-client`, `bachuc-plugin-watchtower-board`, `bachuc-plugin-host`, and `bachuc-timeline`; judge new code with `git blame` of each reported line. `cargo metadata` repeats `"name":"gpui-kit"` once per dependent crate, so count `^name = "gpui-kit"` in `Cargo.lock` for duplicate builds.
+- Source: TASK-288, TASK-291, TASK-293, TASK-295 outcomes; `crates/app/src/shell.rs:957`.
+- Use next time: before planning UI on a GPUI view, confirm in `shell.rs` that a user path opens it.

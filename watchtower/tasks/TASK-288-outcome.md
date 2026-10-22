@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE
+BLOCKED: BUILT, UNVERIFIED (Q-186). Code committed; see UI Checks.
 
 ## Changed
 
@@ -27,3 +27,14 @@ All-files toolbar keeps its 5 controls in order. Code read: `git diff` shows no 
 ## Lessons
 
 - `file_view.rs` is edited by another builder at the same time, so the `large_enum_variant` line number drifts.
+
+## UI Checks
+
+UI checker, 2026-10-22, check bundle at `74d73ff80` on live (6768), zoom 1.25. Screenshots in `/tmp/wt-ui/` (`288-*.png`).
+
+- Screen check, one-file diff from Changes has `diff-file-toolbar` and "Wrap long lines": UNVERIFIED. A press on a Changes row opens the all-files view (`open_all_diffs`), not the one-file diff. `ExplorerEvent::OpenDiff` has no emitter: `rg "OpenDiff" packages/desktop-gpui/crates packages/desktop-gpui/plugins` finds only the enum, the shell handler, and an example. `Source::File` is unreachable in the app. Pre-existing: the emitter went away with commit `57d2d6b47` (all-files view). The toolbar code itself was not observed for `Source::File`.
+- Screen check, commit file diff from the commits list shows the same toolbar: PASS. AX: `toolbar Diff` holds only `button Wrap long lines`; the icon sits at the right end (`288-commit-diff.png`). Pressing it gives `button Scroll long lines`. The open all-files view followed to "Scroll long lines" and the LONGLINE row wrapped to 4 rows (`288-all-wrapped.png`). Wrap restored to "Wrap long lines" after.
+- Screen check, 300 px pane keeps the wrap button inside the pane: UNVERIFIED at 300 px. With the Explorer open the pane never drops under 400 px (`WORKSPACE_BODY_MIN_WIDTH`); a 300 px pane has no way to open a commit diff. At 400 px (640 px window, 240 px Explorer) the wrap button sits at the right end inside the pane (`288-pane400.png`).
+- Anti-goal, all-files `diff-view-toolbar` keeps 5 controls in order: PASS. After: AX `Diff mode`, `Collapse all files`, `Hide whitespace`, `Wrap long lines`, `Refresh`. Before: `git diff d82c3b9a2 HEAD -- diff_view.rs` has no hunk inside `render_toolbar` (line 625); only its call site in `render` changed.
+
+Blocked: BUILT, UNVERIFIED (Q-186)

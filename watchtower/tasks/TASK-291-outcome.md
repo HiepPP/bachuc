@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE
+BLOCKED: BUILT, UNVERIFIED (Q-186). Code committed; see UI Checks.
 
 ## Changed
 
@@ -33,3 +33,18 @@ Lines mode sends 1 request per reload. Code read of `reload`: `read_file` is cal
 
 - `gpui::transparent_black` is reachable through `use gpui_kit::*` paths; clippy wants it passed as a function (`redundant_closure`).
 - Toolbar hides the markdown toggle for Loading, Failed, Empty and placeholders because `markdown_available` needs `State::Ready` with line rows.
+
+## UI Checks
+
+UI checker, 2026-10-22, check bundle at `74d73ff80` on live (6768), zoom 1.25. Scratch worktree `wt-ui-check` held a modified `CONTRIBUTING.md`, a new `new-scratch.md`, a 1.8 MB `big-scratch.md`, a binary `binary-scratch.md`, a deleted `README.ko.md`, and a committed `SECURITY.md` change. It is archived.
+
+Main finding: the one-file diff (`Source::File`) is unreachable in the app. A Changes row press opens the all-files view; `ExplorerEvent::OpenDiff` has no emitter (see TASK-288 UI Checks). Every line below that needs a one-file diff is UNVERIFIED for that reason. The Rendered code was not observed.
+
+- Screen check, changed `.md` one-file diff, "Show rendered", red then green block: UNVERIFIED (one-file diff unreachable).
+- Screen check, new untracked `.md`, every block green: UNVERIFIED (one-file diff unreachable).
+- Screen check, append a paragraph while Rendered is on: UNVERIFIED (one-file diff unreachable).
+- Screen check, too-large or binary `.md` placeholder has no "Show rendered": UNVERIFIED (one-file diff unreachable). The all-files view lists `big-scratch.md` and `binary-scratch.md` as New rows with `+0 -0`.
+- Screen check, commit diff, all-files view, deleted `.md` have no "Show rendered": PASS for the commit diff of `SECURITY.md` and the all-files view with the deleted `README.ko.md`. The AX tree has no such button in either (`288-commit-diff.png`). A one-file diff of a deleted file is unreachable.
+- Anti-goal, Lines mode sends 1 request per reload: UNVERIFIED (one-file diff unreachable, no daemon log line to read). Code read: `rg read_file diff_view.rs` has one match, inside `markdown_mode.then(...)`.
+
+Blocked: BUILT, UNVERIFIED (Q-186)

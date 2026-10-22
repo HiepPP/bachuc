@@ -1,6 +1,6 @@
 # TASK-292 outcome
 
-Status: DONE (UI/owner check deferred)
+Status: DONE (owner card check pending)
 
 ## Changed
 
@@ -41,3 +41,7 @@ Tripwire: existing `secondary_line_covers_each_row_state` strings.
 
 - `Client::agent_thinking` needs loaded model options; use `agent_thinking_option_id` for the raw id.
 - Clippy 1.97 reports two lints in untouched code (`page.rs:66`, `core.rs:2711`), so `-D warnings` clippy fails for both crates today.
+
+## UI Checks
+
+UI checker, 2026-10-22. Owner check on a running watchtower card: UNVERIFIED (owner). No builder agent was running on live (6768): `npm run cli -- ls -a` listed only mock and closed check agents, and builders of this run use the release daemon. The Board was not opened.
