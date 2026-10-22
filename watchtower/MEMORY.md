@@ -73,6 +73,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a Board refresh on `AgentsChanged`, a Board surface params hint, a composer-send mark, or a placeholder card for a new thread, while Hiep needs the What next Send card in Running on the first Board frame. Reason: [ADR-0058](watchtower/decisions/ADR-0058-gpui-pending-turn-mark-over-waiting-for-the-board-poll.md).
 - Avoid a thread-branch server `git pull --ff-only` or a Pull on a dirty folder in the GPUI branch pill, while the daemon checkout pull serves the explorer Pull. Reason: [ADR-0059](watchtower/decisions/ADR-0059-gpui-branch-pill-pull-through-daemon-checkout-pull.md).
 - Avoid a cwd-keyed or daemon-stored composer prompt history, while GPUI is the only client that recalls prompts and worktrees share a repo. Reason: [ADR-0060](watchtower/decisions/ADR-0060-gpui-local-prompt-history-per-repo-over-daemon.md).
+- Avoid adding full old and new file text to the diff protocol for a markdown rich diff, while only the one-file uncommitted diff needs it. Reason: [ADR-0061](watchtower/decisions/ADR-0061-gpui-rich-markdown-diff-from-working-file-over-protocol-full-text.md).
+- Avoid importing prompt-translate server modules from another plugin, while only selection-translate needs the LLM call. Reason: [ADR-0062](watchtower/decisions/ADR-0062-selection-translate-plugin-copies-llm-logic-over-sharing-prompt-translate.md).
+- Avoid plugin-drawn views at the selection, while result cards need only text and Copy. Reason: [ADR-0063](watchtower/decisions/ADR-0063-host-drawn-selection-result-card-over-plugin-views.md).
 
 ## Learnings
 
