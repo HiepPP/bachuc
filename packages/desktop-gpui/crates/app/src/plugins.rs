@@ -7,7 +7,7 @@ use bachuc_plugin_host::{HeaderSubtitleInput, NativePlugin, PanelContext, PanelL
 
 /// The plugin id of each linked crate `bachuc-plugin-<id>` and its `plugin()`. The order is the
 /// daemon catalog order (sorted by id), which decides every "first wins" rule of the host.
-const PLUGINS: [(&str, fn() -> Box<dyn NativePlugin>); 15] = [
+const PLUGINS: [(&str, fn() -> Box<dyn NativePlugin>); 16] = [
     ("assistant-cite", bachuc_plugin_assistant_cite::plugin),
     ("board", bachuc_plugin_board::plugin),
     ("claude-look", bachuc_plugin_claude_look::plugin),
@@ -23,6 +23,10 @@ const PLUGINS: [(&str, fn() -> Box<dyn NativePlugin>); 15] = [
     ),
     ("plugins-nav", bachuc_plugin_plugins_nav::plugin),
     ("prompt-translate", bachuc_plugin_prompt_translate::plugin),
+    (
+        "selection-translate",
+        bachuc_plugin_selection_translate::plugin,
+    ),
     ("skill-pins", bachuc_plugin_skill_pins::plugin),
     ("stop-orb", bachuc_plugin_stop_orb::plugin),
     ("thread-branch", bachuc_plugin_thread_branch::plugin),
@@ -176,7 +180,7 @@ mod tests {
     use bachuc_plugin_host::{PanelContext, PanelLocation};
     use std::path::Path;
 
-    const IDS: [&str; 15] = [
+    const IDS: [&str; 16] = [
         "assistant-cite",
         "board",
         "claude-look",
@@ -186,6 +190,7 @@ mod tests {
         "next-prompt-actions",
         "plugins-nav",
         "prompt-translate",
+        "selection-translate",
         "skill-pins",
         "stop-orb",
         "thread-branch",
@@ -195,7 +200,7 @@ mod tests {
     ];
 
     #[test]
-    fn the_registered_ids_are_the_fifteen_in_catalog_order() {
+    fn the_registered_ids_are_the_sixteen_in_catalog_order() {
         let ids: Vec<&str> = registered_plugins()
             .iter()
             .map(|plugin| plugin.id())
