@@ -29,6 +29,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 
 ## Avoid
 
+- Avoid a Decider backend inside `jev-evaluator` and a Rust port of `tier0` while the Decider probe targets a GPUI `DecisionService`. Reason: [ADR-0066](watchtower/decisions/ADR-0066-standalone-rust-decider-probe-over-jev-evaluator-backend.md).
 - Avoid editing "Paseo" to "Bachuc" in the locale files while the fork merges upstream. Reason: [ADR-0006](watchtower/decisions/ADR-0006-brand-transform-over-locale-edits.md).
 - Avoid the macOS executable name `Paseo` and a top-level `executableName` change while Linux and Windows launchers expect `Paseo`. Reason: [ADR-0007](watchtower/decisions/ADR-0007-bachuc-executable-over-paseo.md).
 - Avoid a new desktop bundle ID, such as `vn.bachuc.desktop`, while the owner does not own a Bachuc domain. Reason: [ADR-0008](watchtower/decisions/ADR-0008-github-bundle-id-over-bachuc-domain.md).
