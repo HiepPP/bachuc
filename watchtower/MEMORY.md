@@ -80,6 +80,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 
 ## Learnings
 
+- 2026-10-23: Decider for Mac accepts question types `noul`, `choice`, `score`, not `boolean`. The decider-probe event set is reproducible only from the frozen copy `.dev/decider-probe/timeline-snapshot.sqlite`; the live timeline cache grows during agent runs. In `cargo tree` output the root line holds the repo path, which contains `gpui`, so skip it with `tail -n +2` before you grep for GPUI crates.
+
 ### 2026-10-01 - Plugin host APIs
 
 - Learned: the app runs React Compiler. A `useMemo` input that the body reads only through `void` is dropped from the compiled cache keys, so state bumped by an external store never re-runs the memo. Use `"use no memo"` or read the value for real.

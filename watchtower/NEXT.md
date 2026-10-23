@@ -11,8 +11,8 @@
 
 | Order | TASK                                       | Group | Status | Spec                                                                                                                             | Deps               | Context                                        | Notes                                                                              |
 | ----- | ------------------------------------------ | ----- | ------ | -------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
-| 1     | TASK-298 Node extract and Jev bridge       | A     | TODO   | [watchtower/tasks/TASK-298-node-extract-and-jev-bridge.md](watchtower/tasks/TASK-298-node-extract-and-jev-bridge.md)             | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Writes the event, label, and result formats.                                       |
-| 2     | TASK-299 Rust decider-probe run and report | B     | TODO   | [watchtower/tasks/TASK-299-rust-decider-probe-run-and-report.md](watchtower/tasks/TASK-299-rust-decider-probe-run-and-report.md) | TASK-298           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Start order only; no shared file. Can build from the Interfaces block in parallel. |
+| 1     | TASK-298 Node extract and Jev bridge       | A     | DONE   | [watchtower/tasks/TASK-298-node-extract-and-jev-bridge.md](watchtower/tasks/TASK-298-node-extract-and-jev-bridge.md)             | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Writes the event, label, and result formats.                                       |
+| 2     | TASK-299 Rust decider-probe run and report | B     | DONE   | [watchtower/tasks/TASK-299-rust-decider-probe-run-and-report.md](watchtower/tasks/TASK-299-rust-decider-probe-run-and-report.md) | TASK-298           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Start order only; no shared file. Can build from the Interfaces block in parallel. |
 | 3     | TASK-300 Run the probe and write results   | C     | TODO   | [watchtower/tasks/TASK-300-run-probe-and-write-results.md](watchtower/tasks/TASK-300-run-probe-and-write-results.md)             | TASK-298, TASK-299 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Blocked on Q-190 labels by Hiep.                                                   |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
@@ -32,7 +32,7 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Handoff
 
-- Next action: run `/watchtower implement` for TASK-298 and TASK-299. Then Hiep answers Q-190 before TASK-300.
+- Next action: Hiep labels the 150 events (Q-190). Then run `/watchtower implement` for TASK-300. Rerun `extract.ts` only with `PROBE_DB=.dev/decider-probe/timeline-snapshot.sqlite`, because the live timeline changes the sample.
 
 ## Archive
 

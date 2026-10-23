@@ -127,5 +127,5 @@ Anti-goal: `decider-probe` pulls in 0 GPUI crates; tripwire; read from `./cargo.
 - With `--endpoint http://127.0.0.1:9` -> each line has `error` set, and the exit code is non-zero.
 - With a fixture of labels and results for both backends: `report --data <tmp>` -> `report.md` has the six section headings in order, and one sweep row shows `n/a`.
 - With a fixture where one result id has no label and one label has no result: `report --data <tmp>` -> stdout prints both skipped counts, and `report.md` still writes.
-- Anti-goal: `./cargo.sh tree -p decider-probe | rg -c gpui` -> 0 or no match.
+- Anti-goal: `./cargo.sh tree -p decider-probe | tail -n +2 | rg -c gpui` -> no match (the root line holds the repo path, which contains `gpui`).
 - Cleanup per [CLAUDE.md](CLAUDE.md): `./cargo.sh clean --profile dev` when no other `cargo` or `rustc` process runs.
