@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "format": "oxfmt index.server.ts server tests README.md package.json tsconfig.json paseo-plugin.json",
-    "lint": "oxlint --disable-nested-config index.server.ts server tests",
-    "test": "tsx --test tests/*.test.ts"
+    "format": "oxfmt index.server.ts server scripts tests README.md package.json tsconfig.json paseo-plugin.json",
+    "lint": "oxlint --disable-nested-config index.server.ts server scripts tests",
+    "test": "tsx --test tests/*.test.ts",
+    "decisions": "tsx scripts/decisions.ts"
   },
   "dependencies": {
     "tsx": "^4.20.0"
