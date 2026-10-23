@@ -32,6 +32,22 @@ must sit beside this plugin with its dependencies installed.
 Confidence thresholds are unchanged. Direct access to `typesafe-ai.json` is denied before
 the read-only allowlist or Jev evaluation.
 
+## See past decisions
+
+Print the last 30 decisions with their command text:
+
+```sh
+npm run decisions                                   # release (~/.bachuc, or $PASEO_HOME)
+npm run decisions -- --jev-allowed                  # only commands Jev allowed on its own
+npm run decisions -- --limit 100
+npm run decisions -- --home ../../../.dev/paseo-home   # live
+```
+
+Each line shows the time, the decision (`allow`, `deny`, `escalate`), the source (`regex`, `jev`,
+`unavailable`), and the command. The ledger stores only a hash, so the script finds the text by
+hashing the shell commands in `$PASEO_HOME/timeline-cache.sqlite`, opened read-only. When the cache
+no longer holds a command, the line shows `(command no longer in the timeline cache)`.
+
 Evidence: 30 labeled shell commands scored 30/30 in
 `plugins/jev-evaluator/artifacts/jev-benchmark-2026-09-22T11-51-03-364Z/report.md`, a synthetic set
 with the policy stated in the state. Real workloads are not measured. Without the command list context of that benchmark, Jev rated
