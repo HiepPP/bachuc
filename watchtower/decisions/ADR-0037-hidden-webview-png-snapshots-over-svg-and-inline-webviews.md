@@ -1,6 +1,6 @@
 # ADR-0037 Hidden WebView PNG snapshots over SVG export and live inline WebViews
 
-Status: accepted
+Status: superseded by ADR-0067 (Mermaid only)
 Date: 2026-10-15
 Supersedes: ADR-0036
 Scope: `packages/desktop-gpui/crates/diagram/**`, `packages/desktop-gpui/crates/timeline/**`
