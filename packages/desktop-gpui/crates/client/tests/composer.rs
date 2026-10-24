@@ -455,13 +455,15 @@ fn send_and_enqueue_carry_attachments_and_resolve_on_the_answer() {
     );
     assert_eq!(harness.core.sent_images("other"), None);
     // The images are saved by message id, so a restarted app still finds them.
-    let file = saved.join(message_id).join("0.png");
-    let deadline = std::time::Instant::now() + WAIT;
-    while !file.exists() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    assert_eq!(std::fs::read(&file).expect("saved image"), b"hi");
-    std::fs::remove_dir_all(&saved).expect("cleaned");
+    let saved_bytes = |id: &str| {
+        let file = saved.join(id).join("0.png");
+        let deadline = std::time::Instant::now() + WAIT;
+        while !file.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        std::fs::read(&file).expect("saved image")
+    };
+    assert_eq!(saved_bytes(message_id), b"hi");
     let reply = harness
         .core
         .send_outgoing("a1", message("refuse"), TurnBehavior::Interrupt);
@@ -474,6 +476,13 @@ fn send_and_enqueue_carry_attachments_and_resolve_on_the_answer() {
     assert_eq!(request["attachments"][0]["text"], "chip");
     assert_eq!(request["images"][0]["mimeType"], "image/png");
     assert_eq!(harness.core.queued_prompts("a1")[0].text, "later");
+    // A queued prompt goes out with its item id as the message id, so its images keep that id.
+    assert_eq!(
+        harness.core.sent_images("q1").map(|images| images.len()),
+        Some(1)
+    );
+    assert_eq!(saved_bytes("q1"), b"hi");
+    std::fs::remove_dir_all(&saved).expect("cleaned");
 }
 
 #[test]

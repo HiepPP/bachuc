@@ -97,6 +97,8 @@ enum Pending {
     Queue {
         agent_id: String,
         reply: Option<Reply<()>>,
+        /// The images of an enqueue, saved under the item id the answer gives.
+        images: Vec<SentImage>,
     },
     ReadConfig {
         root: String,
@@ -500,6 +502,22 @@ impl ClientCore {
     /// Saves sent images under `dir` from now on.
     pub fn set_sent_images_dir(&mut self, dir: PathBuf) {
         self.sent_images_dir = Some(dir);
+    }
+
+    /// Keeps the images of a sent prompt, and saves them when a folder is set.
+    fn remember_sent_images(&mut self, message_id: &str, images: Vec<SentImage>) {
+        if images.is_empty() {
+            return;
+        }
+        if let Some(dir) = self.sent_images_dir.clone() {
+            let (id, saved) = (message_id.to_string(), images.clone());
+            std::thread::spawn(move || {
+                if let Err(error) = sent_images::save(&dir, &id, &saved) {
+                    log::warn!("cannot save the images of {id}: {error}");
+                }
+            });
+        }
+        self.sent_images.insert(message_id.to_string(), images);
     }
 
     /// The images sent with the prompt `message_id`, from this session or from disk.
@@ -1108,6 +1126,7 @@ impl ClientCore {
         let pending = Pending::Queue {
             agent_id: agent_id.to_string(),
             reply,
+            images: Vec::new(),
         };
         if let Err(pending) = self.request(message, pending) {
             pending.fail(anyhow!("not connected"));
@@ -1135,18 +1154,7 @@ impl ClientCore {
         behavior: TurnBehavior,
     ) -> oneshot::Receiver<anyhow::Result<()>> {
         let message_id = uuid::Uuid::new_v4().to_string();
-        let images = sent_images::decode(&message.images);
-        if !images.is_empty() {
-            if let Some(dir) = self.sent_images_dir.clone() {
-                let (id, saved) = (message_id.clone(), images.clone());
-                std::thread::spawn(move || {
-                    if let Err(error) = sent_images::save(&dir, &id, &saved) {
-                        log::warn!("cannot save the images of {id}: {error}");
-                    }
-                });
-            }
-            self.sent_images.insert(message_id.clone(), images);
-        }
+        self.remember_sent_images(&message_id, sent_images::decode(&message.images));
         let request = json!({
             "type": "send_agent_message_request",
             "agentId": agent_id,
@@ -1165,7 +1173,15 @@ impl ClientCore {
     ) -> oneshot::Receiver<anyhow::Result<()>> {
         let request = json!({"type": "agent.queue.enqueue.request", "agentId": agent_id, "text": message.text});
         let (reply, receiver) = oneshot::channel();
-        self.queue_request(Self::with_outgoing(request, message), agent_id, Some(reply));
+        // The daemon sends the item with its id as the message id, so the bubble finds them.
+        let pending = Pending::Queue {
+            agent_id: agent_id.to_string(),
+            reply: Some(reply),
+            images: sent_images::decode(&message.images),
+        };
+        if let Err(pending) = self.request(Self::with_outgoing(request, message), pending) {
+            pending.fail(anyhow!("not connected"));
+        }
         receiver
     }
 
@@ -3274,13 +3290,20 @@ impl ClientCore {
                 };
                 let _ = reply.send(result);
             }
-            Pending::Queue { agent_id, reply } => {
+            Pending::Queue {
+                agent_id,
+                reply,
+                images,
+            } => {
                 if let Some(error) = error {
                     log::warn!("queue request for {agent_id} failed: {error}");
                     if let Some(reply) = reply {
                         let _ = reply.send(Err(anyhow!(error)));
                     }
                     return;
+                }
+                if let Some(item_id) = payload["itemId"].as_str() {
+                    self.remember_sent_images(item_id, images);
                 }
                 if payload["queue"].is_object()
                     && let Some(extra) = self.extras.get_mut(&agent_id)
