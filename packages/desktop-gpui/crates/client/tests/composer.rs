@@ -422,6 +422,8 @@ fn send_and_enqueue_carry_attachments_and_resolve_on_the_answer() {
         )]
     });
     let mut harness = connect(&server);
+    let saved = std::env::temp_dir().join(format!("sent-images-{}", uuid::Uuid::new_v4()));
+    harness.core.set_sent_images_dir(saved.clone());
     let message = |text: &str| OutgoingMessage {
         text: text.into(),
         images: vec![json!({"data": "aGk=", "mimeType": "image/png"})],
@@ -452,6 +454,14 @@ fn send_and_enqueue_carry_attachments_and_resolve_on_the_answer() {
         }])
     );
     assert_eq!(harness.core.sent_images("other"), None);
+    // The images are saved by message id, so a restarted app still finds them.
+    let file = saved.join(message_id).join("0.png");
+    let deadline = std::time::Instant::now() + WAIT;
+    while !file.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(std::fs::read(&file).expect("saved image"), b"hi");
+    std::fs::remove_dir_all(&saved).expect("cleaned");
     let reply = harness
         .core
         .send_outgoing("a1", message("refuse"), TurnBehavior::Interrupt);
