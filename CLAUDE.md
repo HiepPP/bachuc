@@ -249,7 +249,7 @@ The app runs on iOS, Android, web (browser), and web (Electron desktop). Code is
 
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **bachuc** (125700 symbols, 460986 relationships, 1270 execution flows).
+This project is indexed by GitNexus as **bachuc** (156166 symbols, 564822 relationships, 1201 execution flows).
 
 > Index stale? Run `node .gitnexus/run.cjs analyze --index-only` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? Bootstrap with `npx`, `bunx`, or `pnpm dlx` — e.g. `bunx gitnexus@latest analyze` (npm 11 npx crash; #1939).
 
