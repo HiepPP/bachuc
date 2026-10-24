@@ -1,6 +1,6 @@
 // Prints the gate's recent decisions with the command text. The ledger stores only command
 // hashes, so this matches them against shell commands in the daemon's timeline cache.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -30,15 +30,21 @@ try {
 }
 
 const commands = new Map<string, string>();
-const db = new DatabaseSync(path.join(home, "timeline-cache.sqlite"), { readOnly: true });
-const rows = db
-  .prepare(
-    "select distinct json_extract(item, '$.detail.command') as command from timeline_rows " +
-      "where item_type = 'tool_call' and json_extract(item, '$.detail.type') = 'shell'",
-  )
-  .all() as { command: string | null }[];
-for (const { command } of rows) if (command) commands.set(hashCommand(command), command);
-db.close();
+const dbFile = path.join(home, "timeline-cache.sqlite");
+if (existsSync(dbFile)) {
+  const db = new DatabaseSync(dbFile, { readOnly: true });
+  try {
+    const rows = db
+      .prepare(
+        "select distinct json_extract(item, '$.detail.command') as command from timeline_rows " +
+          "where item_type = 'tool_call' and json_extract(item, '$.detail.type') = 'shell'",
+      )
+      .all() as { command: string | null }[];
+    for (const { command } of rows) if (command) commands.set(hashCommand(command), command);
+  } finally {
+    db.close();
+  }
+}
 
 const selected = selectDecisions(entries, {
   jevAllowedOnly: args.includes("--jev-allowed"),
