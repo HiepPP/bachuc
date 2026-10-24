@@ -62,3 +62,5 @@ UI checker, 2026-10-25. The bare example binary is not visible to `cua_repl`, so
 Lead close (2026-10-25): screen check PASS (lead viewed `/tmp/wt-ui/diagrams-1.jpg`). Status BLOCKED.
 
 Blocked: BUILT, UNVERIFIED (Q-191). The light and dark switch and the Ready-path timing read need Hiep.
+
+Owner check (2026-10-25, Q-191): Hiep switched light and dark; diagrams render again in the new colors -> PASS. Status: DONE. The Ready-path timing read stays UNVERIFIED; the Pending path measured at most 0.060 ms against 1 ms.
