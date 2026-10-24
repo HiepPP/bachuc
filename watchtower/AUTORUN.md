@@ -15,7 +15,7 @@ max_builders: 6
 
 ## Repo Rules
 
-- Branch: `feat/gpui-native-mermaid-pele-quickjs`.
+- Branch: `feat/gpui-pele-spike` (owner moved the run here on 2026-10-25; `main` must stay at 3436e8658).
 - Skip: none.
 - The tree holds uncommitted changes of another agent in `packages/desktop-gpui/crates/client/src/core.rs` and `packages/desktop-gpui/crates/client/tests/composer.rs`. Never stage, edit, stash, format, or revert them (owner, 2026-10-25). Stage only the group's own files.
 - Group A runs in two phases, because TASK-302 (Group B) depends on TASK-301 and TASK-303 depends on TASK-302: TASK-301, then Group B, then TASK-303 and TASK-304.
