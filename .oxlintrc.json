@@ -3,7 +3,11 @@
   "options": {
     "typeAware": false
   },
-  "ignorePatterns": [".dev/**", "hiep-plugins/**"],
+  "ignorePatterns": [
+    ".dev/**",
+    "hiep-plugins/**",
+    "packages/desktop-gpui/crates/diagram/assets/**"
+  ],
   "plugins": ["react", "react-perf", "unicorn", "typescript", "oxc", "import", "promise"],
   "categories": {
     "correctness": "error",

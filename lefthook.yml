@@ -12,6 +12,7 @@ pre-commit:
       # Mirrors .oxlintrc.json ignorePatterns; oxlint exits 1 when every path it receives is ignored.
       exclude:
         - "hiep-plugins/**"
+        - "packages/desktop-gpui/crates/diagram/assets/**"
       run: npm run lint -- {staged_files}
     - name: typecheck
       run: npm run typecheck
