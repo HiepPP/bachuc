@@ -1,5 +1,5 @@
-//! The hidden page: its HTML, the init script with `renderMermaid` and `renderMath`, and the files
-//! it loads through the `bachuc-diagram://` protocol.
+//! The hidden page for KaTeX: its HTML, the init script with `renderMath`, and the files it loads
+//! through the `bachuc-diagram://` protocol.
 
 use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};
@@ -9,9 +9,6 @@ use wry::http::{Request, Response, header::CONTENT_TYPE};
 pub(crate) const PROTOCOL: &str = "bachuc-diagram";
 pub(crate) const URL: &str = "bachuc-diagram://localhost/index.html";
 
-/// Mermaid diagrams render into a box this wide, in CSS pixels. A wider diagram scales down.
-pub(crate) const MERMAID_WIDTH: u32 = 960;
-
 const INDEX: &str = r#"<!doctype html>
 <html><head><meta charset="utf-8">
 <link rel="stylesheet" href="katex/katex.min.css">
@@ -19,10 +16,8 @@ const INDEX: &str = r#"<!doctype html>
 html, body { margin: 0; background: transparent; }
 body { font-family: -apple-system, sans-serif; }
 #d { display: inline-block; padding: 6px; }
-#d.mermaid { display: block; width: MERMAID_WIDTHpx; padding: 0; }
 .katex-display { margin: 0; }
 </style>
-<script src="mermaid.min.js"></script>
 <script src="katex/katex.min.js"></script>
 </head><body><div id="d"></div>
 <script>window.ipc.postMessage(JSON.stringify({ type: "ready" }));</script>
@@ -40,7 +35,6 @@ pub(crate) const INIT_SCRIPT: &str = r##"(() => {
   };
   const show = async (id, dark, fill) => {
     const d = document.getElementById("d");
-    d.className = "";
     d.innerHTML = "";
     d.style.color = dark ? "#e6e6e6" : "#1f1f1f";
     try {
@@ -54,14 +48,6 @@ pub(crate) const INIT_SCRIPT: &str = r##"(() => {
       post({ type: "failed", id, error: String((e && e.message) || e) });
     }
   };
-  window.renderMermaid = (id, src, dark) => show(id, dark, async (d) => {
-    mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "default" });
-    await mermaid.parse(src);
-    const { svg } = await mermaid.render("m" + id, src);
-    d.className = "mermaid";
-    d.innerHTML = svg;
-    return d.firstElementChild;
-  });
   window.renderMath = (id, src, dark) => show(id, dark, async (d) => {
     katex.render(src, d, { displayMode: true, throwOnError: true });
     return d;
@@ -74,13 +60,6 @@ fn repo_file(relative: &str) -> PathBuf {
         .join(relative)
 }
 
-/// `BACHUC_MERMAID_JS` overrides the path, as in the prototype.
-fn mermaid_js() -> PathBuf {
-    std::env::var_os("BACHUC_MERMAID_JS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo_file("node_modules/mermaid/dist/mermaid.min.js"))
-}
-
 /// `BACHUC_KATEX_DIR` overrides the KaTeX `dist` folder.
 fn katex_dir() -> PathBuf {
     std::env::var_os("BACHUC_KATEX_DIR")
@@ -89,9 +68,6 @@ fn katex_dir() -> PathBuf {
 }
 
 fn file_path(path: &str) -> Option<PathBuf> {
-    if path == "/mermaid.min.js" {
-        return Some(mermaid_js());
-    }
     let rest = Path::new(path.strip_prefix("/katex/")?);
     // Serve files inside the KaTeX folder only.
     if !rest.components().all(|c| matches!(c, Component::Normal(_))) {
@@ -115,11 +91,7 @@ fn content_type(path: &str) -> &'static str {
 pub(crate) fn respond(request: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     let path = request.uri().path();
     let body = if path == "/index.html" {
-        Some(
-            INDEX
-                .replace("MERMAID_WIDTH", &MERMAID_WIDTH.to_string())
-                .into_bytes(),
-        )
+        Some(INDEX.as_bytes().to_vec())
     } else {
         file_path(path).and_then(|file| std::fs::read(file).ok())
     };
@@ -137,7 +109,6 @@ mod tests {
 
     #[test]
     fn serves_only_the_page_and_its_files() {
-        assert_eq!(file_path("/mermaid.min.js"), Some(mermaid_js()));
         assert_eq!(
             file_path("/katex/fonts/KaTeX_Main-Regular.woff2"),
             Some(katex_dir().join("fonts/KaTeX_Main-Regular.woff2"))

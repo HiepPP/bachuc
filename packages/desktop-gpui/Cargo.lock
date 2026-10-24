@@ -624,6 +624,7 @@ dependencies = [
 name = "bachuc-diagram"
 version = "0.1.0"
 dependencies = [
+ "bachuc-theme",
  "block2 0.6.2",
  "futures",
  "gpui-kit",
@@ -634,6 +635,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-web-kit",
  "raw-window-handle",
+ "resvg 0.46.0",
  "rquickjs",
  "serde_json",
 ]

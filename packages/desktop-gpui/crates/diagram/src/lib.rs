@@ -1,11 +1,14 @@
-//! Renders mermaid diagrams and KaTeX math in one hidden WebView and returns PNG snapshots that
-//! GPUI shows as images (ADR-0037). The WebView sits outside the window's visible content, not
-//! `isHidden`, so WebKit still paints it.
+//! Renders Mermaid diagrams and KaTeX math to PNGs that GPUI shows as images. Mermaid goes through
+//! Pele on QuickJS and resvg on a background thread (ADR-0067). KaTeX renders in one hidden
+//! WebView that returns PNG snapshots (ADR-0037). The WebView sits outside the window's visible
+//! content, not `isHidden`, so WebKit still paints it.
 
 mod cache;
 mod page;
+mod pele;
 #[cfg(target_os = "macos")]
 mod snapshot;
+mod svg;
 
 use std::sync::Arc;
 
@@ -18,10 +21,13 @@ use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::{Rect, WebViewBuilder};
 
 use cache::RenderCache;
+use pele::PeleEngine;
+use svg::{PeleTheme, pele_theme};
 
 /// Snapshot pixels per logical pixel.
 const SCALE: f32 = 2.0;
-const WEBVIEW_WIDTH: f64 = page::MERMAID_WIDTH as f64 + 40.0;
+/// Wide enough for a display formula, in CSS pixels.
+const WEBVIEW_WIDTH: f64 = 1000.0;
 const MIN_WEBVIEW_HEIGHT: f64 = 600.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -110,6 +116,9 @@ pub struct DiagramRenderer {
     webview: wry::WebView,
     events: UnboundedSender<Event>,
     cache: RenderCache,
+    pele: PeleEngine,
+    /// The theme the cached Mermaid PNGs use.
+    theme: PeleTheme,
     ready: bool,
     dark: bool,
     height: f64,
@@ -154,6 +163,8 @@ impl DiagramRenderer {
             webview,
             events,
             cache: RenderCache::default(),
+            pele: PeleEngine::spawn(),
+            theme: pele_theme(&bachuc_theme::tokens(cx)),
             ready: false,
             dark: cx.theme().is_dark(),
             height: MIN_WEBVIEW_HEIGHT,
@@ -170,8 +181,11 @@ impl DiagramRenderer {
         cx: &mut Context<DiagramRenderer>,
     ) -> DiagramState {
         let dark = cx.theme().is_dark();
-        if dark != self.dark {
+        // KaTeX takes only the dark flag; Mermaid takes every theme color, custom themes too.
+        let theme = pele_theme(&bachuc_theme::tokens(cx));
+        if dark != self.dark || theme != self.theme {
             self.dark = dark;
+            self.theme = theme;
             self.cache.clear();
         }
         let state = self.cache.request(kind, source);
@@ -182,25 +196,37 @@ impl DiagramRenderer {
     }
 
     fn start_next(&mut self, cx: &mut Context<Self>) {
-        if !self.ready {
-            return;
-        }
-        let Some(job) = self.cache.next_job() else {
+        let Some(job) = self.cache.next_job(self.ready) else {
             return;
         };
-        let function = match job.kind {
-            DiagramKind::Mermaid => "renderMermaid",
-            DiagramKind::Math => "renderMath",
-        };
-        let script = format!(
-            "{function}({}, {}, {})",
-            job.id,
-            json!(job.source),
-            self.dark
-        );
-        if let Err(error) = self.webview.evaluate_script(&script) {
-            self.finish(job.id, Err(error.to_string()), cx);
+        match job.kind {
+            DiagramKind::Mermaid => self.start_mermaid(job.id, job.source, cx),
+            DiagramKind::Math => {
+                let script = format!(
+                    "renderMath({}, {}, {})",
+                    job.id,
+                    json!(job.source),
+                    self.dark
+                );
+                if let Err(error) = self.webview.evaluate_script(&script) {
+                    self.finish(job.id, Err(error.to_string()), cx);
+                }
+            }
         }
+    }
+
+    /// Sends the source to the Pele thread. The main thread only waits for the reply as an event.
+    fn start_mermaid(&mut self, id: u64, source: String, cx: &mut Context<Self>) {
+        let reply = self.pele.render_png(source, self.theme.clone());
+        let events = self.events.clone();
+        cx.background_executor()
+            .spawn(async move {
+                let result = reply
+                    .await
+                    .unwrap_or_else(|_| Err("the Pele engine stopped".into()));
+                let _ = events.unbounded_send(Event::Snapshot { id, result });
+            })
+            .detach();
     }
 
     fn on_event(&mut self, event: Event, cx: &mut Context<Self>) {
