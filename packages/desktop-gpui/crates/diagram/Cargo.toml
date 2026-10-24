@@ -11,6 +11,11 @@ wry = { version = "0.53.3", package = "lb-wry", features = ["transparent"] }
 raw-window-handle = { version = "0.6", features = ["std"] }
 serde_json = "1"
 futures = "0.3"
+# Runs the vendored Pele build to turn Mermaid source into SVG.
+rquickjs = { version = "0.14", default-features = false }
+# Rasterizes the Pele SVG. The same 0.46.0 build GPUI pulls in; keep the features equal to its.
+resvg = { version = "0.46", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
+bachuc-theme = { path = "../theme" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # wry has no snapshot API, so the crate calls WKWebView takeSnapshot itself (ADR-0037).

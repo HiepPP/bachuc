@@ -11,5 +11,11 @@
   "arrowParens": "always",
   "bracketSameLine": false,
   "bracketSpacing": true,
-  "ignorePatterns": ["*.lock", "**/*.gen.ts", "**/*.gen.tsx", "packages/desktop-gpui/vendor/**"]
+  "ignorePatterns": [
+    "*.lock",
+    "**/*.gen.ts",
+    "**/*.gen.tsx",
+    "packages/desktop-gpui/vendor/**",
+    "packages/desktop-gpui/crates/diagram/assets/**"
+  ]
 }

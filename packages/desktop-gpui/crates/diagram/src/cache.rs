@@ -7,7 +7,7 @@ use gpui_kit::Image;
 
 use crate::{DiagramKind, DiagramState};
 
-/// One render the WebView runs. `id` matches the WebView's answer to the job.
+/// One render, for the WebView or for Pele. `id` matches the WebView's answer to the job.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Job {
     pub id: u64,
@@ -50,11 +50,20 @@ impl RenderCache {
     }
 
     /// Starts the next queued job. Returns `None` while a job runs, so renders run one at a time.
-    pub fn next_job(&mut self) -> Option<Job> {
+    /// Before the WebView is ready only a Mermaid job can start, from behind queued Math jobs,
+    /// because Pele does not use the WebView.
+    pub fn next_job(&mut self, webview_ready: bool) -> Option<Job> {
         if self.running.is_some() {
             return None;
         }
-        let (kind, source) = self.queue.pop_front()?;
+        let index = if webview_ready {
+            0
+        } else {
+            self.queue
+                .iter()
+                .position(|(kind, _)| *kind == DiagramKind::Mermaid)?
+        };
+        let (kind, source) = self.queue.remove(index)?;
         self.next_id += 1;
         let job = Job {
             id: self.next_id,
@@ -115,7 +124,7 @@ mod tests {
             cache.request(DiagramKind::Mermaid, "graph TD; A-->B"),
             DiagramState::Pending
         ));
-        let job = cache.next_job().expect("job");
+        let job = cache.next_job(true).expect("job");
         let img = image();
         assert_eq!(
             cache.finish(job.id, Ok(img.clone())),
@@ -125,20 +134,20 @@ mod tests {
             DiagramState::Ready(cached) => assert!(Arc::ptr_eq(&cached, &img)),
             other => panic!("expected Ready, got {other:?}"),
         }
-        assert_eq!(cache.next_job(), None);
+        assert_eq!(cache.next_job(true), None);
     }
 
     #[test]
     fn failed_source_gives_failed_with_the_error_text_and_is_cached() {
         let mut cache = RenderCache::default();
         cache.request(DiagramKind::Mermaid, "flowchart LR\n A --> (");
-        let job = cache.next_job().expect("job");
+        let job = cache.next_job(true).expect("job");
         cache.finish(job.id, Err("Parse error on line 2".into()));
         match cache.request(DiagramKind::Mermaid, "flowchart LR\n A --> (") {
             DiagramState::Failed(error) => assert_eq!(error, "Parse error on line 2"),
             other => panic!("expected Failed, got {other:?}"),
         }
-        assert_eq!(cache.next_job(), None);
+        assert_eq!(cache.next_job(true), None);
     }
 
     #[test]
@@ -147,22 +156,22 @@ mod tests {
         cache.request(DiagramKind::Math, "x^2");
         cache.request(DiagramKind::Math, "x^2");
         cache.request(DiagramKind::Math, "y^2");
-        let first = cache.next_job().expect("first job");
+        let first = cache.next_job(true).expect("first job");
         assert_eq!(first.source, "x^2");
-        assert_eq!(cache.next_job(), None, "second job waits for the first");
+        assert_eq!(cache.next_job(true), None, "second job waits for the first");
         cache.request(DiagramKind::Math, "x^2");
         cache.finish(first.id, Ok(image()));
-        let second = cache.next_job().expect("second job");
+        let second = cache.next_job(true).expect("second job");
         assert_eq!(second.source, "y^2");
         cache.finish(second.id, Ok(image()));
-        assert_eq!(cache.next_job(), None, "x^2 was queued only once");
+        assert_eq!(cache.next_job(true), None, "x^2 was queued only once");
     }
 
     #[test]
     fn kinds_are_cached_apart() {
         let mut cache = RenderCache::default();
         cache.request(DiagramKind::Math, "A");
-        let job = cache.next_job().expect("job");
+        let job = cache.next_job(true).expect("job");
         cache.finish(job.id, Ok(image()));
         assert!(matches!(
             cache.request(DiagramKind::Mermaid, "A"),
@@ -174,7 +183,7 @@ mod tests {
     fn unknown_or_old_ids_are_ignored() {
         let mut cache = RenderCache::default();
         cache.request(DiagramKind::Math, "x");
-        let job = cache.next_job().expect("job");
+        let job = cache.next_job(true).expect("job");
         assert_eq!(cache.finish(job.id + 1, Ok(image())), None);
         assert!(cache.running(job.id));
     }
@@ -183,11 +192,39 @@ mod tests {
     fn clear_renders_the_running_job_again() {
         let mut cache = RenderCache::default();
         cache.request(DiagramKind::Math, "x");
-        let job = cache.next_job().expect("job");
+        let job = cache.next_job(true).expect("job");
         cache.clear();
         assert_eq!(cache.finish(job.id, Ok(image())), None);
-        let again = cache.next_job().expect("job again");
+        let again = cache.next_job(true).expect("job again");
         assert_eq!(again.source, "x");
+        assert!(again.id > job.id);
+    }
+
+    #[test]
+    fn mermaid_job_starts_before_the_webview_is_ready_and_math_stays_queued() {
+        let mut cache = RenderCache::default();
+        cache.request(DiagramKind::Math, "x");
+        cache.request(DiagramKind::Mermaid, "A");
+        let job = cache.next_job(false).expect("mermaid job");
+        assert_eq!((job.kind, job.source.as_str()), (DiagramKind::Mermaid, "A"));
+        cache.finish(job.id, Ok(image()));
+        assert_eq!(cache.next_job(false), None, "math waits for the WebView");
+        let math = cache.next_job(true).expect("math job");
+        assert_eq!((math.kind, math.source.as_str()), (DiagramKind::Math, "x"));
+    }
+
+    #[test]
+    fn cleared_mermaid_job_renders_again_before_the_webview_is_ready() {
+        let mut cache = RenderCache::default();
+        cache.request(DiagramKind::Mermaid, "A");
+        let job = cache.next_job(false).expect("job");
+        cache.clear();
+        assert_eq!(cache.finish(job.id, Ok(image())), None);
+        let again = cache.next_job(false).expect("job again");
+        assert_eq!(
+            (again.kind, again.source.as_str()),
+            (DiagramKind::Mermaid, "A")
+        );
         assert!(again.id > job.id);
     }
 }

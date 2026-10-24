@@ -56,7 +56,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid pixel widths computed from `onLayout` for cells that must share a row on Board, while react-native-web reports a rounded `offsetWidth`. Reason: [ADR-0033](watchtower/decisions/ADR-0033-percent-cells-over-measured-pixel-cells-on-board.md).
 - Avoid a Swift or SwiftUI desktop client, and new long-term work on the Electron renderer UI, while the GPUI client measured 6.5% CPU against 24% for Swift and 1.2 GB or more for Electron on the same stream. Reason: [ADR-0034](watchtower/decisions/ADR-0034-rust-gpui-client-over-swift-and-electron.md).
 - Avoid hand-written Rust protocol structs while the zod schemas can export JSON Schema for code generation. Reason: [ADR-0035](watchtower/decisions/ADR-0035-generated-protocol-types-over-hand-written-rust-types.md).
-- Avoid a live WebView inside each timeline row, and SVG export of diagrams, while `gpui-wry` views do not clip inside GPUI scroll lists and GPUI's usvg drops `foreignObject` labels and KaTeX HTML. Reason: [ADR-0037](watchtower/decisions/ADR-0037-hidden-webview-png-snapshots-over-svg-and-inline-webviews.md).
+- Avoid a live WebView inside each timeline row, and SVG export of KaTeX, while `gpui-wry` views do not clip inside GPUI scroll lists and KaTeX outputs HTML that GPUI's usvg drops. Reason: [ADR-0037](watchtower/decisions/ADR-0037-hidden-webview-png-snapshots-over-svg-and-inline-webviews.md).
+- Avoid mermaid.js in a WebView, and a mermaid.js fallback when Pele fails, while Pele on QuickJS rendered at an overall p95 of 7.4 to 9.6 ms with a load of 117 to 142 ms. Reason: [ADR-0067](watchtower/decisions/ADR-0067-pele-on-quickjs-over-hidden-webview-mermaid.md).
 - Avoid WebView panes, a hidden WebView or embedded JS engine for plugin clients, declarative plugin widgets, and moving plugin client logic into server parts, while the owner wants native Rust plugin clients and freezes Electron. Reason: [ADR-0045](watchtower/decisions/ADR-0045-native-rust-plugin-clients-over-webview-panes-or-shared-logic.md).
 - Avoid a higher GPUI CPU budget, a slower timeline redraw while a turn streams, and folding or capping old steps, while incremental sync keeps a 15-minute turn under 10%. Reason: [ADR-0039](watchtower/decisions/ADR-0039-incremental-timeline-sync-over-throttle-or-budget.md).
 - Avoid a 33 ms shared ticker, per-mark repeat timers, and `request_animation_frame` or `with_animation(..).repeat()` in a running mark, while each GPUI mark frame re-renders the window tree and main reads 42.6% during a turn. Reason: [ADR-0052](watchtower/decisions/ADR-0052-one-shared-66ms-frame-ticker-over-per-mark-timers.md).
@@ -439,3 +440,11 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - 2026-10-22 Learned: TASK-297 put the only entry to the one-file diff in a row context menu, which the UI checker cannot open (AX lists only Pick; `accesskit_macos` maps no show-menu action), so its screen checks fell to the owner (Q-189). This repeats the 2026-10-18 rule.
 - Source: TASK-297 outcome, UI Checks.
 - Use next time: when a plan adds a menu item, also give it a key or AX press path, or plan the check as an owner check.
+
+### 2026-10-25 - Implement 20261025-gpui-native-mermaid-pele-quickjs
+
+- Learned: usvg 0.46 stops reading an SVG `style` attribute at the first CSS custom property (`--_x:...`), so later declarations such as `font-family` are lost. Pele's root style puts its custom properties first, so `resolve_vars` in `crates/diagram/src/svg.rs` drops them after it resolves them.
+- Learned: `cua_repl` cannot see a bare cargo example binary. The UI checker wrapped the built binary in a signed `.app` under `/tmp` and opened it with `open -g`.
+- Learned: the repo lint and format hooks check every staged JS file. A vendored JS file needs an entry in `.oxlintrc.json`, `.oxfmtrc.json`, and the `lefthook.yml` lint exclude.
+- Source: TASK-301, TASK-303 outcomes and the UI checker run.
+- Use next time: plan a vendored JS asset with its lint and format ignore lines, and plan GPUI example screen checks with the `.app` wrapper.
