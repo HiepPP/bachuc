@@ -440,3 +440,11 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - 2026-10-22 Learned: TASK-297 put the only entry to the one-file diff in a row context menu, which the UI checker cannot open (AX lists only Pick; `accesskit_macos` maps no show-menu action), so its screen checks fell to the owner (Q-189). This repeats the 2026-10-18 rule.
 - Source: TASK-297 outcome, UI Checks.
 - Use next time: when a plan adds a menu item, also give it a key or AX press path, or plan the check as an owner check.
+
+### 2026-10-25 - Implement 20261025-gpui-native-mermaid-pele-quickjs
+
+- Learned: usvg 0.46 stops reading an SVG `style` attribute at the first CSS custom property (`--_x:...`), so later declarations such as `font-family` are lost. Pele's root style puts its custom properties first, so `resolve_vars` in `crates/diagram/src/svg.rs` drops them after it resolves them.
+- Learned: `cua_repl` cannot see a bare cargo example binary. The UI checker wrapped the built binary in a signed `.app` under `/tmp` and opened it with `open -g`.
+- Learned: the repo lint and format hooks check every staged JS file. A vendored JS file needs an entry in `.oxlintrc.json`, `.oxfmtrc.json`, and the `lefthook.yml` lint exclude.
+- Source: TASK-301, TASK-303 outcomes and the UI checker run.
+- Use next time: plan a vendored JS asset with its lint and format ignore lines, and plan GPUI example screen checks with the `.app` wrapper.

@@ -45,3 +45,20 @@ Tripwire: each `DiagramRenderer::render` call on the main thread takes 1 ms or l
 - A cargo run of the example never gets a visible frame without focus here; screen timings need the UI checker.
 
 Lead re-check (2026-10-25): `cargo.sh test -p bachuc-diagram` -> 17 passed; fmt and clippy `--no-deps --all-targets` clean; Produces names found with rg; `crates/timeline` has no diff. Committed in 4cb92d2a2.
+
+## UI Checks
+
+UI checker, 2026-10-25. The bare example binary is not visible to `cua_repl`, so the checker copied the built `target/debug/examples/diagrams` into a signed wrapper `/tmp/wt-ui/DiagramsCheck.app` (no source edit, no extra cargo run) and opened it with `open -g`. Cargo log: `/tmp/diagrams-example.log`. The window was raised before each screenshot. The process is killed and the wrapper is left in `/tmp`.
+
+2. Screen check: PASS. Evidence: `/tmp/wt-ui/diagrams-1.jpg`, `diagrams-2.jpg`, `diagrams-3.jpg` (light system appearance).
+   - Flowchart (block 1): boxes `GPUI client`, `Daemon`, `Agents`, `alacritty_terminal`, edge labels `WebSocket /ws` and `binary frames`. Labels are sharp, dark gray on light boxes, inside their boxes.
+   - Sequence (block 3): `Client` and `Daemon` boxes with `hello`, `server_info`, `fetch_agent_timeline`, `timeline page` arrows. Sharp labels, readable.
+   - State (block 5): start dot, `Idle`, `Running`, `Error`, end dot, labels `prompt`, `finished`, `failed`. Sharp, inside rounded boxes.
+   - Bad source (block 7): code block with `flowchart LR / A --> (` and red Pele error text `Error: Parse error on line 2 ... Expecting 'NODE_STRING', got 'PS'` plus the stack lines.
+   - KaTeX (blocks 2, 4, 6): the Gaussian integral, the sum `1/n^2 = pi^2/6`, and the 2x2 matrix with `det A`. All three show.
+3. Light and dark switch: UNVERIFIED (needs owner). The example follows the system appearance and has no toggle. The checker did not change the macOS appearance setting. Only the light theme was seen.
+4. Anti-goal, a `Ready` render call: UNVERIFIED. The example has no timing output, and reading a `Ready` call needs a temporary `Instant` edit of `examples/diagrams.rs`, which this check may not make. Visible fact: the window painted all 7 blocks as `Ready` images after launch. The builder's `Pending` max 0.060 ms stays the only measurement.
+
+Lead close (2026-10-25): screen check PASS (lead viewed `/tmp/wt-ui/diagrams-1.jpg`). Status BLOCKED.
+
+Blocked: BUILT, UNVERIFIED (Q-191). The light and dark switch and the Ready-path timing read need Hiep.

@@ -9,12 +9,12 @@
 
 ## Tracker
 
-| Order | TASK                                                  | Group | Status      | Spec                                                                                                                                         | Deps               | Context                                        | Notes                                                    |
-| ----- | ----------------------------------------------------- | ----- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------- | -------------------------------------------------------- |
-| 1     | TASK-301 Spike Pele on rquickjs                       | A     | DONE        | [watchtower/tasks/TASK-301-spike-pele-on-rquickjs.md](watchtower/tasks/TASK-301-spike-pele-on-rquickjs.md)                                   | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Go or no-go gate. If it fails, stop the plan.            |
-| 2     | TASK-302 ADR-0067 supersedes ADR-0037                 | B     | DONE        | [watchtower/tasks/TASK-302-adr-0067-supersedes-adr-0037.md](watchtower/tasks/TASK-302-adr-0067-supersedes-adr-0037.md)                       | TASK-301           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Start order only; no shared file. Write only after a go. |
-| 3     | TASK-303 Pele engine, theme vars, resvg PNG           | A     | IN PROGRESS | [watchtower/tasks/TASK-303-pele-engine-theme-vars-resvg-png.md](watchtower/tasks/TASK-303-pele-engine-theme-vars-resvg-png.md)               | TASK-301, TASK-302 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | UI checks pending.                                       |
-| 4     | TASK-304 Mermaid through Pele, WebView for KaTeX only | A     | IN PROGRESS | [watchtower/tasks/TASK-304-mermaid-through-pele-webview-katex-only.md](watchtower/tasks/TASK-304-mermaid-through-pele-webview-katex-only.md) | TASK-303           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | UI checks pending.                                       |
+| Order | TASK                                                  | Group | Status  | Spec                                                                                                                                         | Deps               | Context                                        | Notes                                                                        |
+| ----- | ----------------------------------------------------- | ----- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------- | ---------------------------------------------------------------------------- |
+| 1     | TASK-301 Spike Pele on rquickjs                       | A     | DONE    | [watchtower/tasks/TASK-301-spike-pele-on-rquickjs.md](watchtower/tasks/TASK-301-spike-pele-on-rquickjs.md)                                   | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Go or no-go gate. If it fails, stop the plan.                                |
+| 2     | TASK-302 ADR-0067 supersedes ADR-0037                 | B     | DONE    | [watchtower/tasks/TASK-302-adr-0067-supersedes-adr-0037.md](watchtower/tasks/TASK-302-adr-0067-supersedes-adr-0037.md)                       | TASK-301           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Start order only; no shared file. Write only after a go.                     |
+| 3     | TASK-303 Pele engine, theme vars, resvg PNG           | A     | DONE    | [watchtower/tasks/TASK-303-pele-engine-theme-vars-resvg-png.md](watchtower/tasks/TASK-303-pele-engine-theme-vars-resvg-png.md)               | TASK-301, TASK-302 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | UI check PASS (Unicode labels).                                              |
+| 4     | TASK-304 Mermaid through Pele, WebView for KaTeX only | A     | BLOCKED | [watchtower/tasks/TASK-304-mermaid-through-pele-webview-katex-only.md](watchtower/tasks/TASK-304-mermaid-through-pele-webview-katex-only.md) | TASK-303           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | BUILT, UNVERIFIED (Q-191): light and dark switch and Ready timing need Hiep. |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
@@ -35,7 +35,7 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Handoff
 
-- Next action: run `/watchtower implement`. TASK-301 runs first and decides go or no-go.
+- Next action: Hiep answers Q-191 (light and dark switch on the `diagrams` example or live GPUI). Then set TASK-304 to `DONE` and run `/watchtower archive`.
 
 ## Archive
 

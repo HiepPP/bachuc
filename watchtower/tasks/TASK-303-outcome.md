@@ -47,3 +47,9 @@ Tripwire: `bachuc-diagram` depends on `resvg 0.46.0` only. Source: `./cargo.sh t
 - Pele's source limit is 50000 characters (`Y1=5e4` in the vendored script); the error text is "Diagram source is longer than the limit of 50000 characters."
 
 Lead re-check (2026-10-25): `cargo.sh test -p bachuc-diagram` -> 17 passed; fmt and clippy `--no-deps --all-targets` clean; Produces names found with rg; `crates/timeline` has no diff. Committed in 4cb92d2a2.
+
+## UI Checks
+
+UI checker, 2026-10-25.
+
+1. Unicode check: PASS. Evidence: `/tmp/pele-unicode.png` viewed as an image (transparent background, shown on a light backdrop). The labels `Tiếng Việt`, `Xin chào, thế giới`, and `Đúng không?` show with every diacritic, in a sans face, in white text inside dark boxes and a dark diamond. No boxes (tofu) appear.
