@@ -28,6 +28,7 @@ use crate::model::{
 };
 use crate::model::{RewindMode, RewindModes};
 use crate::plugins::{self, PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite};
+use crate::sent_images::{self, SentImage};
 use crate::terminal::{self, TerminalFrame, TerminalHandle};
 use crate::timeline::{FetchPlan, LiveRow, TimelineState, TimelineSync};
 use crate::{parse_provider_subagent_key, provider_subagent_key};
@@ -38,6 +39,7 @@ use futures::channel::{mpsc, oneshot};
 use serde::Deserialize as _;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::PathBuf;
 
 type Reply<T> = oneshot::Sender<anyhow::Result<T>>;
 
@@ -437,6 +439,11 @@ pub struct ClientCore {
     git_status_events: Vec<GitStatusEvent>,
     /// By workspace id, from the workspace `scripts` and `script_status_update`.
     workspace_scripts: HashMap<String, Vec<WorkspaceScript>>,
+    /// The images of each prompt this client sent, by message id. The daemon's `user_message`
+    /// holds only text, so the bubble shows them from here.
+    sent_images: HashMap<String, Vec<SentImage>>,
+    /// Where sent images are saved, so they outlive the session. `None` keeps them in memory.
+    sent_images_dir: Option<PathBuf>,
 }
 
 impl ClientCore {
@@ -485,7 +492,22 @@ impl ClientCore {
             provider_subagents: HashMap::new(),
             git_status_events: Vec::new(),
             workspace_scripts: HashMap::new(),
+            sent_images: HashMap::new(),
+            sent_images_dir: None,
         }
+    }
+
+    /// Saves sent images under `dir` from now on.
+    pub fn set_sent_images_dir(&mut self, dir: PathBuf) {
+        self.sent_images_dir = Some(dir);
+    }
+
+    /// The images sent with the prompt `message_id`, from this session or from disk.
+    pub fn sent_images(&self, message_id: &str) -> Option<Vec<SentImage>> {
+        if let Some(images) = self.sent_images.get(message_id) {
+            return Some(images.clone());
+        }
+        sent_images::load(self.sent_images_dir.as_deref()?, message_id)
     }
 
     /// Git and script status events since the last call.
@@ -1112,11 +1134,24 @@ impl ClientCore {
         message: OutgoingMessage,
         behavior: TurnBehavior,
     ) -> oneshot::Receiver<anyhow::Result<()>> {
+        let message_id = uuid::Uuid::new_v4().to_string();
+        let images = sent_images::decode(&message.images);
+        if !images.is_empty() {
+            if let Some(dir) = self.sent_images_dir.clone() {
+                let (id, saved) = (message_id.clone(), images.clone());
+                std::thread::spawn(move || {
+                    if let Err(error) = sent_images::save(&dir, &id, &saved) {
+                        log::warn!("cannot save the images of {id}: {error}");
+                    }
+                });
+            }
+            self.sent_images.insert(message_id.clone(), images);
+        }
         let request = json!({
             "type": "send_agent_message_request",
             "agentId": agent_id,
             "text": message.text,
-            "messageId": uuid::Uuid::new_v4().to_string(),
+            "messageId": message_id,
             "activeTurnBehavior": behavior.wire(),
         });
         self.request_reply(Self::with_outgoing(request, message), Pending::Accepted)

@@ -22,7 +22,7 @@ pub mod plugins;
 mod tool_view;
 pub mod tools;
 
-pub use image_view::{display_size, image_dimensions, read_target};
+pub use image_view::{decode_sent_image, display_size, image_dimensions, read_target};
 
 use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
@@ -387,6 +387,8 @@ pub struct TimelineView {
     responding: HashMap<String, String>,
     /// Message images by source.
     images: HashMap<String, ImageLoad>,
+    /// The images this client sent with a prompt, by message id, for the user bubble.
+    sent_images: HashMap<String, Vec<Arc<Image>>>,
     lightbox: Option<Arc<Image>>,
     finder: Option<FindState>,
     /// Syntax runs of open code sections, by text.
@@ -614,6 +616,7 @@ impl TimelineView {
             forms: HashMap::new(),
             responding: HashMap::new(),
             images: HashMap::new(),
+            sent_images: HashMap::new(),
             lightbox: None,
             finder: None,
             syntax_cache: RefCell::new(HashMap::new()),
@@ -1041,6 +1044,7 @@ impl TimelineView {
             self.prune_plugin_views();
         }
         let images = self.update_messages(&touched, cx);
+        self.update_sent_images(&touched, cx);
         self.update_hashes(&touched);
         for source in images {
             self.load_image(&source, cx);
@@ -2052,6 +2056,11 @@ impl TimelineView {
                 // it shows, so hovering never moves the layout.
                 let group = SharedString::from(format!("user-message-{key}"));
                 let footer = self.render_user_footer(index, key, &text, &group, cx);
+                let sent_images = self.render_sent_images(entry, key, cx).map(|row| {
+                    div()
+                        .when(!text.trim().is_empty(), |row| row.mb(zoomed(SPACE_2, cx)))
+                        .child(row)
+                });
                 v_flex()
                     .group(group)
                     .items_end()
@@ -2070,6 +2079,7 @@ impl TimelineView {
                             .text_color(t.foreground)
                             .text_size(size)
                             .line_height(px(body_line_height(size / px(1.))))
+                            .children(sent_images)
                             .child(StyledText::new(text).with_highlights(highlights)),
                     )
                     .child(footer)

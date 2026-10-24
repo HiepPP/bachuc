@@ -5,8 +5,8 @@ mod common;
 use bachuc_client::{
     ActiveTurn, AddedProject, AgentFeatureKind, AgentUsage, BranchSuggestion, BranchValidation,
     ClientEvent, CreateWorkspace, CreatedWorkspace, DiffCompare, DiffMode, DraftConfig,
-    InitialAgent, OutgoingMessage, SubagentKind, TaskEntry, TaskStatus, ThinkingControls,
-    TurnBehavior, TurnMetrics, WorkspaceSource, WorktreeAction, resume_command,
+    InitialAgent, OutgoingMessage, SentImage, SubagentKind, TaskEntry, TaskStatus,
+    ThinkingControls, TurnBehavior, TurnMetrics, WorkspaceSource, WorktreeAction, resume_command,
 };
 use common::{FakeServer, Harness, agent_snapshot, session};
 use serde_json::{Value, json};
@@ -442,6 +442,16 @@ fn send_and_enqueue_carry_attachments_and_resolve_on_the_answer() {
         request["attachments"],
         json!([{"type": "text", "mimeType": "text/plain", "text": "chip"}])
     );
+    // The user bubble shows the sent images by message id; the daemon echoes only text.
+    let message_id = request["messageId"].as_str().expect("message id");
+    assert_eq!(
+        harness.core.sent_images(message_id),
+        Some(vec![SentImage {
+            mime_type: "image/png".into(),
+            bytes: b"hi".to_vec(),
+        }])
+    );
+    assert_eq!(harness.core.sent_images("other"), None);
     let reply = harness
         .core
         .send_outgoing("a1", message("refuse"), TurnBehavior::Interrupt);

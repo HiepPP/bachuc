@@ -13,6 +13,7 @@ mod hosts;
 mod model;
 mod pending;
 mod plugins;
+mod sent_images;
 mod terminal;
 pub mod timeline;
 
@@ -51,6 +52,7 @@ pub use pending::{PENDING_TURN_TTL_MS, PendingTurnsChanged};
 pub use plugins::{
     PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite, PluginStatus,
 };
+pub use sent_images::SentImage;
 pub use terminal::{TerminalFrame, TerminalHandle};
 pub use timeline::TimelineState;
 
@@ -159,7 +161,13 @@ impl Client {
     /// Connects to `host` and keeps reconnecting until the entity is dropped.
     pub fn connect(host: HostConfig, cx: &mut App) -> Entity<Client> {
         let config = ConnectionConfig::new(host.url.clone(), client_id(), host.password.clone());
-        Self::connect_with(host, config, cx)
+        let client = Self::connect_with(host, config, cx);
+        client.update(cx, |client, _| {
+            client
+                .core
+                .set_sent_images_dir(data_dir().join("sent-images"))
+        });
+        client
     }
 
     /// `connect` with explicit connection settings.
@@ -587,6 +595,11 @@ impl Client {
     ) {
         self.core.send_prompt_with(agent_id, text, images, behavior);
         self.publish(cx);
+    }
+
+    /// The images sent with the prompt `message_id`.
+    pub fn sent_images(&self, message_id: &str) -> Option<Vec<SentImage>> {
+        self.core.sent_images(message_id)
     }
 
     /// Whether the host queues prompts (`features.agentMessageQueue`).

@@ -6,12 +6,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use bachuc_client::FileKind;
+use bachuc_client::{FileKind, SentImage};
 use bachuc_icons::IconName;
-use bachuc_theme::metrics::{FONT_BASE, ICON_MD, SPACE_1, SPACE_2, SPACE_4, SPACE_6};
+use bachuc_theme::metrics::{FONT_BASE, ICON_MD, RADIUS_MD, SPACE_1, SPACE_2, SPACE_4, SPACE_6};
 use bachuc_theme::{tokens, ui_font_size, zoom, zoomed};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{Sizable as _, v_flex};
+use gpui_kit::component::{Sizable as _, h_flex, v_flex};
 use gpui_kit::*;
 
 use crate::TimelineView;
@@ -30,6 +30,8 @@ const LIGHTBOX_MAX_WIDTH: f32 = 960.;
 const LIGHTBOX_MAX_HEIGHT: f32 = 640.;
 const BACKDROP_ALPHA: f32 = 0.9;
 const UNAVAILABLE: &str = "Image preview unavailable.";
+/// The side of an image thumbnail in a user bubble, as the composer chip.
+const SENT_THUMB: f32 = 48.;
 
 pub(crate) enum ImageLoad {
     Loading,
@@ -114,7 +116,88 @@ pub fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
+/// One sent image, decoded for drawing.
+pub fn decode_sent_image(image: &SentImage) -> Option<Image> {
+    let format = ImageFormat::from_mime_type(&image.mime_type)?;
+    Some(Image::from_bytes(format, image.bytes.clone()))
+}
+
+/// The ids a `user_message` can carry the client's message id in.
+fn sent_message_ids(entry: &serde_json::Value) -> impl Iterator<Item = &str> {
+    ["clientMessageId", "messageId"]
+        .into_iter()
+        .filter_map(|field| entry["item"][field].as_str())
+        .filter(|id| !id.is_empty())
+}
+
 impl TimelineView {
+    /// Decodes the sent images of each changed user message once.
+    pub(crate) fn update_sent_images(&mut self, touched: &[usize], cx: &mut Context<Self>) {
+        let client = self.client.read(cx);
+        for &index in touched {
+            let entry = &self.entries[index];
+            if crate::item_type(entry) != "user_message" {
+                continue;
+            }
+            for id in sent_message_ids(entry) {
+                if self.sent_images.contains_key(id) {
+                    break;
+                }
+                if let Some(images) = client.sent_images(id) {
+                    let decoded = images
+                        .iter()
+                        .filter_map(decode_sent_image)
+                        .map(Arc::new)
+                        .collect();
+                    self.sent_images.insert(id.to_string(), decoded);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// The thumbnails of the images sent with a user message, as `UserMessageImagePill`; a
+    /// click opens the larger view.
+    pub(crate) fn render_sent_images(
+        &self,
+        entry: &serde_json::Value,
+        key: u64,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let images = sent_message_ids(entry)
+            .find_map(|id| self.sent_images.get(id))
+            .filter(|images| !images.is_empty())?;
+        let t = tokens(cx);
+        let thumbs = images.iter().enumerate().map(|(position, image)| {
+            let open = image.clone();
+            div()
+                .id(ElementId::Name(
+                    format!("sent-image-{key}-{position}").into(),
+                ))
+                .role(Role::Button)
+                .aria_label("Open image attachment")
+                .size(zoomed(SENT_THUMB, cx))
+                .overflow_hidden()
+                .border_1()
+                .border_color(t.border_accent)
+                .rounded(zoomed(RADIUS_MD, cx))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.lightbox = Some(open.clone());
+                    this.focus.focus(window, cx);
+                    cx.notify();
+                }))
+                .child(img(image.clone()).size_full().object_fit(ObjectFit::Cover))
+        });
+        Some(
+            h_flex()
+                .flex_wrap()
+                .gap(zoomed(SPACE_2, cx))
+                .children(thumbs)
+                .into_any_element(),
+        )
+    }
+
     /// Starts loading each image of a message that has no load yet.
     pub(crate) fn load_image(&mut self, source: &str, cx: &mut Context<Self>) {
         if self.images.contains_key(source) {
@@ -279,54 +362,57 @@ impl TimelineView {
     }
 
     /// The larger view over the pane: the image fit in 960 by 640 on a dark backdrop. A click
-    /// anywhere or Escape closes it.
+    /// anywhere or Escape closes it. It paints deferred and occludes, so the pane's corner pills,
+    /// drawn after the timeline, stay under it and take no clicks.
     pub(crate) fn render_lightbox(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let image = self.lightbox.clone()?;
         let t = tokens(cx);
+        let lightbox = div()
+            .id("lightbox")
+            .role(Role::Dialog)
+            .aria_label("Image")
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p(zoomed(SPACE_4, cx))
+            .bg(black().opacity(BACKDROP_ALPHA))
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.lightbox = None;
+                cx.notify();
+            }))
+            .child(
+                v_flex()
+                    .size_full()
+                    .max_w(zoomed(LIGHTBOX_MAX_WIDTH, cx))
+                    .max_h(zoomed(LIGHTBOX_MAX_HEIGHT, cx))
+                    .child(img(image).size_full().object_fit(ObjectFit::Contain)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top(zoomed(SPACE_2, cx))
+                    .right(zoomed(SPACE_2, cx))
+                    .child(
+                        icon_button(
+                            "lightbox-close",
+                            "Dismiss image",
+                            IconName::X,
+                            t.foreground_muted,
+                            &t,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.lightbox = None;
+                            cx.notify();
+                        })),
+                    ),
+            );
         Some(
-            div()
-                .id("lightbox")
-                .role(Role::Dialog)
-                .aria_label("Image")
-                .absolute()
-                .inset_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p(zoomed(SPACE_4, cx))
-                .bg(black().opacity(BACKDROP_ALPHA))
-                .cursor_pointer()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.lightbox = None;
-                    cx.notify();
-                }))
-                .child(
-                    v_flex()
-                        .size_full()
-                        .max_w(zoomed(LIGHTBOX_MAX_WIDTH, cx))
-                        .max_h(zoomed(LIGHTBOX_MAX_HEIGHT, cx))
-                        .child(img(image).size_full().object_fit(ObjectFit::Contain)),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .top(zoomed(SPACE_2, cx))
-                        .right(zoomed(SPACE_2, cx))
-                        .child(
-                            icon_button(
-                                "lightbox-close",
-                                "Dismiss image",
-                                IconName::X,
-                                t.foreground_muted,
-                                &t,
-                                cx,
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.lightbox = None;
-                                cx.notify();
-                            })),
-                        ),
-                )
+            deferred(lightbox.occlude())
+                .with_priority(1)
                 .into_any_element(),
         )
     }

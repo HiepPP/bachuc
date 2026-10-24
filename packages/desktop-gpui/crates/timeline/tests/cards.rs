@@ -2,12 +2,13 @@
 //! `packages/app/src/agent-stream/view.tsx` and `question-form-card-core.ts` build them, and the
 //! find and image helpers of the agent pane.
 
+use bachuc_client::SentImage;
 use bachuc_timeline::cards::{
     QuestionForm, action_response, actions, dismiss_label, parse_questions, plan_outcome,
     plan_starts_open, plan_text, plan_title, title,
 };
 use bachuc_timeline::find::{match_ranges, status, step};
-use bachuc_timeline::{display_size, image_dimensions, read_target};
+use bachuc_timeline::{decode_sent_image, display_size, image_dimensions, read_target};
 use serde_json::json;
 
 #[test]
@@ -181,4 +182,12 @@ fn images_read_from_the_folder_that_holds_them_and_fit_480_by_360() {
     assert_eq!(image_dimensions(&png), Some((640, 480)));
     assert_eq!(image_dimensions(b"GIF89a\x10\x00\x20\x00"), Some((16, 32)));
     assert_eq!(image_dimensions(b"nope"), None);
+    // A sent image decodes for the user bubble; a type that is not an image draws nothing.
+    let sent = |mime_type: &str| SentImage {
+        mime_type: mime_type.into(),
+        bytes: b"hi".to_vec(),
+    };
+    let decoded = decode_sent_image(&sent("image/png"));
+    assert_eq!(decoded.map(|image| image.bytes), Some(b"hi".to_vec()));
+    assert!(decode_sent_image(&sent("text/plain")).is_none());
 }
