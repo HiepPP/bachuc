@@ -416,9 +416,14 @@ pub struct TimelineView {
     result_card: ResultCards,
     /// The timeline's bounds and the selection toolbar's size at the last paint.
     bounds: Rc<Cell<Bounds<Pixels>>>,
-    /// The width of the plugin corner pills over the timeline, 0 while none show. Message text
-    /// stays clear of them (`column_right_inset`).
-    corner_reserve: Pixels,
+    /// The widest and tallest the plugin corner pills have been over this timeline, 0 before
+    /// any show. It never shrinks, so a pill that shows only between turns does not rewrap the
+    /// text at each turn's end. Rows under the pills keep their text clear of them
+    /// (`column_right_inset`).
+    corner_reserve: Size<Pixels>,
+    /// Each row's height at its last paint, None until it paints. The rows above a row place
+    /// it under the corner pills or not (`under_corner_pills`).
+    row_heights: Rc<RefCell<Vec<Option<f32>>>>,
     toolbar_size: Rc<Cell<Size<Pixels>>>,
     pending_reveal: Option<PendingReveal>,
     reveal_highlight: Option<Task<()>>,
@@ -633,7 +638,8 @@ impl TimelineView {
             selection: None,
             result_card: ResultCards::default(),
             bounds,
-            corner_reserve: px(0.),
+            corner_reserve: Size::default(),
+            row_heights: Rc::default(),
             toolbar_size: Rc::new(Cell::new(Size::default())),
             pending_reveal: None,
             reveal_highlight: None,
@@ -665,11 +671,18 @@ impl TimelineView {
         &self.agent_id
     }
 
-    /// Sets the width of the corner pills over the timeline's top-right corner, 0 when none
-    /// show. The rows keep their text left of them, so a change redraws every row.
-    pub fn set_corner_reserve(&mut self, width: Pixels, cx: &mut Context<TimelineView>) {
-        if (f32::from(width) - f32::from(self.corner_reserve)).abs() > 0.5 {
-            self.corner_reserve = width;
+    /// Takes the size of the corner pills over the timeline's top-right corner, 0 when none
+    /// show. The reserve grows to it and never shrinks. The rows under the pills keep their text
+    /// left of them, so a change redraws every row.
+    pub fn set_corner_reserve(&mut self, size: Size<Pixels>, cx: &mut Context<TimelineView>) {
+        let grown = Size {
+            width: self.corner_reserve.width.max(size.width),
+            height: self.corner_reserve.height.max(size.height),
+        };
+        if f32::from(grown.width) - f32::from(self.corner_reserve.width) > 0.5
+            || f32::from(grown.height) - f32::from(self.corner_reserve.height) > 0.5
+        {
+            self.corner_reserve = grown;
             self.list.remeasure();
             cx.notify();
         }
@@ -1229,6 +1242,20 @@ impl TimelineView {
         let top_in_splice = removed.contains(&top.item_ix);
         if !removed.is_empty() || inserted > 0 {
             self.list.splice(removed.clone(), inserted);
+            // A replaced row keeps the old height until it paints, so the rows below it do not
+            // lose their place under the corner pills for a frame.
+            let mut heights = self.row_heights.borrow_mut();
+            if heights.len() < old.len() {
+                heights.resize(old.len(), None);
+            }
+            let replaced: Vec<Option<f32>> = heights[removed.clone()]
+                .iter()
+                .copied()
+                .chain(std::iter::repeat(None))
+                .take(inserted)
+                .collect();
+            heights.splice(removed.clone(), replaced);
+            heights.truncate(new.len());
         }
         // Rows kept on both sides of the splice draw again when their content changed.
         let kept = (0..prefix)
@@ -1945,12 +1972,68 @@ impl TimelineView {
             RowKind::Permission(request) => this.render_permission(request, cx),
         };
         let space = this.space_below(row, this.rows.get(index + 1), cx);
-        let inset = column_right_inset(
-            f32::from(this.bounds.get().size.width),
-            f32::from(this.corner_reserve),
-            bachuc_theme::reading_look(cx).content_width,
-            bachuc_theme::zoom(cx),
-        );
+        let zoom = bachuc_theme::zoom(cx);
+        let pills_bottom = if this.corner_reserve.width > px(0.) {
+            CORNER_PILLS_OFFSET * zoom + f32::from(this.corner_reserve.height)
+        } else {
+            0.
+        };
+        let list_top = (SPACE_4 + HISTORY_START_SLOT) * zoom;
+        let under = {
+            let heights = this.row_heights.borrow();
+            under_corner_pills(
+                &heights[..index.min(heights.len())],
+                index,
+                list_top,
+                pills_bottom,
+            )
+        };
+        let inset = if under {
+            column_right_inset(
+                f32::from(this.bounds.get().size.width),
+                f32::from(this.corner_reserve.width),
+                bachuc_theme::reading_look(cx).content_width,
+                zoom,
+            )
+        } else {
+            0.
+        };
+        // Records the row's height. A row near the top that changes height can move the rows
+        // below it in or out from under the pills, so they draw again. The list state stays
+        // borrowed while the list lays out its rows, so the remeasure waits for the frame's end.
+        let heights = this.row_heights.clone();
+        let view = cx.entity().downgrade();
+        let measure = canvas(
+            move |area, _, cx| {
+                let height = f32::from(area.size.height);
+                let mut all = heights.borrow_mut();
+                if all.len() <= index {
+                    all.resize(index + 1, None);
+                }
+                let old = all[index].replace(height);
+                if old.is_some_and(|old| (old - height).abs() <= 0.5) {
+                    return;
+                }
+                let top: f32 = list_top + all[..index].iter().flatten().sum::<f32>();
+                if top >= pills_bottom {
+                    return;
+                }
+                let view = view.clone();
+                cx.defer(move |cx| {
+                    view.update(cx, |this, cx| {
+                        let count = this.list.item_count();
+                        if index + 1 < count {
+                            this.list.remeasure_items(index + 1..count);
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full();
         // `streamItemWrapper`: the content column, at most 820 wide, centered. Its width follows
         // `content_column_width`. `min_w_0` stops the min-content probe: GPUI text answers it
         // with its unwrapped width, which would hold the column wider than a narrow row.
@@ -1970,6 +2053,7 @@ impl TimelineView {
                     .when_some(space, |column, space| column.pb(zoomed(space, cx)))
                     .child(content),
             )
+            .child(measure)
             .into_any_element()
     }
 
@@ -3328,6 +3412,30 @@ pub fn content_column_width(row_width: f32, max_width: f32, zoom: f32) -> f32 {
 /// The content column's width in a row `row_width` wide, before its own padding.
 fn column_width(row_width: f32, max_width: f32, zoom: f32) -> f32 {
     (row_width - 2. * ROW_PADDING * zoom).clamp(0., max_width * zoom)
+}
+
+/// Whether the row at `index` starts under the corner pills, whose column ends `pills_bottom`
+/// below the top of the timeline content (0 with no pills). `heights_above` holds the painted
+/// heights of the rows above it, and the first row starts `list_top` down. A row with a row
+/// above it that has not painted is not under: it can sit anywhere. Positions are in content
+/// coordinates, so a row keeps its answer while the timeline scrolls.
+pub fn under_corner_pills(
+    heights_above: &[Option<f32>],
+    index: usize,
+    list_top: f32,
+    pills_bottom: f32,
+) -> bool {
+    if heights_above.len() < index {
+        return false;
+    }
+    let mut top = list_top;
+    for height in heights_above {
+        let Some(height) = height else {
+            return false;
+        };
+        top += height;
+    }
+    top < pills_bottom
 }
 
 /// The corner pills sit this far in from the pane's top-right corner (`CornerPills`), and
