@@ -793,6 +793,25 @@ mod tests {
         format!("## What's Next\n```next-prompts\n{value}\n```")
     }
 
+    #[test]
+    fn v1_defaults_a_missing_prompt_id_to_its_position() {
+        let collides = json!({"version": 1, "prompts": [
+            {"prompt": "Apply G1."}, {"id": "p1", "prompt": "Apply G4."}]});
+        assert!(parse_prompts(&markdown(&collides)).is_empty());
+        let value = json!({"version": 1, "prompts": [
+            {"prompt": "Apply G1."}, {"prompt": "Apply G4."}]});
+        let blocks = parse_prompts(&markdown(&value));
+        let ids: Vec<_> = blocks[0]
+            .declaration
+            .as_ref()
+            .unwrap()
+            .prompts
+            .iter()
+            .map(|p| p.id.as_str())
+            .collect();
+        assert_eq!(ids, ["p1", "p2"]);
+    }
+
     fn with(mut value: Value, key: &str, field: Value) -> Value {
         value[key] = field;
         value

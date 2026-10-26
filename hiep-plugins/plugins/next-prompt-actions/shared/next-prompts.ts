@@ -81,10 +81,25 @@ const declarationSchema = z
   });
 export type NextPromptsV1 = z.infer<typeof declarationSchema>;
 
+// Agents often omit `id` when nothing refers to it; default it to the 1-based position.
+function withDefaultIds(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || !("prompts" in value)) return value;
+  const { prompts } = value as { prompts: unknown };
+  if (!Array.isArray(prompts)) return value;
+  return {
+    ...value,
+    prompts: prompts.map((prompt, index) =>
+      typeof prompt === "object" && prompt !== null && !("id" in prompt)
+        ? { ...prompt, id: `p${index + 1}` }
+        : prompt,
+    ),
+  };
+}
+
 export function parseNextPrompts(block: string): NextPromptsV1 | null {
   if (block.length > 65536 || new TextEncoder().encode(block).byteLength > 65536) return null;
   try {
-    const parsed = declarationSchema.safeParse(JSON.parse(block));
+    const parsed = declarationSchema.safeParse(withDefaultIds(JSON.parse(block)));
     return parsed.success ? parsed.data : null;
   } catch {
     return null;

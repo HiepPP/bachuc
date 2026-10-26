@@ -171,11 +171,26 @@ fn relations_valid(value: &NextPromptsV1) -> bool {
     true
 }
 
+/// Agents often omit `id` when nothing refers to it; default it to the 1-based position.
+fn default_ids(value: &mut Value) {
+    let Some(prompts) = value.get_mut("prompts").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for (index, prompt) in prompts.iter_mut().enumerate() {
+        if let Some(object) = prompt.as_object_mut() {
+            object
+                .entry("id")
+                .or_insert_with(|| Value::String(format!("p{}", index + 1)));
+        }
+    }
+}
+
 pub(crate) fn parse_next_prompts(block: &str) -> Option<NextPromptsV1> {
     if js_len(block) > MAX_BLOCK || block.len() > MAX_BLOCK {
         return None;
     }
-    let value: Value = serde_json::from_str(block).ok()?;
+    let mut value: Value = serde_json::from_str(block).ok()?;
+    default_ids(&mut value);
     shape(&value).filter(relations_valid)
 }
 
