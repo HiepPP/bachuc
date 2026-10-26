@@ -332,7 +332,7 @@ pub struct Projector {
     projections: Vec<Option<Rc<Projection>>>,
     revision: Option<u64>,
     labels: Option<u64>,
-    /// The last assistant message or thought, which streams while the turn runs.
+    /// The last assistant message or thought, which streams while its turn runs.
     last_stream_item: Option<usize>,
     streaming: Option<usize>,
 }
@@ -374,7 +374,14 @@ impl Projector {
             }
         }
         let old_streaming = self.streaming;
-        self.streaming = self.last_stream_item.filter(|_| input.turn_active);
+        // A sent prompt starts the turn before its reply arrives; the reply above that prompt
+        // stays complete.
+        self.streaming = self.last_stream_item.filter(|&last| {
+            input.turn_active
+                && !entries[last + 1..]
+                    .iter()
+                    .any(|entry| item_type(entry) == "user_message")
+        });
 
         let mut outcome = ProjectOutcome {
             full,
