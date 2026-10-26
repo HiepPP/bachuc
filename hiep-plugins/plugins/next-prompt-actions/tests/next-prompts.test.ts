@@ -71,6 +71,20 @@ test("v1 parses exact prompts and reasons only in completed next-step fences", (
     assert.deepEqual(parsePrompts(text), []);
 });
 
+test("v1 defaults a missing prompt id to its position", () => {
+  const value = {
+    version: 1,
+    prompts: [{ prompt: "Apply G1." }, { id: "p1", prompt: "Apply G4." }],
+  };
+  assert.deepEqual(parsePrompts(markdown(value)), [], "a default id collides with a declared one");
+  value.prompts[1] = { prompt: "Apply G4." };
+  const [parsed] = parsePrompts(markdown(value));
+  assert.deepEqual(
+    parsed?.declaration?.prompts.map((p) => p.id),
+    ["p1", "p2"],
+  );
+});
+
 test("v1 ignores unknown fields instead of rejecting the block", () => {
   const value = {
     ...declaration(),
