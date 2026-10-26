@@ -25,7 +25,7 @@ use serde_json::Value;
 use crate::diff::{DiffLine, LineKind};
 use crate::grouping::entry_key;
 use crate::motion;
-use crate::tools::{self, Section};
+use crate::tools::{self, HookLine, Section};
 use crate::{LineRuns, MotionKey, TimelineEvent, TimelineView};
 
 /// The badge reaches past the stream padding, as `marginHorizontal: -13`.
@@ -330,7 +330,16 @@ impl TimelineView {
         let t = tokens(cx);
         let shown = tools::presentation(item, &self.cwd);
         let sections = tools::sections(&item["detail"], shown.error.as_deref());
-        let can_open = !sections.is_empty();
+        // A `hook` row is itself one hook, so it shows no badge or Hooks section of its own.
+        let hooks = if item["name"]
+            .as_str()
+            .is_some_and(|name| name.eq_ignore_ascii_case("hook"))
+        {
+            Vec::new()
+        } else {
+            tools::hook_lines(item)
+        };
+        let can_open = !sections.is_empty() || !hooks.is_empty();
         let expanded = can_open && self.expanded.contains(&key);
         let status = item["status"].as_str().unwrap_or("");
         let is_loading = matches!(status, "running" | "executing");
@@ -444,9 +453,36 @@ impl TimelineView {
                 });
             }))
         });
+        let hook_failed = hooks.iter().any(|hook| hook.status == "error");
+        let hook_badge = (!hooks.is_empty()).then(|| {
+            let color = if hook_failed {
+                t.destructive
+            } else {
+                t.foreground_muted
+            };
+            h_flex()
+                .flex_none()
+                .items_center()
+                .gap(zoomed(SPACE_1, cx))
+                .ml(zoomed(SPACE_2, cx))
+                .text_size(ui_font_size(FONT_SM, cx))
+                .text_color(color)
+                .child(
+                    icon(IconName::Zap)
+                        .with_size(zoomed(ICON_XS, cx))
+                        .text_color(color),
+                )
+                .child(hooks.len().to_string())
+        });
         let mut aria = shown.name.clone();
         if let Some(summary) = &shown.summary {
             aria.push_str(&format!(": {summary}"));
+        }
+        if !hooks.is_empty() {
+            aria.push_str(&format!(", {} hooks", hooks.len()));
+            if hook_failed {
+                aria.push_str(" (failed)");
+            }
         }
         if is_error {
             aria.push_str(", failed");
@@ -489,6 +525,7 @@ impl TimelineView {
                 )
             })
             .when(!has_shimmer, |header| header.child(label).children(summary))
+            .children(hook_badge)
             .children(open_file);
         let details = expanded.then(|| {
             div()
@@ -507,6 +544,9 @@ impl TimelineView {
                     TOOL_DETAIL_MAX_HEIGHT,
                     cx,
                 ))
+                .when(!hooks.is_empty(), |details| {
+                    details.child(self.render_hooks(key, &hooks, !sections.is_empty(), &t, cx))
+                })
         });
         v_flex()
             .id(("tool", key))
@@ -516,6 +556,69 @@ impl TimelineView {
             .mx(zoomed(-BADGE_BLEED, cx))
             .child(header)
             .children(details)
+            .into_any_element()
+    }
+
+    /// The Hooks section after the detail sections: one block per hook with its name, status,
+    /// exit code, and output.
+    fn render_hooks(
+        &self,
+        key: u64,
+        hooks: &[HookLine],
+        after_sections: bool,
+        t: &Tokens,
+        cx: &App,
+    ) -> AnyElement {
+        let mono = mono_font_family(cx);
+        div()
+            .id(("hooks", key))
+            .when(after_sections, |area| {
+                area.border_t_1().border_color(t.border)
+            })
+            .max_h(zoomed(TOOL_DETAIL_MAX_HEIGHT, cx))
+            .overflow_y_scroll()
+            .p(zoomed(SPACE_3, cx))
+            .bg(t.surface1)
+            .child(
+                v_flex()
+                    .gap(zoomed(SPACE_2, cx))
+                    .child(
+                        div()
+                            .text_size(ui_font_size(FONT_BASE, cx))
+                            .text_color(t.foreground_muted)
+                            .child("Hooks"),
+                    )
+                    .children(hooks.iter().map(|hook| {
+                        let status_color = if hook.status == "error" {
+                            t.destructive
+                        } else {
+                            t.foreground_muted
+                        };
+                        v_flex()
+                            .gap(zoomed(SPACE_1, cx))
+                            .font_family(mono)
+                            .text_size(code_font_size(FONT_CODE, cx))
+                            .child(
+                                h_flex()
+                                    .gap(zoomed(SPACE_2, cx))
+                                    .child(div().text_color(t.foreground).child(hook.name.clone()))
+                                    .child(
+                                        div().text_color(status_color).child(hook.status.clone()),
+                                    )
+                                    .children(hook.exit_code.map(|code| {
+                                        div()
+                                            .text_color(t.foreground_muted)
+                                            .child(format!("exit {code}"))
+                                    })),
+                            )
+                            .children(hook.output.as_ref().map(|output| {
+                                div()
+                                    .whitespace_nowrap()
+                                    .text_color(t.foreground_muted)
+                                    .child(cut_lines(output))
+                            }))
+                    })),
+            )
             .into_any_element()
     }
 

@@ -23,6 +23,15 @@ pub struct Presentation {
     pub error: Option<String>,
 }
 
+/// One hook that ran on a tool call, from the `hooks` of its item.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HookLine {
+    pub name: String,
+    pub status: String,
+    pub exit_code: Option<i64>,
+    pub output: Option<String>,
+}
+
 /// One block of a tool detail view.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Section {
@@ -124,6 +133,9 @@ fn icon_for(name: &str, detail: &Value) -> IconName {
     if lower == "speak" {
         return IconName::MicVocal;
     }
+    if lower == "hook" {
+        return IconName::Zap;
+    }
     if lower == "task" {
         return IconName::Bot;
     }
@@ -173,6 +185,8 @@ pub fn presentation(item: &Value, cwd: &str) -> Presentation {
         )
     } else if is_unknown && lower == "thinking" {
         (Some("Thinking".to_string()), summary)
+    } else if lower == "hook" {
+        (Some("Hook".to_string()), text(&detail["label"]))
     } else if lower == "terminal" {
         (
             Some("Terminal".to_string()),
@@ -428,10 +442,28 @@ pub fn sections(detail: &Value, error: Option<&str>) -> Vec<Section> {
     out
 }
 
-/// Whether the detail has anything to open, as `hasMeaningfulToolCallDetail`.
+/// The hooks that ran on a tool call (`hooks` of its item), in order.
+pub fn hook_lines(item: &Value) -> Vec<HookLine> {
+    item["hooks"]
+        .as_array()
+        .map(|hooks| {
+            hooks
+                .iter()
+                .map(|hook| HookLine {
+                    name: hook["name"].as_str().unwrap_or("").to_string(),
+                    status: hook["status"].as_str().unwrap_or("").to_string(),
+                    exit_code: hook["exitCode"].as_i64(),
+                    output: text(&hook["output"]),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether the detail has anything to open, as `hasMeaningfulToolCallDetail`. Hooks count too.
 pub fn has_details(item: &Value) -> bool {
     let error = error_text(&item["error"]);
-    !sections(&item["detail"], error.as_deref()).is_empty()
+    !sections(&item["detail"], error.as_deref()).is_empty() || !hook_lines(item).is_empty()
 }
 
 /// The syntax language for a file path, by extension: only the grammars the crate builds.
