@@ -449,3 +449,11 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the repo lint and format hooks check every staged JS file. A vendored JS file needs an entry in `.oxlintrc.json`, `.oxfmtrc.json`, and the `lefthook.yml` lint exclude.
 - Source: TASK-301, TASK-303 outcomes and the UI checker run.
 - Use next time: plan a vendored JS asset with its lint and format ignore lines, and plan GPUI example screen checks with the `.app` wrapper.
+
+### 2026-10-27 skill and hook usage view
+
+- Learned: with `includeHookEvents: true`, one short Claude turn on this machine makes about 19 non-tool hook events (3 `SessionStart`, 6 `UserPromptSubmit`, 10 `Stop`), plus 3 `PreToolUse` and 3 `PostToolUse` per Bash call. The SDK does not report Paseo's own callback hooks.
+- Learned: a `Stop` hook response can arrive after the turn ends. The provider marks it `cancelled` at turn end, then re-emits it as `success`; the last item wins by `callId`.
+- Learned: the lefthook format hook rewrites watchtower markdown tables, so run `npm run format:files` on plan files before a plan commit.
+- Source: TASK-305 live probe, the UI checker run, and the plan commits.
+- Use next time: plan any per-hook UI for about 20 rows per turn, and do not assume a hook ends before its turn ends.

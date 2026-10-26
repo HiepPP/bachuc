@@ -4,17 +4,17 @@
 
 - Title: Show the skills and hooks a Claude agent used in its session
 - Slug: 20261027-skill-and-hook-usage-view
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-27
 
 ## Tracker
 
-| Order | TASK                                                           | Group | Status      | Spec                                                                                                                         | Deps     | Context                                        | Notes                                             |
-| ----- | -------------------------------------------------------------- | ----- | ----------- | ---------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------- | ------------------------------------------------- |
-| 1     | TASK-305 Capture Claude hooks and skill use in the provider    | A     | DONE        | [watchtower/tasks/TASK-305-claude-hook-and-skill-capture.md](watchtower/tasks/TASK-305-claude-hook-and-skill-capture.md)     | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares protocol and SDK type files with TASK-306. |
-| 2     | TASK-306 Count, store, and send the skill and hook summary     | A     | DONE        | [watchtower/tasks/TASK-306-daemon-skill-hook-usage-summary.md](watchtower/tasks/TASK-306-daemon-skill-hook-usage-summary.md) | TASK-305 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Same builder as TASK-305, after it.               |
-| 3     | TASK-307 Show hooks in GPUI tool rows and hook rows            | B     | IN PROGRESS | [watchtower/tasks/TASK-307-gpui-timeline-hook-rows.md](watchtower/tasks/TASK-307-gpui-timeline-hook-rows.md)                 | TASK-305 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Start order only; no shared file.                 |
-| 4     | TASK-308 Show the skill and hook summary as a GPUI header chip | C     | IN PROGRESS | [watchtower/tasks/TASK-308-gpui-header-usage-chip.md](watchtower/tasks/TASK-308-gpui-header-usage-chip.md)                   | TASK-306 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Start order only; no shared file.                 |
+| Order | TASK                                                           | Group | Status | Spec                                                                                                                         | Deps     | Context                                        | Notes                                             |
+| ----- | -------------------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------- | ------------------------------------------------- |
+| 1     | TASK-305 Capture Claude hooks and skill use in the provider    | A     | DONE   | [watchtower/tasks/TASK-305-claude-hook-and-skill-capture.md](watchtower/tasks/TASK-305-claude-hook-and-skill-capture.md)     | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Shares protocol and SDK type files with TASK-306. |
+| 2     | TASK-306 Count, store, and send the skill and hook summary     | A     | DONE   | [watchtower/tasks/TASK-306-daemon-skill-hook-usage-summary.md](watchtower/tasks/TASK-306-daemon-skill-hook-usage-summary.md) | TASK-305 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Same builder as TASK-305, after it.               |
+| 3     | TASK-307 Show hooks in GPUI tool rows and hook rows            | B     | DONE   | [watchtower/tasks/TASK-307-gpui-timeline-hook-rows.md](watchtower/tasks/TASK-307-gpui-timeline-hook-rows.md)                 | TASK-305 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Start order only; no shared file.                 |
+| 4     | TASK-308 Show the skill and hook summary as a GPUI header chip | C     | DONE   | [watchtower/tasks/TASK-308-gpui-header-usage-chip.md](watchtower/tasks/TASK-308-gpui-header-usage-chip.md)                   | TASK-306 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Start order only; no shared file.                 |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
@@ -34,7 +34,9 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Handoff
 
-- Next action: run `/watchtower implement`. Group A goes first; groups B and C start when their Deps close.
+- Run result (2026-10-27): all 4 TASKs DONE on `feat/skill-and-hook-usage-view`. Code commits: `002d06e34` (group A), `64509dded` (group B), `190c21300` (group C). Nothing pushed.
+- Plan Verify: the live end-to-end check passed through the UI checker (a `/feynman` skill and the Bash hooks counted; the chip read "1 skill · 5 hooks"). The daemon restart check stayed UNVERIFIED (unattended), because the run config forbids a live restart; the agent-manager reload test covers it. No new `COMPAT(` tag was needed.
+- Next action: the owner tests on live, then reviews and merges the branch to `main`.
 
 ## Archive
 
