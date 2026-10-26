@@ -630,12 +630,22 @@ const ToolCallDetailPayloadSchema: z.ZodType<ToolCallDetail, unknown> = z.discri
   ],
 );
 
+const ToolCallHookPayloadSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  event: z.string(),
+  status: z.enum(["running", "success", "error", "cancelled"]),
+  exitCode: z.number().optional(),
+  output: z.string().optional(),
+});
+
 const ToolCallBasePayloadSchema = z.object({
   type: z.literal("tool_call"),
   callId: z.string(),
   name: z.string(),
   detail: ToolCallDetailPayloadSchema,
   metadata: z.record(z.string(), z.unknown()).optional(),
+  hooks: z.array(ToolCallHookPayloadSchema).optional(),
 });
 
 const ToolCallRunningPayloadSchema = ToolCallBasePayloadSchema.extend({
@@ -852,6 +862,19 @@ export const AgentBackgroundProcessSchema = z.object({
 
 export type AgentBackgroundProcess = z.infer<typeof AgentBackgroundProcessSchema>;
 
+const SkillHookUsageEntrySchema = z.object({
+  name: z.string(),
+  event: z.string().optional(),
+  count: z.number(),
+  errorCount: z.number(),
+  lastUsedAt: z.string(),
+});
+
+export const AgentSkillHookUsageSchema = z.object({
+  skills: z.array(SkillHookUsageEntrySchema),
+  hooks: z.array(SkillHookUsageEntrySchema),
+});
+
 export const AgentSnapshotPayloadSchema = z.object({
   id: z.string(),
   provider: AgentProviderSchema,
@@ -883,6 +906,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   providerUnavailable: z.boolean().optional(),
   queue: AgentMessageQueueSummarySchema.optional(),
   backgroundProcesses: z.array(AgentBackgroundProcessSchema).optional(),
+  skillHookUsage: AgentSkillHookUsageSchema.optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;

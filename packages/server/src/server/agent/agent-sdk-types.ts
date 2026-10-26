@@ -349,6 +349,16 @@ export type ToolCallDetail =
       output: unknown;
     };
 
+export interface ToolCallHook {
+  id: string;
+  /** The SDK hook name, for example `PreToolUse:Bash`. */
+  name: string;
+  event: string;
+  status: "running" | "success" | "error" | "cancelled";
+  exitCode?: number;
+  output?: string;
+}
+
 interface ToolCallBase {
   [key: string]: unknown;
   type: "tool_call";
@@ -356,6 +366,7 @@ interface ToolCallBase {
   name: string;
   detail: ToolCallDetail;
   metadata?: Record<string, unknown>;
+  hooks?: ToolCallHook[];
 }
 
 type ToolCallRunningTimelineItem = ToolCallBase & {
@@ -483,7 +494,31 @@ export type AgentStreamEvent =
       event: import("./provider-subagents/store.js").ProviderSubagentInputEvent;
     }
   /** Upserts one background process. Agent state, not a timeline row. */
-  | { type: "background_process"; provider: AgentProvider; process: AgentBackgroundProcess };
+  | { type: "background_process"; provider: AgentProvider; process: AgentBackgroundProcess }
+  /** One skill use. Internal: the agent manager counts it and never forwards it. */
+  | {
+      type: "skill_used";
+      provider: AgentProvider;
+      name: string;
+      source: "tool" | "slash_command";
+    }
+  /** One finished hook. Internal: the agent manager counts it and never forwards it. */
+  | { type: "hook_used"; provider: AgentProvider; hook: ToolCallHook };
+
+export interface SkillHookUsageEntry {
+  name: string;
+  /** Set only for hooks. */
+  event?: string;
+  count: number;
+  errorCount: number;
+  lastUsedAt: string;
+}
+
+/** Per-agent skill and hook counts, newest first, at most 50 entries each. */
+export interface AgentSkillHookUsage {
+  skills: SkillHookUsageEntry[];
+  hooks: SkillHookUsageEntry[];
+}
 
 export type AgentBackgroundProcessStatus = "running" | "completed" | "failed" | "stopped";
 

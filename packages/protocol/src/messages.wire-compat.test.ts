@@ -219,6 +219,90 @@ describe("wire schema compatibility", () => {
     expect(parsed.detail.actions).toEqual([]);
   });
 
+  test("tool call items parse with and without hooks, and old clients drop hooks", () => {
+    const item = {
+      type: "tool_call" as const,
+      callId: "toolu_b1",
+      name: "Bash",
+      status: "completed" as const,
+      error: null,
+      detail: { type: "shell" as const, command: "ls" },
+    };
+    const hooks = [
+      { id: "h1", name: "PreToolUse:Bash", event: "PreToolUse", status: "success" as const },
+      {
+        id: "h2",
+        name: "PostToolUse:Bash",
+        event: "PostToolUse",
+        status: "error" as const,
+        exitCode: 2,
+        output: "blocked",
+      },
+    ];
+
+    expect(AgentTimelineItemPayloadSchema.parse(item)).toEqual(item);
+    expect(AgentTimelineItemPayloadSchema.parse({ ...item, hooks })).toEqual({ ...item, hooks });
+    // A client from before hooks has no field for them and keeps the rest of the item.
+    const PreHooksToolCall = z.object({
+      type: z.literal("tool_call"),
+      callId: z.string(),
+      name: z.string(),
+      status: z.string(),
+      error: z.unknown().nullable(),
+      detail: z.object({ type: z.literal("shell"), command: z.string() }),
+    });
+    expect(PreHooksToolCall.parse({ ...item, hooks })).toEqual(item);
+  });
+
+  test("agent snapshots parse with and without skillHookUsage", () => {
+    const snapshot = {
+      id: "agent-1",
+      provider: "claude",
+      cwd: "/tmp/project",
+      model: null,
+      createdAt: "2026-10-27T00:00:00.000Z",
+      updatedAt: "2026-10-27T00:00:00.000Z",
+      lastUserMessageAt: null,
+      status: "idle",
+      capabilities: {
+        supportsStreaming: true,
+        supportsSessionPersistence: true,
+        supportsDynamicModes: false,
+        supportsMcpServers: false,
+        supportsReasoningStream: false,
+        supportsToolInvocations: true,
+      },
+      currentModeId: null,
+      availableModes: [],
+      pendingPermissions: [],
+      persistence: null,
+      title: null,
+      labels: {},
+    };
+    const skillHookUsage = {
+      skills: [{ name: "watchtower", count: 2, errorCount: 0, lastUsedAt: "2026-10-27T10:00:00Z" }],
+      hooks: [
+        {
+          name: "PreToolUse:Bash",
+          event: "PreToolUse",
+          count: 5,
+          errorCount: 1,
+          lastUsedAt: "2026-10-27T10:00:00Z",
+        },
+      ],
+    };
+
+    expect(AgentSnapshotPayloadSchema.parse(snapshot).skillHookUsage).toBeUndefined();
+    expect(
+      AgentSnapshotPayloadSchema.parse({ ...snapshot, skillHookUsage }).skillHookUsage,
+    ).toEqual(skillHookUsage);
+    // A client from before the summary drops the field and keeps the rest.
+    const PreSummarySnapshotSchema = AgentSnapshotPayloadSchema.omit({ skillHookUsage: true });
+    expect(PreSummarySnapshotSchema.parse({ ...snapshot, skillHookUsage })).not.toHaveProperty(
+      "skillHookUsage",
+    );
+  });
+
   test("old clients parse agent snapshots with rewind capabilities", () => {
     const parsed = LegacyAgentSnapshotPayloadSchema.parse({
       id: "agent-1",

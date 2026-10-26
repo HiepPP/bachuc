@@ -42,6 +42,14 @@ import {
   resolveClaudeDisabledThinkingForModel,
 } from "./model-manifest.js";
 import { parsePartialJsonObject } from "./partial-json.js";
+import {
+  hookRowItem,
+  hookToolName,
+  readClaudeHookMessage,
+  slashCommandSkill,
+  truncateHookOutput,
+  type ClaudeHookMessage,
+} from "./hook-events.js";
 import { ClaudeSidechainTracker } from "./sidechain-tracker.js";
 import { ClaudeTaskState } from "./task-state.js";
 import { ClaudeBackgroundProcesses } from "./background-processes.js";
@@ -121,6 +129,7 @@ import {
   type SteerResult,
   type AgentStreamEvent,
   type AgentTimelineItem,
+  type ToolCallHook,
   type AgentUsage,
   type AgentRuntimeInfo,
   type FetchCatalogOptions,
@@ -866,6 +875,11 @@ interface PendingPermission {
 }
 
 type ToolUseClassification = "generic" | "command" | "file_change";
+type ClaudeToolCallItem = Extract<AgentTimelineItem, { type: "tool_call" }>;
+
+/** Tool call items kept per turn for hook re-emits; hooks only ever match recent calls. */
+const MAX_TRACKED_TOOL_CALLS = 64;
+
 interface ToolUseCacheEntry {
   id: string;
   name: string;
@@ -2162,6 +2176,14 @@ class ClaudeAgentSession implements AgentSession {
   private lastRuntimeModel: string | null = null;
   private compacting = false;
   private compactionMarkerOpen = false;
+  /** The `skills` list of the latest init message; a slash command counts only when listed. */
+  private initSkills: string[] | null = null;
+  /** Typed prompt texts sent before any init message told us which skills exist. */
+  private pendingSlashTexts: string[] = [];
+  /** Newest full tool call item per call id this turn, so a hook can re-emit its call. */
+  private readonly turnToolCalls = new Map<string, ClaudeToolCallItem>();
+  private readonly liveHooks = new Map<string, { hook: ToolCallHook; callId: string }>();
+  private readonly countedSkillCallIds = new Set<string>();
   private queryPumpPromise: Promise<void> | null = null;
   private queryRestartNeeded = false;
   private pendingInterruptAbort = false;
@@ -2342,6 +2364,7 @@ class ClaudeAgentSession implements AgentSession {
       this.activeForegroundInput = this.input;
       this.startQueryPump();
       this.input.push(sdkMessage);
+      this.emitSlashCommandSkillUsed(prompt);
       setTimeout(() => {
         if (this.activeForegroundTurnId === turnId) {
           this.emitSubmittedUserMessage(sdkMessage, turnId, options?.clientMessageId);
@@ -3352,6 +3375,7 @@ class ClaudeAgentSession implements AgentSession {
     const base: ClaudeOptions = {
       cwd: this.config.cwd,
       includePartialMessages: true,
+      includeHookEvents: true,
       permissionMode: this.currentMode,
       // Dynamic mode switching can recreate the underlying Claude query. Keep the
       // bypass launch capability available so later setPermissionMode("bypassPermissions")
@@ -3657,6 +3681,7 @@ class ClaudeAgentSession implements AgentSession {
     if (event.type === "turn_failed" || event.type === "turn_canceled") {
       this.flushPendingToolCalls();
     }
+    this.finishTurnHooks();
     this.notifySubscribers(event);
     this.activeForegroundTurnId = null;
     this.activeForegroundQuery = null;
@@ -3670,6 +3695,9 @@ class ClaudeAgentSession implements AgentSession {
   private dispatchEvents(events: AgentStreamEvent[]): void {
     let terminalSeen = false;
     for (const event of events) {
+      if (this.isTerminalTurnEvent(event)) {
+        this.finishTurnHooks();
+      }
       this.notifySubscribers(event);
       terminalSeen ||= this.isTerminalTurnEvent(event);
     }
@@ -3712,6 +3740,7 @@ class ClaudeAgentSession implements AgentSession {
     if (!this.autonomousTurn) {
       return;
     }
+    this.finishTurnHooks();
     this.notifySubscribers({ type: "turn_completed", provider: "claude" });
     this.autonomousTurn = null;
     this.activeForegroundQuery = null;
@@ -4232,7 +4261,7 @@ class ClaudeAgentSession implements AgentSession {
         break;
     }
 
-    return events;
+    return this.trackTimelineEvents(events);
   }
 
   /** Once Claude has read a steer there is nothing left to discard on interrupt. */
@@ -4354,8 +4383,24 @@ class ClaudeAgentSession implements AgentSession {
     message: Extract<SDKMessage, { type: "system" }>,
     events: AgentStreamEvent[],
   ): void {
+    const hookMessage = readClaudeHookMessage(message);
+    if (hookMessage) {
+      this.appendHookEvents(hookMessage, events);
+      return;
+    }
     if (message.subtype === "init") {
       const sessionUpdate = this.handleSystemMessage(message);
+      const pendingSlashTexts = this.pendingSlashTexts;
+      this.pendingSlashTexts = [];
+      const slashSkill = this.findSlashCommandSkill(pendingSlashTexts);
+      if (slashSkill) {
+        events.push({
+          type: "skill_used",
+          provider: "claude",
+          name: slashSkill,
+          source: "slash_command",
+        });
+      }
       if (sessionUpdate.notice) {
         events.push({
           type: "timeline",
@@ -4413,6 +4458,153 @@ class ClaudeAgentSession implements AgentSession {
     if (message.subtype === "task_progress") {
       return;
     }
+  }
+
+  private appendHookEvents(message: ClaudeHookMessage, events: AgentStreamEvent[]): void {
+    const hook: ToolCallHook =
+      message.phase === "started"
+        ? { id: message.id, name: message.name, event: message.event, status: "running" }
+        : {
+            id: message.id,
+            name: message.name,
+            event: message.event,
+            status: message.status,
+            ...(message.exitCode === undefined ? {} : { exitCode: message.exitCode }),
+            ...(message.output ? { output: truncateHookOutput(message.output) } : {}),
+          };
+    const item = this.applyHook(hook);
+    if (item) events.push({ type: "timeline", provider: "claude", item });
+    // Count a hook once, when it ends.
+    if (hook.status !== "running") {
+      events.push({ type: "hook_used", provider: "claude", hook });
+    }
+  }
+
+  /**
+   * Puts a hook in its tool call, or in its own `hook` row when no call matches, and returns the
+   * full item to re-emit. The agent manager replaces an item by call id, so the item must be the
+   * newest copy of the call.
+   */
+  private applyHook(hook: ToolCallHook): ClaudeToolCallItem | null {
+    const known = this.liveHooks.get(hook.id);
+    const target = known?.callId ?? this.matchHookToolCall(hook)?.callId ?? `hook:${hook.id}`;
+    if (hook.status === "running") {
+      this.liveHooks.set(hook.id, { hook, callId: target });
+    } else {
+      this.liveHooks.delete(hook.id);
+    }
+    const base = this.turnToolCalls.get(target);
+    if (!base) {
+      return target === `hook:${hook.id}` ? this.trackToolCall(hookRowItem(hook)) : null;
+    }
+    const hooks = [...(base.hooks ?? []).filter((entry) => entry.id !== hook.id), hook];
+    if (target !== `hook:${hook.id}`) {
+      return this.trackToolCall({ ...base, hooks });
+    }
+    return this.trackToolCall({ ...hookRowItem(hook), hooks });
+  }
+
+  /**
+   * A hook message has no tool call id, so a tool hook goes to the newest main-thread call of its
+   * tool. Parallel calls of one tool take one hook each, newest first. A `PreToolUse` hook only
+   * matches a running call.
+   */
+  private matchHookToolCall(hook: ToolCallHook): ClaudeToolCallItem | null {
+    const tool = hookToolName(hook.name);
+    if (!tool) return null;
+    let calls = [...this.turnToolCalls.values()]
+      .toReversed()
+      .filter((call) => call.name === tool && !call.callId.startsWith("hook:"));
+    if (hook.event === "PreToolUse") {
+      calls = calls.filter((call) => call.status === "running");
+    }
+    return (
+      calls.find((call) => !call.hooks?.some((entry) => entry.event === hook.event)) ??
+      calls[0] ??
+      null
+    );
+  }
+
+  /** Remembers the newest copy of a tool call and keeps the hooks it already carries. */
+  private trackToolCall(item: ClaudeToolCallItem): ClaudeToolCallItem {
+    const prior = this.turnToolCalls.get(item.callId);
+    const merged =
+      item.hooks === undefined && prior?.hooks ? { ...item, hooks: prior.hooks } : item;
+    this.turnToolCalls.delete(item.callId);
+    this.turnToolCalls.set(item.callId, merged);
+    if (this.turnToolCalls.size > MAX_TRACKED_TOOL_CALLS) {
+      const oldest = this.turnToolCalls.keys().next().value;
+      if (oldest !== undefined) this.turnToolCalls.delete(oldest);
+    }
+    return merged;
+  }
+
+  /** Live path only: tracks tool calls and counts each `Skill` call once. */
+  private trackTimelineEvents(events: AgentStreamEvent[]): AgentStreamEvent[] {
+    const tracked: AgentStreamEvent[] = [];
+    for (const event of events) {
+      if (event.type !== "timeline" || event.item.type !== "tool_call") {
+        tracked.push(event);
+        continue;
+      }
+      const item = this.trackToolCall(event.item);
+      tracked.push(item === event.item ? event : { ...event, item });
+      const skill = this.readNewSkillUse(item);
+      if (skill) {
+        tracked.push({ type: "skill_used", provider: "claude", name: skill, source: "tool" });
+      }
+    }
+    return tracked;
+  }
+
+  private readNewSkillUse(item: ClaudeToolCallItem): string | null {
+    if (item.name !== "Skill" || this.countedSkillCallIds.has(item.callId)) return null;
+    if (item.detail.type !== "plain_text" || !item.detail.label) return null;
+    this.countedSkillCallIds.add(item.callId);
+    return item.detail.label;
+  }
+
+  /** A typed `/<name>` prompt that names a listed skill counts as one skill use. */
+  private emitSlashCommandSkillUsed(prompt: AgentPromptInput): void {
+    const typedTexts =
+      typeof prompt === "string"
+        ? [prompt]
+        : prompt.flatMap((chunk) =>
+            chunk.type === "text" && !("mimeType" in chunk) ? [chunk.text] : [],
+          );
+    if (this.initSkills === null) {
+      // The first prompt can leave before Claude's init message lists the skills.
+      this.pendingSlashTexts = typedTexts;
+      return;
+    }
+    const name = this.findSlashCommandSkill(typedTexts);
+    if (name) {
+      this.notifySubscribers({
+        type: "skill_used",
+        provider: "claude",
+        name,
+        source: "slash_command",
+      });
+    }
+  }
+
+  private findSlashCommandSkill(texts: readonly string[]): string | null {
+    for (const text of texts) {
+      const name = slashCommandSkill(text, this.initSkills ?? []);
+      if (name) return name;
+    }
+    return null;
+  }
+
+  /** Ends the turn's hook state: a hook still running is re-emitted as cancelled. */
+  private finishTurnHooks(): void {
+    for (const { hook } of this.liveHooks.values()) {
+      const item = this.applyHook({ ...hook, status: "cancelled" });
+      if (item) this.pushEvent({ type: "timeline", provider: "claude", item });
+    }
+    this.liveHooks.clear();
+    this.turnToolCalls.clear();
+    this.pendingSlashTexts = [];
   }
 
   private appendTaskNotificationEvents(
@@ -4656,6 +4848,11 @@ class ClaudeAgentSession implements AgentSession {
     }
 
     const msgRecord = toObjectRecord(message) ?? {};
+    if (Array.isArray(msgRecord.skills)) {
+      this.initSkills = msgRecord.skills.filter(
+        (skill): skill is string => typeof skill === "string",
+      );
+    }
     const newSessionId = extractSessionIdRaw({
       session_id: msgRecord.session_id,
       sessionId: msgRecord.sessionId,
@@ -4835,7 +5032,11 @@ class ClaudeAgentSession implements AgentSession {
   };
 
   private enqueueTimeline(item: AgentTimelineItem) {
-    this.pushEvent({ type: "timeline", item, provider: "claude" });
+    this.pushEvent({
+      type: "timeline",
+      item: item.type === "tool_call" ? this.trackToolCall(item) : item,
+      provider: "claude",
+    });
   }
 
   private flushPendingToolCalls() {
