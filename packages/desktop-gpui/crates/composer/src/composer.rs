@@ -501,7 +501,10 @@ impl Composer {
         window: &mut Window,
         cx: &mut Context<Composer>,
     ) -> Composer {
-        let max_rows = max_input_rows(f32::from(window.viewport_size().height), FONT_CONTENT);
+        let max_rows = max_input_rows(
+            f32::from(window.viewport_size().height),
+            f32::from(ui_font_size(FONT_CONTENT, cx)),
+        );
         let min_lines = options
             .as_ref()
             .map_or(1, |options| options.min_lines.max(1));
@@ -3308,7 +3311,10 @@ impl RenderOnce for AttachTrigger {
 
 impl Render for Composer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let rows = max_input_rows(f32::from(window.viewport_size().height), FONT_CONTENT);
+        let rows = max_input_rows(
+            f32::from(window.viewport_size().height),
+            f32::from(ui_font_size(FONT_CONTENT, cx)),
+        );
         if rows != self.max_rows {
             self.max_rows = rows;
             let min = self
