@@ -2950,6 +2950,51 @@ fn a_process_with_an_unreadable_start_or_end_is_dropped_or_kept_open() {
     assert_eq!(processes[0].ended_at_ms, None);
 }
 
+// ---- skill and hook usage (TASK-308) ----
+
+fn agent_with_usage(id: &str, usage: Value) -> Value {
+    let mut agent = agent_snapshot(id, "running");
+    agent["skillHookUsage"] = usage;
+    json!({"type": "agent_update", "payload": {"kind": "upsert", "agent": agent}})
+}
+
+#[test]
+fn an_agent_snapshot_keeps_its_skill_hook_usage() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    server.broadcast(agent_with_usage(
+        "a1",
+        json!({
+            "skills": [{"name": "watchtower", "count": 2, "errorCount": 0, "lastUsedAt": "2026-10-27T10:00:00.000Z"}],
+            "hooks": [{"name": "PreToolUse:Bash", "event": "PreToolUse", "count": 5, "errorCount": 1, "lastUsedAt": "2026-10-27T10:01:00.000Z"}]
+        }),
+    ));
+    assert!(
+        harness.pump_until(WAIT, |h| h.core.skill_hook_usage("a1").is_some()),
+        "the usage arrives"
+    );
+    let usage = harness.core.skill_hook_usage("a1").unwrap();
+    assert_eq!(usage.skills[0].name, "watchtower");
+    assert_eq!(usage.skills[0].count, 2);
+    assert_eq!(usage.hooks[0].event.as_deref(), Some("PreToolUse"));
+    assert_eq!(usage.hooks[0].error_count, 1);
+    assert_eq!(usage.chip_label().as_deref(), Some("1 skill · 1 hook"));
+}
+
+#[test]
+fn an_agent_snapshot_without_usage_has_no_chip() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = connect(&server);
+    server.broadcast(agent_with_processes("a1", json!([])));
+    assert!(
+        harness.pump_until(WAIT, |h| h.core.agents()[0].status == "running"),
+        "the snapshot arrives"
+    );
+    assert!(harness.core.skill_hook_usage("a1").is_none());
+}
+
 #[test]
 fn background_stop_follows_the_host_feature() {
     let server = FakeServer::start();

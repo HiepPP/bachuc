@@ -541,6 +541,87 @@ impl BackgroundProcess {
     }
 }
 
+/// One skill or hook of an agent's `skillHookUsage` (`SkillHookUsageEntry`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UsageEntry {
+    pub name: String,
+    /// The hook event, such as `PreToolUse`. Skills have none.
+    pub event: Option<String>,
+    pub count: u64,
+    pub error_count: u64,
+    pub last_used_at_ms: Option<i64>,
+}
+
+impl UsageEntry {
+    fn parse_all(value: &serde_json::Value) -> Vec<Self> {
+        value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| {
+                Some(Self {
+                    name: entry["name"].as_str()?.to_string(),
+                    event: entry["event"].as_str().map(str::to_string),
+                    count: entry["count"].as_u64().unwrap_or(0),
+                    error_count: entry["errorCount"].as_u64().unwrap_or(0),
+                    last_used_at_ms: entry["lastUsedAt"].as_str().and_then(parse_iso_ms),
+                })
+            })
+            .collect()
+    }
+
+    /// The time since the last use: `just now`, `5m ago`, `3h ago`, or `2d ago`. Empty when the
+    /// daemon sent no readable time.
+    pub fn used_ago(&self, now_ms: i64) -> String {
+        let Some(at) = self.last_used_at_ms else {
+            return String::new();
+        };
+        let seconds = ((now_ms - at) / 1000).max(0);
+        match seconds {
+            0..=9 => "just now".to_string(),
+            10..=59 => format!("{seconds}s ago"),
+            60..=3599 => format!("{}m ago", seconds / 60),
+            3600..=86_399 => format!("{}h ago", seconds / 3600),
+            _ => format!("{}d ago", seconds / 86_400),
+        }
+    }
+}
+
+/// The skills and hooks an agent used (snapshot `skillHookUsage`), in the daemon's order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SkillHookUsage {
+    pub skills: Vec<UsageEntry>,
+    pub hooks: Vec<UsageEntry>,
+}
+
+impl SkillHookUsage {
+    /// The `skillHookUsage` of a snapshot. A missing field, or one with no entry, gives `None`.
+    pub(crate) fn parse(value: &serde_json::Value) -> Option<Self> {
+        value.as_object()?;
+        let usage = Self {
+            skills: UsageEntry::parse_all(&value["skills"]),
+            hooks: UsageEntry::parse_all(&value["hooks"]),
+        };
+        (!usage.skills.is_empty() || !usage.hooks.is_empty()).then_some(usage)
+    }
+
+    /// The header chip text, such as `3 skills · 12 hooks`. A part with no entry is left out;
+    /// `None` when both are empty. The numbers count distinct entries, not uses.
+    pub fn chip_label(&self) -> Option<String> {
+        let part = |count: usize, noun: &str| {
+            (count > 0).then(|| format!("{count} {noun}{}", if count == 1 { "" } else { "s" }))
+        };
+        let parts: Vec<String> = [
+            part(self.skills.len(), "skill"),
+            part(self.hooks.len(), "hook"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        (!parts.is_empty()).then(|| parts.join(" · "))
+    }
+}
+
 // ---- composer, New workspace, and tab menu data (TASK-169) ----
 
 /// The daemon's metrics of one finished turn (`TurnMetricsSchema`).
@@ -1243,5 +1324,59 @@ impl NewEntryKind {
             NewEntryKind::File => "file",
             NewEntryKind::Directory => "directory",
         }
+    }
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::{SkillHookUsage, UsageEntry};
+    use serde_json::json;
+
+    fn entry(last: Option<i64>) -> UsageEntry {
+        UsageEntry {
+            name: "x".into(),
+            event: None,
+            count: 1,
+            error_count: 0,
+            last_used_at_ms: last,
+        }
+    }
+
+    #[test]
+    fn the_chip_label_leaves_out_an_empty_part() {
+        let many = |n: usize| vec![entry(None); n];
+        let usage = SkillHookUsage {
+            skills: many(3),
+            hooks: many(12),
+        };
+        assert_eq!(usage.chip_label().as_deref(), Some("3 skills · 12 hooks"));
+        let hooks_only = SkillHookUsage {
+            skills: vec![],
+            hooks: many(1),
+        };
+        assert_eq!(hooks_only.chip_label().as_deref(), Some("1 hook"));
+        assert_eq!(SkillHookUsage::default().chip_label(), None);
+    }
+
+    #[test]
+    fn a_missing_or_empty_field_gives_no_usage() {
+        assert_eq!(SkillHookUsage::parse(&serde_json::Value::Null), None);
+        assert_eq!(
+            SkillHookUsage::parse(&json!({"skills": [], "hooks": []})),
+            None
+        );
+        assert!(SkillHookUsage::parse(&json!({"skills": [{"name": "a"}]})).is_some());
+    }
+
+    #[test]
+    fn the_time_since_use_reads_in_one_unit() {
+        let at = 1_000_000_000;
+        let e = entry(Some(at));
+        assert_eq!(e.used_ago(at + 5_000), "just now");
+        assert_eq!(e.used_ago(at + 30_000), "30s ago");
+        assert_eq!(e.used_ago(at + 5 * 60_000), "5m ago");
+        assert_eq!(e.used_ago(at + 3 * 3_600_000), "3h ago");
+        assert_eq!(e.used_ago(at + 2 * 86_400_000), "2d ago");
+        assert_eq!(entry(None).used_ago(at), "");
     }
 }

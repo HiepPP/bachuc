@@ -48,6 +48,7 @@ pub use model::{
 };
 pub use model::{PromptEntry, PromptIndex};
 pub use model::{RewindMode, RewindModes};
+pub use model::{SkillHookUsage, UsageEntry};
 pub use pending::{PENDING_TURN_TTL_MS, PendingTurnsChanged};
 pub use plugins::{
     PluginEvent, PluginListItem, PluginSettingsRead, PluginSettingsWrite, PluginStatus,
@@ -626,6 +627,11 @@ impl Client {
     /// The agent's background processes, in the daemon's order.
     pub fn background_processes(&self, agent_id: &str) -> Vec<BackgroundProcess> {
         self.core.background_processes(agent_id)
+    }
+
+    /// The skills and hooks the agent used. `None` when its snapshot carries none.
+    pub fn skill_hook_usage(&self, agent_id: &str) -> Option<SkillHookUsage> {
+        self.core.skill_hook_usage(agent_id)
     }
 
     /// Whether the host can stop a background process.
