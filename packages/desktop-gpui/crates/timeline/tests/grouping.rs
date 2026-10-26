@@ -636,3 +636,20 @@ fn incremental_rows_match_full_regroup() {
     assert_eq!(rows, 2);
     check(&[], false, "the timeline empties");
 }
+
+#[test]
+fn leaves_hook_rows_out_of_the_step_counts() {
+    let hook = Fx {
+        name: "h1".into(),
+        second: 2,
+        item: json!({
+            "type": "tool_call", "callId": "hook:h1", "name": "hook", "status": "completed",
+            "error": null,
+            "detail": {"type": "plain_text", "label": "UserPromptSubmit", "icon": "wrench"}
+        }),
+    };
+    let group = build(vec![user(), hook, shell("s1", 3), note("final", 12)]).only_group(false);
+    let counts = group.steps[0].counts;
+    assert_eq!(counts.command_count, 1);
+    assert_eq!(counts.other_tool_count, 0);
+}

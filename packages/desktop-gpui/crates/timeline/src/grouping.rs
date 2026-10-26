@@ -90,6 +90,8 @@ enum Call {
     Command,
     Read(String),
     Search,
+    /// A hook row (`name: "hook"`), which runs no tool, so no count includes it.
+    Hook,
     Other,
 }
 
@@ -599,7 +601,9 @@ fn call_of(entry: &Value) -> Call {
     let normalized = name.trim().to_lowercase();
     let detail = &item["detail"];
     let path = || detail["filePath"].as_str().unwrap_or("").to_string();
-    if is_paseo_tool_name(name) || normalized.starts_with("paseo_") {
+    if name == "hook" {
+        Call::Hook
+    } else if is_paseo_tool_name(name) || normalized.starts_with("paseo_") {
         Call::Paseo
     } else if matches!(detail["type"].as_str(), Some("edit" | "write")) {
         Call::Edited(path())
@@ -642,6 +646,7 @@ fn count_kinds<'a>(calls: impl Iterator<Item = &'a Call>) -> StepCounts {
                 }
             }
             Call::Search => counts.search_count += 1,
+            Call::Hook => {}
             Call::Other => counts.other_tool_count += 1,
         }
     }
