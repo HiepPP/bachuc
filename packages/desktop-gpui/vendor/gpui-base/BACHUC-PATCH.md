@@ -43,3 +43,7 @@ GPUI's input never asked macOS for the user's Text Replacements (System Settings
 ## Selection edges
 
 `TextViewState::selection_edges()` (`src/text/state.rs`) returns the caret line boxes, in window coordinates, at the first and last selected character the last frame painted. It reads `TextViewSelectionAdapter::painted_selection_edges()` (`src/text/selection_adapter.rs`), the edges the touch handles already use. The timeline puts the selection toolbar, such as Cite, over them instead of over the whole message.
+
+## Table cell padding at zoom
+
+`table_cell_padding_x` in `src/text/node.rs` gave an unstyled cell a fixed 24 px of padding, but the cell draws `px_3`, which is 0.75 rem. Bachuc zoom makes the window rem 28 px, so each column lost 18 px of text width and short text such as "ID" wrapped one letter per line. The default now uses `rems(0.75)` at the window rem. Re-apply this edit after a gpui-kit upgrade.

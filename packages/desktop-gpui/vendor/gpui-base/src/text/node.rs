@@ -2942,12 +2942,13 @@ struct TableColumn {
 }
 
 /// Horizontal padding of a table cell: `px_3` unless `style.table_cell`
-/// sets it.
+/// sets it. `px_3` is 0.75 rem, so it is wider than `CELL_PAD_PX` when the
+/// window rem is above 16 px (Bachuc zoom).
 fn table_cell_padding_x(style: &TextViewStyle, rem_size: Pixels) -> f32 {
     let padding = &style.table_cell().padding;
     let side = |length: Option<DefiniteLength>| match length {
         Some(DefiniteLength::Absolute(length)) => f32::from(length.to_pixels(rem_size)),
-        _ => CELL_PAD_PX / 2.,
+        _ => f32::from(rems(0.75).to_pixels(rem_size)),
     };
     side(padding.left) + side(padding.right)
 }
