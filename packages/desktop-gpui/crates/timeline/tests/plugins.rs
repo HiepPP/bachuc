@@ -448,6 +448,29 @@ fn phases_follow_running_calls_and_the_streaming_message() {
         false,
     );
     assert_eq!(*seen.borrow(), [("c".to_string(), TimelinePhase::Complete)]);
+    // A new prompt starts the next turn before its reply: the old reply stays complete.
+    seen.borrow_mut().clear();
+    entries.push(user(5, "ok"));
+    grouper.sync(&entries, true);
+    projector.sync(
+        &input(&index, 1, &labels, true),
+        &entries,
+        grouper.changed(),
+        false,
+    );
+    assert!(seen.borrow().is_empty());
+    entries.push(assistant(6, "d"));
+    grouper.sync(&entries, true);
+    projector.sync(
+        &input(&index, 1, &labels, true),
+        &entries,
+        grouper.changed(),
+        false,
+    );
+    assert_eq!(
+        *seen.borrow(),
+        [("d".to_string(), TimelinePhase::Streaming)]
+    );
 }
 
 #[test]
