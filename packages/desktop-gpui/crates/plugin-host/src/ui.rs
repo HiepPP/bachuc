@@ -344,6 +344,8 @@ pub fn markdown_style(cx: &App) -> TextViewStyle {
         .font_family(mono_font_family(cx))
         .text_size(code)
         .line_height((code * FENCE_LINE_HEIGHT).round());
+    let mut table = corners.clone();
+    table.overflow.x = Some(Overflow::Scroll);
     let table_head = StyleRefinement::default()
         .bg(theme.table_head)
         .text_color(theme.table_head_foreground);
@@ -361,7 +363,7 @@ pub fn markdown_style(cx: &App) -> TextViewStyle {
             f32::from(zoomed(PARAGRAPH_GAP, cx)) / f32::from(rem_size(cx)),
         ))
         .with_code_block(code_block)
-        .with_table(corners)
+        .with_table(table)
         .with_table_head(table_head)
         .with_inline_code(HighlightStyle {
             background_color: Some(theme.accent),

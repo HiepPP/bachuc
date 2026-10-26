@@ -2366,6 +2366,9 @@ impl TimelineView {
             .font_family(mono_font_family(cx))
             .text_size(code)
             .line_height((code * FENCE_LINE_HEIGHT).round());
+        // A table wider than the message scrolls sideways instead of wrapping its columns thin.
+        let mut table = corners.clone();
+        table.overflow.x = Some(Overflow::Scroll);
         let table_head = StyleRefinement::default()
             .bg(theme.table_head)
             .text_color(theme.table_head_foreground);
@@ -2384,7 +2387,7 @@ impl TimelineView {
                 window_rems(zoomed(LIST_SPACING_BOTTOM, cx), rem_size(cx)),
             )
             .with_code_block(code_block)
-            .with_table(corners)
+            .with_table(table)
             .with_table_head(table_head)
             .with_inline_code(HighlightStyle {
                 background_color: Some(theme.accent),
