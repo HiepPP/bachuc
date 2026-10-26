@@ -447,8 +447,8 @@ pub struct CornerPills {
     client: Entity<Client>,
     agent_id: String,
     popovers: PopoverViews,
-    /// The width of the pill column at the last paint, 0 while no pill shows.
-    width: Rc<Cell<Pixels>>,
+    /// The size of the pill column at the last paint, 0 while no pill shows.
+    size: Rc<Cell<Size<Pixels>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -483,22 +483,22 @@ impl CornerPills {
             client,
             agent_id,
             popovers: PopoverViews::default(),
-            width: Rc::new(Cell::new(px(0.))),
+            size: Rc::new(Cell::new(Size::default())),
             _subscriptions: subscriptions,
         }
     }
 
-    /// The width the pill column took at the last paint, 0 while no pill shows. The agent pane
+    /// The size the pill column took at the last paint, 0 while no pill shows. The agent pane
     /// reads it to keep message text clear of the pills; it changes the value only by more than
     /// half a pixel.
-    pub fn width(&self) -> Pixels {
-        self.width.get()
+    pub fn size(&self) -> Size<Pixels> {
+        self.size.get()
     }
 
-    /// Hides the column: its width goes to 0 and the observers hear of it.
+    /// Hides the column: its size goes to 0 and the observers hear of it.
     fn hide(&self, cx: &mut Context<Self>) -> AnyElement {
-        if self.width.get() != px(0.) {
-            self.width.set(px(0.));
+        if self.size.get() != Size::default() {
+            self.size.set(Size::default());
             let id = cx.entity_id();
             cx.defer(move |cx| cx.notify(id));
         }
@@ -549,7 +549,7 @@ impl Render for CornerPills {
                 )
             })
             .collect();
-        let width = self.width.clone();
+        let size = self.size.clone();
         let id = cx.entity_id();
         v_flex()
             .id("plugin-composer-corner-pills")
@@ -561,11 +561,14 @@ impl Render for CornerPills {
             .items_end()
             .gap(zoomed(SPACE_2, cx))
             .child(
-                // Records the column width so the timeline can keep its text clear of it.
+                // Records the column size so the timeline can keep its text clear of it.
                 canvas(
                     move |bounds, _, cx| {
-                        if width_changed(width.get(), bounds.size.width) {
-                            width.set(bounds.size.width);
+                        let old = size.get();
+                        if width_changed(old.width, bounds.size.width)
+                            || width_changed(old.height, bounds.size.height)
+                        {
+                            size.set(bounds.size);
                             cx.defer(move |cx| cx.notify(id));
                         }
                     },

@@ -1,7 +1,7 @@
 //! The width rule of a timeline row's content column.
 
 use bachuc_theme::metrics::{MAX_CONTENT_WIDTH, SPACE_2, SPACE_3};
-use bachuc_timeline::{column_right_inset, content_column_width};
+use bachuc_timeline::{column_right_inset, content_column_width, under_corner_pills};
 
 #[test]
 fn a_narrow_row_gives_text_the_row_less_its_padding() {
@@ -117,4 +117,23 @@ fn a_narrower_reading_width_caps_the_column() {
     assert_eq!(content_column_width(1600., 768., 1.), 768. - 16.);
     assert_eq!(content_column_width(1600., 768., 1.5), 1.5 * 768. - 24.);
     assert_eq!(column_right_inset(1600., 170., 768., 1.), 0.);
+}
+
+#[test]
+fn only_rows_that_start_above_the_pills_bottom_are_under_the_pills() {
+    // The list starts 48 px down; the pills end 12 + 100 = 112 px down.
+    let (top, bottom) = (48., 112.);
+    assert!(under_corner_pills(&[], 0, top, bottom));
+    assert!(under_corner_pills(&[Some(40.)], 1, top, bottom));
+    assert!(!under_corner_pills(&[Some(40.), Some(30.)], 2, top, bottom));
+    // The answer is the same whatever the scroll position: it reads only content heights.
+    assert!(!under_corner_pills(&[Some(400.)], 1, top, bottom));
+}
+
+#[test]
+fn no_pills_or_an_unpainted_row_above_puts_no_row_under_the_pills() {
+    assert!(!under_corner_pills(&[], 0, 48., 0.));
+    assert!(!under_corner_pills(&[None], 1, 48., 112.));
+    // Heights not recorded yet for the rows above.
+    assert!(!under_corner_pills(&[], 3, 48., 112.));
 }
