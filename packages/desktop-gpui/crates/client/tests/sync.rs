@@ -140,6 +140,61 @@ fn wrong_password_disconnects_with_the_reason_and_backs_off() {
 }
 
 #[test]
+fn a_provider_snapshot_update_refetches_the_provider_list_only_when_it_changes() {
+    let server = FakeServer::start();
+    server.add_agent("a1", "idle");
+    let mut harness = Harness::connect(&server.url, None);
+    assert!(harness.connected());
+    assert!(harness.pump_until(WAIT, |h| h.core.providers().len() == 2));
+    assert!(
+        server.requests_of("session.events.set_subscription.request")[0]["events"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("providers_snapshot_update"))
+    );
+    let update = |entries: Value| {
+        json!({"type": "providers_snapshot_update", "payload": {
+            "entries": entries, "generatedAt": "now"
+        }})
+    };
+
+    // Same providers, and the ready one already has models: nothing to refetch.
+    assert!(harness.pump_until(WAIT, |h| !h.core.providers()[0].models.is_empty()));
+    server.broadcast(update(json!([
+        {"provider": "mock", "status": "ready"}, {"provider": "pi", "status": "unavailable"}
+    ])));
+    harness.pump_for(Duration::from_millis(300));
+    assert_eq!(
+        server.requests_of("list_available_providers_request").len(),
+        1
+    );
+
+    // A provider added in config.json reaches the picker without a reconnect.
+    server.reply(
+        "list_available_providers_request",
+        "list_available_providers_response",
+        json!({"fetchedAt": "now", "providers": [
+            {"provider": "mock", "available": true}, {"provider": "pi", "available": false},
+            {"provider": "cursor", "available": true}
+        ]}),
+    );
+    server.broadcast(update(json!([
+        {"provider": "mock", "status": "ready"}, {"provider": "pi", "status": "unavailable"},
+        {"provider": "cursor", "status": "loading"}
+    ])));
+    assert!(harness.pump_until(WAIT, |h| {
+        h.core
+            .providers()
+            .iter()
+            .any(|p| p.id == "cursor" && p.available && !p.models.is_empty())
+    }));
+    assert_eq!(
+        server.requests_of("list_available_providers_request").len(),
+        2
+    );
+}
+
+#[test]
 fn correct_password_connects() {
     let server = FakeServer::start();
     server.add_agent("a1", "idle");

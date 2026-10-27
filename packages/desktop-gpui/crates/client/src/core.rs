@@ -384,7 +384,7 @@ struct TerminalStream {
 
 /// Session events this client subscribes to; with `explicit_event_subscriptions` the daemon
 /// sends them only on request.
-const SESSION_EVENTS: [&str; 8] = [
+const SESSION_EVENTS: [&str; 9] = [
     "agent_permission_request",
     "agent_permission_resolved",
     "project.update",
@@ -393,6 +393,7 @@ const SESSION_EVENTS: [&str; 8] = [
     "agent.provider_subagents.update",
     "checkout_status_update",
     "script_status_update",
+    "providers_snapshot_update",
 ];
 
 /// Client state for one host.
@@ -2727,6 +2728,7 @@ impl ClientCore {
                 }
             }
             "agent_stream" => self.stream(payload),
+            "providers_snapshot_update" => self.providers_snapshot_update(payload),
             "agent.timeline.replacement" => {
                 let agent_id = payload["agentId"].as_str().unwrap_or_default().to_string();
                 if let Some(sync) = self.timelines.get_mut(&agent_id) {
@@ -4021,6 +4023,45 @@ impl ClientCore {
             }
         }
         self.directory_changed = true;
+    }
+
+    /// Refetches the provider list when the daemon's snapshot adds or removes a provider, or a
+    /// provider turns ready that has no models here. Each refetch also lists every provider's
+    /// models, so an update that changes nothing the picker shows does not refetch.
+    fn providers_snapshot_update(&mut self, payload: &Value) {
+        if self
+            .pending
+            .values()
+            .any(|p| matches!(p, Pending::Providers))
+        {
+            return;
+        }
+        let entries: Vec<&Value> = payload["entries"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .collect();
+        let mut ids: Vec<&str> = entries
+            .iter()
+            .filter_map(|e| e["provider"].as_str())
+            .collect();
+        let mut known: Vec<&str> = self.providers.iter().map(|p| p.id.as_str()).collect();
+        ids.sort_unstable();
+        known.sort_unstable();
+        let newly_ready = entries.iter().any(|entry| {
+            entry["status"] == "ready"
+                && entry["provider"].as_str().is_some_and(|id| {
+                    self.providers
+                        .iter()
+                        .any(|p| p.id == id && (!p.available || p.models.is_empty()))
+                })
+        });
+        if ids != known || newly_ready {
+            let _ = self.request(
+                json!({"type": "list_available_providers_request"}),
+                Pending::Providers,
+            );
+        }
     }
 
     // ---- live stream and permissions ----
