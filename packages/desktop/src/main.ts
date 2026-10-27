@@ -25,10 +25,18 @@ import {
   screen,
   session,
   shell,
+  type Tray,
   webContents,
 } from "electron";
 import { resolvePaseoHome } from "@getpaseo/server/daemon-control";
-import { registerDaemonManager } from "./daemon/daemon-manager.js";
+import {
+  getDaemonLogs,
+  registerDaemonManager,
+  resolveDesktopDaemonStatus,
+  restartDaemon,
+  startDaemon,
+} from "./daemon/daemon-manager.js";
+import { needsDaemonStart, startMenuBar } from "./features/menu-bar.js";
 import { parsePassthroughCliArgsFromArgv, runPassthroughCli } from "./daemon/cli/passthrough.js";
 import { closeAllTransportSessions } from "./daemon/local-transport.js";
 import {
@@ -119,6 +127,18 @@ const PASEO_DEV_LISTEN = "127.0.0.1:6770";
 // ~/.bachuc and its port, with the userData folder that belongs to them. The build output is
 // Bachuc.app too, so only the install path counts.
 const IS_RELEASE_APP = app.isPackaged && process.execPath.startsWith("/Applications/Bachuc.app/");
+// The installed release runs as a menu bar app with no window; GPUI is the daily app (ADR-0074).
+const MENU_BAR_MODE = IS_RELEASE_APP && process.platform === "darwin";
+const GPUI_APP_PATH = "/Applications/Bachuc GPUI.app";
+// Held so the tray is not garbage collected.
+let menuBarTray: Tray | null = null;
+
+function openGpuiApp(): void {
+  void shell.openPath(GPUI_APP_PATH).then((error) => {
+    if (error) log.error(`[menu-bar] cannot open ${GPUI_APP_PATH}: ${error}`);
+    return undefined;
+  });
+}
 // The release script builds with productName Bachuc, so the helper apps carry the same name.
 const APP_NAME =
   process.env.PASEO_TEST_APP_NAME?.trim() || (IS_RELEASE_APP ? "Bachuc" : "Bachuc Dev");
@@ -888,6 +908,10 @@ desktopWindowOwner = createDesktopWindowOwner<AgentDeepLinkTarget>({
 // ---------------------------------------------------------------------------
 
 function receiveAgentDeepLink(input: string): void {
+  if (MENU_BAR_MODE) {
+    openGpuiApp();
+    return;
+  }
   const target = parseAgentDeepLink(input);
   if (!target) {
     return;
@@ -931,6 +955,10 @@ function setupSingleInstanceLock(): boolean {
   }
 
   app.on("second-instance", (_event, commandLine) => {
+    if (MENU_BAR_MODE) {
+      openGpuiApp();
+      return;
+    }
     const agentTarget = parseAgentDeepLinkFromArgv(commandLine);
     if (agentTarget) {
       void bootstrapComplete
@@ -974,6 +1002,32 @@ async function runCliPassthroughIfRequested(): Promise<boolean> {
   }
 
   return true;
+}
+
+/** No Dock icon and no window: start the daemon if it is down, then show the tray. */
+async function startMenuBarMode(): Promise<void> {
+  app.dock?.hide();
+  try {
+    if (needsDaemonStart(await resolveDesktopDaemonStatus())) {
+      await startDaemon();
+    }
+  } catch (error) {
+    log.error("[menu-bar] failed to start the daemon", error);
+  }
+  menuBarTray = startMenuBar({
+    resourcesPath: process.resourcesPath,
+    readStatus: resolveDesktopDaemonStatus,
+    openGpui: openGpuiApp,
+    restartDaemon,
+    openLogs: () => {
+      void shell.openPath(getDaemonLogs().logPath);
+    },
+    // app.exit skips before-quit, so the quit lifecycle does not stop the daemon.
+    quit: () => {
+      menuBarTray?.destroy();
+      app.exit(0);
+    },
+  });
 }
 
 async function bootstrap(): Promise<void> {
@@ -1039,6 +1093,13 @@ async function bootstrap(): Promise<void> {
       pendingProjectPath: typeof pendingPath === "string" ? pendingPath : null,
     });
   });
+
+  if (MENU_BAR_MODE) {
+    await startMenuBarMode();
+    bootstrapIsComplete = true;
+    resolveBootstrapComplete();
+    return;
+  }
 
   // The first window of the session restores and persists saved geometry.
   const initialAgentNavigation = pendingAgentNavigation;

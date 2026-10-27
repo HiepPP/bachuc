@@ -270,7 +270,7 @@ function assertBuiltInDaemonManagementEnabled(settings: DesktopSettings): void {
   }
 }
 
-async function startDaemon(): Promise<DesktopDaemonStatus> {
+export async function startDaemon(): Promise<DesktopDaemonStatus> {
   assertBuiltInDaemonManagementEnabled(await getDesktopSettingsStore().get());
 
   const current = await resolveDesktopDaemonStatus();
@@ -354,12 +354,12 @@ export async function stopDesktopDaemon(
   return resolveDesktopDaemonStatus();
 }
 
-async function restartDaemon(): Promise<DesktopDaemonStatus> {
+export async function restartDaemon(): Promise<DesktopDaemonStatus> {
   await runExternalCliJsonCommand(["daemon", "restart", "--home", getPaseoHome(), "--json"]);
   return resolveDesktopDaemonStatus();
 }
 
-function getDaemonLogs(): DesktopDaemonLogs {
+export function getDaemonLogs(): DesktopDaemonLogs {
   const logPath = logFilePath();
   return {
     logPath,
