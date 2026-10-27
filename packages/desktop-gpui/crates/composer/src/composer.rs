@@ -117,6 +117,8 @@ const DROP_FILES_HERE: &str = "Drop files here";
 pub enum ComposerEvent {
     /// A prompt went to the client.
     Sent { text: String, images: usize },
+    /// The daemon replied to a send or queue with no error; a draft never emits this.
+    Delivered { agent_id: String },
     /// `/clear` archived the agent; the owner opens a fresh draft in its place.
     ReplaceWithDraft,
     /// The diff stat pill: open the Changes tab of this workspace.
@@ -1785,6 +1787,9 @@ impl Composer {
             let result = task.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 let Some(error) = send_error_text(&result) else {
+                    cx.emit(ComposerEvent::Delivered {
+                        agent_id: this.agent_id.clone(),
+                    });
                     return;
                 };
                 log::warn!("cannot send to {}: {error}", this.agent_id);
