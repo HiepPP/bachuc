@@ -33,6 +33,9 @@ pub enum PillPlacement {
     Track,
     Toolbar,
     Corner,
+    /// An icon in the joined button group of the workspace header, for the focused agent tab.
+    /// The label is not drawn; the title is the tooltip.
+    Header,
 }
 
 /// Whether a pill shows on the New workspace draft composer. `Only` skips agent composers.

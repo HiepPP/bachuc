@@ -296,6 +296,9 @@ impl Shell {
                 .on_click(cx.listener(|this, _, _, cx| this.toggle_side_panel(cx)))
             });
         let has_workspace = self.selected_cwd().is_some();
+        let pill_agent = self.focused_agent(cx);
+        self.header_pills
+            .update(cx, |pills, cx| pills.set_agent(pill_agent, cx));
         let menu = self.render_header_actions(cx);
         let explorer_open = self.layout.explorer_open;
         // Electron's order: Scripts, Open in editor, git actions, then the Explorer toggle.
@@ -380,6 +383,7 @@ impl Shell {
                     .items_center()
                     .gap(zoomed(SPACE_1, cx))
                     .children(side_panel)
+                    .child(self.header_pills.clone())
                     .child(menu)
                     .children(header_buttons)
                     .when(has_workspace, |row| {
@@ -684,12 +688,16 @@ impl Shell {
 
     /// The skill and hook chip of the focused agent tab, and its list. No chip when the tab is
     /// not an agent or the agent's snapshot has no usage.
+    /// The agent of the focused tab, `None` when that tab is not an agent.
+    fn focused_agent(&self, cx: &App) -> Option<String> {
+        self.active_key(cx)
+            .and_then(|key| self.pane_identity(&key))
+            .and_then(|identity| agent_of_key(&identity).map(str::to_string))
+    }
+
     fn render_usage_chip(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let t = tokens(cx);
-        let agent_id = self
-            .active_key(cx)
-            .and_then(|key| self.pane_identity(&key))
-            .and_then(|identity| agent_of_key(&identity).map(str::to_string))?;
+        let agent_id = self.focused_agent(cx)?;
         let usage = self.client.read(cx).skill_hook_usage(&agent_id)?;
         let label = usage.chip_label()?;
         let open = self.header_menu == Some(HeaderMenu::Usage);

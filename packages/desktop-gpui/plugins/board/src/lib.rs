@@ -1,7 +1,7 @@
 //! `bachuc-plugin-board`: the native client of the board plugin
 //! (`hiep-plugins/plugins/board/index.client.tsx`, ADR-0045). It adds the Board page with its
 //! Runs, Timeline, and Recaps views, the "Board" sidebar item, the `Mod+D` shortcut, the
-//! "Thinking orb" settings screen, the workspace header's project chip, and the thread corner
+//! "Thinking orb" settings screen, the workspace header's project chip, and the thread header
 //! pills. The server part stays in TypeScript; this crate calls it only through the `board.*`
 //! RPCs and the host settings.
 
@@ -79,7 +79,7 @@ impl NativePlugin for Board {
                     .into()
             }),
         });
-        for pill in pills::corner_pills(&store, &ctx) {
+        for pill in pills::header_pills(&store, &ctx) {
             contributions.add_composer_pill(pill);
         }
         contributions.add_sidebar_item(SidebarItem {

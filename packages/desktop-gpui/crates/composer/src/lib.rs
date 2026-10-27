@@ -29,5 +29,5 @@ pub use attachments::{Attachment, can_send, mime_for_path};
 pub use composer::{Composer, ComposerEvent};
 pub use dock::composer_dock;
 pub use draft::{DraftOptions, DraftSeed, DraftSubmission, SubmitIcon};
-pub use plugin_slots::CornerPills;
+pub use plugin_slots::{CornerPills, HeaderPills};
 pub use subagents_track::row_label;
