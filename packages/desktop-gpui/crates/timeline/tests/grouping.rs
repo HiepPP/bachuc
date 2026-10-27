@@ -8,7 +8,7 @@ use bachuc_theme::TurnLabel;
 use std::rc::Rc;
 
 use bachuc_timeline::grouping::{
-    Row, SharedRow, TurnGroup, TurnGrouper, group_turns, turn_note_hosts,
+    Row, SharedRow, StepSkill, TurnGroup, TurnGrouper, group_turns, step_skills, turn_note_hosts,
 };
 use serde_json::{Value, json};
 
@@ -652,4 +652,49 @@ fn leaves_hook_rows_out_of_the_step_counts() {
     let counts = group.steps[0].counts;
     assert_eq!(counts.command_count, 1);
     assert_eq!(counts.other_tool_count, 0);
+}
+
+fn skill(id: &str, second: i64, name: &str) -> Fx {
+    Fx {
+        name: id.into(),
+        second,
+        item: json!({
+            "type": "tool_call", "callId": id, "name": "Skill", "status": "completed",
+            "error": null,
+            "detail": {"type": "plain_text", "label": name, "icon": "sparkles"}
+        }),
+    }
+}
+
+#[test]
+fn lists_the_skills_of_a_step_once_each_in_call_order() {
+    let t = build(vec![
+        user(),
+        skill("k1", 2, "solve"),
+        shell("s1", 3),
+        skill("k2", 4, "sequential-thinking"),
+        skill("k3", 5, "solve"),
+        note("final", 12),
+    ]);
+    let group = t.only_group(false);
+    assert_eq!(
+        step_skills(&t.entries, &group.steps[0]),
+        vec![
+            StepSkill {
+                name: "solve".into(),
+                at: at(2)
+            },
+            StepSkill {
+                name: "sequential-thinking".into(),
+                at: at(4)
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_step_without_skill_calls_lists_no_skills() {
+    let t = build(vec![user(), shell("s1", 1), note("final", 12)]);
+    let group = t.only_group(false);
+    assert!(step_skills(&t.entries, &group.steps[0]).is_empty());
 }

@@ -182,6 +182,35 @@ pub fn timestamp_ms(entry: &Value) -> i64 {
         .map_or(0, |time| time.timestamp_millis())
 }
 
+/// One skill a step loaded: its name and the time of its call.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StepSkill {
+    pub name: String,
+    pub at: i64,
+}
+
+/// The skills a step loaded, once each, in call order. A skill call is a tool call whose detail
+/// is the `plain_text` with the `sparkles` icon that the daemon gives the Claude `Skill` tool.
+pub fn step_skills(entries: &[Value], step: &TurnStep) -> Vec<StepSkill> {
+    let mut skills: Vec<StepSkill> = Vec::new();
+    for &index in &step.items {
+        let detail = &entries[index]["item"]["detail"];
+        if detail["type"] != "plain_text" || detail["icon"] != "sparkles" {
+            continue;
+        }
+        let Some(name) = detail["label"].as_str().filter(|name| !name.is_empty()) else {
+            continue;
+        };
+        if !skills.iter().any(|skill| skill.name == name) {
+            skills.push(StepSkill {
+                name: name.to_string(),
+                at: timestamp_ms(&entries[index]),
+            });
+        }
+    }
+    skills
+}
+
 /// The file an edit or write call changes.
 pub fn edited_file_path(entry: &Value) -> Option<&str> {
     let detail = &entry["item"]["detail"];

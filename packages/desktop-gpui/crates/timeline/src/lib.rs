@@ -3185,6 +3185,7 @@ impl TimelineView {
             Vec::new()
         };
         let live = step.is_running.then(|| self.render_live_box(step, cx));
+        let marker = self.render_skill_marker(step, run_started_at, cx);
 
         // The rail joins the step numbers, from the middle of the first to the middle of the
         // last.
@@ -3211,6 +3212,7 @@ impl TimelineView {
             .relative()
             .when(is_first, |row| row.pt(zoomed(STEP_LIST_TOP, cx)))
             .when(!(is_first && is_last), |row| row.child(rail))
+            .children(marker)
             .child(
                 v_flex()
                     .relative()
@@ -3245,6 +3247,78 @@ impl TimelineView {
                 )
             })
             .into_any_element()
+    }
+
+    /// The line above a step that loaded skills: the sparkle on the rail, the skill names, a
+    /// rule, and the time of the first skill call since the turn start. None without skills.
+    fn render_skill_marker(
+        &self,
+        step: &TurnStep,
+        run_started_at: i64,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let skills = grouping::step_skills(&self.entries, step);
+        let first = skills.first()?;
+        let t = tokens(cx);
+        // The theme has no skill token; the ANSI magenta follows light, dark, and custom themes.
+        let color = t.ansi[5];
+        let names = skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        Some(
+            h_flex()
+                .id(("skill-marker", entry_key(&self.entries[step.id])))
+                .role(Role::Note)
+                .aria_label(format!("Skills: {names}"))
+                .gap(zoomed(SPACE_3, cx))
+                .items_center()
+                .mb(zoomed(STEP_GAP, cx))
+                .child(
+                    // The surface hides the rail behind the sparkle.
+                    div()
+                        .size(zoomed(STEP_NUMBER, cx))
+                        .mr(zoomed(2., cx))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(t.surface0)
+                        .child(
+                            icon(IconName::Sparkles)
+                                .with_size(zoomed(12., cx))
+                                .text_color(color),
+                        ),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(ui_font_size(STEP_COUNTS_SIZE, cx))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(color)
+                        .child(names),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(zoomed(SPACE_3, cx))
+                        .h(px(1.))
+                        .bg(color.opacity(0.3)),
+                )
+                .child(
+                    div()
+                        .w(zoomed(STEP_TIME_WIDTH, cx))
+                        .flex_none()
+                        .text_right()
+                        .font_family(bachuc_theme::ui_font_family(cx))
+                        .text_size(code_font_size(STEP_TIME_SIZE, cx))
+                        .text_color(t.foreground_muted)
+                        .child(format_clock(first.at - run_started_at)),
+                )
+                .into_any_element(),
+        )
     }
 
     /// The running step's last call: its command and the last lines of its output.
