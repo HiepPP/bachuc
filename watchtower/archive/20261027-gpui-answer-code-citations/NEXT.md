@@ -4,8 +4,8 @@
 
 - Title: Clearer GPUI answers, Bash descriptions on release, and a menu bar daemon host
 - Slug: 20261027-gpui-answer-code-citations
-- Status: DONE
-- Updated: 2026-10-27
+- Status: ARCHIVED
+- Updated: 2026-10-28
 
 ## Tracker
 
@@ -45,4 +45,4 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Archive
 
-- None.
+- Archived: 2026-10-28 -> watchtower/archive/20261027-gpui-answer-code-citations/
