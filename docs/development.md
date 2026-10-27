@@ -73,7 +73,7 @@ In Paseo-managed worktree services, use the injected service environment rather 
 
 ### Installing a release
 
-`scripts/paseo-release.sh` builds a release from this checkout, installs it as `/Applications/Bachuc.app`, links `~/.local/bin/paseo` to its CLI, and restarts the release daemon (`~/.bachuc`, `6767`) on it. Stock, the upstream app, is no longer used.
+`scripts/paseo-release.sh` builds a release from this checkout, installs it as `/Applications/Bachuc.app`, links `~/.local/bin/paseo` to its CLI, and restarts the release daemon (`~/.bachuc`, `6767`) on it. Stock, the upstream app, is no longer used. The installed app runs as a menu bar app with no window ([docs/gpui.md](gpui.md#daily-app)), and the script opens it in the background.
 
 ```bash
 scripts/paseo-release.sh             # build, install, start
