@@ -68,7 +68,10 @@ export default function contribute(server: PluginServerContext) {
   ]);
   async function sweep(archivedId?: string) {
     const since = cleanup.mark();
+    const bound = bridge.mark();
     const live = (await listLiveAgents(getApi())).filter(({ id }) => id !== archivedId);
+    const leases = bridge.prune(new Set(live.map(({ id }) => id)), bound);
+    if (leases) console.log(`Jev orchestrator: removed ${leases} stale bridge leases.`);
     const result = await cleanup.prune(live, since);
     if (result.manifests || result.definitions)
       console.log(
@@ -77,11 +80,10 @@ export default function contribute(server: PluginServerContext) {
   }
   // The host API exists only inside hooks and RPCs, so the startup sweep waits for the first hook.
   let startupSweep: Promise<void> | undefined;
-  const sweepOnce = () => {
-    startupSweep ??= sweep().catch((error) =>
+  const sweepOnce = () =>
+    (startupSweep ??= sweep().catch((error) =>
       console.warn(`Jev native: cleanup failed: ${(error as Error).message}`),
-    );
-  };
+    ));
   const bridge = createBridge(
     engine,
     scope,
@@ -114,7 +116,7 @@ export default function contribute(server: PluginServerContext) {
   });
   const create = server.before("agent.create", async ({ request }, context) => {
     api = context.paseo;
-    sweepOnce();
+    await sweepOnce();
     if (
       !["codex", "claude"].includes(request.config.provider) ||
       request.env?.PASEO_ORCH_CHILD === "1" ||
@@ -148,7 +150,7 @@ export default function contribute(server: PluginServerContext) {
   });
   const open = server.before("agent.session_open", async ({ request }, context) => {
     api = context.paseo;
-    sweepOnce();
+    await sweepOnce();
     const token = request.env?.PASEO_ORCH_TOKEN;
     if (token) bridge.bind(token, request.agentId, await realpath(request.cwd));
     const env = { ...request.env };

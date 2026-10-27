@@ -42,3 +42,20 @@ test("a taken port falls back to a fresh port", async (t) => {
   const saved = JSON.parse(await readFile(file, "utf8"));
   assert.equal(`http://127.0.0.1:${saved.port}/mcp`, moved);
 });
+
+test("prune drops leases of agents that are gone, keeping live and later binds", async (t) => {
+  const file = path.join(await mkdtemp(path.join(tmpdir(), "jev-bridge-")), "bridge.json");
+  const bridge = createBridge({} as never, scope, undefined, file);
+  t.after(() => bridge.close());
+  await bridge.ready;
+  for (const id of ["live", "gone"]) bridge.bind(bridge.issue("/workspace"), id, "/workspace");
+  const since = bridge.mark();
+  bridge.bind(bridge.issue("/workspace"), "late", "/workspace");
+
+  assert.equal(bridge.prune(new Set(["live"]), since), 1);
+  assert.ok(bridge.leaseFor("live", "/workspace"));
+  assert.ok(bridge.leaseFor("late", "/workspace"));
+  assert.equal(bridge.leaseFor("gone", "/workspace"), undefined);
+  const saved = JSON.parse(await readFile(file, "utf8"));
+  assert.equal(saved.leases.length, 2);
+});
