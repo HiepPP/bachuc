@@ -1,0 +1,42 @@
+# NEXT
+
+## Current Active Plan
+
+- Title: Clearer GPUI answers with code citation cards
+- Slug: 20261027-gpui-answer-code-citations
+- Status: ACTIVE
+- Updated: 2026-10-27
+
+## Tracker
+
+| Order | TASK                                                      | Group | Status | Spec                                                                                                             | Deps     | Context                                        | Notes                                                |
+| ----- | --------------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------- | ---------------------------------------------------- |
+| 1     | TASK-316 Keep the shell description on the wire           | A     | TODO   | [watchtower/tasks/TASK-316-shell-description-on-wire.md](watchtower/tasks/TASK-316-shell-description-on-wire.md) | -        | -                                              | Protocol, server, and GPUI tool summary. Q-198.      |
+| 2     | TASK-317 Code block header hook in the vendored text view | B     | TODO   | [watchtower/tasks/TASK-317-code-block-header-hook.md](watchtower/tasks/TASK-317-code-block-header-hook.md)       | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Vendor only. Hot render path.                        |
+| 3     | TASK-318 Code citation card in the GPUI answer            | C     | TODO   | [watchtower/tasks/TASK-318-code-citation-card.md](watchtower/tasks/TASK-318-code-citation-card.md)               | TASK-317 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Starts after TASK-317. Q-197.                        |
+| 4     | TASK-319 Investigation answer rule                        | D     | TODO   | [watchtower/tasks/TASK-319-investigation-answer-rule.md](watchtower/tasks/TASK-319-investigation-answer-rule.md) | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Edits the global rules file outside the repo. Q-197. |
+
+TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
+
+## Plan Verify
+
+- `cd packages/desktop-gpui && ./cargo.sh test -p bachuc-timeline` and the `gpui-base` text tests -> pass.
+- `npm run typecheck` and `npm run lint` -> pass.
+- Screen check on live (human or UI checker): ask a live agent "find the cause of X" after TASK-319 -> the answer has Symptom, Cause, and Fix, and each code excerpt shows a "file Ln a-b" header that opens the file.
+- After the checks, quit the GPUI app and run `cd packages/desktop-gpui && ./cargo.sh clean --profile dev` when no other cargo or rustc process runs.
+
+## Review Focus
+
+- A fence meta that is not a path, such as `title="x"` -> no header, plain block; owner TASK-318.
+- A cited path that does not exist in the thread cwd -> the header still shows; the click does what a broken file link does today; owner TASK-318.
+- A citation fence while the message still streams (fence not closed) -> no header flicker; the block renders as code until closed; owner TASK-317.
+- A shell call stored before TASK-316 -> the summary shows the command; owner TASK-316.
+- A message with no code block -> no extra layout pass; owner TASK-318.
+
+## Handoff
+
+- Next action: run `/watchtower implement`.
+
+## Archive
+
+- None.
