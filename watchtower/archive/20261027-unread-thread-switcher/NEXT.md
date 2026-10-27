@@ -4,7 +4,7 @@
 
 - Title: GPUI unread thread switcher and after-send jump
 - Slug: 20261027-unread-thread-switcher
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-27
 
 ## Tracker
@@ -44,4 +44,4 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Archive
 
-- None.
+- Archived: 2026-10-27 -> watchtower/archive/20261027-unread-thread-switcher/
