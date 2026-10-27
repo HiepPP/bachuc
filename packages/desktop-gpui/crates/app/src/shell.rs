@@ -3457,8 +3457,9 @@ impl Shell {
     }
 
     /// `agent.unread.switcher` with no switcher open: asks the Board for its runs, then shows
-    /// the queue (see `show_unread_switcher`).
-    fn open_unread_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// the queue (see `show_unread_switcher`). `list` always shows the list, as the command
+    /// center item does, since Cmd is up there.
+    fn open_unread_switcher(&mut self, list: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(task) = self.board_snapshot(cx) else {
             self.show_toast(false, "Board is not installed".into(), cx);
             return;
@@ -3467,7 +3468,7 @@ impl Shell {
         cx.spawn_in(window, async move |this, cx| {
             let result = task.await;
             let _ = this.update_in(cx, |shell, window, cx| {
-                shell.show_unread_switcher(result, window, cx)
+                shell.show_unread_switcher(result, list, window, cx)
             });
         })
         .detach();
@@ -3478,6 +3479,7 @@ impl Shell {
     fn show_unread_switcher(
         &mut self,
         result: Result<serde_json::Value, String>,
+        list: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -3499,7 +3501,7 @@ impl Shell {
             return;
         }
         let held = window.modifiers();
-        if !(held.platform || held.control || held.alt) {
+        if !list && !(held.platform || held.control || held.alt) {
             self.open_agent(&rows[0].agent_id, window, cx);
             return;
         }
@@ -3833,7 +3835,12 @@ impl Shell {
     }
 
     fn run_command(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(action) = id.strip_prefix("action:") {
+        if id == "action:agent.unread.switcher"
+            && self.unread.is_none()
+            && self.unread_pending.is_none()
+        {
+            self.open_unread_switcher(true, window, cx);
+        } else if let Some(action) = id.strip_prefix("action:") {
             self.run_action(action, window, cx);
         } else if let Some(workspace_id) = id.strip_prefix("workspace:") {
             self.open_workspace(workspace_id.to_string(), window, cx);
@@ -3929,7 +3936,7 @@ impl Shell {
                 Some(switcher) => switcher.update(cx, |switcher, cx| switcher.step(true, cx)),
                 None => match self.unread_pending.as_mut() {
                     Some(steps) => steps.push(true),
-                    None => self.open_unread_switcher(window, cx),
+                    None => self.open_unread_switcher(false, window, cx),
                 },
             },
             "agent.previous" => match self.unread.as_ref().map(|(view, _)| view.clone()) {
