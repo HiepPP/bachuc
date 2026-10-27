@@ -227,6 +227,25 @@ pub fn parse_inline_path_token(value: &str) -> Option<FileTarget> {
     })
 }
 
+/// The file and lines a code fence cites in its meta, the text after the language: one token,
+/// `path:12` or `path:12-20`. Other meta, such as `title="x"`, gives None.
+pub fn code_citation(meta: &str) -> Option<FileTarget> {
+    let meta = meta.trim();
+    if meta.is_empty() || meta.contains(|c: char| c.is_whitespace() || "=\"'()".contains(c)) {
+        return None;
+    }
+    // One colon, so `path:12:4` (a column) is not a citation.
+    let (_, lines) = meta
+        .split_once(':')
+        .filter(|(_, lines)| !lines.contains(':'))?;
+    let (start, end) = lines.split_once('-').unwrap_or((lines, "1"));
+    let is_number = |text: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+    if !is_number(start) || !is_number(end) {
+        return None;
+    }
+    parse_inline_path_token(meta)
+}
+
 fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
