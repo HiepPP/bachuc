@@ -1,6 +1,6 @@
 //! The unread thread switcher: a Cmd+Tab style popover over the window (ADR-0070).
 //!
-//! The shell opens it on Mod+J with the queue rows, oldest first. The view holds focus, so it
+//! The shell opens it on Mod+J with the cycle rows, unread first (ADR-0073). The view holds focus, so it
 //! sees the release of the modifier that opened it: the release opens the selected row, like
 //! Enter. The popover draws only when the modifier is still held after `SHOW_DELAY`, so a quick
 //! tap opens the oldest thread with no flash. The view never closes itself; the shell removes it
@@ -29,6 +29,8 @@ pub struct SwitcherRow {
     pub title: String,
     pub workspace: String,
     pub reason: AttentionReason,
+    /// False for a read card, which shows "Read" in place of the reason.
+    pub unread: bool,
     /// "now", "5m", "3h", or `None` when the timestamp does not parse.
     pub age: Option<String>,
 }
@@ -134,9 +136,10 @@ impl UnreadSwitcher {
 
     fn render_row(&self, ix: usize, row: &SwitcherRow, cx: &mut Context<Self>) -> Stateful<Div> {
         let colors = tokens(cx);
-        let reason = match row.reason {
-            AttentionReason::Error => ("Error", colors.status_danger),
-            _ => ("Finished", colors.status_success),
+        let reason = match (row.unread, row.reason) {
+            (false, _) => ("Read", colors.foreground_muted),
+            (true, AttentionReason::Error) => ("Error", colors.status_danger),
+            (true, _) => ("Finished", colors.status_success),
         };
         let agent_id = row.agent_id.clone();
         let label = format!("{}, {}, {}", row.title, row.workspace, reason.0);

@@ -28,7 +28,10 @@ use crate::state::{
     waiting_threads, workspace_agents, workspace_order,
 };
 use crate::toast::{ToastStack, render_toasts};
-use crate::unread::{QueueEntry, ViewHistory, board_finished_ids, iso_to_ms, unread_queue};
+use crate::unread::{
+    QueueEntry, ViewHistory, board_finished_ids, board_finished_runs, iso_to_ms, switch_cycle,
+    unread_queue,
+};
 use crate::unread_switcher::{SwitcherRow, UnreadSwitcher, UnreadSwitcherEvent};
 use crate::workspace_draft::{self, WorkspaceDraftPane};
 use crate::{dock, fire};
@@ -3309,27 +3312,57 @@ impl Shell {
 
     // ----- unread switcher and After send -----
 
-    /// The unread queue of the active host: agent ids of Board cards, oldest first (ADR-0072).
-    /// `board` is the set of non-running Board runs from `board.snapshot`.
-    fn unread_queue_ids(&self, board: &HashSet<String>, cx: &App) -> Vec<String> {
+    /// The queue entries of the active host. `ended_at` gives a Board run's `endedAt`, or `None`
+    /// for an agent that is not a non-running Board run.
+    fn queue_entries(
+        &self,
+        ended_at: impl Fn(&str) -> Option<Option<String>>,
+        cx: &App,
+    ) -> Vec<QueueEntry> {
         let client = self.client.read(cx);
-        let entries: Vec<QueueEntry> = client
+        client
             .agents()
             .iter()
             .map(|agent| {
                 let (requires_attention, reason) =
                     client.agent_attention(&agent.id).unwrap_or((false, None));
+                let run = ended_at(&agent.id);
                 QueueEntry {
                     agent_id: agent.id.clone(),
                     requires_attention,
                     reason,
                     is_subagent: client.agent_parent_id(&agent.id).is_some(),
                     attention_at: attention_at(client, &agent.id),
-                    on_board: board.contains(&agent.id),
+                    on_board: run.is_some(),
+                    ended_at: run.flatten(),
                 }
             })
-            .collect();
+            .collect()
+    }
+
+    /// The unread queue of the active host: agent ids of Board cards, oldest first (ADR-0072).
+    /// `board` is the set of non-running Board runs from `board.snapshot`.
+    fn unread_queue_ids(&self, board: &HashSet<String>, cx: &App) -> Vec<String> {
+        let entries = self.queue_entries(|id| board.contains(id).then_some(None), cx);
         unread_queue(&entries, self.viewed_agent.as_deref())
+    }
+
+    /// The Mod+J cycle of the active host: every non-running Board card, unread first, after the
+    /// viewed thread (ADR-0073). An agent with a pending permission counts as a Permission wait.
+    fn switch_cycle_ids(&self, runs: &HashMap<String, Option<String>>, cx: &App) -> Vec<String> {
+        let mut entries = self.queue_entries(|id| runs.get(id).cloned(), cx);
+        let client = self.client.read(cx);
+        for entry in &mut entries {
+            let waiting = client
+                .agents()
+                .iter()
+                .any(|agent| agent.id == entry.agent_id && agent.pending_permissions > 0);
+            if waiting {
+                entry.requires_attention = true;
+                entry.reason = Some(AttentionReason::Permission);
+            }
+        }
+        switch_cycle(&entries, self.viewed_agent.as_deref())
     }
 
     /// The oldest unread Board agent other than `exclude`.
@@ -3396,7 +3429,15 @@ impl Shell {
                             .map(|workspace| workspace.name.clone())
                     })
                     .unwrap_or_default();
-                let reason = match client.agent_attention(id) {
+                let attention = client.agent_attention(id);
+                let unread = matches!(
+                    attention,
+                    Some((
+                        true,
+                        Some(AttentionReason::Finished | AttentionReason::Error)
+                    ))
+                );
+                let reason = match attention {
                     Some((_, Some(AttentionReason::Error))) => AttentionReason::Error,
                     _ => AttentionReason::Finished,
                 };
@@ -3408,6 +3449,7 @@ impl Shell {
                     title: agent_title(agent),
                     workspace,
                     reason,
+                    unread,
                     age,
                 })
             })
@@ -3450,10 +3492,10 @@ impl Shell {
                 return;
             }
         };
-        let ids = self.unread_queue_ids(&board_finished_ids(&snapshot), cx);
+        let ids = self.switch_cycle_ids(&board_finished_runs(&snapshot), cx);
         let rows = self.unread_rows(&ids, cx);
         if rows.is_empty() {
-            self.show_toast(true, "No unread threads".into(), cx);
+            self.show_toast(true, "No finished threads".into(), cx);
             return;
         }
         let held = window.modifiers();
