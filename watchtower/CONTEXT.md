@@ -10,7 +10,7 @@
 
 ## Decisions
 
-- [ADR-0072](watchtower/decisions/ADR-0072-board-cards-only-unread-queue.md), superseding ADR-0070: the host switcher, the unread Board-card FIFO queue, and the Mod+J keys.
+- [ADR-0073](watchtower/decisions/ADR-0073-board-finished-cycle-over-unread-only.md), superseding ADR-0072: Mod+J cycles all Board Just finished cards, unread first.
 - [ADR-0071](watchtower/decisions/ADR-0071-after-send-setting-over-fixed-jump.md): the After send setting with Stay as default.
 
 ## Open Decisions

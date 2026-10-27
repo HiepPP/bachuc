@@ -1,6 +1,6 @@
 # ADR-0072 Unread queue from Board Just finished cards over every unread agent of the host
 
-Status: accepted
+Status: superseded by ADR-0073
 Date: 2026-10-27
 Supersedes: ADR-0070
 Scope: `packages/desktop-gpui/crates/app/**`, `packages/desktop-gpui/crates/command/src/shortcuts.rs`, `packages/desktop-gpui/crates/client/**`
