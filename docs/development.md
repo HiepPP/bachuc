@@ -82,6 +82,8 @@ scripts/paseo-release.sh --force     # install while agents are mid-turn
 scripts/paseo-release.sh --skip-build  # install the last build again, no new build
 ```
 
+`scripts/bachuc-release.sh` runs `scripts/paseo-release.sh` and then `scripts/gpui-release.sh`, so one run updates the daemon and the daily GPUI app. It takes the same flags; `--dry-run` skips the GPUI step. Use it after a server change: `gpui-release.sh` alone never restarts the daemon.
+
 - Run it from Terminal.app. It stops the daemon that owns every Paseo agent and terminal, so it refuses to run inside one. It also refuses while an agent is mid-turn unless you pass `--force`; it checks before the build and again after it.
 - The build is copied out of `packages/desktop/release` before anything stops, and the previous app goes to the Trash. Nothing in the release home is moved or deleted.
 - When `~/.bachuc` does not exist yet, the script clones `~/.paseo` to it, and `~/Library/Application Support/Paseo` to `Bachuc`, after the old daemon stops. It rewrites `~/.paseo/` paths in the cloned JSON files and leaves the old folders as a backup. A failed first install moves the clone to the Trash, so the next run clones again.
