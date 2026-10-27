@@ -3,8 +3,9 @@
 
 use serde_json::Value;
 
-/// `BOARD_LIVE_WINDOW_MS`: data older than this shows as Stale.
-pub(crate) const BOARD_LIVE_WINDOW_MS: i64 = 10_000;
+/// Data older than this shows as Stale. It must exceed `IDLE_BOARD_POLL_MS`, or every idle
+/// poll gap shows the delayed notice; two missed idle polls count as delayed.
+pub(crate) const BOARD_LIVE_WINDOW_MS: i64 = 30_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ConnectionState {
@@ -177,6 +178,14 @@ mod tests {
         );
         assert_eq!(
             connection_state(true, false, Some(NOW - BOARD_LIVE_WINDOW_MS), NOW),
+            ConnectionState::Live
+        );
+    }
+
+    #[test]
+    fn an_idle_poll_gap_stays_live() {
+        assert_eq!(
+            connection_state(true, false, Some(NOW - IDLE_BOARD_POLL_MS - 1_000), NOW),
             ConnectionState::Live
         );
     }

@@ -218,7 +218,7 @@ pub(crate) fn snapshot_warning(state: ConnectionState) -> Option<&'static str> {
         ConnectionState::Error => Some("Could not refresh. Showing the last successful snapshot."),
         ConnectionState::Offline => Some("Host is offline. Showing the last successful snapshot."),
         ConnectionState::Stale => {
-            Some("Updates are delayed. Showing a snapshot older than 10 seconds.")
+            Some("Updates are delayed. Showing a snapshot older than 30 seconds.")
         }
         ConnectionState::Connecting | ConnectionState::Live => None,
     }
@@ -345,7 +345,7 @@ mod tests {
         assert!(
             snapshot_warning(ConnectionState::Stale)
                 .unwrap()
-                .contains("older than 10 seconds")
+                .contains("older than 30 seconds")
         );
         assert_eq!(connection_label(ConnectionState::Error), "Connection issue");
         assert_eq!(
