@@ -25,6 +25,8 @@ use super::{
 
 const IMAGE_LEN: usize = 1;
 pub(super) const INLINE_CODE_PADDING: f32 = 4.;
+/// Matches the inline code chip in the Claude app.
+const INLINE_CODE_RADIUS: f32 = 5.;
 
 pub(super) struct InlineFlow {
     id: ElementId,
@@ -674,7 +676,7 @@ impl Element for InlineFlow {
                 state.selection = None;
             }
         }
-        let radius = crate::Theme::global(cx).tokens.radius.sm;
+        let radius = px(INLINE_CODE_RADIUS);
         for (element, background) in prepaint {
             if let Some((bounds, color)) = background {
                 window.paint_quad(gpui::fill(*bounds, *color).corner_radii(radius));

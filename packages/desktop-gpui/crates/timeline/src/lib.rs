@@ -2500,8 +2500,14 @@ impl TimelineView {
             .with_code_block(code_block)
             .with_table(table)
             .with_table_head(table_head)
+            // A tint of the text color, not a surface token: a theme whose control color is
+            // near its background would hide the chip.
             .with_inline_code(HighlightStyle {
-                background_color: Some(theme.accent),
+                background_color: Some(theme.foreground.opacity(if theme.is_dark() {
+                    0.08
+                } else {
+                    0.06
+                })),
                 ..Default::default()
             })
             .with_dark(theme.is_dark())
