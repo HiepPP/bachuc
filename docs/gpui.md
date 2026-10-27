@@ -68,7 +68,7 @@ cd packages/desktop-gpui
 - The GPUI app does not start the daemon (ADR-0041). The script installs the login item `io.github.hieppp.bachuc-daemon`, which runs `paseo daemon start` at login. Its log is `~/Library/Logs/Bachuc/daemon-login.log`.
 - The login item runs through a login shell, because agents need the user's PATH. The Electron app gets the same env from `login-shell-env.ts`.
 - Keep `/Applications/Bachuc.app` installed. The daemon and the `paseo` CLI run on its runtime, and `scripts/paseo-release.sh` still updates them.
-- Keep "Keep running after quit" on in the Electron app. If you open Electron and then quit it, it stops a daemon it started when that setting is off.
+- The installed `Bachuc.app` is a menu bar app with no window and no Dock icon (ADR-0074), so GPUI is the only Bachuc icon in the Dock. It starts the daemon when the daemon is down, and its menu shows the daemon status and offers Open Bachuc GPUI, Restart daemon, Open logs, and Quit. Quit leaves the daemon running. A deep link or a second launch opens GPUI. Builds other than the installed release keep the Electron window.
 
 ## Rules
 

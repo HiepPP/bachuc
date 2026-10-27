@@ -52,6 +52,11 @@ mac:
       to: bin/paseo
     - from: assets/icon.png
       to: icon.png
+    # The menu bar icon of the release app (ADR-0074).
+    - from: assets/trayTemplate.png
+      to: trayTemplate.png
+    - from: assets/trayTemplate@2x.png
+      to: trayTemplate@2x.png
   target:
     - dmg
     - zip

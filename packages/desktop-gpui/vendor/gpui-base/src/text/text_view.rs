@@ -21,6 +21,11 @@ use crate::{GlobalState, TextSelection, text::TextViewStyle};
 pub(crate) type CodeBlockActionsFn =
     dyn Fn(&CodeBlock, &mut Window, &mut App) -> AnyElement + Send + Sync;
 
+/// Type for the code block header generator function: `None` keeps the block
+/// as it is.
+pub(crate) type CodeBlockHeaderFn =
+    dyn Fn(&CodeBlock, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync;
+
 pub(crate) type CodeBlockHighlighterFn =
     dyn Fn(&CodeBlock) -> Vec<(Range<usize>, gpui::HighlightStyle)> + Send + Sync;
 
@@ -152,6 +157,7 @@ pub struct TextView {
     scrollable: bool,
     max_lines: Option<usize>,
     code_block_actions: Option<Arc<CodeBlockActionsFn>>,
+    code_block_header: Option<Arc<CodeBlockHeaderFn>>,
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
@@ -199,6 +205,7 @@ impl TextView {
             scrollable: false,
             max_lines: None,
             code_block_actions: None,
+            code_block_header: None,
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
@@ -223,6 +230,7 @@ impl TextView {
             scrollable: false,
             max_lines: None,
             code_block_actions: None,
+            code_block_header: None,
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
@@ -247,6 +255,7 @@ impl TextView {
             scrollable: false,
             max_lines: None,
             code_block_actions: None,
+            code_block_header: None,
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
@@ -343,6 +352,18 @@ impl TextView {
         self.code_block_actions = Some(Arc::new(move |code_block, window, cx| {
             f(&code_block, window, cx).into_any_element()
         }));
+        self
+    }
+
+    /// Sets a header drawn above the code, inside the code block border.
+    ///
+    /// The closure receives the [`CodeBlock`] and returns `None` to keep the
+    /// block as it is.
+    pub fn code_block_header<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&CodeBlock, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync + 'static,
+    {
+        self.code_block_header = Some(Arc::new(f));
         self
     }
 
@@ -682,6 +703,7 @@ impl Element for TextView {
                 state.preserve_selection_for_reflow();
             }
             state.code_block_actions = self.code_block_actions.clone();
+            state.code_block_header = self.code_block_header.clone();
             state.code_block_highlighter = code_block_highlighter;
             state.table_actions = self.table_actions.clone();
             state.link_click_handler = self.link_click_handler.clone();

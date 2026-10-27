@@ -47,3 +47,10 @@ GPUI's input never asked macOS for the user's Text Replacements (System Settings
 ## Table cell padding at zoom
 
 `table_cell_padding_x` in `src/text/node.rs` gave an unstyled cell a fixed 24 px of padding, but the cell draws `px_3`, which is 0.75 rem. Bachuc zoom makes the window rem 28 px, so each column lost 18 px of text width and short text such as "ID" wrapped one letter per line. The default now uses `rems(0.75)` at the window rem. Re-apply this edit after a gpui-kit upgrade.
+
+## Code block meta and header (TASK-317)
+
+- `CodeBlock` keeps the fence text after the language as `meta()` (`src/text/node.rs`). `Node::Code` in `src/text/format/markdown.rs` passes markdown-rs `raw.meta`. `PartialEq for CodeBlock` compares it, so a meta change refreshes the block.
+- `TextView::code_block_header` (`src/text/text_view.rs`) takes a closure that returns `Option<AnyElement>`. It reaches `CodeBlock::render` through `TextViewState` and `NodeContext`. `None` renders the block exactly as before.
+- With a header, the bordered frame drops its padding and holds the header, then a body box with the code style's padding. The body box holds the corner actions, so they stay over the code. The language label does not show.
+- The timeline draws code citation cards with it (TASK-318). This crate is not a workspace member, so the timeline tests cover it. Re-apply these edits after a gpui-kit upgrade.

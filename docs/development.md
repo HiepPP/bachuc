@@ -73,7 +73,7 @@ In Paseo-managed worktree services, use the injected service environment rather 
 
 ### Installing a release
 
-`scripts/paseo-release.sh` builds a release from this checkout, installs it as `/Applications/Bachuc.app`, links `~/.local/bin/paseo` to its CLI, and restarts the release daemon (`~/.bachuc`, `6767`) on it. Stock, the upstream app, is no longer used.
+`scripts/paseo-release.sh` builds a release from this checkout, installs it as `/Applications/Bachuc.app`, links `~/.local/bin/paseo` to its CLI, and restarts the release daemon (`~/.bachuc`, `6767`) on it. Stock, the upstream app, is no longer used. The installed app runs as a menu bar app with no window ([docs/gpui.md](gpui.md#daily-app)), and the script opens it in the background.
 
 ```bash
 scripts/paseo-release.sh             # build, install, start
@@ -81,6 +81,8 @@ scripts/paseo-release.sh --dry-run   # print every step, change nothing
 scripts/paseo-release.sh --force     # install while agents are mid-turn
 scripts/paseo-release.sh --skip-build  # install the last build again, no new build
 ```
+
+`scripts/bachuc-release.sh` runs `scripts/paseo-release.sh` and then `scripts/gpui-release.sh`, so one run updates the daemon and the daily GPUI app. It takes the same flags; `--dry-run` skips the GPUI step. Use it after a server change: `gpui-release.sh` alone never restarts the daemon.
 
 - Run it from Terminal.app. It stops the daemon that owns every Paseo agent and terminal, so it refuses to run inside one. It also refuses while an agent is mid-turn unless you pass `--force`; it checks before the build and again after it.
 - The build is copied out of `packages/desktop/release` before anything stops, and the previous app goes to the Trash. Nothing in the release home is moved or deleted.

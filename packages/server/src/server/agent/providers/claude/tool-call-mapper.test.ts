@@ -71,6 +71,36 @@ describe("claude tool-call mapper", () => {
     }
   });
 
+  it("keeps the Bash description on the shell detail", () => {
+    const item = expectMapped(
+      mapClaudeRunningToolCall({
+        callId: "claude-call-description",
+        name: "Bash",
+        input: { command: "git status", description: "  Show working tree status " },
+        output: null,
+      }),
+    );
+
+    expect(item.detail).toEqual({
+      type: "shell",
+      command: "git status",
+      description: "Show working tree status",
+    });
+  });
+
+  it("leaves out an empty Bash description", () => {
+    const item = expectMapped(
+      mapClaudeRunningToolCall({
+        callId: "claude-call-empty-description",
+        name: "Bash",
+        input: { command: "git status", description: "   " },
+        output: null,
+      }),
+    );
+
+    expect(item.detail).toEqual({ type: "shell", command: "git status" });
+  });
+
   it("maps partial running input through the same canonical detail path", () => {
     const item = expectMapped(
       mapClaudeRunningToolCall({

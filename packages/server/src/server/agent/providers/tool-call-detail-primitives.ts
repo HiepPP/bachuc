@@ -99,9 +99,14 @@ export const ToolShellInputSchema = z
             .join(" ") || undefined;
       }
     }
+    const description =
+      "description" in value && typeof value.description === "string"
+        ? nonEmptyString(value.description.trim())
+        : undefined;
     return {
       command,
       cwd: nonEmptyString(value.cwd) ?? nonEmptyString(value.directory),
+      ...(description ? { description } : {}),
     };
   });
 
@@ -819,6 +824,7 @@ export function toShellToolDetail(
     type: "shell",
     command,
     ...(input?.cwd ? { cwd: input.cwd } : {}),
+    ...(input?.description ? { description: input.description } : {}),
     ...(output?.output ? { output: output.output } : {}),
     ...(output?.exitCode !== undefined ? { exitCode: output.exitCode } : {}),
   };

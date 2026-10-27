@@ -366,7 +366,8 @@ plugins_ready() {
 
 # start_and_verify <app>
 start_and_verify() {
-  run open -n "$1"
+  # -g: the menu bar app opens no window, and the terminal keeps the focus (ADR-0074).
+  run open -g -n "$1"
   wait_for 120 "daemon $(app_version "$1") on $RELEASE_LISTEN (see $(live_home)/daemon.log)" \
     daemon_matches "$1"
 }

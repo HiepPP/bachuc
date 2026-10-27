@@ -31,6 +31,33 @@ fn shell_shows_the_command_and_its_output() {
 }
 
 #[test]
+fn shell_summary_is_the_description_when_the_call_has_one() {
+    let detail = json!({"type": "shell", "command": "git status", "description": "Show working tree status"});
+    let shown = presentation(&call("Bash", "completed", detail.clone()), CWD);
+    assert_eq!(shown.name, "Shell");
+    assert_eq!(shown.summary.as_deref(), Some("Show working tree status"));
+    // The open badge still shows the command.
+    assert_eq!(
+        sections(&detail, None),
+        vec![Section::Shell {
+            command: "git status".into(),
+            output: String::new()
+        }]
+    );
+}
+
+#[test]
+fn shell_summary_is_the_command_without_a_description() {
+    for detail in [
+        json!({"type": "shell", "command": "git status"}),
+        json!({"type": "shell", "command": "git status", "description": "  "}),
+    ] {
+        let shown = presentation(&call("Bash", "completed", detail), CWD);
+        assert_eq!(shown.summary.as_deref(), Some("git status"));
+    }
+}
+
+#[test]
 fn read_shows_the_file_with_syntax_and_a_gutter_from_its_offset() {
     let detail = json!({
         "type": "read", "filePath": "/Users/test/project/src/app.ts",

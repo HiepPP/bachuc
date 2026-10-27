@@ -325,3 +325,33 @@ fn a_click_resolves_under_the_agent_folder() {
     );
     assert_eq!(resolve_click("main", "/repo"), LinkClick::Ignored);
 }
+
+#[test]
+fn a_fence_meta_with_a_path_and_lines_is_a_code_citation() {
+    let range = bachuc_timeline::links::code_citation("src/lib.rs:2331-2334").unwrap();
+    assert_eq!(range.path, "src/lib.rs");
+    assert_eq!(range.line_start, Some(2331));
+    assert_eq!(range.line_end, Some(2334));
+
+    let line = bachuc_timeline::links::code_citation("src/lib.rs:12").unwrap();
+    assert_eq!(line.line_start, Some(12));
+    assert_eq!(line.line_end, None);
+
+    for meta in [
+        "title=\"x\"",
+        "title=\"a:1\"",
+        "src/lib.rs line 5",
+        "src/lib.rs(12)",
+        "src/lib.rs:10 title=\"x\"",
+        "src/lib.rs:12:4",
+        "src/lib.rs",
+        "",
+        "  ",
+    ] {
+        assert_eq!(
+            bachuc_timeline::links::code_citation(meta),
+            None,
+            "{meta:?}"
+        );
+    }
+}

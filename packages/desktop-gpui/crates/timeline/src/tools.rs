@@ -162,7 +162,17 @@ pub fn presentation(item: &Value, cwd: &str) -> Presentation {
         )
     };
     let (display, summary) = match detail["type"].as_str().unwrap_or("unknown") {
-        "shell" => (Some("Shell".into()), text(&detail["command"])),
+        // The daemon keeps the description Claude gives a Bash call; the open badge still shows
+        // the command.
+        "shell" => (
+            Some("Shell".into()),
+            detail["description"]
+                .as_str()
+                .map(str::trim)
+                .filter(|description| !description.is_empty())
+                .map(str::to_string)
+                .or_else(|| text(&detail["command"])),
+        ),
         "read" => path("Read"),
         "edit" => path("Edit"),
         "write" => path("Write"),

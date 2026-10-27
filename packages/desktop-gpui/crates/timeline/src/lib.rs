@@ -1923,6 +1923,14 @@ impl TimelineView {
     }
 
     /// A click on a link in a message: a file opens through the app, a web link in the browser.
+    fn open_citation(&mut self, target: links::FileTarget, cx: &mut Context<Self>) {
+        cx.emit(TimelineEvent::OpenFile {
+            cwd: self.cwd.clone(),
+            path: target.path,
+            line: target.line_start,
+        });
+    }
+
     fn open_link(&mut self, href: &str, cx: &mut Context<Self>) {
         match links::resolve_click(href, &self.cwd) {
             links::LinkClick::File(target) => cx.emit(TimelineEvent::OpenFile {
@@ -2333,12 +2341,24 @@ impl TimelineView {
         let (style, highlighter) = self.markdown_style(cx);
         let copy_color = t.foreground_muted;
         let (copy_pad, copy_icon) = (zoomed(SPACE_1, cx), zoomed(ICON_SM, cx));
+        let citation = CitationLook {
+            foreground: t.foreground,
+            muted: t.foreground_muted,
+            border: t.border,
+            hover: t.surface3,
+            gap: zoomed(SPACE_2 - 1., cx),
+            pad_x: zoomed(SPACE_3, cx),
+            pad_y: zoomed(SPACE_2, cx),
+            size: ui_font_size(bachuc_theme::metrics::FONT_SM, cx),
+            icon: zoomed(ICON_SM, cx),
+        };
         blocks
             .into_iter()
             .enumerate()
             .map(|(position, block)| match block {
                 Block::Markdown => match &message.states[position] {
                     Some(state) => {
+                        let header_view = view.clone();
                         let view = view.clone();
                         let text = RichText::new(state)
                             .style(style.clone())
@@ -2347,6 +2367,13 @@ impl TimelineView {
                             .on_link_click(move |href, _, _, cx| {
                                 let href = href.to_string();
                                 let _ = view.update(cx, |this, cx| this.open_link(&href, cx));
+                            })
+                            // A fence like ```rust src/lib.rs:10-20 gets a file header that
+                            // opens the cited lines.
+                            .code_block_header(move |block, _, cx| {
+                                let target = links::code_citation(&block.meta()?)?;
+                                let view = header_view.clone();
+                                Some(render_citation_header(target, citation, view, cx))
                             })
                             // `HighlightedCodeBlock` shows no language, only a copy button
                             // on hover; an action in the corner takes the language's place.
@@ -3851,6 +3878,67 @@ fn format_elapsed(ms: i64) -> String {
     } else {
         join(minutes / 60, "h", minutes % 60, "m")
     }
+}
+
+/// The colors and sizes of a code citation header, read once per message render.
+#[derive(Clone, Copy)]
+struct CitationLook {
+    foreground: Hsla,
+    muted: Hsla,
+    border: Hsla,
+    hover: Hsla,
+    gap: Pixels,
+    pad_x: Pixels,
+    pad_y: Pixels,
+    size: Pixels,
+    icon: Pixels,
+}
+
+/// The header of a cited code block: the file icon and name, and "Ln a–b". A press opens the
+/// file at the first line.
+fn render_citation_header(
+    target: links::FileTarget,
+    look: CitationLook,
+    view: WeakEntity<TimelineView>,
+    cx: &App,
+) -> AnyElement {
+    let name = target
+        .path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&target.path)
+        .to_string();
+    let lines = match (target.line_start, target.line_end) {
+        (Some(start), Some(end)) => format!("Ln {start}\u{2013}{end}"),
+        (Some(start), None) => format!("Ln {start}"),
+        _ => String::new(),
+    };
+    h_flex()
+        .id("citation")
+        .role(Role::Link)
+        .aria_label(format!("Open {} {lines}", target.path))
+        .items_center()
+        .gap(look.gap)
+        .px(look.pad_x)
+        .py(look.pad_y)
+        .border_b_1()
+        .border_color(look.border)
+        .text_size(look.size)
+        .font_family(bachuc_theme::ui_font_family(cx))
+        .cursor_pointer()
+        .hover(move |row| row.bg(look.hover))
+        .child(
+            img(bachuc_explorer::file_icons::file_icon(&name))
+                .size(look.icon)
+                .flex_none(),
+        )
+        .child(div().text_color(look.foreground).child(name))
+        .child(div().text_color(look.muted).child(lines))
+        .on_click(move |_, _, cx| {
+            let target = target.clone();
+            let _ = view.update(cx, |this, cx| this.open_citation(target, cx));
+        })
+        .into_any_element()
 }
 
 fn short_path(path: &str) -> String {
