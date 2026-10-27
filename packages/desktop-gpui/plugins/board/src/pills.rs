@@ -1,6 +1,8 @@
-//! The three thread corner pills of `client/remove.ts` (45-249): Remove, Remove & New Thread,
-//! and Jump To Parent. GPUI pills match the composer's agent, so each pill finds its run in
-//! the store snapshot by `agent_id`; the Electron workspace lookup is not needed.
+//! The three thread actions of `client/remove.ts` (45-249): Jump To Parent, Remove, and
+//! Remove & New Thread. GPUI draws them as one icon group in the workspace header, so they
+//! never cover the timeline and sit away from the composer. Each pill finds its run in the
+//! store snapshot by the focused agent's `agent_id`; the Electron workspace lookup is not
+//! needed.
 
 use crate::model::{ConnectionState, Run};
 use crate::store::BoardStore;
@@ -12,9 +14,11 @@ use bachuc_plugin_host::{
 use gpui_kit::{App, Entity, Hsla, rgb};
 use std::rc::Rc;
 
-/// Navigation, not removal: orange sets it apart from the Remove actions above it
-/// (`remove.ts:29-30`). The one literal color of the crate.
+/// Navigation, not removal: orange sets it apart from the Remove actions beside it
+/// (`remove.ts:29-30`).
 const PARENT_COLOR: u32 = 0xf97316;
+/// Red marks the one icon that only removes, as the design picked on 2026-10-28.
+const REMOVE_COLOR: u32 = 0x9c3a3a;
 const RUN_CHANGED: &str = "Run changed. Refresh and retry.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,23 +122,22 @@ fn remove_and_leave(
     .detach();
 }
 
-/// The pill state of `kind`: its title, label, icon, and press.
+/// The pill state of `kind`: its title (the tooltip), icon, and press. Header pills draw no
+/// label.
 fn pill_state(
     kind: PillKind,
     run: Run,
     store: &Entity<BoardStore>,
     ctx: &PluginContext,
 ) -> PillState {
-    let (title, label, icon, color) = match kind {
-        PillKind::Remove => ("Remove from Board", "Remove", IconName::X, None),
-        PillKind::RemoveAndNew => (
-            "Remove and Start New Thread",
-            "Remove & New Thread",
-            IconName::SquarePen,
-            None,
+    let (title, icon, color) = match kind {
+        PillKind::Remove => (
+            "Remove from Board",
+            IconName::X,
+            Some(Hsla::from(rgb(REMOVE_COLOR))),
         ),
+        PillKind::RemoveAndNew => ("Remove and Start New Thread", IconName::SquarePen, None),
         PillKind::Parent => (
-            "Jump To Parent",
             "Jump To Parent",
             IconName::CornerLeftUp,
             Some(Hsla::from(rgb(PARENT_COLOR))),
@@ -144,7 +147,7 @@ fn pill_state(
     let ctx = ctx.clone();
     PillState {
         title: title.into(),
-        label: Some(label.into()),
+        label: None,
         icon: Some(icon),
         color,
         disabled: false,
@@ -168,30 +171,32 @@ fn pill_state(
     }
 }
 
-/// The three corner pills, in Electron's stacking order.
-pub(crate) fn corner_pills(store: &Entity<BoardStore>, ctx: &PluginContext) -> Vec<ComposerPill> {
-    [
-        ("remove", PillKind::Remove),
-        ("remove-new-thread", PillKind::RemoveAndNew),
-        ("jump-to-parent", PillKind::Parent),
-    ]
-    .into_iter()
-    .map(|(id, kind)| {
-        let store = store.clone();
-        let ctx = ctx.clone();
-        ComposerPill {
-            id,
-            placement: PillPlacement::Corner,
-            show_on_draft: ShowOnDraft::No,
-            workspace_id: None,
-            agent_id: None,
-            state: Rc::new(move |target, cx| {
-                let run = current_run(&store, kind, target, cx)?;
-                Some(pill_state(kind, run, &store, &ctx))
-            }),
-        }
-    })
-    .collect()
+/// The three header pills, left to right: navigation first, then the two removals.
+const HEADER_PILLS: [(&str, PillKind); 3] = [
+    ("jump-to-parent", PillKind::Parent),
+    ("remove", PillKind::Remove),
+    ("remove-new-thread", PillKind::RemoveAndNew),
+];
+
+pub(crate) fn header_pills(store: &Entity<BoardStore>, ctx: &PluginContext) -> Vec<ComposerPill> {
+    HEADER_PILLS
+        .into_iter()
+        .map(|(id, kind)| {
+            let store = store.clone();
+            let ctx = ctx.clone();
+            ComposerPill {
+                id,
+                placement: PillPlacement::Header,
+                show_on_draft: ShowOnDraft::No,
+                workspace_id: None,
+                agent_id: None,
+                state: Rc::new(move |target, cx| {
+                    let run = current_run(&store, kind, target, cx)?;
+                    Some(pill_state(kind, run, &store, &ctx))
+                }),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -259,6 +264,15 @@ mod tests {
         assert!(pills_hidden(ConnectionState::Offline));
         assert!(!pills_hidden(ConnectionState::Live));
         assert!(!pills_hidden(ConnectionState::Stale));
+    }
+
+    #[test]
+    fn the_header_group_reads_parent_remove_then_remove_and_new() {
+        let kinds: Vec<_> = HEADER_PILLS.iter().map(|(_, kind)| *kind).collect();
+        assert_eq!(
+            kinds,
+            [PillKind::Parent, PillKind::Remove, PillKind::RemoveAndNew]
+        );
     }
 
     #[test]

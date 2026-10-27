@@ -13,7 +13,7 @@ use bachuc_plugin_host::{
     PluginHostEvent, PluginSlashCommand, StopButton, host,
 };
 use bachuc_theme::metrics::{
-    FONT_SM, ICON_SM, POPUP_GAP, RADIUS_2XL, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
+    FONT_SM, ICON_SM, POPUP_GAP, RADIUS_2XL, RADIUS_MD, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
 };
 use bachuc_theme::{tokens, ui_font_size, zoomed};
 use gpui_kit::component::popover::Popover;
@@ -31,8 +31,10 @@ const TRACK_LABEL_MAX: f32 = 160.;
 const WIDE_LABEL_MAX: f32 = 240.;
 /// `composerPillStyles.body` `minHeight` (`COMPOSER_PILL_MIN_HEIGHT`).
 const FLOATING_PILL_HEIGHT: f32 = 32.;
-/// `toolbarButton` height.
+/// `toolbarButton` height, and the height of the workspace header controls.
 const TOOLBAR_PILL_HEIGHT: f32 = 28.;
+/// Each header pill is a wide icon cell, so a press does not land on its neighbour.
+const HEADER_CELL_WIDTH: f32 = 40.;
 
 /// The pills that apply to one composer, split by where they sit.
 #[derive(Clone, Default)]
@@ -40,6 +42,7 @@ pub struct PillSlots {
     pub track: Vec<Contributed<ComposerPill>>,
     pub toolbar: Vec<Contributed<ComposerPill>>,
     pub corner: Vec<Contributed<ComposerPill>>,
+    pub header: Vec<Contributed<ComposerPill>>,
 }
 
 /// Splits the pills that apply to this composer by `placement`, keeping registration order.
@@ -59,6 +62,7 @@ pub fn pill_slots(
             PillPlacement::Track => &mut slots.track,
             PillPlacement::Toolbar => &mut slots.toolbar,
             PillPlacement::Corner => &mut slots.corner,
+            PillPlacement::Header => &mut slots.header,
         };
         slot.push(pill.clone());
     }
@@ -261,7 +265,7 @@ fn pill_body(
     let small = ui_font_size(FONT_SM, cx);
     let label_max = match slot {
         PillPlacement::Track => TRACK_LABEL_MAX,
-        PillPlacement::Toolbar | PillPlacement::Corner => WIDE_LABEL_MAX,
+        PillPlacement::Toolbar | PillPlacement::Corner | PillPlacement::Header => WIDE_LABEL_MAX,
     };
     let body = match slot {
         PillPlacement::Track => docked_pill(id, open, cx),
@@ -295,7 +299,19 @@ fn pill_body(
             .bg(if open { t.surface2 } else { t.surface1 })
             .text_size(small)
             .hover(move |pill| pill.bg(t.surface2)),
+        // One cell of the joined header group; the group draws the border.
+        PillPlacement::Header => div()
+            .id(id)
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .w(zoomed(HEADER_CELL_WIDTH, cx))
+            .h_full()
+            .when(open, |pill| pill.bg(t.surface2))
+            .hover(move |pill| pill.bg(t.surface2)),
     };
+    let show_label = slot != PillPlacement::Header;
     let title = state.title.clone();
     body.role(Role::Button)
         .aria_label(title.clone())
@@ -308,7 +324,7 @@ fn pill_body(
                 .icon
                 .map(|name| icon(name).with_size(zoomed(ICON_SM, cx)).text_color(color)),
         )
-        .children(state.label.clone().map(|label| {
+        .children(state.label.clone().filter(|_| show_label).map(|label| {
             div()
                 .min_w_0()
                 .truncate()
@@ -508,47 +524,16 @@ impl CornerPills {
 
 impl Render for CornerPills {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(host) = host(cx) else {
-            return self.hide(cx);
-        };
-        let workspace_id = self
-            .client
-            .read(cx)
-            .agents()
-            .iter()
-            .find(|agent| agent.id == self.agent_id)
-            .and_then(|agent| agent.workspace_id.clone());
-        let corner = pill_slots(
-            host.read(cx).index().composer_pills(),
-            workspace_id.as_deref(),
-            Some(&self.agent_id),
-            false,
-        )
-        .corner;
-        let target = ComposerTarget {
-            workspace_id,
-            agent_id: Some(self.agent_id.clone()),
-            draft: None,
-        };
-        let states = pill_states(&corner, &target, cx);
-        if states.is_empty() {
+        let pills = agent_pills(
+            &self.client,
+            &self.agent_id,
+            PillPlacement::Corner,
+            &self.popovers,
+            cx,
+        );
+        if pills.is_empty() {
             return self.hide(cx);
         }
-        // A corner pill never opens a New workspace panel: it sits on an agent pane.
-        let show_panel: ShowPanel = Rc::new(|_, _, _| {});
-        let pills: Vec<AnyElement> = states
-            .into_iter()
-            .map(|(pill, state)| {
-                plugin_pill(
-                    &pill,
-                    state,
-                    target.clone(),
-                    show_panel.clone(),
-                    self.popovers.clone(),
-                    cx,
-                )
-            })
-            .collect();
         let size = self.size.clone();
         let id = cx.entity_id();
         v_flex()
@@ -579,6 +564,141 @@ impl Render for CornerPills {
             )
             .children(pills)
             .into_any_element()
+    }
+}
+
+/// The drawn pills of one agent at `placement`, in registration order. These pills sit on an
+/// agent's pane or header, so a press never opens a New workspace panel.
+fn agent_pills(
+    client: &Entity<Client>,
+    agent_id: &str,
+    placement: PillPlacement,
+    popovers: &PopoverViews,
+    cx: &App,
+) -> Vec<AnyElement> {
+    let Some(host) = host(cx) else {
+        return Vec::new();
+    };
+    let workspace_id = client
+        .read(cx)
+        .agents()
+        .iter()
+        .find(|agent| agent.id == agent_id)
+        .and_then(|agent| agent.workspace_id.clone());
+    let slots = pill_slots(
+        host.read(cx).index().composer_pills(),
+        workspace_id.as_deref(),
+        Some(agent_id),
+        false,
+    );
+    let pills = match placement {
+        PillPlacement::Track => slots.track,
+        PillPlacement::Toolbar => slots.toolbar,
+        PillPlacement::Corner => slots.corner,
+        PillPlacement::Header => slots.header,
+    };
+    let target = ComposerTarget {
+        workspace_id,
+        agent_id: Some(agent_id.to_string()),
+        draft: None,
+    };
+    let show_panel: ShowPanel = Rc::new(|_, _, _| {});
+    pill_states(&pills, &target, cx)
+        .into_iter()
+        .map(|(pill, state)| {
+            plugin_pill(
+                &pill,
+                state,
+                target.clone(),
+                show_panel.clone(),
+                popovers.clone(),
+                cx,
+            )
+        })
+        .collect()
+}
+
+/// The header pills of the focused agent tab: one joined group of icon cells in the workspace
+/// header, outside the timeline. The shell sets the agent when the focused tab changes.
+pub struct HeaderPills {
+    client: Entity<Client>,
+    agent_id: Option<String>,
+    popovers: PopoverViews,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl HeaderPills {
+    pub fn new(client: Entity<Client>, cx: &mut Context<HeaderPills>) -> HeaderPills {
+        let mut subscriptions =
+            vec![
+                cx.subscribe(&client, |_, _, event: &bachuc_client::ClientEvent, cx| {
+                    if matches!(event, bachuc_client::ClientEvent::AgentsChanged) {
+                        cx.notify();
+                    }
+                }),
+            ];
+        if let Some(host) = host(cx) {
+            subscriptions.push(cx.subscribe(&host, |this: &mut HeaderPills, _, event, cx| {
+                if host_action(event, this.agent_id.as_deref()) == Some(HostAction::Redraw) {
+                    cx.notify();
+                }
+            }));
+        }
+        HeaderPills {
+            client,
+            agent_id: None,
+            popovers: PopoverViews::default(),
+            _subscriptions: subscriptions,
+        }
+    }
+
+    /// The focused tab's agent, `None` when the tab is not an agent.
+    pub fn set_agent(&mut self, agent_id: Option<String>, cx: &mut Context<Self>) {
+        if self.agent_id != agent_id {
+            self.agent_id = agent_id;
+            self.popovers.borrow_mut().clear();
+            cx.notify();
+        }
+    }
+}
+
+impl Render for HeaderPills {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let pills = match &self.agent_id {
+            Some(agent_id) => agent_pills(
+                &self.client,
+                agent_id,
+                PillPlacement::Header,
+                &self.popovers,
+                cx,
+            ),
+            None => Vec::new(),
+        };
+        let t = tokens(cx);
+        let count = pills.len();
+        let mut cells = Vec::with_capacity(count * 2);
+        for (index, pill) in pills.into_iter().enumerate() {
+            if index > 0 {
+                cells.push(div().w_px().h_full().bg(t.border_accent).into_any_element());
+            }
+            cells.push(pill);
+        }
+        h_flex()
+            .id("plugin-header-pills")
+            .role(Role::Group)
+            .aria_label("Plugin pills")
+            // `display: none` keeps an empty group from adding a gap to the header row.
+            .when(count == 0, |group| group.hidden())
+            .flex_shrink_0()
+            .h(zoomed(TOOLBAR_PILL_HEIGHT, cx))
+            .items_stretch()
+            .rounded(zoomed(RADIUS_MD, cx))
+            .border_1()
+            .border_color(t.border_accent)
+            .overflow_hidden()
+            // A press must not also start a window drag in the title bar under it.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .children(cells)
     }
 }
 
@@ -677,15 +797,18 @@ mod tests {
             pill("c", PillPlacement::Corner, ShowOnDraft::No),
             pill("d", PillPlacement::Track, ShowOnDraft::Only),
             pill("e", PillPlacement::Track, ShowOnDraft::Yes),
+            pill("f", PillPlacement::Header, ShowOnDraft::No),
         ];
         let agent = pill_slots(&pills, Some("w"), Some("x"), false);
         assert_eq!(ids(&agent.track), ["a", "e"]);
         assert_eq!(ids(&agent.toolbar), ["b"]);
         assert_eq!(ids(&agent.corner), ["c"]);
+        assert_eq!(ids(&agent.header), ["f"]);
         let draft = pill_slots(&pills, None, None, true);
         assert_eq!(ids(&draft.track), ["d", "e"]);
         assert_eq!(ids(&draft.toolbar), ["b"]);
         assert!(draft.corner.is_empty());
+        assert!(draft.header.is_empty());
     }
 
     #[test]

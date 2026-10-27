@@ -44,7 +44,7 @@ use bachuc_command::{
     CommandCenter, CommandEvent, CommandFileEvent, FileResult, Shortcut, ShortcutsDialog,
     ShortcutsDialogEvent, data_dir, load_shortcuts,
 };
-use bachuc_composer::{Composer, ComposerEvent, DraftSeed, row_label};
+use bachuc_composer::{Composer, ComposerEvent, DraftSeed, HeaderPills, row_label};
 use bachuc_diagram::DiagramRenderer;
 use bachuc_explorer::{
     DiffView, Explorer, ExplorerDiffEvent, ExplorerEvent, ExplorerFileEvent, ExplorerNoticeEvent,
@@ -290,6 +290,8 @@ pub struct Shell {
     pr_checked: HashMap<String, Instant>,
     /// The header menu that shows, if any.
     pub(crate) header_menu: Option<HeaderMenu>,
+    /// The plugin header pills of the focused agent tab.
+    pub(crate) header_pills: Entity<HeaderPills>,
     /// The Workspace actions menu while it shows.
     pub(crate) header_actions: Option<(Entity<PopupMenu>, Subscription)>,
     /// The Open in editor apps, read once at start, and the last pick of the session.
@@ -341,6 +343,7 @@ impl Shell {
             bachuc_settings::watch_plugin_themes(cx);
         }
         let logo_fill = LogoFill::new(tokens(cx).foreground);
+        let header_pills = cx.new(|cx| HeaderPills::new(client.clone(), cx));
         let mut shell = Shell {
             hosts,
             host_index,
@@ -385,6 +388,7 @@ impl Shell {
             pr_inflight: HashSet::new(),
             pr_checked: HashMap::new(),
             header_menu: None,
+            header_pills,
             header_actions: None,
             editor_targets: editor_targets(|path| std::path::Path::new(path).exists()),
             editor_icons: Vec::new(),
