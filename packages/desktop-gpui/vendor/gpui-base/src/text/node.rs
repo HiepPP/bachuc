@@ -19,7 +19,7 @@ use crate::{
     GlobalState, ScrollableMask, Scrollbar, StyledExt, h_flex,
     scrollable_mask::horizontal_scroll_area,
     text::{
-        CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
+        CodeBlockActionsFn, CodeBlockHeaderFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
         MarkdownNode, TableActionsFn,
         document::{NodeRenderOptions, PrevBlock, flow_position},
         inline::{
@@ -2016,6 +2016,9 @@ impl Paragraph {
 #[derive(Debug, Clone)]
 pub struct CodeBlock {
     lang: Option<SharedString>,
+    /// The fence text after the language, for example `src/lib.rs:10-20` in
+    /// ```` ```rust src/lib.rs:10-20 ````.
+    meta: Option<SharedString>,
     state: Arc<Mutex<InlineState>>,
     highlight_cache: Arc<Mutex<Option<CachedCodeBlockHighlights>>>,
     /// Rendered UTF-8 byte spans of the code paired with their exact Markdown
@@ -2039,7 +2042,10 @@ impl std::fmt::Debug for CachedCodeBlockHighlights {
 
 impl PartialEq for CodeBlock {
     fn eq(&self, other: &Self) -> bool {
-        self.lang == other.lang && self.code() == other.code() && self.span == other.span
+        self.lang == other.lang
+            && self.meta == other.meta
+            && self.code() == other.code()
+            && self.span == other.span
     }
 }
 
@@ -2047,6 +2053,11 @@ impl CodeBlock {
     /// Get the language of the code block.
     pub fn lang(&self) -> Option<SharedString> {
         self.lang.clone()
+    }
+
+    /// Get the fence text after the language, if any.
+    pub fn meta(&self) -> Option<SharedString> {
+        self.meta.clone()
     }
 
     /// Get the code content of the code block.
@@ -2078,11 +2089,17 @@ impl CodeBlock {
 
         Self {
             lang,
+            meta: None,
             state,
             highlight_cache: Arc::new(Mutex::new(None)),
             source_segments: vec![],
             span: span.map(|s| s.into()),
         }
+    }
+
+    pub(crate) fn with_meta(mut self, meta: Option<SharedString>) -> Self {
+        self.meta = meta.filter(|meta| !meta.trim().is_empty());
+        self
     }
 
     pub(crate) fn source_segments(mut self, source_segments: Vec<SourceSegment>) -> Self {
@@ -2196,13 +2213,20 @@ impl CodeBlock {
     ) -> AnyElement {
         let style = &node_cx.style;
         let leaf_key = self.span.map(|span| TextLeafKey::block(span.start));
+        // A caller header (BACHUC-PATCH) sits above the code, inside the border.
+        let header = node_cx
+            .code_block_header
+            .as_ref()
+            .and_then(|header| header(self, window, cx));
         // The language sits quietly in the top-right corner, where custom
         // actions go instead when the caller provides them; the top padding
         // keeps the first line clear of it. Like the actions, it stays out of
         // the scrolled content so it holds its corner.
         let lang_label = self
             .lang()
-            .filter(|lang| !lang.is_empty() && node_cx.code_block_actions.is_none())
+            .filter(|lang| {
+                !lang.is_empty() && node_cx.code_block_actions.is_none() && header.is_none()
+            })
             .map(|lang| {
                 div()
                     .absolute()
@@ -2215,6 +2239,36 @@ impl CodeBlock {
                     .child(lang)
             });
 
+        let code = Inline::new(
+            self.state.clone(),
+            vec![],
+            fade_highlights(
+                node_cx
+                    .code_block_highlighter
+                    .as_ref()
+                    .map(|highlighter| self.highlighted_styles(highlighter))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(range, style)| (range, InlineHighlight::from(style)))
+                    .collect(),
+                node_cx.stream_fades(leaf_key),
+            ),
+            node_cx.link_click_handler.clone(),
+        )
+        .range_backgrounds(node_cx.range_backgrounds(leaf_key).to_vec())
+        .reveal(node_cx.reveal_at(leaf_key, 0, self.code().len()));
+        let mut actions = node_cx.code_block_actions.clone().map(|actions| {
+            div()
+                .id("actions")
+                .absolute()
+                .top_2()
+                .right_2()
+                .bg(style.code_background())
+                .rounded(cx.theme().tokens.radius.md)
+                .child(actions(&self, window, cx))
+        });
+        let code_style = style.code_block();
+        let has_header = header.is_some();
         let block = div()
             .w_full()
             .min_w_0()
@@ -2232,37 +2286,32 @@ impl CodeBlock {
             .text_size(cx.theme().tokens.typography.mono_md.size)
             .line_height(relative(1.6))
             .relative()
-            .refine_style(&style.code_block())
-            .child(
-                Inline::new(
-                    self.state.clone(),
-                    vec![],
-                    fade_highlights(
-                        node_cx
-                            .code_block_highlighter
-                            .as_ref()
-                            .map(|highlighter| self.highlighted_styles(highlighter))
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|(range, style)| (range, InlineHighlight::from(style)))
-                            .collect(),
-                        node_cx.stream_fades(leaf_key),
-                    ),
-                    node_cx.link_click_handler.clone(),
-                )
-                .range_backgrounds(node_cx.range_backgrounds(leaf_key).to_vec())
-                .reveal(node_cx.reveal_at(leaf_key, 0, self.code().len())),
-            );
-        let actions = node_cx.code_block_actions.clone().map(|actions| {
-            div()
-                .id("actions")
-                .absolute()
-                .top_2()
-                .right_2()
-                .bg(style.code_background())
-                .rounded(cx.theme().tokens.radius.md)
-                .child(actions(&self, window, cx))
-        });
+            .refine_style(&code_style);
+        let block = match header {
+            None => block.child(code),
+            // With a header the frame keeps the border and the caller's style
+            // but no padding; the code gets the padding in its own box, which
+            // also holds the actions, so they stay over the code.
+            Some(header) => {
+                let padding = StyleRefinement {
+                    padding: code_style.padding.clone(),
+                    ..StyleRefinement::default()
+                };
+                let mut body = div()
+                    .w_full()
+                    .min_w_0()
+                    .px_4()
+                    .pt(px(14.))
+                    .pb(px(14.))
+                    .relative()
+                    .refine_style(&padding)
+                    .child(code);
+                if let Some(actions) = actions.take() {
+                    body = body.child(actions);
+                }
+                block.p_0().child(header).child(body)
+            }
+        };
         // The id scopes the caller's action ids per code block, so plain ids
         // like `"copy"` don't collide across blocks.
         let id = block_element_id("codeblock", self.span, options.ix);
@@ -2298,9 +2347,11 @@ impl CodeBlock {
                 .children(lang_label)
                 .into_any_element()
         } else {
-            // Without actions nothing under the block needs element state.
+            // Without actions or a header nothing under the block needs
+            // element state; the id scopes the ids inside a header.
             match actions {
                 Some(actions) => block.id(id).child(actions).into_any_element(),
+                None if has_header => block.id(id).into_any_element(),
                 None => block.children(lang_label).into_any_element(),
             }
         };
@@ -2325,6 +2376,7 @@ pub(crate) struct NodeContext {
     pub(crate) link_refs: HashMap<SharedString, LinkMark>,
     pub(crate) style: Arc<TextViewStyle>,
     pub(crate) code_block_actions: Option<Arc<CodeBlockActionsFn>>,
+    pub(crate) code_block_header: Option<Arc<CodeBlockHeaderFn>>,
     pub(crate) code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     pub(crate) table_actions: Option<Arc<TableActionsFn>>,
     pub(crate) image_source: Option<Arc<super::text_view::ImageSourceFn>>,
