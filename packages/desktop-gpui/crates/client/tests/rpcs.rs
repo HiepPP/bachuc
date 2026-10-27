@@ -766,6 +766,32 @@ fn project_config_reads_and_writes_with_the_revision() {
 // ---- follow-up fields and requests (TASK-157) ----
 
 #[test]
+fn agent_attention_timestamp_reads_the_snapshot_value() {
+    let server = FakeServer::start();
+    server.with(|s| {
+        let mut stamped = agent_snapshot("a1", "idle");
+        stamped["requiresAttention"] = json!(true);
+        stamped["attentionReason"] = json!("finished");
+        stamped["attentionTimestamp"] = json!("2026-10-27T05:00:00.000Z");
+        let mut null = agent_snapshot("a2", "idle");
+        null["attentionTimestamp"] = Value::Null;
+        let mut blank = agent_snapshot("a3", "idle");
+        blank["attentionTimestamp"] = json!(" ");
+        s.agents = vec![stamped, null, blank, agent_snapshot("a4", "idle")];
+    });
+    let mut harness = connect(&server);
+    assert!(harness.pump_until(WAIT, |h| h.core.agents().len() == 4));
+    assert_eq!(
+        harness.core.agent_attention_timestamp("a1").as_deref(),
+        Some("2026-10-27T05:00:00.000Z")
+    );
+    assert_eq!(harness.core.agent_attention_timestamp("a2"), None);
+    assert_eq!(harness.core.agent_attention_timestamp("a3"), None);
+    assert_eq!(harness.core.agent_attention_timestamp("a4"), None, "absent");
+    assert_eq!(harness.core.agent_attention_timestamp("missing"), None);
+}
+
+#[test]
 fn agent_attention_reads_the_flag_and_the_reason() {
     let server = FakeServer::start();
     server.with(|s| {

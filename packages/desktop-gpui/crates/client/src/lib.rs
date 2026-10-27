@@ -699,6 +699,11 @@ impl Client {
         self.core.agent_attention(agent_id)
     }
 
+    /// The daemon `attentionTimestamp` of the agent, `None` when null, blank, or unknown.
+    pub fn agent_attention_timestamp(&self, agent_id: &str) -> Option<String> {
+        self.core.agent_attention_timestamp(agent_id)
+    }
+
     /// The project's `projectKey`, else `["<serverId>","<projectId>"]` as the app builds it.
     pub fn project_view_key(&self, project_id: &str) -> Option<String> {
         self.core.project_view_key(project_id)
