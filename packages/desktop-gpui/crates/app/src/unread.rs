@@ -1,5 +1,7 @@
-//! The unread thread queue and the back history behind Mod+J and Mod+Shift+J (ADR-0070). Both
-//! are pure; the shell fills them from `Client`.
+//! The unread thread queue and the back history behind Mod+J and Mod+Shift+J (ADR-0070,
+//! ADR-0072). Both are pure; the shell fills them from `Client` and the Board snapshot.
+
+use std::collections::HashSet;
 
 use bachuc_client::AttentionReason;
 
@@ -13,15 +15,34 @@ pub struct QueueEntry {
     /// The daemon `attentionTimestamp`, else the agent's `updatedAt`. ISO strings in one
     /// format, so they compare as text.
     pub attention_at: Option<String>,
+    /// The agent is a Board run with a status other than `running`.
+    pub on_board: bool,
 }
 
-/// The agent ids to visit, oldest first: flagged, finished or failed, not a subagent, and not
-/// the viewed agent. An entry with no timestamp sorts last; ties sort by agent id.
+/// The agent ids of the Board runs whose status is not `running`, from a `board.snapshot`
+/// answer. A run that does not decode is skipped.
+pub fn board_finished_ids(snapshot: &serde_json::Value) -> HashSet<String> {
+    let Some(runs) = snapshot.get("runs").and_then(|runs| runs.as_array()) else {
+        return HashSet::new();
+    };
+    runs.iter()
+        .filter_map(|run| {
+            let id = run.get("agentId")?.as_str()?;
+            let status = run.get("status")?.as_str()?;
+            (status != "running").then(|| id.to_string())
+        })
+        .collect()
+}
+
+/// The agent ids to visit, oldest first: on the Board, flagged, finished or failed, not a
+/// subagent, and not the viewed agent. An entry with no timestamp sorts last; ties sort by
+/// agent id.
 pub fn unread_queue(entries: &[QueueEntry], viewed: Option<&str>) -> Vec<String> {
     let mut queued: Vec<&QueueEntry> = entries
         .iter()
         .filter(|entry| {
-            entry.requires_attention
+            entry.on_board
+                && entry.requires_attention
                 && matches!(
                     entry.reason,
                     Some(AttentionReason::Finished | AttentionReason::Error)
@@ -103,6 +124,7 @@ mod tests {
             reason,
             is_subagent: false,
             attention_at: at.map(String::from),
+            on_board: true,
         }
     }
 
@@ -180,5 +202,32 @@ mod tests {
         assert_eq!(history.back(None), None);
         history.visit(Some("a"));
         assert_eq!(history.back(Some("a")), None);
+    }
+
+    #[test]
+    fn board_finished_ids_keep_non_running_runs_and_skip_bad_rows() {
+        let snapshot = serde_json::json!({
+            "observingSince": "2026-10-27T00:00:00.000Z",
+            "runs": [
+                {"agentId": "done", "status": "completed"},
+                {"agentId": "failed", "status": "failed"},
+                {"agentId": "busy", "status": "running"},
+                {"status": "completed"},
+                "bad"
+            ]
+        });
+        let ids = board_finished_ids(&snapshot);
+        assert!(ids.contains("done") && ids.contains("failed"));
+        assert!(!ids.contains("busy"));
+        assert_eq!(ids.len(), 2);
+        assert!(board_finished_ids(&serde_json::json!({})).is_empty());
+    }
+
+    #[test]
+    fn an_unread_agent_off_the_board_stays_out() {
+        let mut off = entry("off", Some(AttentionReason::Finished), Some("1"));
+        off.on_board = false;
+        let entries = [off, entry("on", Some(AttentionReason::Finished), Some("2"))];
+        assert_eq!(unread_queue(&entries, None), ["on"]);
     }
 }

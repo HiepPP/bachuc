@@ -28,7 +28,7 @@ use crate::state::{
     waiting_threads, workspace_agents, workspace_order,
 };
 use crate::toast::{ToastStack, render_toasts};
-use crate::unread::{QueueEntry, ViewHistory, iso_to_ms, unread_queue};
+use crate::unread::{QueueEntry, ViewHistory, board_finished_ids, iso_to_ms, unread_queue};
 use crate::unread_switcher::{SwitcherRow, UnreadSwitcher, UnreadSwitcherEvent};
 use crate::workspace_draft::{self, WorkspaceDraftPane};
 use crate::{dock, fire};
@@ -53,6 +53,7 @@ use bachuc_icons::{IconName, provider_logo};
 use bachuc_plugin_host::{
     AgentAnchor, PanelInput, PanelTarget, PluginHost, PluginHostEvent, SurfacePresentation,
 };
+use bachuc_settings::after_send::AfterSend;
 use bachuc_settings::appearance::{Appearance, ZoomDirection, zoom_step};
 use bachuc_settings::{Settings, SettingsEvent};
 use bachuc_sidebar::model::{StatusBucket, archive_prompt, bucket_for_agent};
@@ -249,6 +250,9 @@ pub struct Shell {
     command: Option<(Entity<CommandCenter>, Vec<Subscription>)>,
     /// The Mod+J unread switcher while it shows.
     unread: Option<(Entity<UnreadSwitcher>, Subscription)>,
+    /// While the Board snapshot for Mod+J is pending: the Mod+J (true) and Mod+Shift+J (false)
+    /// presses that came meanwhile, applied as steps once the switcher opens.
+    unread_pending: Option<Vec<bool>>,
     /// The generation of the last Files scope query, so an answer to an older one is dropped.
     file_query: u64,
     shortcuts_dialog: Option<(Entity<ShortcutsDialog>, Subscription)>,
@@ -358,6 +362,7 @@ impl Shell {
             hosts_open: false,
             command: None,
             unread: None,
+            unread_pending: None,
             file_query: 0,
             shortcuts_dialog: None,
             side_file: None,
@@ -715,6 +720,7 @@ impl Shell {
         self.known_agents.clear();
         self.command = None;
         self.unread = None;
+        self.unread_pending = None;
         self.view_history = ViewHistory::default();
         self.pending_open = None;
         self.pending_prompt = None;
@@ -3303,8 +3309,9 @@ impl Shell {
 
     // ----- unread switcher and After send -----
 
-    /// The unread queue of the active host: agent ids, oldest first (ADR-0070).
-    fn unread_queue_ids(&self, cx: &App) -> Vec<String> {
+    /// The unread queue of the active host: agent ids of Board cards, oldest first (ADR-0072).
+    /// `board` is the set of non-running Board runs from `board.snapshot`.
+    fn unread_queue_ids(&self, board: &HashSet<String>, cx: &App) -> Vec<String> {
         let client = self.client.read(cx);
         let entries: Vec<QueueEntry> = client
             .agents()
@@ -3318,31 +3325,57 @@ impl Shell {
                     reason,
                     is_subagent: client.agent_parent_id(&agent.id).is_some(),
                     attention_at: attention_at(client, &agent.id),
+                    on_board: board.contains(&agent.id),
                 }
             })
             .collect();
         unread_queue(&entries, self.viewed_agent.as_deref())
     }
 
-    /// The oldest unread agent other than `exclude`.
-    fn next_unread(&self, exclude: Option<&str>, cx: &App) -> Option<String> {
-        self.unread_queue_ids(cx)
+    /// The oldest unread Board agent other than `exclude`.
+    fn next_unread(
+        &self,
+        exclude: Option<&str>,
+        board: &HashSet<String>,
+        cx: &App,
+    ) -> Option<String> {
+        self.unread_queue_ids(board, cx)
             .into_iter()
             .find(|id| Some(id.as_str()) != exclude)
     }
 
-    /// Opens the oldest unread thread other than `exclude`. False, with no toast, when none.
+    /// Opens the oldest unread Board thread other than `exclude`. False, with no toast, when
+    /// none.
     pub(crate) fn open_next_unread(
         &mut self,
         exclude: Option<&str>,
+        board: &HashSet<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(agent_id) = self.next_unread(exclude, cx) else {
+        let Some(agent_id) = self.next_unread(exclude, board, cx) else {
             return false;
         };
         self.open_agent(&agent_id, window, cx);
         true
+    }
+
+    /// Starts the `board.snapshot` call. None when the Board plugin is not active.
+    fn board_snapshot(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<Task<Result<serde_json::Value, String>>> {
+        let active = self
+            .plugin_host
+            .as_ref()
+            .is_some_and(|host| host.read(cx).is_active("board"));
+        if !active {
+            return None;
+        }
+        let call = self.client.update(cx, |client, cx| {
+            client.invoke_plugin_rpc("board", "board.snapshot", serde_json::json!({}), cx)
+        });
+        Some(cx.spawn(async move |_, _| call.await.map_err(|error| error.to_string())))
     }
 
     fn unread_rows(&self, ids: &[String], cx: &App) -> Vec<SwitcherRow> {
@@ -3381,16 +3414,54 @@ impl Shell {
             .collect()
     }
 
-    /// `agent.unread.switcher` with no switcher open: shows the queue, or the empty toast.
+    /// `agent.unread.switcher` with no switcher open: asks the Board for its runs, then shows
+    /// the queue (see `show_unread_switcher`).
     fn open_unread_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let ids = self.unread_queue_ids(cx);
+        let Some(task) = self.board_snapshot(cx) else {
+            self.show_toast(false, "Board is not installed".into(), cx);
+            return;
+        };
+        self.unread_pending = Some(Vec::new());
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            let _ = this.update_in(cx, |shell, window, cx| {
+                shell.show_unread_switcher(result, window, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// Runs when the Board snapshot answers. Shows the queue or a toast. With Cmd already up it
+    /// is a tap: the oldest thread opens with no popover.
+    fn show_unread_switcher(
+        &mut self,
+        result: Result<serde_json::Value, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // None: a host switch dropped this call, so its answer belongs to the old host.
+        let Some(steps) = self.unread_pending.take() else {
+            return;
+        };
+        let snapshot = match result {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.show_toast(false, error, cx);
+                return;
+            }
+        };
+        let ids = self.unread_queue_ids(&board_finished_ids(&snapshot), cx);
         let rows = self.unread_rows(&ids, cx);
         if rows.is_empty() {
             self.show_toast(true, "No unread threads".into(), cx);
             return;
         }
-        self.command = None;
         let held = window.modifiers();
+        if !(held.platform || held.control || held.alt) {
+            self.open_agent(&rows[0].agent_id, window, cx);
+            return;
+        }
+        self.command = None;
         let switcher = cx.new(|cx| UnreadSwitcher::new(rows, held, window, cx));
         let subscription = cx.subscribe_in(
             &switcher,
@@ -3404,6 +3475,11 @@ impl Shell {
                 cx.notify();
             },
         );
+        switcher.update(cx, |switcher, cx| {
+            for forward in steps {
+                switcher.step(forward, cx);
+            }
+        });
         self.unread = Some((switcher, subscription));
         cx.notify();
     }
@@ -3434,11 +3510,42 @@ impl Shell {
     }
 
     /// Applies the After send setting to a delivered send (ADR-0071). The file is read at each
-    /// send, so a change applies at once.
+    /// send, so a change applies at once. Next unread asks the Board for its runs first
+    /// (ADR-0072); a failed call leaves the set empty, so the Board opens.
     fn after_send(&mut self, agent_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let mode = bachuc_settings::after_send::load();
+        let task = (mode == AfterSend::NextUnread)
+            .then(|| self.board_snapshot(cx))
+            .flatten();
+        let Some(task) = task else {
+            self.finish_after_send(mode, agent_id, &HashSet::new(), window, cx);
+            return;
+        };
+        let agent_id = agent_id.to_string();
+        cx.spawn_in(window, async move |this, cx| {
+            let board = task
+                .await
+                .map(|snapshot| board_finished_ids(&snapshot))
+                .unwrap_or_default();
+            let _ = this.update_in(cx, |shell, window, cx| {
+                shell.finish_after_send(mode, &agent_id, &board, window, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// Runs the After send step. The viewed thread and the queue are read now, so a thread left
+    /// during the Board call does not move.
+    fn finish_after_send(
+        &mut self,
+        mode: AfterSend,
+        agent_id: &str,
+        board: &HashSet<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let still_viewed = self.viewed_agent.as_deref() == Some(agent_id);
-        let has_next = self.next_unread(Some(agent_id), cx).is_some();
+        let has_next = self.next_unread(Some(agent_id), board, cx).is_some();
         let board_active = self
             .plugin_host
             .as_ref()
@@ -3446,7 +3553,7 @@ impl Shell {
         match decide_after_send(mode, still_viewed, has_next, board_active) {
             AfterSendStep::Stay => {}
             AfterSendStep::OpenNext => {
-                self.open_next_unread(Some(agent_id), window, cx);
+                self.open_next_unread(Some(agent_id), board, window, cx);
             }
             AfterSendStep::OpenBoard => self.open_surface(
                 OpenSurface {
@@ -3778,11 +3885,17 @@ impl Shell {
             },
             "agent.unread.switcher" => match self.unread.as_ref().map(|(view, _)| view.clone()) {
                 Some(switcher) => switcher.update(cx, |switcher, cx| switcher.step(true, cx)),
-                None => self.open_unread_switcher(window, cx),
+                None => match self.unread_pending.as_mut() {
+                    Some(steps) => steps.push(true),
+                    None => self.open_unread_switcher(window, cx),
+                },
             },
             "agent.previous" => match self.unread.as_ref().map(|(view, _)| view.clone()) {
                 Some(switcher) => switcher.update(cx, |switcher, cx| switcher.step(false, cx)),
-                None => self.open_previous_agent(window, cx),
+                None => match self.unread_pending.as_mut() {
+                    Some(steps) => steps.push(false),
+                    None => self.open_previous_agent(window, cx),
+                },
             },
             "workspace.new" => self.new_workspace(None, window, cx),
             "agent.new" => self.open_project(window, cx),
