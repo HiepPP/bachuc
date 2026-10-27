@@ -55,6 +55,9 @@ export function createBridge(
     (saved.leases ?? []).filter(([, lease]) => lease?.parentId && lease.cwd),
   );
   let port = Number.isInteger(saved.port) ? saved.port! : 0;
+  // Bind order in this process, so a prune can keep agents bound after its agent list was read.
+  let binds = 0;
+  const boundAt = new Map<string, number>();
   const save = () => {
     if (!stateFile) return;
     mkdirSync(path.dirname(stateFile), { recursive: true });
@@ -137,6 +140,7 @@ export function createBridge(
         return false;
       if (!lease.parentId) {
         lease.parentId = parentId;
+        boundAt.set(token, ++binds);
         save();
       }
       return true;
@@ -150,6 +154,22 @@ export function createBridge(
       for (const [token, lease] of leases)
         if (lease.parentId === parentId) changed = leases.delete(token);
       if (changed) save();
+    },
+    mark() {
+      return binds;
+    },
+    // Deleted agents, and agents archived while the plugin was stopped, never fire
+    // agent.archived, so their leases would otherwise fill the table for good.
+    prune(live: Set<string>, since: number) {
+      let removed = 0;
+      for (const [token, lease] of leases)
+        if (lease.parentId && !live.has(lease.parentId) && (boundAt.get(token) ?? 0) <= since) {
+          leases.delete(token);
+          boundAt.delete(token);
+          removed++;
+        }
+      if (removed) save();
+      return removed;
     },
     close() {
       leases.clear();
