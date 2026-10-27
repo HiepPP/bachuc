@@ -1,6 +1,8 @@
 //! The New agent defaults pane: the model, effort, and mode a new draft composer starts with.
 //! The choices come from the active host; a pick is stored in `agent-defaults.json` at once.
+//! The After send row is stored in `after-send.json`.
 
+use crate::after_send::{self, AfterSend};
 use crate::agent_defaults::{AgentDefaults, load, save};
 use crate::ui::{
     card, column, error_text, note, page_title, row, row_text, scroll_page, section, select_trigger,
@@ -14,6 +16,19 @@ use gpui_kit::component::theme::Theme;
 use gpui_kit::*;
 
 const DEFAULT: &str = "Default";
+
+const AFTER_SEND_CHOICES: [(AfterSend, &str); 3] = [
+    (AfterSend::Stay, "Stay"),
+    (AfterSend::Board, "Back to Board"),
+    (AfterSend::NextUnread, "Next unread"),
+];
+
+fn after_send_label(mode: AfterSend) -> &'static str {
+    AFTER_SEND_CHOICES
+        .iter()
+        .find(|(choice, _)| *choice == mode)
+        .map_or("Stay", |(_, label)| label)
+}
 
 /// The label of `id` in `choices`; an id the host does not offer shows as is.
 fn choice_label(id: Option<&str>, choices: &[(String, String)]) -> String {
@@ -50,6 +65,7 @@ fn pick_model(
 pub struct AgentDefaultsPane {
     client: Entity<Client>,
     current: AgentDefaults,
+    after_send: AfterSend,
     /// The modes of the stored provider, from the host.
     modes: Vec<(String, String)>,
     modes_request: u64,
@@ -72,6 +88,7 @@ impl AgentDefaultsPane {
         let mut pane = Self {
             client,
             current: load(),
+            after_send: after_send::load(),
             modes: Vec::new(),
             modes_request: 0,
             error: None,
@@ -121,6 +138,14 @@ impl AgentDefaultsPane {
         if provider_changed {
             self.load_modes(cx);
         }
+        cx.notify();
+    }
+
+    fn set_after_send(&mut self, mode: AfterSend, cx: &mut Context<Self>) {
+        self.error = after_send::save(mode)
+            .err()
+            .map(|error| format!("Cannot save the after send setting: {error:#}").into());
+        self.after_send = mode;
         cx.notify();
     }
 
@@ -242,6 +267,33 @@ impl AgentDefaultsPane {
         })
     }
 
+    /// Stay, Back to Board, or Next unread; no Default row. `current` is checked.
+    fn after_send_dropdown(current: AfterSend, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let shown = after_send_label(current);
+        let weak = cx.weak_entity();
+        select_trigger(
+            "agent-defaults-after-send",
+            None,
+            shown.to_string(),
+            format!("After send: {shown}"),
+            cx,
+        )
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, app| {
+            AFTER_SEND_CHOICES.iter().fold(
+                menu.min_w(zoomed(200., app)).check_side(Side::Right),
+                |menu, (mode, label)| {
+                    let mode = *mode;
+                    menu.item(Self::text_item(
+                        (*label).into(),
+                        current == mode,
+                        move |this, cx| this.set_after_send(mode, cx),
+                        weak.clone(),
+                    ))
+                },
+            )
+        })
+    }
+
     /// Default, then `choices`; `current` is checked.
     fn choice_dropdown(
         id: &'static str,
@@ -300,6 +352,7 @@ impl Render for AgentDefaultsPane {
             Self::set_mode,
             cx,
         );
+        let after_send = Self::after_send_dropdown(self.after_send, cx);
         let body = card(cx)
             .id("agent-defaults")
             .role(Role::Group)
@@ -322,6 +375,15 @@ impl Render for AgentDefaultsPane {
                 row(false, cx)
                     .child(row_text("Mode", Some("The permission mode".into()), cx))
                     .child(mode),
+            )
+            .child(
+                row(false, cx)
+                    .child(row_text(
+                        "After send",
+                        Some("What happens once a prompt is sent".into()),
+                        cx,
+                    ))
+                    .child(after_send),
             );
         scroll_page(
             "agent-defaults-pane",

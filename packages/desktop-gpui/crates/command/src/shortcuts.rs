@@ -103,6 +103,18 @@ const DEFAULTS: &[(ShortcutSection, &str, &str, &str)] = &[
         "Archive workspace",
         "Cmd+Shift+Backspace",
     ),
+    (
+        Workspaces,
+        "agent.unread.switcher",
+        "Open unread thread",
+        "Cmd+J",
+    ),
+    (
+        Workspaces,
+        "agent.previous",
+        "Back to previous thread",
+        "Cmd+Shift+J",
+    ),
     (TabsPanes, "workspace.tab.menu.open", "New tab", "Cmd+T"),
     (
         TabsPanes,

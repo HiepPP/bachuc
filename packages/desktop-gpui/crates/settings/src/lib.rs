@@ -9,6 +9,7 @@
 //! themes to `bachuc_theme` for the Appearance picker. The pure models (`appearance`, `hosts`, `bindings`, `config`) hold the rules and carry
 //! the tests.
 
+pub mod after_send;
 pub mod agent_defaults;
 pub mod appearance;
 pub mod bindings;

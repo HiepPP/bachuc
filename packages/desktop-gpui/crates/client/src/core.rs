@@ -282,6 +282,8 @@ struct AgentExtra {
     updated_at: Option<String>,
     requires_attention: bool,
     attention_reason: Option<AttentionReason>,
+    /// The daemon `attentionTimestamp`; a blank value is `None`.
+    attention_timestamp: Option<String>,
     features: Vec<AgentFeature>,
     labels: BTreeMap<String, String>,
     /// The snapshot `title`, which `AgentSummary` replaces with an id prefix when null.
@@ -695,6 +697,15 @@ impl ClientCore {
         }
         let extra = self.extras.get(agent_id)?;
         Some((extra.requires_attention, extra.attention_reason))
+    }
+
+    /// The daemon `attentionTimestamp` of the agent. `None` when null, blank, absent, or the
+    /// agent is unknown.
+    pub fn agent_attention_timestamp(&self, agent_id: &str) -> Option<String> {
+        if !self.agents.iter().any(|agent| agent.id == agent_id) {
+            return None;
+        }
+        self.extras.get(agent_id)?.attention_timestamp.clone()
     }
 
     /// The agent's provider features. A feature type this client does not know is left out.
@@ -3767,6 +3778,10 @@ impl ClientCore {
         extra.attention_reason = agent["attentionReason"]
             .as_str()
             .and_then(AttentionReason::parse);
+        extra.attention_timestamp = agent["attentionTimestamp"]
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string);
         extra.features = agent_features(&agent["features"]);
         extra.labels = agent["labels"]
             .as_object()

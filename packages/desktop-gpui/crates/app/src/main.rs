@@ -7,6 +7,7 @@
 //! `BACHUC_NO_ACTIVATE=1` keeps the app in the background, for UI checks started with `open -g`.
 
 mod actions;
+mod after_send;
 mod chrome;
 mod dock;
 mod fire;
@@ -17,6 +18,8 @@ mod plugins;
 mod shell;
 mod state;
 mod toast;
+mod unread;
+mod unread_switcher;
 mod workspace_draft;
 
 use gpui_kit::*;
