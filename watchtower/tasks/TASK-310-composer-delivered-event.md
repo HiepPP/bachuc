@@ -33,10 +33,10 @@ Expected result:
 - IF the send fails THEN THE composer SHALL not emit `Delivered` and SHALL keep its current error and text restore.
 - WHEN a draft submits THE composer SHALL not emit `Delivered`.
 
-Anti-goal: the `bachuc-composer` and `bachuc-app` builds keep 0 warnings; tripwire; read from `./cargo.sh clippy -p bachuc-composer -p bachuc-app --no-deps -- -D warnings` before the change and at completion.
+Anti-goal: the `bachuc-composer` clippy error list stays the same as the baseline, 0 new errors; tripwire; read from `./cargo.sh clippy -p bachuc-composer -p bachuc-app --no-deps -- -D warnings` before the change and at completion.
 
 ## Verify
 
 - `cd packages/desktop-gpui && ./cargo.sh test -p bachuc-composer` -> all tests pass.
-- `cd packages/desktop-gpui && ./cargo.sh clippy -p bachuc-composer -p bachuc-app --no-deps -- -D warnings` -> no warnings. A non-exhaustive match in the app on `ComposerEvent` still compiles.
+- `cd packages/desktop-gpui && ./cargo.sh clippy -p bachuc-composer -p bachuc-app --no-deps -- -D warnings` -> the same 10 old `bachuc-composer` errors as the baseline (AUTORUN Known Failures), none in `composer.rs`. `./cargo.sh check -p bachuc-app` -> compiles.
 - `rg -n "ComposerEvent::Delivered" packages/desktop-gpui/crates/composer/src/composer.rs` -> one emit, inside the success branch of the send task.
