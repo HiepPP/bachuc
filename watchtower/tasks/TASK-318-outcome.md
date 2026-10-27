@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: DONE (implement: manual checks pending, Q-200)
+Status: DONE
 
 Changed:
 
@@ -22,7 +22,8 @@ Verified:
 
 ## UI Checks
 
-- Check bundle screen check: UNVERIFIED (unattended). The bundle stayed on "Connecting live" for over 1 minute while the CLI reached live (Q-200).
+- 2026-10-27 16:58, release GPUI built 16:53: PASS. The AX tree of the daily app lists the header button "Open prebundled/packaged-main.mjs Ln 34365–34369" inside an assistant message of another release thread, next to its "Copy code" action. The header was below the visible area, so no screenshot shows it.
+- Earlier check bundle screen check: UNVERIFIED (unattended). The bundle stayed on "Connecting live" for over 1 minute while the CLI reached live (Q-200).
 - Data path: live agent `bd3263a` wrote a ` ```rust packages/desktop-gpui/crates/timeline/src/links.rs:237-240 ` fence, which `code_citation` accepts.
 
 Anti-goal:

@@ -25,6 +25,7 @@ Verified:
 
 ## UI Checks
 
+- 2026-10-27 16:58: still UNVERIFIED. The release daemon on 6767 is PID 63844, started 2026-10-26 11:31, so it runs the old server code; `~/.bachuc/timeline-cache.sqlite` holds 0 shell details with `description`, and the daily GPUI app shows a raw BASH command (Q-200).
 - Live screen check: UNVERIFIED (unattended). The run may not restart live, and the new server code needs a restart (Q-200).
 
 Anti-goal:
