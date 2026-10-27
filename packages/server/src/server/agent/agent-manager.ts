@@ -25,6 +25,7 @@ import type { TerminalManager } from "../../terminal/terminal-manager.js";
 import {
   getAgentStreamEventTurnId,
   type AgentBackgroundProcess,
+  type AgentSkillHookUsage,
   type AgentCapabilityFlags,
   type AgentClient,
   type AgentCreateSessionOptions,
@@ -58,6 +59,7 @@ import {
 import { buildArchivedAgentRecord, type ArchivedStoredAgentRecord } from "./agent-archive.js";
 import type { StoredAgentRecord, AgentStorage } from "./agent-storage.js";
 import type { AgentOwner } from "./agent-owner.js";
+import { applySkillHookEvent, type SkillHookEvent } from "./skill-hook-usage.js";
 import {
   InMemoryAgentTimelineStore,
   type SeedAgentTimelineOptions,
@@ -490,6 +492,8 @@ interface ManagedAgentBase {
   pendingPermissions: Map<string, AgentPermissionRequest>;
   /** Live runtime state; a closed agent has none, because its processes died with it. */
   backgroundProcesses: Map<string, AgentBackgroundProcess>;
+  /** Skill and hook counts. Stored in the agent record, so they survive a restart. */
+  skillHookUsage?: AgentSkillHookUsage;
   bufferedPermissionResolutions: Map<
     string,
     Extract<AgentStreamEvent, { type: "permission_resolved" }>
@@ -824,6 +828,8 @@ export class AgentManager {
   private readonly backgroundTasks = new Set<Promise<void>>();
   /** Finished processes whose output file still needs one last read. */
   private readonly finalTailProcessIds = new Set<string>();
+  /** Agents whose skill and hook counts changed since the last record write. */
+  private readonly agentsWithUnsavedUsage = new Set<string>();
   private readonly backgroundProcessTails = new BackgroundProcessTailPoller({
     intervalMs: BACKGROUND_PROCESS_TAIL_INTERVAL_MS,
     listWatched: () => this.listWatchedBackgroundProcesses(),
@@ -2546,6 +2552,7 @@ export class AgentManager {
         currentModeId: record.lastModeId ?? null,
         pendingPermissions: new Map(),
         backgroundProcesses: new Map(),
+        skillHookUsage: record.skillHookUsage,
         bufferedPermissionResolutions: new Map(),
         inFlightPermissionResponses: new Set(),
         pendingReplacement: false,
@@ -4190,12 +4197,15 @@ export class AgentManager {
         options,
       });
 
+      // A restored agent keeps the counts of its stored record; a new agent has none.
+      const storedRecord = await this.registry?.get(resolvedAgentId);
       const managed = this.buildManagedAgentForRegister({
         resolvedAgentId,
         session,
         config,
         now,
         durableTimelineHasRows,
+        skillHookUsage: storedRecord?.skillHookUsage,
         options,
       });
 
@@ -4346,6 +4356,7 @@ export class AgentManager {
     config: AgentSessionConfig;
     now: Date;
     durableTimelineHasRows: boolean;
+    skillHookUsage: AgentSkillHookUsage | undefined;
     options:
       | {
           createdAt?: Date;
@@ -4362,7 +4373,15 @@ export class AgentManager {
         }
       | undefined;
   }): ActiveManagedAgent {
-    const { resolvedAgentId, session, config, now, durableTimelineHasRows, options } = params;
+    const {
+      resolvedAgentId,
+      session,
+      config,
+      now,
+      durableTimelineHasRows,
+      skillHookUsage,
+      options,
+    } = params;
     return {
       id: resolvedAgentId,
       provider: config.provider,
@@ -4380,6 +4399,7 @@ export class AgentManager {
       currentModeId: null,
       pendingPermissions: new Map<string, AgentPermissionRequest>(),
       backgroundProcesses: new Map(),
+      skillHookUsage,
       bufferedPermissionResolutions: new Map(),
       inFlightPermissionResponses: new Set(),
       pendingReplacement: false,
@@ -4442,6 +4462,7 @@ export class AgentManager {
   }
 
   private discardRetainedAgentState(agentId: string): void {
+    this.agentsWithUnsavedUsage.delete(agentId);
     this.timelineStore.delete(agentId);
     this.paseoToolPolicies.delete(agentId);
     for (const event of this.providerSubagents.deleteParent(agentId)) {
@@ -4555,6 +4576,10 @@ export class AgentManager {
       this.applyBackgroundProcess(agent, event.process);
       return;
     }
+    if (event.type === "skill_used" || event.type === "hook_used") {
+      this.applySkillHookUsage(agent, event);
+      return;
+    }
     const turnId = getAgentStreamEventTurnId(event);
     const matchingWaiters = this.runs.getMatchingWaiters(agent, turnId);
     this.logger.trace(
@@ -4570,6 +4595,10 @@ export class AgentManager {
     );
 
     const shouldNotifyWaiters = await this.handleStreamEvent(agent, event);
+    // A turn that ends without a state write still stores the counts it gathered.
+    if (isTurnTerminalEvent(event) && this.agentsWithUnsavedUsage.has(agent.id)) {
+      this.enqueueBackgroundPersist(agent);
+    }
 
     if (!shouldNotifyWaiters) {
       return;
@@ -4612,6 +4641,7 @@ export class AgentManager {
     agent: ManagedAgent,
     options?: { title?: string | null; internal?: boolean },
   ): Promise<void> {
+    this.agentsWithUnsavedUsage.delete(agent.id);
     if (!this.registry) {
       return;
     }
@@ -5658,6 +5688,31 @@ export class AgentManager {
       throw new Error("Agent session does not support stopping background processes");
     }
     await agent.session.stopBackgroundProcess(processId);
+  }
+
+  /**
+   * Counts a skill or hook use. The write waits for the end of the turn: a turn can bring dozens
+   * of hook events, and each record write is a full file rewrite.
+   */
+  private applySkillHookUsage(
+    agent: ActiveManagedAgent,
+    event: Extract<AgentStreamEvent, { type: "skill_used" | "hook_used" }>,
+  ): void {
+    const usageEvent: SkillHookEvent =
+      event.type === "skill_used"
+        ? { kind: "skill", name: event.name }
+        : {
+            kind: "hook",
+            name: event.hook.name,
+            event: event.hook.event,
+            status: event.hook.status,
+          };
+    // A hook that still runs is not a use yet.
+    if (usageEvent.kind === "hook" && usageEvent.status === "running") return;
+    const next = applySkillHookEvent(agent.skillHookUsage, usageEvent, new Date().toISOString());
+    agent.skillHookUsage = next;
+    this.agentsWithUnsavedUsage.add(agent.id);
+    this.emitState(agent, { persist: false });
   }
 
   private applyBackgroundProcess(agent: ActiveManagedAgent, process: AgentBackgroundProcess): void {

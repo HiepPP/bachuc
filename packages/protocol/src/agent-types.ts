@@ -308,6 +308,16 @@ export type ToolCallDetail =
       output: unknown;
     };
 
+export interface ToolCallHook {
+  id: string;
+  /** The SDK hook name, for example `PreToolUse:Bash`. */
+  name: string;
+  event: string;
+  status: "running" | "success" | "error" | "cancelled";
+  exitCode?: number;
+  output?: string;
+}
+
 interface ToolCallBase {
   [key: string]: unknown;
   type: "tool_call";
@@ -315,6 +325,7 @@ interface ToolCallBase {
   name: string;
   detail: ToolCallDetail;
   metadata?: Record<string, unknown>;
+  hooks?: ToolCallHook[];
 }
 
 type ToolCallRunningTimelineItem = ToolCallBase & {

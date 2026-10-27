@@ -90,6 +90,8 @@ enum Call {
     Command,
     Read(String),
     Search,
+    /// A hook row (`name: "hook"`), which runs no tool, so no count includes it.
+    Hook,
     Other,
 }
 
@@ -178,6 +180,35 @@ pub fn timestamp_ms(entry: &Value) -> i64 {
         .as_str()
         .and_then(|text| chrono::DateTime::parse_from_rfc3339(text).ok())
         .map_or(0, |time| time.timestamp_millis())
+}
+
+/// One skill a step loaded: its name and the time of its call.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StepSkill {
+    pub name: String,
+    pub at: i64,
+}
+
+/// The skills a step loaded, once each, in call order. A skill call is a tool call whose detail
+/// is the `plain_text` with the `sparkles` icon that the daemon gives the Claude `Skill` tool.
+pub fn step_skills(entries: &[Value], step: &TurnStep) -> Vec<StepSkill> {
+    let mut skills: Vec<StepSkill> = Vec::new();
+    for &index in &step.items {
+        let detail = &entries[index]["item"]["detail"];
+        if detail["type"] != "plain_text" || detail["icon"] != "sparkles" {
+            continue;
+        }
+        let Some(name) = detail["label"].as_str().filter(|name| !name.is_empty()) else {
+            continue;
+        };
+        if !skills.iter().any(|skill| skill.name == name) {
+            skills.push(StepSkill {
+                name: name.to_string(),
+                at: timestamp_ms(&entries[index]),
+            });
+        }
+    }
+    skills
 }
 
 /// The file an edit or write call changes.
@@ -599,7 +630,9 @@ fn call_of(entry: &Value) -> Call {
     let normalized = name.trim().to_lowercase();
     let detail = &item["detail"];
     let path = || detail["filePath"].as_str().unwrap_or("").to_string();
-    if is_paseo_tool_name(name) || normalized.starts_with("paseo_") {
+    if name == "hook" {
+        Call::Hook
+    } else if is_paseo_tool_name(name) || normalized.starts_with("paseo_") {
         Call::Paseo
     } else if matches!(detail["type"].as_str(), Some("edit" | "write")) {
         Call::Edited(path())
@@ -642,6 +675,7 @@ fn count_kinds<'a>(calls: impl Iterator<Item = &'a Call>) -> StepCounts {
                 }
             }
             Call::Search => counts.search_count += 1,
+            Call::Hook => {}
             Call::Other => counts.other_tool_count += 1,
         }
     }

@@ -3310,6 +3310,314 @@ describe("ClaudeAgentSession context window usage", () => {
       },
     ]);
   });
+
+  type ToolCallItem = Extract<AgentTimelineItem, { type: "tool_call" }>;
+
+  function hookStarted(id: string, name: string): Record<string, unknown> {
+    return {
+      type: "system",
+      subtype: "hook_started",
+      hook_id: id,
+      hook_name: name,
+      hook_event: name.split(":")[0],
+      uuid: `hook-start-${id}`,
+      session_id: "session-1",
+    };
+  }
+
+  function hookResponse(
+    id: string,
+    name: string,
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      type: "system",
+      subtype: "hook_response",
+      hook_id: id,
+      hook_name: name,
+      hook_event: name.split(":")[0],
+      output: "",
+      stdout: "",
+      stderr: "",
+      outcome: "success",
+      uuid: `hook-end-${id}`,
+      session_id: "session-1",
+      ...overrides,
+    };
+  }
+
+  function toolUse(id: string, name: string, input: Record<string, unknown>) {
+    return {
+      type: "assistant",
+      uuid: `assistant-${id}`,
+      session_id: "session-1",
+      message: {
+        id: `msg-${id}`,
+        role: "assistant",
+        content: [{ type: "tool_use", id, name, input }],
+      },
+    };
+  }
+
+  function toolResult(id: string): Record<string, unknown> {
+    return {
+      type: "user",
+      uuid: `user-${id}`,
+      session_id: "session-1",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: id, content: "ok" }],
+      },
+    };
+  }
+
+  function toolCallItems(events: AgentStreamEvent[]): ToolCallItem[] {
+    return events.flatMap((event) =>
+      event.type === "timeline" && event.item.type === "tool_call" ? [event.item] : [],
+    );
+  }
+
+  function latestItem(events: AgentStreamEvent[], callId: string): ToolCallItem {
+    const item = toolCallItems(events).findLast((candidate) => candidate.callId === callId);
+    if (!item) throw new Error(`No tool call item for ${callId}`);
+    return item;
+  }
+
+  function hookStatusesOf(item: ToolCallItem): string[] | undefined {
+    return item.hooks?.map((hook) => hook.status);
+  }
+
+  function usedSkills(events: AgentStreamEvent[]) {
+    return events.flatMap((event) => (event.type === "skill_used" ? [event] : []));
+  }
+
+  function usedHooks(events: AgentStreamEvent[]) {
+    return events.flatMap((event) => (event.type === "hook_used" ? [event.hook] : []));
+  }
+
+  async function runTurn(turn: Array<Record<string, unknown>>, prompt = "turn") {
+    const session = await createSessionForTurns([
+      [createInitMessage(), ...turn, createSuccessResult()],
+    ]);
+    try {
+      return await collectStreamEvents(session, prompt);
+    } finally {
+      await session.close();
+    }
+  }
+
+  test("Claude hooks and skills: nests tool hooks in their tool call without adding a timeline row", async () => {
+    const events = await runTurn([
+      toolUse("toolu_b1", "Bash", { command: "ls" }),
+      hookStarted("h1", "PreToolUse:Bash"),
+      hookResponse("h1", "PreToolUse:Bash"),
+      hookStarted("h2", "PostToolUse:Bash"),
+      hookResponse("h2", "PostToolUse:Bash"),
+      toolResult("toolu_b1"),
+    ]);
+
+    const items = toolCallItems(events);
+    expect(new Set(items.map((item) => item.callId))).toEqual(new Set(["toolu_b1"]));
+    const hookStatuses = items.map((item) => hookStatusesOf(item));
+    expect(hookStatuses).toContainEqual(["running"]);
+    expect(hookStatuses).toContainEqual(["success"]);
+    const final = latestItem(events, "toolu_b1");
+    expect(final.status).toBe("completed");
+    expect(final.hooks).toEqual([
+      { id: "h1", name: "PreToolUse:Bash", event: "PreToolUse", status: "success" },
+      { id: "h2", name: "PostToolUse:Bash", event: "PostToolUse", status: "success" },
+    ]);
+    expect(usedHooks(events).map((hook) => hook.id)).toEqual(["h1", "h2"]);
+  });
+
+  test("Claude hooks and skills: keeps a finished tool call completed when a late hook re-emits it", async () => {
+    const events = await runTurn([
+      toolUse("toolu_b1", "Bash", { command: "ls" }),
+      toolResult("toolu_b1"),
+      hookStarted("h2", "PostToolUse:Bash"),
+      hookResponse("h2", "PostToolUse:Bash"),
+    ]);
+
+    const final = latestItem(events, "toolu_b1");
+    expect(final.status).toBe("completed");
+    expect(final.hooks?.map((hook) => hook.id)).toEqual(["h2"]);
+  });
+
+  test("Claude hooks and skills: gives a hook without a tool its own hook row", async () => {
+    const events = await runTurn([
+      hookStarted("h9", "SessionStart:startup"),
+      hookResponse("h9", "SessionStart:startup", { output: "context loaded" }),
+    ]);
+
+    const rows = toolCallItems(events).filter((item) => item.callId === "hook:h9");
+    expect(rows.map((row) => row.status)).toEqual(["running", "completed"]);
+    expect(rows.at(-1)).toMatchObject({
+      name: "hook",
+      detail: { type: "plain_text", label: "SessionStart:startup", text: "context loaded" },
+      hooks: [{ id: "h9", status: "success", output: "context loaded" }],
+    });
+    expect(usedHooks(events)).toHaveLength(1);
+  });
+
+  test("Claude hooks and skills: keeps the error status and exit code of a failed hook", async () => {
+    const events = await runTurn([
+      toolUse("toolu_b1", "Bash", { command: "rm x" }),
+      hookStarted("h1", "PreToolUse:Bash"),
+      hookResponse("h1", "PreToolUse:Bash", {
+        outcome: "error",
+        exit_code: 2,
+        output: "blocked",
+      }),
+    ]);
+
+    expect(latestItem(events, "toolu_b1").hooks).toEqual([
+      {
+        id: "h1",
+        name: "PreToolUse:Bash",
+        event: "PreToolUse",
+        status: "error",
+        exitCode: 2,
+        output: "blocked",
+      },
+    ]);
+    expect(usedHooks(events)[0]).toMatchObject({ status: "error", exitCode: 2 });
+  });
+
+  test("Claude hooks and skills: cuts hook output to 2048 characters", async () => {
+    const events = await runTurn([
+      hookStarted("h9", "UserPromptSubmit"),
+      hookResponse("h9", "UserPromptSubmit", { output: "x".repeat(5000) }),
+    ]);
+
+    const output = latestItem(events, "hook:h9").hooks?.[0]?.output ?? "";
+    expect(output.length).toBeLessThanOrEqual(2048);
+    expect(output.length).toBeGreaterThan(0);
+  });
+
+  test("Claude hooks and skills: puts parallel calls of one tool on different calls, one hook each", async () => {
+    const events = await runTurn([
+      {
+        ...toolUse("toolu_b1", "Bash", { command: "a" }),
+        message: {
+          id: "msg-parallel",
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "toolu_b1", name: "Bash", input: { command: "a" } },
+            { type: "tool_use", id: "toolu_b2", name: "Bash", input: { command: "b" } },
+          ],
+        },
+      },
+      hookStarted("h1", "PreToolUse:Bash"),
+      hookResponse("h1", "PreToolUse:Bash"),
+      hookStarted("h2", "PreToolUse:Bash"),
+      hookResponse("h2", "PreToolUse:Bash"),
+    ]);
+
+    const first = latestItem(events, "toolu_b1").hooks?.map((hook) => hook.id) ?? [];
+    const second = latestItem(events, "toolu_b2").hooks?.map((hook) => hook.id) ?? [];
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect([...first, ...second].sort()).toEqual(["h1", "h2"]);
+  });
+
+  test("Claude hooks and skills: re-emits a hook still running at turn end as cancelled", async () => {
+    const events = await runTurn([
+      toolUse("toolu_b1", "Bash", { command: "ls" }),
+      hookStarted("h1", "PreToolUse:Bash"),
+    ]);
+
+    const terminalIndex = events.findIndex((event) => event.type === "turn_completed");
+    const cancelledIndex = events.findIndex(
+      (event) =>
+        event.type === "timeline" &&
+        event.item.type === "tool_call" &&
+        event.item.hooks?.[0]?.status === "cancelled",
+    );
+    expect(cancelledIndex).toBeGreaterThan(-1);
+    expect(cancelledIndex).toBeLessThan(terminalIndex);
+    expect(latestItem(events, "toolu_b1").hooks?.[0]?.status).toBe("cancelled");
+    expect(usedHooks(events)).toEqual([]);
+  });
+
+  test("Claude hooks and skills: counts a Skill tool call once per call id", async () => {
+    const skillStart = {
+      type: "stream_event",
+      session_id: "session-1",
+      event: {
+        type: "content_block_start",
+        index: 0,
+        content_block: {
+          type: "tool_use",
+          id: "toolu_s1",
+          name: "Skill",
+          input: { skill: "watchtower" },
+        },
+      },
+    };
+    const events = await runTurn([
+      skillStart,
+      toolUse("toolu_s1", "Skill", { skill: "watchtower" }),
+      toolResult("toolu_s1"),
+      toolUse("toolu_s2", "Skill", { skill: "drill-me" }),
+    ]);
+
+    expect(usedSkills(events).map((event) => [event.name, event.source])).toEqual([
+      ["watchtower", "tool"],
+      ["drill-me", "tool"],
+    ]);
+  });
+
+  test("Claude hooks and skills: counts a slash command that names a listed skill", async () => {
+    const session = await createSessionForTurns([
+      [{ ...createInitMessage(), skills: ["watchtower"] }, createSuccessResult()],
+      [createSuccessResult({ uuid: "result-2" })],
+      [createSuccessResult({ uuid: "result-3" })],
+    ]);
+    try {
+      const first = await collectStreamEvents(session, "/watchtower new");
+      const second = await collectStreamEvents(session, "/watchtower again");
+      const third = await collectStreamEvents(session, "/compact");
+
+      expect(usedSkills(first).map((event) => [event.name, event.source])).toEqual([
+        ["watchtower", "slash_command"],
+      ]);
+      expect(usedSkills(second)).toHaveLength(1);
+      expect(usedSkills(third)).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("Claude hooks and skills: emits no skill or hook event while it replays history", async () => {
+    const session = await createSessionForTurns([]);
+    const internal = session as unknown as {
+      historyPending: boolean;
+      persistedHistory: Array<{ item: AgentTimelineItem; timestamp: string }>;
+    };
+    internal.historyPending = true;
+    internal.persistedHistory = [
+      {
+        timestamp: "2026-10-27T10:00:00.000Z",
+        item: {
+          type: "tool_call",
+          callId: "toolu_old",
+          name: "Skill",
+          status: "completed",
+          detail: { type: "plain_text", label: "watchtower", icon: "sparkles" },
+          error: null,
+        },
+      },
+    ];
+    try {
+      const replayed: AgentStreamEvent[] = [];
+      for await (const event of session.streamHistory()) {
+        replayed.push(event);
+      }
+      expect(replayed.map((event) => event.type)).toEqual(["timeline"]);
+    } finally {
+      await session.close();
+    }
+  });
 });
 
 describe("toClaudeSdkMcpConfig", () => {

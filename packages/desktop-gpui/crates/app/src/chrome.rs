@@ -9,7 +9,7 @@ use crate::state::{
     EditorGlyph, EditorTarget, agent_of_key, editor_glyph, find_workspace, github_url, host_gate,
     host_option_label, open_args, script_state,
 };
-use bachuc_client::WorkspaceScript;
+use bachuc_client::{UsageEntry, WorkspaceScript};
 use bachuc_icons::{IconName, github_mark, icon};
 use bachuc_theme::metrics::{
     FONT_BASE, FONT_SM, HEADER_HEIGHT, ICON_SM, RADIUS_LG, RADIUS_MD, SETTINGS_SIDEBAR_WIDTH,
@@ -23,11 +23,13 @@ use gpui_kit::*;
 use std::rc::Rc;
 use std::sync::Arc;
 
-/// The header menu that shows: the Scripts list or the Open in editor targets.
+/// The header menu that shows: the Scripts list, the Open in editor targets, or the skill and
+/// hook usage list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum HeaderMenu {
     Scripts,
     Editor,
+    Usage,
 }
 
 /// `HEADER_CONTROL_HEIGHT` of `control-geometry.ts`, for the split buttons.
@@ -660,6 +662,7 @@ impl Shell {
         let workspace_id = self.selected.clone();
         let scripts = self.client.read(cx).workspace_scripts(&workspace_id);
         let mut buttons = Vec::new();
+        buttons.extend(self.render_usage_chip(cx));
         if !scripts.is_empty() {
             buttons.push(self.render_scripts_button(&workspace_id, scripts, cx));
         }
@@ -677,6 +680,60 @@ impl Shell {
                 .into_any_element()
         }));
         buttons
+    }
+
+    /// The skill and hook chip of the focused agent tab, and its list. No chip when the tab is
+    /// not an agent or the agent's snapshot has no usage.
+    fn render_usage_chip(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let t = tokens(cx);
+        let agent_id = self
+            .active_key(cx)
+            .and_then(|key| self.pane_identity(&key))
+            .and_then(|identity| agent_of_key(&identity).map(str::to_string))?;
+        let usage = self.client.read(cx).skill_hook_usage(&agent_id)?;
+        let label = usage.chip_label()?;
+        let open = self.header_menu == Some(HeaderMenu::Usage);
+        let trigger = h_flex()
+            .id("header-usage")
+            .role(Role::Button)
+            .aria_label(format!("Skills and hooks: {label}"))
+            .aria_expanded(open)
+            .flex_shrink_0()
+            .h(zoomed(28., cx))
+            .px(zoomed(SPACE_2, cx))
+            .items_center()
+            .rounded(zoomed(RADIUS_MD, cx))
+            .cursor_pointer()
+            .whitespace_nowrap()
+            .text_size(ui_font_size(FONT_SM, cx))
+            .text_color(t.foreground_muted)
+            .when(open, |button| button.bg(t.surface2))
+            .hover(|style| style.bg(t.surface2))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(label);
+        let trigger = pressable(
+            trigger,
+            act(|this: &mut Shell, cx: &mut Context<Shell>| {
+                this.toggle_header_menu(HeaderMenu::Usage, cx)
+            }),
+            cx,
+        );
+        let menu = open.then(|| {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_millis() as i64);
+            let mut rows = usage_group("Skills", &usage.skills, now_ms, cx);
+            rows.extend(usage_group("Hooks", &usage.hooks, now_ms, cx));
+            header_popover("usage-menu", "Skills and hooks", 28., rows, cx)
+        });
+        Some(
+            div()
+                .relative()
+                .flex_shrink_0()
+                .child(trigger)
+                .children(menu)
+                .into_any_element(),
+        )
     }
 
     fn render_scripts_button(
@@ -1357,6 +1414,67 @@ fn menu_row(
                     )
                 }),
         )
+}
+
+/// One group of the usage list: its label, then a row per entry in the daemon's order (newest
+/// first). A hook row adds its error count when it is not zero. No entry gives no rows.
+fn usage_group(
+    label: &'static str,
+    entries: &[UsageEntry],
+    now_ms: i64,
+    cx: &mut Context<Shell>,
+) -> Vec<AnyElement> {
+    let t = tokens(cx);
+    if entries.is_empty() {
+        return Vec::new();
+    }
+    let mut rows = vec![
+        div()
+            .px(zoomed(SPACE_2, cx))
+            .pt(zoomed(SPACE_1, cx))
+            .text_size(ui_font_size(FONT_SM, cx))
+            .text_color(t.foreground_extra_muted)
+            .child(label)
+            .into_any_element(),
+    ];
+    rows.extend(entries.iter().map(|entry| {
+        h_flex()
+            .h(zoomed(MENU_ITEM_HEIGHT, cx))
+            .px(zoomed(SPACE_2, cx))
+            .gap(zoomed(SPACE_2, cx))
+            .items_center()
+            .text_size(ui_font_size(FONT_SM, cx))
+            .text_color(t.foreground)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(entry.name.clone()),
+            )
+            .when(entry.error_count > 0, |row| {
+                row.child(
+                    div()
+                        .flex_shrink_0()
+                        .text_color(t.status_danger)
+                        .child(format!("{} failed", entry.error_count)),
+                )
+            })
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_color(t.foreground_muted)
+                    .child(format!("×{}", entry.count)),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_color(t.foreground_muted)
+                    .child(entry.used_ago(now_ms)),
+            )
+            .into_any_element()
+    }));
+    rows
 }
 
 /// A header menu under its trigger of `trigger_height`, right-aligned, closed by a press

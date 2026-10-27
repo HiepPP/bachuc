@@ -11732,3 +11732,181 @@ test("failed startup history closes the session without registering an agent", a
     for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
   }
 });
+
+class SkillHookTurnSession extends TestAgentSession {
+  constructor(
+    config: AgentSessionConfig,
+    private readonly usage: { skill: boolean; hooks: number },
+  ) {
+    super(config);
+  }
+
+  override async startTurn(): Promise<{ turnId: string }> {
+    const turnId = `turn-${++this.turnIdCounter}`;
+    setTimeout(() => {
+      this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
+      if (this.usage.skill) {
+        this.pushEvent({
+          type: "skill_used",
+          provider: this.provider,
+          name: "watchtower",
+          source: "tool",
+        });
+      }
+      for (let index = 0; index < this.usage.hooks; index += 1) {
+        this.pushEvent({
+          type: "hook_used",
+          provider: this.provider,
+          hook: {
+            id: `hook-${index}`,
+            name: "PreToolUse:Bash",
+            event: "PreToolUse",
+            status: index === 0 ? "error" : "success",
+          },
+        });
+      }
+      this.pushEvent({ type: "turn_completed", provider: this.provider, turnId });
+    }, 0);
+    return { turnId };
+  }
+}
+
+async function runSkillHookTurn(usage: { skill: boolean; hooks: number }) {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-skill-hook-usage-test-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const client = new (class extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new SkillHookTurnSession(config, usage);
+    }
+  })();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  await manager.flush();
+  await storage.flush();
+  const applySnapshot = vi.spyOn(storage, "applySnapshot");
+  await drainAsyncGenerator(manager.streamAgent(agent.id, "go"));
+  await manager.flush();
+  await storage.flush();
+  const writes = applySnapshot.mock.calls.filter(([written]) => written.id === agent.id).length;
+  return { workdir, storage, manager, agentId: agent.id, writes };
+}
+
+test("skill and hook events update the agent snapshot, and an unused agent omits the field", async () => {
+  const run = await runSkillHookTurn({ skill: true, hooks: 20 });
+  try {
+    const payload = toAgentPayload(run.manager.getAgent(run.agentId)!);
+    expect(payload.skillHookUsage?.skills).toEqual([
+      { name: "watchtower", count: 1, errorCount: 0, lastUsedAt: expect.any(String) },
+    ]);
+    expect(payload.skillHookUsage?.hooks).toEqual([
+      {
+        name: "PreToolUse:Bash",
+        event: "PreToolUse",
+        count: 20,
+        errorCount: 1,
+        lastUsedAt: expect.any(String),
+      },
+    ]);
+
+    const idle = await runSkillHookTurn({ skill: false, hooks: 0 });
+    try {
+      expect(toAgentPayload(idle.manager.getAgent(idle.agentId)!)).not.toHaveProperty(
+        "skillHookUsage",
+      );
+    } finally {
+      rmSync(idle.workdir, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(run.workdir, { recursive: true, force: true });
+  }
+});
+
+test("a turn with 20 hook events adds at most one agent record write", async () => {
+  const baseline = await runSkillHookTurn({ skill: false, hooks: 0 });
+  const busy = await runSkillHookTurn({ skill: true, hooks: 20 });
+  try {
+    expect(busy.writes).toBeGreaterThan(0);
+    expect(busy.writes - baseline.writes).toBeLessThanOrEqual(1);
+  } finally {
+    rmSync(baseline.workdir, { recursive: true, force: true });
+    rmSync(busy.workdir, { recursive: true, force: true });
+  }
+});
+
+test("skill and hook counts survive a restart", async () => {
+  const run = await runSkillHookTurn({ skill: true, hooks: 3 });
+  try {
+    const before = toAgentPayload(run.manager.getAgent(run.agentId)!).skillHookUsage;
+    expect(before?.hooks[0]?.count).toBe(3);
+
+    const reread = new AgentStorage(join(run.workdir, "agents"), logger);
+    const record = await reread.get(run.agentId);
+    expect(record?.skillHookUsage).toEqual(before);
+
+    const restarted = new AgentManager({
+      clients: { codex: new TestAgentClient() },
+      registry: reread,
+      logger,
+    });
+    const handle = run.manager.getAgent(run.agentId)!.persistence!;
+    const resumed = await restarted.resumeAgentFromPersistence(
+      handle,
+      { cwd: run.workdir },
+      run.agentId,
+    );
+    expect(toAgentPayload(resumed).skillHookUsage).toEqual(before);
+    await restarted.closeAgent(run.agentId);
+  } finally {
+    rmSync(run.workdir, { recursive: true, force: true });
+  }
+});
+
+test("a provider history replay adds no skill or hook count", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-skill-hook-replay-test-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  class ReplayingSession extends TestAgentSession {
+    readonly initialTimeline = [
+      {
+        item: { type: "assistant_message" as const, text: "old answer" },
+        timestamp: "2026-10-27T10:00:00.000Z",
+      },
+    ];
+
+    override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+      yield { type: "skill_used", provider: this.provider, name: "old", source: "tool" };
+      yield {
+        type: "hook_used",
+        provider: this.provider,
+        hook: { id: "old", name: "Stop", event: "Stop", status: "success" },
+      };
+      yield {
+        type: "timeline",
+        provider: this.provider,
+        item: { type: "assistant_message", text: "old answer" },
+      };
+    }
+  }
+  const client = new (class extends TestAgentClient {
+    override async resumeSession(
+      _handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ): Promise<AgentSession> {
+      return new ReplayingSession({ provider: "codex", cwd: config?.cwd ?? workdir });
+    }
+  })();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  try {
+    const resumed = await manager.resumeAgentFromPersistence(
+      { provider: "codex", sessionId: "old-session" },
+      { cwd: workdir },
+    );
+    await manager.flush();
+    expect(toAgentPayload(resumed)).not.toHaveProperty("skillHookUsage");
+    expect(manager.getAgent(resumed.id)?.skillHookUsage).toBeUndefined();
+  } finally {
+    for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});

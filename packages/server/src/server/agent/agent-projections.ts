@@ -18,6 +18,7 @@ import type {
   ImportableProviderSession,
 } from "./agent-sdk-types.js";
 import type { ManagedAgent } from "./agent-manager.js";
+import { hasSkillHookUsage } from "./skill-hook-usage.js";
 import type { JsonValue } from "../json-utils.js";
 import {
   isStoredAgentProviderAvailable,
@@ -98,6 +99,7 @@ export function toStoredAgentRecord(
       : null,
     internal: options?.internal,
     owner: agent.owner,
+    ...(hasSkillHookUsage(agent.skillHookUsage) ? { skillHookUsage: agent.skillHookUsage } : {}),
   } satisfies StoredAgentRecord;
 }
 
@@ -148,6 +150,10 @@ export function toAgentPayload(
 
   if (agent.backgroundProcesses.size > 0) {
     payload.backgroundProcesses = Array.from(agent.backgroundProcesses.values());
+  }
+
+  if (agent.skillHookUsage && hasSkillHookUsage(agent.skillHookUsage)) {
+    payload.skillHookUsage = agent.skillHookUsage;
   }
 
   if (agent.lastError !== undefined) {
@@ -252,6 +258,7 @@ export function buildStoredAgentPayload(
     attentionTimestamp: record.attentionTimestamp ?? null,
     archivedAt: record.archivedAt ?? null,
     labels: normalizeLabels(record.labels),
+    ...(hasSkillHookUsage(record.skillHookUsage) ? { skillHookUsage: record.skillHookUsage } : {}),
     ...(providerAvailable ? {} : { providerUnavailable: true }),
   };
 }

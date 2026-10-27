@@ -10415,6 +10415,60 @@
                                       "tail"
                                     ]
                                   }
+                                },
+                                "skillHookUsage": {
+                                  "type": "object",
+                                  "properties": {
+                                    "skills": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    },
+                                    "hooks": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    }
+                                  },
+                                  "required": ["skills", "hooks"]
                                 }
                               },
                               "required": [
@@ -11716,6 +11770,60 @@
                                   "tail"
                                 ]
                               }
+                            },
+                            "skillHookUsage": {
+                              "type": "object",
+                              "properties": {
+                                "skills": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "count": {
+                                        "type": "number"
+                                      },
+                                      "errorCount": {
+                                        "type": "number"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                  }
+                                },
+                                "hooks": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "count": {
+                                        "type": "number"
+                                      },
+                                      "errorCount": {
+                                        "type": "number"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                  }
+                                }
+                              },
+                              "required": ["skills", "hooks"]
                             }
                           },
                           "required": [
@@ -12401,6 +12509,39 @@
                                               },
                                               "additionalProperties": {}
                                             },
+                                            "hooks": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "id": {
+                                                    "type": "string"
+                                                  },
+                                                  "name": {
+                                                    "type": "string"
+                                                  },
+                                                  "event": {
+                                                    "type": "string"
+                                                  },
+                                                  "status": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "running",
+                                                      "success",
+                                                      "error",
+                                                      "cancelled"
+                                                    ]
+                                                  },
+                                                  "exitCode": {
+                                                    "type": "number"
+                                                  },
+                                                  "output": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["id", "name", "event", "status"]
+                                              }
+                                            },
                                             "status": {
                                               "type": "string",
                                               "const": "running"
@@ -12862,6 +13003,39 @@
                                               },
                                               "additionalProperties": {}
                                             },
+                                            "hooks": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "id": {
+                                                    "type": "string"
+                                                  },
+                                                  "name": {
+                                                    "type": "string"
+                                                  },
+                                                  "event": {
+                                                    "type": "string"
+                                                  },
+                                                  "status": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "running",
+                                                      "success",
+                                                      "error",
+                                                      "cancelled"
+                                                    ]
+                                                  },
+                                                  "exitCode": {
+                                                    "type": "number"
+                                                  },
+                                                  "output": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["id", "name", "event", "status"]
+                                              }
+                                            },
                                             "status": {
                                               "type": "string",
                                               "const": "completed"
@@ -13322,6 +13496,39 @@
                                                 "type": "string"
                                               },
                                               "additionalProperties": {}
+                                            },
+                                            "hooks": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "id": {
+                                                    "type": "string"
+                                                  },
+                                                  "name": {
+                                                    "type": "string"
+                                                  },
+                                                  "event": {
+                                                    "type": "string"
+                                                  },
+                                                  "status": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "running",
+                                                      "success",
+                                                      "error",
+                                                      "cancelled"
+                                                    ]
+                                                  },
+                                                  "exitCode": {
+                                                    "type": "number"
+                                                  },
+                                                  "output": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["id", "name", "event", "status"]
+                                              }
                                             },
                                             "status": {
                                               "type": "string",
@@ -13802,6 +14009,39 @@
                                                 "type": "string"
                                               },
                                               "additionalProperties": {}
+                                            },
+                                            "hooks": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "id": {
+                                                    "type": "string"
+                                                  },
+                                                  "name": {
+                                                    "type": "string"
+                                                  },
+                                                  "event": {
+                                                    "type": "string"
+                                                  },
+                                                  "status": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "running",
+                                                      "success",
+                                                      "error",
+                                                      "cancelled"
+                                                    ]
+                                                  },
+                                                  "exitCode": {
+                                                    "type": "number"
+                                                  },
+                                                  "output": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["id", "name", "event", "status"]
+                                              }
                                             },
                                             "status": {
                                               "type": "string",
@@ -18892,6 +19132,60 @@
                                       "tail"
                                     ]
                                   }
+                                },
+                                "skillHookUsage": {
+                                  "type": "object",
+                                  "properties": {
+                                    "skills": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    },
+                                    "hooks": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    }
+                                  },
+                                  "required": ["skills", "hooks"]
                                 }
                               },
                               "required": [
@@ -21548,6 +21842,39 @@
                                               },
                                               "additionalProperties": {}
                                             },
+                                            "hooks": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "id": {
+                                                    "type": "string"
+                                                  },
+                                                  "name": {
+                                                    "type": "string"
+                                                  },
+                                                  "event": {
+                                                    "type": "string"
+                                                  },
+                                                  "status": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "running",
+                                                      "success",
+                                                      "error",
+                                                      "cancelled"
+                                                    ]
+                                                  },
+                                                  "exitCode": {
+                                                    "type": "number"
+                                                  },
+                                                  "output": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["id", "name", "event", "status"]
+                                              }
+                                            },
                                             "status": {
                                               "type": "string",
                                               "const": "running"
@@ -22009,6 +22336,39 @@
                                               },
                                               "additionalProperties": {}
                                             },
+                                            "hooks": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "id": {
+                                                    "type": "string"
+                                                  },
+                                                  "name": {
+                                                    "type": "string"
+                                                  },
+                                                  "event": {
+                                                    "type": "string"
+                                                  },
+                                                  "status": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "running",
+                                                      "success",
+                                                      "error",
+                                                      "cancelled"
+                                                    ]
+                                                  },
+                                                  "exitCode": {
+                                                    "type": "number"
+                                                  },
+                                                  "output": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["id", "name", "event", "status"]
+                                              }
+                                            },
                                             "status": {
                                               "type": "string",
                                               "const": "completed"
@@ -22469,6 +22829,39 @@
                                                 "type": "string"
                                               },
                                               "additionalProperties": {}
+                                            },
+                                            "hooks": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "id": {
+                                                    "type": "string"
+                                                  },
+                                                  "name": {
+                                                    "type": "string"
+                                                  },
+                                                  "event": {
+                                                    "type": "string"
+                                                  },
+                                                  "status": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "running",
+                                                      "success",
+                                                      "error",
+                                                      "cancelled"
+                                                    ]
+                                                  },
+                                                  "exitCode": {
+                                                    "type": "number"
+                                                  },
+                                                  "output": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["id", "name", "event", "status"]
+                                              }
                                             },
                                             "status": {
                                               "type": "string",
@@ -22949,6 +23342,39 @@
                                                 "type": "string"
                                               },
                                               "additionalProperties": {}
+                                            },
+                                            "hooks": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "id": {
+                                                    "type": "string"
+                                                  },
+                                                  "name": {
+                                                    "type": "string"
+                                                  },
+                                                  "event": {
+                                                    "type": "string"
+                                                  },
+                                                  "status": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "running",
+                                                      "success",
+                                                      "error",
+                                                      "cancelled"
+                                                    ]
+                                                  },
+                                                  "exitCode": {
+                                                    "type": "number"
+                                                  },
+                                                  "output": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["id", "name", "event", "status"]
+                                              }
                                             },
                                             "status": {
                                               "type": "string",
@@ -24819,6 +25245,60 @@
                                   "tail"
                                 ]
                               }
+                            },
+                            "skillHookUsage": {
+                              "type": "object",
+                              "properties": {
+                                "skills": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "count": {
+                                        "type": "number"
+                                      },
+                                      "errorCount": {
+                                        "type": "number"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                  }
+                                },
+                                "hooks": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "count": {
+                                        "type": "number"
+                                      },
+                                      "errorCount": {
+                                        "type": "number"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                  }
+                                }
+                              },
+                              "required": ["skills", "hooks"]
                             }
                           },
                           "required": [
@@ -25933,6 +26413,60 @@
                                         "tail"
                                       ]
                                     }
+                                  },
+                                  "skillHookUsage": {
+                                    "type": "object",
+                                    "properties": {
+                                      "skills": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "name": {
+                                              "type": "string"
+                                            },
+                                            "event": {
+                                              "type": "string"
+                                            },
+                                            "count": {
+                                              "type": "number"
+                                            },
+                                            "errorCount": {
+                                              "type": "number"
+                                            },
+                                            "lastUsedAt": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                        }
+                                      },
+                                      "hooks": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "name": {
+                                              "type": "string"
+                                            },
+                                            "event": {
+                                              "type": "string"
+                                            },
+                                            "count": {
+                                              "type": "number"
+                                            },
+                                            "errorCount": {
+                                              "type": "number"
+                                            },
+                                            "lastUsedAt": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                        }
+                                      }
+                                    },
+                                    "required": ["skills", "hooks"]
                                   }
                                 },
                                 "required": [
@@ -27323,6 +27857,60 @@
                                         "tail"
                                       ]
                                     }
+                                  },
+                                  "skillHookUsage": {
+                                    "type": "object",
+                                    "properties": {
+                                      "skills": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "name": {
+                                              "type": "string"
+                                            },
+                                            "event": {
+                                              "type": "string"
+                                            },
+                                            "count": {
+                                              "type": "number"
+                                            },
+                                            "errorCount": {
+                                              "type": "number"
+                                            },
+                                            "lastUsedAt": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                        }
+                                      },
+                                      "hooks": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "name": {
+                                              "type": "string"
+                                            },
+                                            "event": {
+                                              "type": "string"
+                                            },
+                                            "count": {
+                                              "type": "number"
+                                            },
+                                            "errorCount": {
+                                              "type": "number"
+                                            },
+                                            "lastUsedAt": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                        }
+                                      }
+                                    },
+                                    "required": ["skills", "hooks"]
                                   }
                                 },
                                 "required": [
@@ -31831,6 +32419,60 @@
                                       "tail"
                                     ]
                                   }
+                                },
+                                "skillHookUsage": {
+                                  "type": "object",
+                                  "properties": {
+                                    "skills": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    },
+                                    "hooks": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    }
+                                  },
+                                  "required": ["skills", "hooks"]
                                 }
                               },
                               "required": [
@@ -33126,6 +33768,60 @@
                                       "tail"
                                     ]
                                   }
+                                },
+                                "skillHookUsage": {
+                                  "type": "object",
+                                  "properties": {
+                                    "skills": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    },
+                                    "hooks": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    }
+                                  },
+                                  "required": ["skills", "hooks"]
                                 }
                               },
                               "required": [
@@ -33737,6 +34433,39 @@
                                             },
                                             "additionalProperties": {}
                                           },
+                                          "hooks": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "name": {
+                                                  "type": "string"
+                                                },
+                                                "event": {
+                                                  "type": "string"
+                                                },
+                                                "status": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "running",
+                                                    "success",
+                                                    "error",
+                                                    "cancelled"
+                                                  ]
+                                                },
+                                                "exitCode": {
+                                                  "type": "number"
+                                                },
+                                                "output": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": ["id", "name", "event", "status"]
+                                            }
+                                          },
                                           "status": {
                                             "type": "string",
                                             "const": "running"
@@ -34189,6 +34918,39 @@
                                             },
                                             "additionalProperties": {}
                                           },
+                                          "hooks": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "name": {
+                                                  "type": "string"
+                                                },
+                                                "event": {
+                                                  "type": "string"
+                                                },
+                                                "status": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "running",
+                                                    "success",
+                                                    "error",
+                                                    "cancelled"
+                                                  ]
+                                                },
+                                                "exitCode": {
+                                                  "type": "number"
+                                                },
+                                                "output": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": ["id", "name", "event", "status"]
+                                            }
+                                          },
                                           "status": {
                                             "type": "string",
                                             "const": "completed"
@@ -34640,6 +35402,39 @@
                                               "type": "string"
                                             },
                                             "additionalProperties": {}
+                                          },
+                                          "hooks": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "name": {
+                                                  "type": "string"
+                                                },
+                                                "event": {
+                                                  "type": "string"
+                                                },
+                                                "status": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "running",
+                                                    "success",
+                                                    "error",
+                                                    "cancelled"
+                                                  ]
+                                                },
+                                                "exitCode": {
+                                                  "type": "number"
+                                                },
+                                                "output": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": ["id", "name", "event", "status"]
+                                            }
                                           },
                                           "status": {
                                             "type": "string",
@@ -35111,6 +35906,39 @@
                                               "type": "string"
                                             },
                                             "additionalProperties": {}
+                                          },
+                                          "hooks": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "name": {
+                                                  "type": "string"
+                                                },
+                                                "event": {
+                                                  "type": "string"
+                                                },
+                                                "status": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "running",
+                                                    "success",
+                                                    "error",
+                                                    "cancelled"
+                                                  ]
+                                                },
+                                                "exitCode": {
+                                                  "type": "number"
+                                                },
+                                                "output": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": ["id", "name", "event", "status"]
+                                            }
                                           },
                                           "status": {
                                             "type": "string",
@@ -36257,6 +37085,39 @@
                                             },
                                             "additionalProperties": {}
                                           },
+                                          "hooks": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "name": {
+                                                  "type": "string"
+                                                },
+                                                "event": {
+                                                  "type": "string"
+                                                },
+                                                "status": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "running",
+                                                    "success",
+                                                    "error",
+                                                    "cancelled"
+                                                  ]
+                                                },
+                                                "exitCode": {
+                                                  "type": "number"
+                                                },
+                                                "output": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": ["id", "name", "event", "status"]
+                                            }
+                                          },
                                           "status": {
                                             "type": "string",
                                             "const": "running"
@@ -36709,6 +37570,39 @@
                                             },
                                             "additionalProperties": {}
                                           },
+                                          "hooks": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "name": {
+                                                  "type": "string"
+                                                },
+                                                "event": {
+                                                  "type": "string"
+                                                },
+                                                "status": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "running",
+                                                    "success",
+                                                    "error",
+                                                    "cancelled"
+                                                  ]
+                                                },
+                                                "exitCode": {
+                                                  "type": "number"
+                                                },
+                                                "output": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": ["id", "name", "event", "status"]
+                                            }
+                                          },
                                           "status": {
                                             "type": "string",
                                             "const": "completed"
@@ -37160,6 +38054,39 @@
                                               "type": "string"
                                             },
                                             "additionalProperties": {}
+                                          },
+                                          "hooks": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "name": {
+                                                  "type": "string"
+                                                },
+                                                "event": {
+                                                  "type": "string"
+                                                },
+                                                "status": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "running",
+                                                    "success",
+                                                    "error",
+                                                    "cancelled"
+                                                  ]
+                                                },
+                                                "exitCode": {
+                                                  "type": "number"
+                                                },
+                                                "output": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": ["id", "name", "event", "status"]
+                                            }
                                           },
                                           "status": {
                                             "type": "string",
@@ -37631,6 +38558,39 @@
                                               "type": "string"
                                             },
                                             "additionalProperties": {}
+                                          },
+                                          "hooks": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string"
+                                                },
+                                                "name": {
+                                                  "type": "string"
+                                                },
+                                                "event": {
+                                                  "type": "string"
+                                                },
+                                                "status": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "running",
+                                                    "success",
+                                                    "error",
+                                                    "cancelled"
+                                                  ]
+                                                },
+                                                "exitCode": {
+                                                  "type": "number"
+                                                },
+                                                "output": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": ["id", "name", "event", "status"]
+                                            }
                                           },
                                           "status": {
                                             "type": "string",
@@ -38461,6 +39421,34 @@
                                           },
                                           "additionalProperties": {}
                                         },
+                                        "hooks": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "id": {
+                                                "type": "string"
+                                              },
+                                              "name": {
+                                                "type": "string"
+                                              },
+                                              "event": {
+                                                "type": "string"
+                                              },
+                                              "status": {
+                                                "type": "string",
+                                                "enum": ["running", "success", "error", "cancelled"]
+                                              },
+                                              "exitCode": {
+                                                "type": "number"
+                                              },
+                                              "output": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["id", "name", "event", "status"]
+                                          }
+                                        },
                                         "status": {
                                           "type": "string",
                                           "const": "running"
@@ -38909,6 +39897,34 @@
                                           },
                                           "additionalProperties": {}
                                         },
+                                        "hooks": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "id": {
+                                                "type": "string"
+                                              },
+                                              "name": {
+                                                "type": "string"
+                                              },
+                                              "event": {
+                                                "type": "string"
+                                              },
+                                              "status": {
+                                                "type": "string",
+                                                "enum": ["running", "success", "error", "cancelled"]
+                                              },
+                                              "exitCode": {
+                                                "type": "number"
+                                              },
+                                              "output": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["id", "name", "event", "status"]
+                                          }
+                                        },
                                         "status": {
                                           "type": "string",
                                           "const": "completed"
@@ -39356,6 +40372,34 @@
                                             "type": "string"
                                           },
                                           "additionalProperties": {}
+                                        },
+                                        "hooks": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "id": {
+                                                "type": "string"
+                                              },
+                                              "name": {
+                                                "type": "string"
+                                              },
+                                              "event": {
+                                                "type": "string"
+                                              },
+                                              "status": {
+                                                "type": "string",
+                                                "enum": ["running", "success", "error", "cancelled"]
+                                              },
+                                              "exitCode": {
+                                                "type": "number"
+                                              },
+                                              "output": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["id", "name", "event", "status"]
+                                          }
                                         },
                                         "status": {
                                           "type": "string",
@@ -39823,6 +40867,34 @@
                                             "type": "string"
                                           },
                                           "additionalProperties": {}
+                                        },
+                                        "hooks": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "id": {
+                                                "type": "string"
+                                              },
+                                              "name": {
+                                                "type": "string"
+                                              },
+                                              "event": {
+                                                "type": "string"
+                                              },
+                                              "status": {
+                                                "type": "string",
+                                                "enum": ["running", "success", "error", "cancelled"]
+                                              },
+                                              "exitCode": {
+                                                "type": "number"
+                                              },
+                                              "output": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": ["id", "name", "event", "status"]
+                                          }
                                         },
                                         "status": {
                                           "type": "string",
@@ -42290,6 +43362,60 @@
                                       "tail"
                                     ]
                                   }
+                                },
+                                "skillHookUsage": {
+                                  "type": "object",
+                                  "properties": {
+                                    "skills": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    },
+                                    "hooks": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    }
+                                  },
+                                  "required": ["skills", "hooks"]
                                 }
                               },
                               "required": [
@@ -43419,6 +44545,60 @@
                                     "tail"
                                   ]
                                 }
+                              },
+                              "skillHookUsage": {
+                                "type": "object",
+                                "properties": {
+                                  "skills": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "event": {
+                                          "type": "string"
+                                        },
+                                        "count": {
+                                          "type": "number"
+                                        },
+                                        "errorCount": {
+                                          "type": "number"
+                                        },
+                                        "lastUsedAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                    }
+                                  },
+                                  "hooks": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "event": {
+                                          "type": "string"
+                                        },
+                                        "count": {
+                                          "type": "number"
+                                        },
+                                        "errorCount": {
+                                          "type": "number"
+                                        },
+                                        "lastUsedAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                    }
+                                  }
+                                },
+                                "required": ["skills", "hooks"]
                               }
                             },
                             "required": [
@@ -44516,6 +45696,60 @@
                                   "tail"
                                 ]
                               }
+                            },
+                            "skillHookUsage": {
+                              "type": "object",
+                              "properties": {
+                                "skills": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "count": {
+                                        "type": "number"
+                                      },
+                                      "errorCount": {
+                                        "type": "number"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                  }
+                                },
+                                "hooks": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "count": {
+                                        "type": "number"
+                                      },
+                                      "errorCount": {
+                                        "type": "number"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                  }
+                                }
+                              },
+                              "required": ["skills", "hooks"]
                             }
                           },
                           "required": [
@@ -46315,6 +47549,60 @@
                                       "tail"
                                     ]
                                   }
+                                },
+                                "skillHookUsage": {
+                                  "type": "object",
+                                  "properties": {
+                                    "skills": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    },
+                                    "hooks": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    }
+                                  },
+                                  "required": ["skills", "hooks"]
                                 }
                               },
                               "required": [
@@ -48159,6 +49447,60 @@
                                       "tail"
                                     ]
                                   }
+                                },
+                                "skillHookUsage": {
+                                  "type": "object",
+                                  "properties": {
+                                    "skills": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    },
+                                    "hooks": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    }
+                                  },
+                                  "required": ["skills", "hooks"]
                                 }
                               },
                               "required": [
@@ -49973,6 +51315,60 @@
                                       "tail"
                                     ]
                                   }
+                                },
+                                "skillHookUsage": {
+                                  "type": "object",
+                                  "properties": {
+                                    "skills": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    },
+                                    "hooks": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    }
+                                  },
+                                  "required": ["skills", "hooks"]
                                 }
                               },
                               "required": [
@@ -51819,6 +53215,60 @@
                                   "tail"
                                 ]
                               }
+                            },
+                            "skillHookUsage": {
+                              "type": "object",
+                              "properties": {
+                                "skills": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "count": {
+                                        "type": "number"
+                                      },
+                                      "errorCount": {
+                                        "type": "number"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                  }
+                                },
+                                "hooks": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "count": {
+                                        "type": "number"
+                                      },
+                                      "errorCount": {
+                                        "type": "number"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                  }
+                                }
+                              },
+                              "required": ["skills", "hooks"]
                             }
                           },
                           "required": [
@@ -53665,6 +55115,60 @@
                                   "tail"
                                 ]
                               }
+                            },
+                            "skillHookUsage": {
+                              "type": "object",
+                              "properties": {
+                                "skills": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "count": {
+                                        "type": "number"
+                                      },
+                                      "errorCount": {
+                                        "type": "number"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                  }
+                                },
+                                "hooks": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "event": {
+                                        "type": "string"
+                                      },
+                                      "count": {
+                                        "type": "number"
+                                      },
+                                      "errorCount": {
+                                        "type": "number"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                  }
+                                }
+                              },
+                              "required": ["skills", "hooks"]
                             }
                           },
                           "required": [
@@ -55555,6 +57059,70 @@
                                           "tail"
                                         ]
                                       }
+                                    },
+                                    "skillHookUsage": {
+                                      "type": "object",
+                                      "properties": {
+                                        "skills": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "name": {
+                                                "type": "string"
+                                              },
+                                              "event": {
+                                                "type": "string"
+                                              },
+                                              "count": {
+                                                "type": "number"
+                                              },
+                                              "errorCount": {
+                                                "type": "number"
+                                              },
+                                              "lastUsedAt": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "name",
+                                              "count",
+                                              "errorCount",
+                                              "lastUsedAt"
+                                            ]
+                                          }
+                                        },
+                                        "hooks": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "name": {
+                                                "type": "string"
+                                              },
+                                              "event": {
+                                                "type": "string"
+                                              },
+                                              "count": {
+                                                "type": "number"
+                                              },
+                                              "errorCount": {
+                                                "type": "number"
+                                              },
+                                              "lastUsedAt": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "name",
+                                              "count",
+                                              "errorCount",
+                                              "lastUsedAt"
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "required": ["skills", "hooks"]
                                     }
                                   },
                                   "required": [
@@ -59844,6 +61412,60 @@
                                       "tail"
                                     ]
                                   }
+                                },
+                                "skillHookUsage": {
+                                  "type": "object",
+                                  "properties": {
+                                    "skills": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    },
+                                    "hooks": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string"
+                                          },
+                                          "event": {
+                                            "type": "string"
+                                          },
+                                          "count": {
+                                            "type": "number"
+                                          },
+                                          "errorCount": {
+                                            "type": "number"
+                                          },
+                                          "lastUsedAt": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["name", "count", "errorCount", "lastUsedAt"]
+                                      }
+                                    }
+                                  },
+                                  "required": ["skills", "hooks"]
                                 }
                               },
                               "required": [

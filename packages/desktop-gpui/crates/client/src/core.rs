@@ -16,7 +16,7 @@ use crate::model::{
     ProviderSummary, QueuedPrompt, SlashCommand, ThinkingControls, TurnBehavior, WorkspaceNode,
     WorkspaceSummary, provider_label,
 };
-use crate::model::{DirectorySuggestion, MatchMode, NewEntryKind};
+use crate::model::{DirectorySuggestion, MatchMode, NewEntryKind, SkillHookUsage};
 use crate::model::{ForkBoundary, ForkContext, HistoryEntry, HistoryPage};
 use crate::model::{
     GitAction, GitActionReply, GitStatus, GitStatusEvent, PrStatus, PrStatusReply, PrTimelineItem,
@@ -296,6 +296,8 @@ struct AgentExtra {
     rewind: RewindModes,
     /// The snapshot `backgroundProcesses`, in the daemon's order.
     background_processes: Vec<BackgroundProcess>,
+    /// The snapshot `skillHookUsage`. `None` when the snapshot has none.
+    skill_hook_usage: Option<SkillHookUsage>,
 }
 
 /// The newest `todo` item of a viewed timeline, kept as pages and live rows arrive.
@@ -576,6 +578,13 @@ impl ClientCore {
             .get(agent_id)
             .map(|extra| extra.background_processes.clone())
             .unwrap_or_default()
+    }
+
+    /// The skills and hooks the agent used. `None` when its snapshot carries none.
+    pub fn skill_hook_usage(&self, agent_id: &str) -> Option<SkillHookUsage> {
+        self.extras
+            .get(agent_id)
+            .and_then(|extra| extra.skill_hook_usage.clone())
     }
 
     /// Whether the host can stop a background process (`features.agentBackgroundProcesses`).
@@ -3775,6 +3784,7 @@ impl ClientCore {
             .map(str::to_string);
         extra.queue_held = agent["queue"]["held"] == true;
         extra.background_processes = BackgroundProcess::parse_all(&agent["backgroundProcesses"]);
+        extra.skill_hook_usage = SkillHookUsage::parse(&agent["skillHookUsage"]);
         let capabilities = &agent["capabilities"];
         extra.rewind = RewindModes {
             conversation: capabilities["supportsRewindConversation"] == true,

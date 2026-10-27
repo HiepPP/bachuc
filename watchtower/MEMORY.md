@@ -78,6 +78,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid adding full old and new file text to the diff protocol for a markdown rich diff, while only the one-file uncommitted diff needs it. Reason: [ADR-0061](watchtower/decisions/ADR-0061-gpui-rich-markdown-diff-from-working-file-over-protocol-full-text.md).
 - Avoid importing prompt-translate server modules from another plugin, while only selection-translate needs the LLM call. Reason: [ADR-0062](watchtower/decisions/ADR-0062-selection-translate-plugin-copies-llm-logic-over-sharing-prompt-translate.md).
 - Avoid plugin-drawn views at the selection, while result cards need only text and Copy. Reason: [ADR-0063](watchtower/decisions/ADR-0063-host-drawn-selection-result-card-over-plugin-views.md).
+- Avoid one timeline row per hook, GPUI-side skill and hook counting, and a full timeline scan to rebuild the usage summary, while tool hooks run on most tool calls, GPUI loads only the tail, and ADR-0032 keeps SQL reads small. Reason: [ADR-0068](watchtower/decisions/ADR-0068-hooks-in-tool-calls-and-stored-usage-summary.md).
+- Avoid skill chips on step headers, a single turn skill strip, or relying on the open card alone, while the step marker line serves long turns. Reason: [ADR-0069](watchtower/decisions/ADR-0069-skill-marker-between-steps.md).
 
 ## Learnings
 
@@ -448,3 +450,11 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the repo lint and format hooks check every staged JS file. A vendored JS file needs an entry in `.oxlintrc.json`, `.oxfmtrc.json`, and the `lefthook.yml` lint exclude.
 - Source: TASK-301, TASK-303 outcomes and the UI checker run.
 - Use next time: plan a vendored JS asset with its lint and format ignore lines, and plan GPUI example screen checks with the `.app` wrapper.
+
+### 2026-10-27 skill and hook usage view
+
+- Learned: with `includeHookEvents: true`, one short Claude turn on this machine makes about 19 non-tool hook events (3 `SessionStart`, 6 `UserPromptSubmit`, 10 `Stop`), plus 3 `PreToolUse` and 3 `PostToolUse` per Bash call. The SDK does not report Paseo's own callback hooks.
+- Learned: a `Stop` hook response can arrive after the turn ends. The provider marks it `cancelled` at turn end, then re-emits it as `success`; the last item wins by `callId`.
+- Learned: the lefthook format hook rewrites watchtower markdown tables, so run `npm run format:files` on plan files before a plan commit.
+- Source: TASK-305 live probe, the UI checker run, and the plan commits.
+- Use next time: plan any per-hook UI for about 20 rows per turn, and do not assume a hook ends before its turn ends.

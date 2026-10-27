@@ -4,7 +4,7 @@
 
 use bachuc_icons::IconName;
 use bachuc_timeline::diff::{DiffLine, LineKind, numbers};
-use bachuc_timeline::tools::{Section, has_details, presentation, sections};
+use bachuc_timeline::tools::{HookLine, Section, has_details, hook_lines, presentation, sections};
 use serde_json::json;
 
 const CWD: &str = "/Users/test/project";
@@ -250,4 +250,67 @@ fn unknown_tools_show_input_and_output_and_a_failed_call_its_error() {
         presentation(&call("run_tests", "completed", json!({})), CWD).name,
         "Run tests"
     );
+}
+
+#[test]
+fn hooks_of_a_tool_call_become_hook_lines() {
+    let item = json!({
+        "name": "Bash", "status": "completed",
+        "detail": {"type": "shell", "command": "ls"},
+        "hooks": [
+            {"id": "h1", "name": "PreToolUse:Bash", "event": "PreToolUse", "status": "success", "output": "ctx"},
+            {"id": "h2", "name": "PostToolUse:Bash", "event": "PostToolUse", "status": "error", "exitCode": 2}
+        ]
+    });
+    assert_eq!(
+        hook_lines(&item),
+        vec![
+            HookLine {
+                name: "PreToolUse:Bash".into(),
+                status: "success".into(),
+                exit_code: None,
+                output: Some("ctx".into())
+            },
+            HookLine {
+                name: "PostToolUse:Bash".into(),
+                status: "error".into(),
+                exit_code: Some(2),
+                output: None
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_tool_call_without_hooks_has_no_hook_lines() {
+    let item = call(
+        "Bash",
+        "completed",
+        json!({"type": "shell", "command": "ls"}),
+    );
+    assert!(hook_lines(&item).is_empty());
+}
+
+#[test]
+fn a_hook_row_shows_hook_and_its_label() {
+    let item = call(
+        "hook",
+        "completed",
+        json!({"type": "plain_text", "label": "SessionStart:startup", "icon": "wrench"}),
+    );
+    let shown = presentation(&item, CWD);
+    assert_eq!(shown.name, "Hook");
+    assert_eq!(shown.summary.as_deref(), Some("SessionStart:startup"));
+    assert_eq!(shown.icon, IconName::Zap);
+}
+
+#[test]
+fn hooks_alone_make_a_tool_call_openable() {
+    let mut item = call(
+        "Grep",
+        "completed",
+        json!({"type": "unknown", "input": null, "output": null}),
+    );
+    item["hooks"] = json!([{"id": "h1", "name": "PreToolUse:Grep", "event": "PreToolUse", "status": "success"}]);
+    assert!(has_details(&item));
 }
