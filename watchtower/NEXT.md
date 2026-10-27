@@ -4,17 +4,17 @@
 
 - Title: Clearer GPUI answers with code citation cards
 - Slug: 20261027-gpui-answer-code-citations
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-27
 
 ## Tracker
 
 | Order | TASK                                                      | Group | Status | Spec                                                                                                             | Deps     | Context                                        | Notes                                                |
 | ----- | --------------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------- | ---------------------------------------------------- |
-| 1     | TASK-316 Keep the shell description on the wire           | A     | TODO   | [watchtower/tasks/TASK-316-shell-description-on-wire.md](watchtower/tasks/TASK-316-shell-description-on-wire.md) | -        | -                                              | Protocol, server, and GPUI tool summary. Q-198.      |
-| 2     | TASK-317 Code block header hook in the vendored text view | B     | TODO   | [watchtower/tasks/TASK-317-code-block-header-hook.md](watchtower/tasks/TASK-317-code-block-header-hook.md)       | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Vendor only. Hot render path.                        |
-| 3     | TASK-318 Code citation card in the GPUI answer            | C     | TODO   | [watchtower/tasks/TASK-318-code-citation-card.md](watchtower/tasks/TASK-318-code-citation-card.md)               | TASK-317 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Starts after TASK-317. Q-197.                        |
-| 4     | TASK-319 Investigation answer rule                        | D     | TODO   | [watchtower/tasks/TASK-319-investigation-answer-rule.md](watchtower/tasks/TASK-319-investigation-answer-rule.md) | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Edits the global rules file outside the repo. Q-197. |
+| 1     | TASK-316 Keep the shell description on the wire           | A     | DONE   | [watchtower/tasks/TASK-316-shell-description-on-wire.md](watchtower/tasks/TASK-316-shell-description-on-wire.md) | -        | -                                              | Protocol, server, and GPUI tool summary. Q-198.      |
+| 2     | TASK-317 Code block header hook in the vendored text view | B     | DONE   | [watchtower/tasks/TASK-317-code-block-header-hook.md](watchtower/tasks/TASK-317-code-block-header-hook.md)       | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Vendor only. Hot render path.                        |
+| 3     | TASK-318 Code citation card in the GPUI answer            | C     | DONE   | [watchtower/tasks/TASK-318-code-citation-card.md](watchtower/tasks/TASK-318-code-citation-card.md)               | TASK-317 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Starts after TASK-317. Q-197.                        |
+| 4     | TASK-319 Investigation answer rule                        | D     | DONE   | [watchtower/tasks/TASK-319-investigation-answer-rule.md](watchtower/tasks/TASK-319-investigation-answer-rule.md) | -        | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Edits the global rules file outside the repo. Q-197. |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
@@ -35,7 +35,7 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Handoff
 
-- Next action: run `/watchtower implement`.
+- Next action: Hiep runs the Q-200 screen checks on live, then merges `feat/gpui-answer-code-citations`.
 
 ## Archive
 
