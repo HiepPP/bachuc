@@ -79,6 +79,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid importing prompt-translate server modules from another plugin, while only selection-translate needs the LLM call. Reason: [ADR-0062](watchtower/decisions/ADR-0062-selection-translate-plugin-copies-llm-logic-over-sharing-prompt-translate.md).
 - Avoid plugin-drawn views at the selection, while result cards need only text and Copy. Reason: [ADR-0063](watchtower/decisions/ADR-0063-host-drawn-selection-result-card-over-plugin-views.md).
 - Avoid one timeline row per hook, GPUI-side skill and hook counting, and a full timeline scan to rebuild the usage summary, while tool hooks run on most tool calls, GPUI loads only the tail, and ADR-0032 keeps SQL reads small. Reason: [ADR-0068](watchtower/decisions/ADR-0068-hooks-in-tool-calls-and-stored-usage-summary.md).
+- Avoid skill chips on step headers, a single turn skill strip, or relying on the open card alone, while the step marker line serves long turns. Reason: [ADR-0069](watchtower/decisions/ADR-0069-skill-marker-between-steps.md).
 
 ## Learnings
 

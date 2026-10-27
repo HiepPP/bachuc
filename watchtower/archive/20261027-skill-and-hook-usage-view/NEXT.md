@@ -4,7 +4,7 @@
 
 - Title: Show the skills and hooks a Claude agent used in its session
 - Slug: 20261027-skill-and-hook-usage-view
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-27
 
 ## Tracker
@@ -41,3 +41,4 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 ## Archive
 
 - See [watchtower/archive/](watchtower/archive/).
+- Archived: 2026-10-27 -> watchtower/archive/20261027-skill-and-hook-usage-view/
