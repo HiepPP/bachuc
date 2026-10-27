@@ -50,3 +50,10 @@ Restored: `sidebar.json`, `prompt-history.json`; `agent-defaults.json` unchanged
 Status: BLOCKED
 
 Blocked: BUILT, UNVERIFIED (Q-196). The Read label and the "No finished threads" toast show only in the list, which needs Cmd held. The tap cycle and unread-first order passed on live. The lead fixed the cycle so a just-read card no longer pushes unread cards to the end (test `unread_cards_lead_even_after_the_viewed_card_turns_read`). Code is in 5c774634c.
+
+## Owner Check
+
+Status: DONE
+
+- Q-196 ANSWERED on 2026-10-27: Hiep held Cmd, pressed J twice, and released Cmd in Bachuc GPUI Check. PASS.
+- Lead fix after Q-196: the command center item "Open unread thread" always shows the list, because Cmd is up there (`open_unread_switcher` with `list` true). `bachuc-app` 114 tests pass.

@@ -4,22 +4,22 @@
 
 - Title: GPUI unread thread switcher and after-send jump
 - Slug: 20261027-unread-thread-switcher
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-27
 
 ## Tracker
 
 One row per TASK. Group ties together items that ship as one transaction.
 
-| Order | TASK                                        | Group | Status  | Spec                                                                                                               | Deps                         | Context                                        | Notes                                                                           |
-| ----- | ------------------------------------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------- |
-| 1     | TASK-309 Client reads attentionTimestamp    | A     | DONE    | [watchtower/tasks/TASK-309-client-attention-timestamp.md](watchtower/tasks/TASK-309-client-attention-timestamp.md) | -                            | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Gives the queue its FIFO order.                                                 |
-| 2     | TASK-310 Composer Delivered event           | B     | DONE    | [watchtower/tasks/TASK-310-composer-delivered-event.md](watchtower/tasks/TASK-310-composer-delivered-event.md)     | -                            | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Fires after the daemon accepts a send.                                          |
-| 3     | TASK-311 After send setting                 | C     | DONE    | [watchtower/tasks/TASK-311-after-send-setting.md](watchtower/tasks/TASK-311-after-send-setting.md)                 | -                            | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Stay, Back to Board, Next unread.                                               |
-| 4     | TASK-312 Unread queue and Mod+J switcher    | D     | BLOCKED | [watchtower/tasks/TASK-312-unread-queue-and-switcher.md](watchtower/tasks/TASK-312-unread-queue-and-switcher.md)   | TASK-309                     | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | BUILT, UNVERIFIED (Q-196): held-Cmd release needs a hand check.                 |
-| 5     | TASK-313 After send wiring                  | D     | DONE    | [watchtower/tasks/TASK-313-after-send-wiring.md](watchtower/tasks/TASK-313-after-send-wiring.md)                   | TASK-310, TASK-311, TASK-312 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (failing send, Board missing).                 |
-| 6     | TASK-314 Unread queue only from Board cards | D     | BLOCKED | [watchtower/tasks/TASK-314-board-cards-only-queue.md](watchtower/tasks/TASK-314-board-cards-only-queue.md)         | TASK-312, TASK-313           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | BUILT, UNVERIFIED (Q-196): the list needs Cmd held; tap and Next unread pass.   |
-| 7     | TASK-315 Mod+J cycles read Board cards too  | D     | BLOCKED | [watchtower/tasks/TASK-315-cycle-read-board-cards.md](watchtower/tasks/TASK-315-cycle-read-board-cards.md)         | TASK-314                     | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | BUILT, UNVERIFIED (Q-196): Read label and list need Cmd held; tap cycle passes. |
+| Order | TASK                                        | Group | Status | Spec                                                                                                               | Deps                         | Context                                        | Notes                                                            |
+| ----- | ------------------------------------------- | ----- | ------ | ------------------------------------------------------------------------------------------------------------------ | ---------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
+| 1     | TASK-309 Client reads attentionTimestamp    | A     | DONE   | [watchtower/tasks/TASK-309-client-attention-timestamp.md](watchtower/tasks/TASK-309-client-attention-timestamp.md) | -                            | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Gives the queue its FIFO order.                                  |
+| 2     | TASK-310 Composer Delivered event           | B     | DONE   | [watchtower/tasks/TASK-310-composer-delivered-event.md](watchtower/tasks/TASK-310-composer-delivered-event.md)     | -                            | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Fires after the daemon accepts a send.                           |
+| 3     | TASK-311 After send setting                 | C     | DONE   | [watchtower/tasks/TASK-311-after-send-setting.md](watchtower/tasks/TASK-311-after-send-setting.md)                 | -                            | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Stay, Back to Board, Next unread.                                |
+| 4     | TASK-312 Unread queue and Mod+J switcher    | D     | DONE   | [watchtower/tasks/TASK-312-unread-queue-and-switcher.md](watchtower/tasks/TASK-312-unread-queue-and-switcher.md)   | TASK-309                     | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Q-196 passed by hand on 2026-10-27.                              |
+| 5     | TASK-313 After send wiring                  | D     | DONE   | [watchtower/tasks/TASK-313-after-send-wiring.md](watchtower/tasks/TASK-313-after-send-wiring.md)                   | TASK-310, TASK-311, TASK-312 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | implement: manual checks pending (failing send, Board missing).  |
+| 6     | TASK-314 Unread queue only from Board cards | D     | DONE   | [watchtower/tasks/TASK-314-board-cards-only-queue.md](watchtower/tasks/TASK-314-board-cards-only-queue.md)         | TASK-312, TASK-313           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Q-196 passed by hand on 2026-10-27.                              |
+| 7     | TASK-315 Mod+J cycles read Board cards too  | D     | DONE   | [watchtower/tasks/TASK-315-cycle-read-board-cards.md](watchtower/tasks/TASK-315-cycle-read-board-cards.md)         | TASK-314                     | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Q-196 passed by hand; command center item always shows the list. |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE, ARCHIVED after archive.
@@ -40,7 +40,7 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Handoff
 
-- Next action: Hiep checks Q-196 by hand on live: hold Cmd, press J twice, release Cmd. Then answer Q-196 and run `/watchtower verify`.
+- Next action: review and merge `feat/unread-thread-switcher`, then run `/watchtower archive`.
 
 ## Archive
 

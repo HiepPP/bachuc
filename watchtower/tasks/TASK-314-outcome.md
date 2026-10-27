@@ -49,3 +49,9 @@ Restored: `sidebar.json`, `prompt-history.json`; `agent-defaults.json` and `appe
 Status: BLOCKED
 
 Blocked: BUILT, UNVERIFIED (Q-196). The list view needs Cmd held. The tap path and Next unread passed on live. Code is committed in e4791f21d. The lead also dropped a Board answer that arrives after a host switch.
+
+## Owner Check
+
+Status: DONE
+
+- Q-196 ANSWERED on 2026-10-27: Hiep held Cmd, pressed J twice, and released Cmd in Bachuc GPUI Check. PASS.

@@ -62,3 +62,9 @@ Run 2026-10-27 by the UI checker (check bundle on live 6768, `cua_repl`, AX acti
 Status: BLOCKED
 
 Blocked: BUILT, UNVERIFIED (Q-196). The held-Cmd release and the 150 ms draw delay need Hiep's hand check. Code is committed in 28ecb4a64.
+
+## Owner Check
+
+Status: DONE
+
+- Q-196 ANSWERED on 2026-10-27: Hiep held Cmd, pressed J twice, and released Cmd in Bachuc GPUI Check. PASS.
