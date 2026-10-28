@@ -97,7 +97,9 @@ A Recap with no suggestion panel after it is not folded.
 - Compact, the shape the global agent rules ask for: one bullet list whose first item is
   `<branch> · <commit state>`, then `Did:`, then optional `Open:` and `Need from you:`, in that order.
   Vietnamese replies use `Đã làm:`, `Còn lại:`, and `Cần bạn:`. The panel shows each label as
-  written. Did, Open, and Need from you may nest a list.
+  written. Did, Open, and Need from you may nest a list. Since ADR-0077 the rules ask for the
+  `<branch> · <commit state>` bullet alone; the GPUI client folds it into the branch and commit
+  chips with no sections. The frozen React client still keeps a head-only Recap native.
 - Five fields, in this order: `Branch`, `Commit/push`, `Did`, `Not yet`, `Need from you`.
   `Commit/push` is `no`, or `yes` followed by detail such as `yes, committed abc1234`.
   `Did`, `Not yet`, and `Need from you` may each hold a list. Write `nothing` for a field with nothing to report.

@@ -37,6 +37,9 @@ pub(crate) struct NodeRenderOptions {
     /// The previous sibling block, whose own bottom gap counts toward the
     /// gap above a heading or a rule.
     pub(crate) prev: PrevBlock,
+    /// Whether the next sibling block is a list, so a lead-in paragraph such
+    /// as `Changes:` can sit close to it.
+    pub(crate) next_is_list: bool,
 }
 
 /// The kind of block before the one being rendered, as far as the gaps of
@@ -67,6 +70,19 @@ pub(crate) fn flow_position(blocks: &[BlockNode], ix: usize) -> (bool, PrevBlock
         Some(BlockNode::HorizontalRule { .. }) => (false, PrevBlock::Rule),
         Some(_) => (false, PrevBlock::Other),
     }
+}
+
+/// Whether the next block after `ix` that renders something is a list.
+pub(crate) fn next_is_list(blocks: &[BlockNode], ix: usize) -> bool {
+    blocks[ix + 1..]
+        .iter()
+        .find(|block| {
+            !matches!(
+                block,
+                BlockNode::Definition { .. } | BlockNode::Break { .. } | BlockNode::Unknown
+            )
+        })
+        .is_some_and(|block| matches!(block, BlockNode::List { .. }))
 }
 
 impl NodeRenderOptions {
@@ -243,6 +259,7 @@ impl ParsedDocument {
                         is_last,
                         is_first,
                         prev,
+                        next_is_list: next_is_list(&self.blocks, ix),
                         ..Default::default()
                     },
                     node_cx,
@@ -276,6 +293,7 @@ impl ParsedDocument {
                                 is_last,
                                 is_first,
                                 prev,
+                                next_is_list: next_is_list(&blocks, ix),
                                 ..options
                             },
                             &node_cx,

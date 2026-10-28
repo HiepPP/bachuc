@@ -11,6 +11,10 @@ const DAY_MS = 86_400_000;
 export type RecapFields = Pick<RecapEntry, "branch" | "did" | "commitPush" | "raw">;
 
 const FIELD = /^(?:[-*]\s+)?(branch|did|commit\/push):\s*(.*)$/i;
+// The global rules' Recap holds only `<branch> · <commit state>`; Did is the bold opening.
+const BRANCH_STATE = /^[-*]\s+(.+?)\s+·\s+(.+)$/;
+const OPENING = /^\*\*(.+?)\*\*/;
+export const RECAP_DID_LIMIT = 300;
 
 /** Reads the last `## Recap` section of a reply; null when the reply has none. */
 export function parseRecap(text: string): RecapFields | null {
@@ -32,6 +36,12 @@ export function parseRecap(text: string): RecapFields | null {
     raw: lines.slice(start, end).join("\n").trim().slice(0, RECAP_RAW_LIMIT),
   };
   for (const line of lines.slice(start + 1, end)) {
+    const head = BRANCH_STATE.exec(line.trim());
+    if (head) {
+      fields.branch ??= head[1];
+      fields.commitPush ??= head[2];
+      continue;
+    }
     const match = FIELD.exec(line.trim());
     const value = match?.[2].trim();
     if (!match || !value) continue;
@@ -39,6 +49,11 @@ export function parseRecap(text: string): RecapFields | null {
     if (key === "branch") fields.branch ??= value;
     else if (key === "did") fields.did ??= value;
     else fields.commitPush ??= value;
+  }
+  if (fields.did === null) {
+    const opening = lines.slice(0, start).find((line) => line.trim());
+    const did = opening && OPENING.exec(opening.trim())?.[1].trim();
+    if (did) fields.did = did.slice(0, RECAP_DID_LIMIT);
   }
   return fields;
 }

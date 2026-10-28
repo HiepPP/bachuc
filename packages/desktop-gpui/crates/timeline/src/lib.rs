@@ -4,6 +4,7 @@
 //! Electron agent panel: `message.tsx`, `tool-calls/detail-level/turn/view.tsx`, the tool detail
 //! views, the permission cards, and the pane find bar.
 
+mod answer_labels;
 pub mod background;
 mod background_view;
 mod card_view;
@@ -185,9 +186,11 @@ const BODY_LINE_HEIGHT: f32 = 1.4;
 /// The gap under a paragraph in the text view. Both line boxes are whole pixels, so the gap is
 /// the web's block gap with no rounding to take back.
 const PARAGRAPH_GAP: f32 = BLOCK_GAP;
-/// A top-level list's `marginTop: 4` and the 16 below it, in place of the paragraph gap.
+/// A top-level list's `marginTop: 4`, the whole gap below a lead-in such as `Changes:`
+/// (`with_tight_lead_in`), and the paragraph gap below it, so a list ends its group as a
+/// paragraph does.
 const LIST_SPACING_TOP: f32 = 4.;
-const LIST_SPACING_BOTTOM: f32 = 16.;
+const LIST_SPACING_BOTTOM: f32 = BLOCK_GAP;
 /// A fence's line height over its size, as `splitFenceStyle`.
 const FENCE_LINE_HEIGHT: f32 = 1.45;
 /// `STREAM_METADATA_FONT_SIZE`, the compaction marker and turn footer text.
@@ -2511,6 +2514,8 @@ impl TimelineView {
                 ..Default::default()
             })
             .with_dark(theme.is_dark())
+            .with_lead_labels(answer_labels::answer_labels(&t))
+            .with_tight_lead_in(true)
             .with_heading(move |level| heading_style(level, content, border, zoom));
         // Read when the style is built, not per flush; a syntax theme change writes the theme
         // global, which drops this cache.

@@ -6,6 +6,7 @@ import test from "node:test";
 import type { PluginHookAgent } from "@getpaseo/plugin/server";
 
 import {
+  RECAP_DID_LIMIT,
   RECAP_MAX_ENTRIES,
   RECAP_RAW_LIMIT,
   createRecapStore,
@@ -70,6 +71,21 @@ test("keeps Vietnamese text", () => {
     "## Recap\n- Branch: main\n- Did: Sửa lỗi đăng nhập và thêm kiểm thử.\n",
   );
   assert.equal(recap?.did, "Sửa lỗi đăng nhập và thêm kiểm thử.");
+});
+
+test("reads the branch line and the bold opening of the current Recap", () => {
+  const recap = parseRecap(
+    "**Fixed the login.** More text.\n\nDetails.\n\n## Recap\n\n- `feat/x` · committed abc123, pushed\n\n## What Next\n",
+  );
+  assert.equal(recap?.branch, "`feat/x`");
+  assert.equal(recap?.commitPush, "committed abc123, pushed");
+  assert.equal(recap?.did, "Fixed the login.");
+  assert.equal(
+    parseRecap(`**${"x".repeat(500)}**\n\n## Recap\n- main · no changes`)?.did?.length,
+    RECAP_DID_LIMIT,
+  );
+  assert.equal(parseRecap("Plain opening.\n\n## Recap\n- main · no changes")?.did, null);
+  assert.equal(parseRecap("**Old.**\n\n## Recap\n- main · no changes\n- Did: Kept.")?.did, "Kept.");
 });
 
 test("a missing field is null", () => {

@@ -1,8 +1,57 @@
 use std::sync::Arc;
 
-use gpui::{HighlightStyle, Hsla, Rems, StyleRefinement, rems};
+use gpui::{HighlightStyle, Hsla, Rems, SharedString, StyleRefinement, rems};
 
 use crate::ColorTokens;
+
+/// A label that a body paragraph can start with, such as `Fix:`. The view
+/// draws it as a chip in these colors, in the shape of an inline code chip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LeadLabel {
+    /// The label as rendered, colon included.
+    pub text: SharedString,
+    pub color: Hsla,
+    pub background: Hsla,
+}
+
+/// The label of `labels` that the text in `chunks` starts with, the longest
+/// when several do. A label must be followed by whitespace or the end of the
+/// text, so `Fix:` matches `Fix: x` but not `Fix:x` or `Fixes: x`. Public so
+/// the timeline tests cover it: this crate is not a workspace member.
+pub fn match_lead_label<'a, 'b>(
+    chunks: impl Iterator<Item = &'b str> + Clone,
+    labels: &'a [LeadLabel],
+) -> Option<&'a LeadLabel> {
+    labels
+        .iter()
+        .filter(|label| !label.text.is_empty() && starts_with_label(chunks.clone(), &label.text))
+        .max_by_key(|label| label.text.len())
+}
+
+fn starts_with_label<'b>(mut chunks: impl Iterator<Item = &'b str>, label: &str) -> bool {
+    let mut rest = label.as_bytes();
+    let mut tail = "";
+    while !rest.is_empty() {
+        let Some(chunk) = chunks.next() else {
+            return false;
+        };
+        let n = rest.len().min(chunk.len());
+        if chunk.as_bytes()[..n] != rest[..n] {
+            return false;
+        }
+        rest = &rest[n..];
+        // Equal bytes of valid UTF-8 end on a char boundary of `chunk` too.
+        tail = &chunk[n..];
+    }
+    tail.chars()
+        .next()
+        .or_else(|| {
+            chunks
+                .find(|chunk| !chunk.is_empty())
+                .and_then(|chunk| chunk.chars().next())
+        })
+        .is_none_or(char::is_whitespace)
+}
 
 /// TextViewStyle used to customize the style for [`super::TextView`].
 ///
@@ -31,6 +80,8 @@ pub struct TextViewStyle {
     /// show that surface.
     table_background: Option<Hsla>,
     is_dark: bool,
+    lead_labels: Arc<[LeadLabel]>,
+    tight_lead_in: bool,
 }
 
 impl PartialEq for TextViewStyle {
@@ -51,6 +102,8 @@ impl PartialEq for TextViewStyle {
             && self.inline_code == other.inline_code
             && self.table_background == other.table_background
             && self.is_dark == other.is_dark
+            && self.lead_labels == other.lead_labels
+            && self.tight_lead_in == other.tight_lead_in
     }
 }
 
@@ -95,6 +148,8 @@ impl TextViewStyle {
             },
             table_background: None,
             is_dark,
+            lead_labels: Arc::from([]),
+            tight_lead_in: false,
         }
     }
 
@@ -214,6 +269,14 @@ impl TextViewStyle {
         self
     }
 
+    /// Sets the labels a body paragraph or list item can start with. A match
+    /// draws as a chip; headings and table cells are never matched. Empty by
+    /// default.
+    pub fn with_lead_labels(mut self, labels: Arc<[LeadLabel]>) -> Self {
+        self.lead_labels = labels;
+        self
+    }
+
     /// The default body-text color.
     pub fn foreground(&self) -> Hsla {
         self.foreground
@@ -288,6 +351,24 @@ impl TextViewStyle {
     /// Whether content-specific assets should use their dark variant.
     pub fn is_dark(&self) -> bool {
         self.is_dark
+    }
+
+    /// Drops the paragraph gap below a top-level paragraph that ends with a
+    /// colon and has a list after it, so the list's own space above is the
+    /// only gap. Off by default.
+    pub fn with_tight_lead_in(mut self, tight: bool) -> Self {
+        self.tight_lead_in = tight;
+        self
+    }
+
+    /// Whether [`Self::with_tight_lead_in`] is on.
+    pub fn tight_lead_in(&self) -> bool {
+        self.tight_lead_in
+    }
+
+    /// The labels set by [`Self::with_lead_labels`].
+    pub fn lead_labels(&self) -> &[LeadLabel] {
+        &self.lead_labels
     }
 
     /// The table body background, when it is not the theme surface.

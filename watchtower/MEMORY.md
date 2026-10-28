@@ -83,6 +83,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid skill chips on step headers, a single turn skill strip, or relying on the open card alone, while the step marker line serves long turns. Reason: [ADR-0069](watchtower/decisions/ADR-0069-skill-marker-between-steps.md).
 - Avoid a Board plugin mini board, a composer chip strip, a side panel, a header counter, every unread agent of the host, unread cards only, and a cached Board membership for thread switching, while Hiep cycles through all Board Just finished cards with Mod+J. Reason: [ADR-0073](watchtower/decisions/ADR-0073-board-finished-cycle-over-unread-only.md).
 - Avoid a fixed jump after send, a jump on `ComposerEvent::Sent`, and a post-send Next pill, while `Sent` fires before the daemon reply and Hiep wants the choice. Reason: [ADR-0071](watchtower/decisions/ADR-0071-after-send-setting-over-fixed-jump.md).
+- Avoid plain colored label text, one accent color, muted gray, and a plugin-theme fallback for GPUI answer labels while the owner wants role tint chips from existing theme tokens. Reason: [ADR-0076](watchtower/decisions/ADR-0076-semantic-tint-chips-for-answer-labels.md).
+- Avoid dropping the Recap entirely and a Recap that repeats Did, Open, or Need from you, while the Board Recaps tab reads the branch line and the body holds the rest. Reason: [ADR-0077](watchtower/decisions/ADR-0077-recap-branch-line-only.md).
 
 ## Learnings
 
@@ -461,3 +463,10 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the lefthook format hook rewrites watchtower markdown tables, so run `npm run format:files` on plan files before a plan commit.
 - Source: TASK-305 live probe, the UI checker run, and the plan commits.
 - Use next time: plan any per-hook UI for about 20 rows per turn, and do not assume a hook ends before its turn ends.
+
+### 2026-10-28 - Implement 20261028-gpui-answer-label-colors
+
+- Learned: `gpui-base` tests cannot run here: `-p gpui-base` is refused (not a workspace member), and `--manifest-path vendor/gpui-base/Cargo.toml` fails because the crate sits inside the workspace folder. Source: TASK-317 and TASK-323 outcomes.
+- Use next time: keep a vendor rule in a public pure function and test it from a workspace crate, as `match_lead_label` is tested in `crates/timeline/src/answer_labels.rs`.
+- Learned: in a check app, the AX tree and the screenshot lag one frame, so a click on an index read before the last action hits a shifted element (two clicks opened Board). A covered background window also stops drawing, and scroll events do not move the timeline.
+- Use next time: press `End`, then read the AX state, then click, one action per read. Plan long-answer screen checks as several short sample answers, and back up `sidebar.json` and `prompt-history.json` before the check app starts.
