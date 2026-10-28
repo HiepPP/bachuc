@@ -4,6 +4,7 @@
 //! Electron agent panel: `message.tsx`, `tool-calls/detail-level/turn/view.tsx`, the tool detail
 //! views, the permission cards, and the pane find bar.
 
+mod answer_labels;
 pub mod background;
 mod background_view;
 mod card_view;
@@ -2511,6 +2512,7 @@ impl TimelineView {
                 ..Default::default()
             })
             .with_dark(theme.is_dark())
+            .with_lead_labels(answer_labels::answer_labels(&t))
             .with_heading(move |level| heading_style(level, content, border, zoom));
         // Read when the style is built, not per flush; a syntax theme change writes the theme
         // global, which drops this cache.

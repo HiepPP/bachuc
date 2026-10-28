@@ -80,6 +80,7 @@ Render path:
 - Never read a `ListState` in a row callback. It panics with "already mutably borrowed".
 - Never query the system in a render path. `all_font_names` in a row draw made the timeline scroll lag.
 - Prefer sorted vectors over small `HashMap`s on per-frame paths.
+- Add or change an answer label chip only in `crates/timeline/src/answer_labels.rs`. Its colors are theme `status_*` and `tint_*` pairs, never a new hex ([ADR-0076](../watchtower/decisions/ADR-0076-semantic-tint-chips-for-answer-labels.md)).
 
 Layout:
 
