@@ -42,7 +42,7 @@ pub(super) struct InlineHighlight {
 
 impl InlineHighlight {
     /// Layers `other` over `self`, the way [`HighlightStyle::highlight`] does.
-    fn highlight(mut self, other: &InlineHighlight) -> Self {
+    pub(super) fn highlight(mut self, other: &InlineHighlight) -> Self {
         self.style = self.style.highlight(other.style);
         if other.font_family.is_some() {
             self.font_family = other.font_family.clone();
@@ -177,12 +177,16 @@ pub(super) fn text_runs(
 
 /// Splits text into contiguous ranges sharing one font size. GPUI runs can
 /// vary the font but not its size, so each range needs its own shaped line.
+///
+/// A set `font_size_scale` marks a chip, which the inline flow pads and draws
+/// a background behind, so a chip at scale 1 (a lead label) still gets its
+/// own range rather than joining the plain text next to it.
 pub(super) fn text_size_ranges(
     text_len: usize,
     highlights: &[(Range<usize>, InlineHighlight)],
 ) -> Vec<(Range<usize>, f32)> {
-    let mut ranges: Vec<(Range<usize>, f32)> = Vec::new();
-    let mut push = |range: Range<usize>, scale: f32| {
+    let mut ranges: Vec<(Range<usize>, Option<f32>)> = Vec::new();
+    let mut push = |range: Range<usize>, scale: Option<f32>| {
         if range.is_empty() {
             return;
         }
@@ -197,12 +201,15 @@ pub(super) fn text_size_ranges(
     };
     let mut cursor = 0;
     for (range, highlight) in highlights {
-        push(cursor..range.start, 1.);
-        push(range.clone(), highlight.font_size_scale.unwrap_or(1.));
+        push(cursor..range.start, None);
+        push(range.clone(), highlight.font_size_scale);
         cursor = range.end;
     }
-    push(cursor..text_len, 1.);
+    push(cursor..text_len, None);
     ranges
+        .into_iter()
+        .map(|(range, scale)| (range, scale.unwrap_or(1.)))
+        .collect()
 }
 
 /// A inline element used to render a inline text and support selectable.

@@ -35,7 +35,7 @@ use crate::{
 };
 
 use super::{
-    SelectionFormat, TextViewStyle,
+    LeadLabel, SelectionFormat, TextViewStyle, match_lead_label,
     utils::{data_url_image, list_item_prefix, ordered_list_ordinal},
 };
 
@@ -2437,6 +2437,39 @@ impl PartialEq for NodeContext {
     }
 }
 
+/// A lead label chip: the inline code chip shape at body size.
+fn lead_label_highlight(label: &LeadLabel) -> InlineHighlight {
+    InlineHighlight {
+        style: HighlightStyle {
+            color: Some(label.color),
+            background_color: Some(label.background),
+            font_weight: Some(FontWeight::MEDIUM),
+            ..Default::default()
+        },
+        font_family: None,
+        // A set scale is what makes the inline flow draw a chip.
+        font_size_scale: Some(1.),
+    }
+}
+
+/// Layers the label over `highlights`, on top of any mark under it, such as
+/// a bold or code mark on the label text.
+fn with_lead_label(
+    highlights: Vec<(Range<usize>, InlineHighlight)>,
+    (range, label): (Range<usize>, InlineHighlight),
+) -> Vec<(Range<usize>, InlineHighlight)> {
+    combine_highlights(highlights, [(range.clone(), label.clone())])
+        .into_iter()
+        .map(|(r, highlight)| {
+            if r.end <= range.end {
+                (r, highlight.highlight(&label))
+            } else {
+                (r, highlight)
+            }
+        })
+        .collect()
+}
+
 /// The highlight a text mark renders with. The link decoration is applied by
 /// the caller, which also has to record the link range.
 fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHighlight {
@@ -2506,9 +2539,13 @@ impl Paragraph {
     /// `fade_key` names this paragraph's text for the streamed fade-in and
     /// for range highlights; the owning block supplies it because a heading
     /// or table cell paragraph carries no span of its own.
+    ///
+    /// `body` is true for a body paragraph, also in a list item or quote, and
+    /// false for a heading or table cell, which never draw a lead label.
     fn render(
         &self,
         fade_key: Option<TextLeafKey>,
+        body: bool,
         node_cx: &NodeContext,
         _window: &mut Window,
         cx: &mut App,
@@ -2516,11 +2553,13 @@ impl Paragraph {
         let children = &self.children;
         let fades = node_cx.stream_fades(fade_key);
         let backgrounds = node_cx.range_backgrounds(fade_key);
+        let label = body.then(|| self.lead_label(node_cx)).flatten();
 
-        if self.should_render_inline_flow() {
+        // A lead label is a chip, which only the inline flow pads and rounds.
+        if label.is_some() || self.should_render_inline_flow() {
             return InlineFlow::new(
                 leaf_element_id(fade_key),
-                self.inline_flow_items(fade_key, fades, backgrounds, node_cx, cx),
+                self.inline_flow_items(fade_key, label, fades, backgrounds, node_cx, cx),
                 node_cx.link_click_handler.clone(),
             )
             .into_any_element();
@@ -2701,6 +2740,20 @@ impl Paragraph {
             .into_any_element()
     }
 
+    /// The lead label of the style this paragraph's text starts with.
+    fn lead_label<'a>(&self, node_cx: &'a NodeContext) -> Option<&'a LeadLabel> {
+        let labels = node_cx.style.lead_labels();
+        if labels.is_empty() {
+            return None;
+        }
+        let chunks = self
+            .children
+            .iter()
+            .take_while(|child| child.custom.is_none() && child.image.is_none())
+            .map(|child| &*child.text);
+        match_lead_label(chunks, labels)
+    }
+
     fn should_render_inline_flow(&self) -> bool {
         let has_image = self.children.iter().any(|child| child.image.is_some());
         let has_text = self.children.iter().any(|child| !child.text.is_empty());
@@ -2715,6 +2768,7 @@ impl Paragraph {
     fn inline_flow_items(
         &self,
         leaf_key: Option<TextLeafKey>,
+        label: Option<&LeadLabel>,
         fades: &[(Range<usize>, f32)],
         backgrounds: &[(Range<usize>, Hsla)],
         node_cx: &NodeContext,
@@ -2728,11 +2782,17 @@ impl Paragraph {
         // Where `text` starts in the paragraph's whole rendered text, which
         // is the byte space the fade and background ranges use.
         let mut consumed = 0;
+        // The label lies in the first text item: matching stops at the first
+        // custom node or image.
+        let mut label = label.map(|label| (0..label.text.len(), lead_label_highlight(label)));
 
         for inline_node in &self.children {
             if let Some(node) = &inline_node.custom {
                 if let Ok(mut state) = inline_node.state.lock() {
                     state.set_text(text.clone().into());
+                }
+                if let Some(label) = label.take() {
+                    highlights = with_lead_label(std::mem::take(&mut highlights), label);
                 }
                 if !text.is_empty() {
                     let item_fades = slice_fades(fades, consumed, consumed + text.len());
@@ -2790,6 +2850,9 @@ impl Paragraph {
             text.push_str(&inline_node.text);
 
             if let Some(image) = &inline_node.image {
+                if let Some(label) = label.take() {
+                    highlights = with_lead_label(std::mem::take(&mut highlights), label);
+                }
                 if !text.is_empty() {
                     if let Ok(mut state) = inline_node.state.lock() {
                         state.set_text(text.clone().into());
@@ -2850,6 +2913,9 @@ impl Paragraph {
             }
         }
 
+        if let Some(label) = label.take() {
+            highlights = with_lead_label(std::mem::take(&mut highlights), label);
+        }
         if !text.is_empty() {
             if let Ok(mut state) = self.state.lock() {
                 state.set_text(text.clone().into());
@@ -3064,7 +3130,9 @@ fn measure_table_columns(
     let mut col_w = measured.widths.clone();
     for &(row_ix, ix) in &measured.custom_cells {
         let cell = &table.children[row_ix].children[ix];
-        let items = cell.children.inline_flow_items(None, &[], &[], node_cx, cx);
+        let items = cell
+            .children
+            .inline_flow_items(None, None, &[], &[], node_cx, cx);
         let style = text_styles.row_refinement(row_ix).clone();
         let width = window.with_text_style(Some(style), |window| {
             super::inline_flow::intrinsic_width(&items, window, cx)
@@ -3812,7 +3880,7 @@ impl BlockNode {
                         .span
                         .map(|span| TextLeafKey::table_cell(span.start, cell_ordinal));
                     cell_ordinal += 1;
-                    cell.children.render(fade_key, node_cx, window, cx)
+                    cell.children.render(fade_key, false, node_cx, window, cx)
                 });
 
                 let grow = SLACK_GROW * column.max / total_w;
@@ -3911,6 +3979,7 @@ impl BlockNode {
             BlockNode::Paragraph(paragraph) => gapped(
                 paragraph.render(
                     paragraph.span.map(|span| TextLeafKey::block(span.start)),
+                    true,
                     node_cx,
                     window,
                     cx,
@@ -3962,6 +4031,7 @@ impl BlockNode {
                     .refine_style(&refinement)
                     .child(children.render(
                         span.map(|span| TextLeafKey::block(span.start)),
+                        false,
                         node_cx,
                         window,
                         cx,
@@ -4328,7 +4398,7 @@ mod tests {
                 ],
                 ..Default::default()
             };
-            let items = paragraph.inline_flow_items(None, &[], &[], &node_cx, cx);
+            let items = paragraph.inline_flow_items(None, None, &[], &[], &node_cx, cx);
             let InlineFlowItem::Object { style, link, .. } = &items[0] else {
                 panic!()
             };

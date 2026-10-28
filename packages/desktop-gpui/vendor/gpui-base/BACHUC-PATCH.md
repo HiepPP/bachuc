@@ -54,3 +54,11 @@ GPUI's input never asked macOS for the user's Text Replacements (System Settings
 - `TextView::code_block_header` (`src/text/text_view.rs`) takes a closure that returns `Option<AnyElement>`. It reaches `CodeBlock::render` through `TextViewState` and `NodeContext`. `None` renders the block exactly as before.
 - With a header, the bordered frame drops its padding and holds the header, then a body box with the code style's padding. The body box holds the corner actions, so they stay over the code. The language label does not show.
 - The timeline draws code citation cards with it (TASK-318). This crate is not a workspace member, so the timeline tests cover it. Re-apply these edits after a gpui-kit upgrade.
+
+## Lead label chips (TASK-323)
+
+- `TextViewStyle::with_lead_labels` (`src/text/style.rs`) takes `LeadLabel`s: a label text, such as `Fix:`, and its chip text and background colors. The default list is empty, and an empty list renders exactly as before.
+- `match_lead_label` (`src/text/style.rs`) holds the match rule: the paragraph text starts with the whole label, then whitespace or the end. The longest match wins. It is public because this crate is not a workspace member; `crates/timeline/src/answer_labels.rs` tests it.
+- `Paragraph::render` (`src/text/node.rs`) takes a `body` flag: true for a paragraph, also in a list item or quote, false for a heading or table cell. A body paragraph that starts with a label renders through the inline flow, and `inline_flow_items` layers the chip over the marks of the label text.
+- A chip is a highlight with a set `font_size_scale`: the inline flow pads and rounds it like inline code. A label chip sets `Some(1.)`, and `text_size_ranges` (`src/text/inline.rs`) keys its ranges on the `Option`, so a body-size chip does not merge with the plain text next to it. Existing input gives the same ranges as before.
+- The timeline sets the labels (ADR-0076). Re-apply these edits after a gpui-kit upgrade.
