@@ -62,3 +62,9 @@ GPUI's input never asked macOS for the user's Text Replacements (System Settings
 - `Paragraph::render` (`src/text/node.rs`) takes a `body` flag: true for a paragraph, also in a list item or quote, false for a heading or table cell. A body paragraph that starts with a label renders through the inline flow, and `inline_flow_items` layers the chip over the marks of the label text.
 - A chip is a highlight with a set `font_size_scale`: the inline flow pads and rounds it like inline code. A label chip sets `Some(1.)`, and `text_size_ranges` (`src/text/inline.rs`) keys its ranges on the `Option`, so a body-size chip does not merge with the plain text next to it. Existing input gives the same ranges as before.
 - The timeline sets the labels (ADR-0076). Re-apply these edits after a gpui-kit upgrade.
+
+## Tight lead-in before a list
+
+- `TextViewStyle::with_tight_lead_in` (`src/text/style.rs`) drops the paragraph gap below a top-level paragraph that ends with a colon when a list follows it, so the list's own space above (`list_spacing`) is the whole gap. Off by default.
+- `NodeRenderOptions::next_is_list` (`src/text/document.rs`) carries the fact from `render_root` and from a nested root; `Paragraph::ends_with_colon` (`src/text/node.rs`) reads the last text run.
+- The timeline turns it on for assistant answers. Re-apply these edits after a gpui-kit upgrade.

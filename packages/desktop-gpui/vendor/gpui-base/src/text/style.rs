@@ -81,6 +81,7 @@ pub struct TextViewStyle {
     table_background: Option<Hsla>,
     is_dark: bool,
     lead_labels: Arc<[LeadLabel]>,
+    tight_lead_in: bool,
 }
 
 impl PartialEq for TextViewStyle {
@@ -102,6 +103,7 @@ impl PartialEq for TextViewStyle {
             && self.table_background == other.table_background
             && self.is_dark == other.is_dark
             && self.lead_labels == other.lead_labels
+            && self.tight_lead_in == other.tight_lead_in
     }
 }
 
@@ -147,6 +149,7 @@ impl TextViewStyle {
             table_background: None,
             is_dark,
             lead_labels: Arc::from([]),
+            tight_lead_in: false,
         }
     }
 
@@ -348,6 +351,19 @@ impl TextViewStyle {
     /// Whether content-specific assets should use their dark variant.
     pub fn is_dark(&self) -> bool {
         self.is_dark
+    }
+
+    /// Drops the paragraph gap below a top-level paragraph that ends with a
+    /// colon and has a list after it, so the list's own space above is the
+    /// only gap. Off by default.
+    pub fn with_tight_lead_in(mut self, tight: bool) -> Self {
+        self.tight_lead_in = tight;
+        self
+    }
+
+    /// Whether [`Self::with_tight_lead_in`] is on.
+    pub fn tight_lead_in(&self) -> bool {
+        self.tight_lead_in
     }
 
     /// The labels set by [`Self::with_lead_labels`].

@@ -2740,6 +2740,16 @@ impl Paragraph {
             .into_any_element()
     }
 
+    /// Whether the text ends with a colon, as a lead-in to a list does.
+    fn ends_with_colon(&self) -> bool {
+        self.children
+            .iter()
+            .rev()
+            .map(|child| child.text.trim_end())
+            .find(|text| !text.is_empty())
+            .is_some_and(|text| text.ends_with(':'))
+    }
+
     /// The lead label of the style this paragraph's text starts with.
     fn lead_label<'a>(&self, node_cx: &'a NodeContext) -> Option<&'a LeadLabel> {
         let labels = node_cx.style.lead_labels();
@@ -3968,6 +3978,7 @@ impl BlockNode {
                             is_first,
                             prev,
                             is_last: options.is_last && ix + 1 == children.len(),
+                            next_is_list: super::document::next_is_list(children, ix),
                             ..options
                         },
                         node_cx,
@@ -3984,7 +3995,18 @@ impl BlockNode {
                     window,
                     cx,
                 ),
-                mb,
+                // A lead-in such as `Changes:` sits on its list: the list's
+                // own space above is the whole gap.
+                if node_cx.style.tight_lead_in()
+                    && options.next_is_list
+                    && options.depth == 0
+                    && !options.in_blockquote
+                    && paragraph.ends_with_colon()
+                {
+                    rems(0.)
+                } else {
+                    mb
+                },
             ),
             BlockNode::Heading {
                 level,
