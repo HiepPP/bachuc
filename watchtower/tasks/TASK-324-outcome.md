@@ -38,3 +38,14 @@ Owner asks in the same thread, built by the lead with no builder agents.
 - One-line Recap ([ADR-0077](watchtower/decisions/ADR-0077-recap-branch-line-only.md)): the global rules and the stop hook allow only the `<branch> · <commit state>` bullet; "Open:" and "Need from you:" move to the body. GPUI `compact_recap` folds the head alone into the chips (`./cargo.sh test -p bachuc-plugin-next-prompt-actions` -> 65 passed). The test case "no Did" changed from native rendering to a folded Recap, as ADR-0077 asks. Board `parseRecap` reads the branch line and takes Did from the bold opening, cut at 300 characters (`npx tsx --test tests/recaps.test.ts` -> 16 passed; typecheck and lint clean); board plugin reloaded on release and live.
 - Spacing A1 (Claude Design "Bachuc — thread spacing (GPUI)"): `with_tight_lead_in` drops the paragraph gap below a top-level paragraph that ends with ":" before a list, so the label sits 4 px above its list; `LIST_SPACING_BOTTOM` goes from 16 to 24, so a list ends its group with a paragraph gap. Global rules B1 (a one-item group stays on the label line) and B3 (group labels come from the chip table). `./cargo.sh check --workspace` -> builds; `./cargo.sh test -p bachuc-timeline` -> all suites pass, lib 35.
 - UNVERIFIED (unattended) on live: the check bundle window stopped drawing in the background, so the spacing was not seen on screen. `sidebar.json` was backed up and restored after the check.
+
+## Release UI Check (2026-10-28)
+
+Run by the lead with `cua_repl` on the release GPUI app, installed by `scripts/gpui-release.sh` from `53fe0a6f1` (Hiep away, owner asked). Theme claude-light, zoom 1.75. Agent "release chip spacing check" (Haiku, release) holds the sample answer.
+
+- PASS, spacing A1: "Changes:" sits right above its list, and the list ends with a paragraph gap before "Cause:" (`/tmp/labels-shot/release-changes-cause.jpg`).
+- PASS, chips: bold `**Cause:**` is a red chip; "Fix:" before an inline code span is a green chip and the code chip keeps its look; "Còn lại:" is a brown chip over its tight list (`/tmp/labels-shot/release-fix-open.jpg`).
+- PASS, no chip: the "### Fix:" heading, the table cells "Cause:" and "Fix: in a cell", and "Fixes:" stay plain (`/tmp/labels-shot/release-heading-table.jpg`).
+- PASS, one-item group: "Unverified: one item on the label line." is a chip followed by its text (`/tmp/labels-shot/release-unverified.jpg`).
+- Not checked: the Claude dark theme (the owner works in light; `hiep-plugins/AGENTS.md`).
+- Cleanup: the Explorer was shown again and this thread's tab was selected again; `layout.json` and `sidebar.json` match their backups.
