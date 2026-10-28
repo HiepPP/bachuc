@@ -462,3 +462,10 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: the lefthook format hook rewrites watchtower markdown tables, so run `npm run format:files` on plan files before a plan commit.
 - Source: TASK-305 live probe, the UI checker run, and the plan commits.
 - Use next time: plan any per-hook UI for about 20 rows per turn, and do not assume a hook ends before its turn ends.
+
+### 2026-10-28 - Implement 20261028-gpui-answer-label-colors
+
+- Learned: `gpui-base` tests cannot run here: `-p gpui-base` is refused (not a workspace member), and `--manifest-path vendor/gpui-base/Cargo.toml` fails because the crate sits inside the workspace folder. Source: TASK-317 and TASK-323 outcomes.
+- Use next time: keep a vendor rule in a public pure function and test it from a workspace crate, as `match_lead_label` is tested in `crates/timeline/src/answer_labels.rs`.
+- Learned: in a check app, the AX tree and the screenshot lag one frame, so a click on an index read before the last action hits a shifted element (two clicks opened Board). A covered background window also stops drawing, and scroll events do not move the timeline.
+- Use next time: press `End`, then read the AX state, then click, one action per read. Plan long-answer screen checks as several short sample answers, and back up `sidebar.json` and `prompt-history.json` before the check app starts.

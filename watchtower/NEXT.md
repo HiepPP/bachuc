@@ -4,15 +4,15 @@
 
 - Title: GPUI answer label colors from theme tokens
 - Slug: 20261028-gpui-answer-label-colors
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-10-28
 
 ## Tracker
 
-| Order | TASK                                                 | Group | Status | Spec                                                                                                 | Deps     | Context | Notes                                   |
-| ----- | ---------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------------------------------------------- | -------- | ------- | --------------------------------------- |
-| 1     | TASK-323 Lead label colors in the vendored text view | A     | TODO   | [watchtower/tasks/TASK-323-lead-label-hook.md](watchtower/tasks/TASK-323-lead-label-hook.md)         | -        | -       | Vendor only. Hot render path. ADR-0076. |
-| 2     | TASK-324 Answer label colors in the GPUI timeline    | B     | TODO   | [watchtower/tasks/TASK-324-answer-label-colors.md](watchtower/tasks/TASK-324-answer-label-colors.md) | TASK-323 | -       | Starts after TASK-323. ADR-0076.        |
+| Order | TASK                                                 | Group | Status | Spec                                                                                                 | Deps     | Context | Notes                                       |
+| ----- | ---------------------------------------------------- | ----- | ------ | ---------------------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------- |
+| 1     | TASK-323 Lead label colors in the vendored text view | A     | DONE   | [watchtower/tasks/TASK-323-lead-label-hook.md](watchtower/tasks/TASK-323-lead-label-hook.md)         | -        | -       | 3b6976092. ADR-0076.                        |
+| 2     | TASK-324 Answer label colors in the GPUI timeline    | B     | DONE   | [watchtower/tasks/TASK-324-answer-label-colors.md](watchtower/tasks/TASK-324-answer-label-colors.md) | TASK-323 | -       | b69edf27a. implement: manual checks pending |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
@@ -32,7 +32,7 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Handoff
 
-- Next action: run `watchtower implement` for TASK-323, then TASK-324.
+- Next action: Hiep opens the agents "label chip check" and "label chip check 2" on live in light and Claude dark and checks the UNVERIFIED lines in [watchtower/tasks/TASK-324-outcome.md](watchtower/tasks/TASK-324-outcome.md), then reviews `feat/gpui-answer-label-colors` and merges it.
 
 ## Archive
 
