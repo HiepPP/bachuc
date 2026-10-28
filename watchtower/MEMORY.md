@@ -84,6 +84,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Avoid a Board plugin mini board, a composer chip strip, a side panel, a header counter, every unread agent of the host, unread cards only, and a cached Board membership for thread switching, while Hiep cycles through all Board Just finished cards with Mod+J. Reason: [ADR-0073](watchtower/decisions/ADR-0073-board-finished-cycle-over-unread-only.md).
 - Avoid a fixed jump after send, a jump on `ComposerEvent::Sent`, and a post-send Next pill, while `Sent` fires before the daemon reply and Hiep wants the choice. Reason: [ADR-0071](watchtower/decisions/ADR-0071-after-send-setting-over-fixed-jump.md).
 - Avoid plain colored label text, one accent color, muted gray, and a plugin-theme fallback for GPUI answer labels while the owner wants role tint chips from existing theme tokens. Reason: [ADR-0076](watchtower/decisions/ADR-0076-semantic-tint-chips-for-answer-labels.md).
+- Avoid dropping the Recap entirely and a Recap that repeats Did, Open, or Need from you, while the Board Recaps tab reads the branch line and the body holds the rest. Reason: [ADR-0077](watchtower/decisions/ADR-0077-recap-branch-line-only.md).
 
 ## Learnings
 

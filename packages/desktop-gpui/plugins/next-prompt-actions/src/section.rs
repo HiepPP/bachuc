@@ -316,10 +316,11 @@ fn compact_recap(body: &[&str]) -> Option<Recap> {
             rest: Vec::new(),
         });
     }
-    if fields.is_empty()
-        || fields
-            .iter()
-            .any(|f| f.text.is_empty() && f.rest.is_empty())
+    // The head alone is the current Recap: the reply above already holds Did, Open, and
+    // Need from you.
+    if fields
+        .iter()
+        .any(|f| f.text.is_empty() && f.rest.is_empty())
     {
         return None;
     }
@@ -333,7 +334,7 @@ fn compact_recap(body: &[&str]) -> Option<Recap> {
     Some(Recap {
         branch: head[1].to_string(),
         commit: head[2].to_string(),
-        did: sections[0].text.clone(),
+        did: sections.first().map(|s| s.text.clone()).unwrap_or_default(),
         sections: Some(sections),
         ..Recap::default()
     })
@@ -997,10 +998,26 @@ mod tests {
     }
 
     #[test]
+    fn a_branch_only_recap_folds_into_the_chips() {
+        assert_eq!(
+            five(&["- `main` · not committed"]).1,
+            Some(Recap {
+                branch: "`main`".into(),
+                commit: "not committed".into(),
+                sections: Some(Vec::new()),
+                ..Recap::default()
+            })
+        );
+        assert_eq!(
+            five(&["- main · không có thay đổi"]).1.map(|r| r.commit),
+            Some("không có thay đổi".into())
+        );
+    }
+
+    #[test]
     fn any_other_compact_shape_keeps_native_rendering() {
         let head = "- `main` · not committed";
         let cases: Vec<(&str, Vec<&str>)> = vec![
-            ("no Did", vec![head]),
             ("Open before Did", vec![head, "- Open: x", "- Did: y"]),
             (
                 "Need before Open",
