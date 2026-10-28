@@ -15,7 +15,7 @@ enum Role {
 }
 
 /// The labels of the global answer rules, with the Vietnamese forms agents write.
-const LABELS: [(&str, Role); 22] = [
+const LABELS: [(&str, Role); 28] = [
     ("What I did:", Role::Report),
     ("What happened:", Role::Report),
     ("Why it matters:", Role::Report),
@@ -24,12 +24,18 @@ const LABELS: [(&str, Role); 22] = [
     ("Chuyện gì đã xảy ra:", Role::Report),
     ("Vì sao quan trọng:", Role::Report),
     ("Đã làm:", Role::Report),
+    ("Changes:", Role::Report),
+    ("Evidence:", Role::Report),
+    ("Thay đổi:", Role::Report),
+    ("Bằng chứng:", Role::Report),
     ("Symptom:", Role::Warning),
     ("Unverified:", Role::Warning),
     ("Open:", Role::Warning),
     ("Triệu chứng:", Role::Warning),
     ("Chưa xác nhận:", Role::Warning),
     ("Còn lại:", Role::Warning),
+    ("Not cleaned:", Role::Warning),
+    ("Chưa dọn dẹp:", Role::Warning),
     ("Cause:", Role::Danger),
     ("Not fixed:", Role::Danger),
     ("Need from you:", Role::Danger),
@@ -123,7 +129,7 @@ mod tests {
     fn every_label_maps_to_its_role_tokens_in_both_schemes() {
         for t in [Tokens::light(), Tokens::claude_dark()] {
             let labels = answer_labels(&t);
-            assert_eq!(labels.len(), 22);
+            assert_eq!(labels.len(), 28);
             let roles = [
                 (
                     &[
@@ -135,6 +141,10 @@ mod tests {
                         "Chuyện gì đã xảy ra:",
                         "Vì sao quan trọng:",
                         "Đã làm:",
+                        "Changes:",
+                        "Evidence:",
+                        "Thay đổi:",
+                        "Bằng chứng:",
                     ][..],
                     (t.status_merged, t.tint_merged),
                 ),
@@ -146,6 +156,8 @@ mod tests {
                         "Triệu chứng:",
                         "Chưa xác nhận:",
                         "Còn lại:",
+                        "Not cleaned:",
+                        "Chưa dọn dẹp:",
                     ][..],
                     (t.status_warning, t.tint_warning),
                 ),
