@@ -4,7 +4,7 @@
 
 - Title: GPUI answer label colors from theme tokens
 - Slug: 20261028-gpui-answer-label-colors
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-10-28
 
 ## Tracker
@@ -36,4 +36,4 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Archive
 
-- None.
+- Archived: 2026-10-28 -> watchtower/archive/20261028-gpui-answer-label-colors/
