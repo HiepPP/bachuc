@@ -151,6 +151,14 @@ export function createRunStore(now = () => new Date().toISOString()) {
       const run = active.get(agentId) ?? finished.find((item) => item.agentId === agentId);
       if (run) run.title = title;
     },
+    // An owner rename wins over the prompt goal, even when it looks like a command.
+    setTitle(agentId: string, title: string) {
+      for (const run of [...active.values(), ...finished]) {
+        if (run.agentId !== agentId) continue;
+        run.title = title;
+        run.promptTitle = null;
+      }
+    },
     pendingPromptTitles() {
       return [...active.values(), ...finished]
         .filter(

@@ -498,6 +498,25 @@ impl BoardStore {
         })
     }
 
+    /// Renames the agent on the host and stores the title on the Board, which keeps finished runs.
+    pub(crate) fn rename(
+        &mut self,
+        agent_id: &str,
+        title: &str,
+        cx: &mut Context<Self>,
+    ) -> Task<anyhow::Result<()>> {
+        let Some(client) = &self.client else {
+            return Task::ready(Err(anyhow::anyhow!("No host.")));
+        };
+        client.update(cx, |client, cx| client.rename_agent(agent_id, title, cx));
+        let input = json!({ "agentId": agent_id, "title": title });
+        let answer = self.ctx.rpc("board.set-title", input, cx);
+        cx.spawn(async move |this, cx| {
+            answer.await?;
+            this.update(cx, |store, cx| store.refresh(cx))
+        })
+    }
+
     /// Removes a finished run (`removeFinishedRun`); `false` when the run changed meanwhile.
     pub(crate) fn remove(
         &mut self,

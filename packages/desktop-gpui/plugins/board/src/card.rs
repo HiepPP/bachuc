@@ -45,6 +45,8 @@ pub(crate) struct CardUi {
     pub star_error: bool,
     pub toggling_diffs: bool,
     pub diffs_error: bool,
+    pub renaming: bool,
+    pub rename_error: bool,
     pub removing: bool,
     pub remove_error: bool,
 }
@@ -54,6 +56,7 @@ pub(crate) enum CardAction {
     Open(String),
     Star { run_id: String, starred: bool },
     Diffs { agent_id: String, off: bool },
+    Rename { agent_id: String, title: String },
     Remove { run_id: String, agent_id: String },
     OpenProject(Box<Run>),
     OpenTask(Box<Run>),
@@ -188,15 +191,17 @@ pub(crate) enum FocusPart {
     Open,
     Repo,
     Diffs,
+    Rename,
     Star,
     Task,
     Remove,
 }
 
-const FOCUS_PARTS: [FocusPart; 6] = [
+const FOCUS_PARTS: [FocusPart; 7] = [
     FocusPart::Open,
     FocusPart::Repo,
     FocusPart::Diffs,
+    FocusPart::Rename,
     FocusPart::Star,
     FocusPart::Task,
     FocusPart::Remove,
@@ -219,7 +224,7 @@ pub(crate) fn subagent_actions_shown(pinned: bool, focused: Option<FocusPart>) -
 /// One keyed focus handle per focusable part of a rendered card, so the render knows which part
 /// has focus. GPUI drops a handle when its card is not rendered.
 struct Parts {
-    handles: [FocusHandle; 6],
+    handles: [FocusHandle; 7],
     focused: Option<FocusPart>,
     keyboard: bool,
 }
@@ -379,6 +384,7 @@ pub(crate) enum CardPart {
     Elbow,
     Star,
     Diffs,
+    Rename,
     Remove,
 }
 
@@ -389,7 +395,7 @@ pub(crate) fn part_opacity(part: CardPart, seen: bool, active: bool) -> f32 {
     match part {
         CardPart::Repo | CardPart::Main | CardPart::Tags => dim,
         CardPart::Elbow => 0.6 * dim,
-        CardPart::Star | CardPart::Diffs | CardPart::Remove => 1.,
+        CardPart::Star | CardPart::Diffs | CardPart::Rename | CardPart::Remove => 1.,
     }
 }
 
@@ -477,6 +483,7 @@ pub(crate) fn run_card(p: &Paint, c: Card, window: &mut Window, cx: &mut App) ->
     let errors = [
         (ui.star_error, "Could not update star. Please retry."),
         (ui.diffs_error, "Could not change edit diffs. Please retry."),
+        (ui.rename_error, "Could not rename. Please retry."),
         (ui.remove_error, "Could not remove. Please retry."),
     ]
     .into_iter()
@@ -666,22 +673,63 @@ fn diffs_button(p: &Paint, c: &Card, ui: &CardUi, f: &Parts, group: &SharedStrin
         )
     })
     .child(
-        icon(if off {
-            IconName::PencilOff
-        } else {
-            IconName::Pencil
-        })
-        .with_size(p.s(16.))
-        .text_color(if off {
-            t.foreground
-        } else {
-            t.foreground_muted
-        }),
+        icon(if off { IconName::EyeOff } else { IconName::Eye })
+            .with_size(p.s(16.))
+            .text_color(if off {
+                t.foreground
+            } else {
+                t.foreground_muted
+            }),
     )
     .when(f.ring(FocusPart::Diffs), |diffs| {
         diffs.child(focus_ring(t.accent, CONTROL_RADIUS * p.scale, false))
     });
     dim(diffs, CardPart::Diffs, c.seen, c.focused, group).into_any_element()
+}
+
+/// The pencil: renames the thread. Shows with the star on hover, like edit diffs when on.
+fn rename_button(p: &Paint, c: &Card, ui: &CardUi, f: &Parts, group: &SharedString) -> AnyElement {
+    let (run, t) = (c.run, &p.t);
+    let rename = part(
+        SharedString::from(format!("board-rename-{}", run.id)),
+        format!("Rename {}", run.title),
+        f.handle(FocusPart::Rename),
+    )
+    .flex_none()
+    .size(p.s(28.))
+    .my(-p.s(6.))
+    .flex()
+    .items_center()
+    .justify_center()
+    .rounded(p.s(CONTROL_RADIUS))
+    .map(|rename| {
+        if ui.renaming {
+            rename.opacity(0.5)
+        } else {
+            rename
+                .opacity(0.)
+                .group_hover(group.clone(), |style| style.opacity(1.))
+                .focus_visible(|style| style.opacity(1.))
+        }
+    })
+    .when(!ui.renaming, |rename| {
+        p.press(
+            rename.hover(|style| style.bg(t.surface2)),
+            CardAction::Rename {
+                agent_id: run.agent_id.clone(),
+                title: run.title.clone(),
+            },
+        )
+    })
+    .child(
+        icon(IconName::Pencil)
+            .with_size(p.s(16.))
+            .text_color(t.foreground_muted),
+    )
+    .when(f.ring(FocusPart::Rename), |rename| {
+        rename.child(focus_ring(t.accent, CONTROL_RADIUS * p.scale, false))
+    });
+    dim(rename, CardPart::Rename, c.seen, c.focused, group).into_any_element()
 }
 
 fn remove_button(p: &Paint, c: &Card, ui: &CardUi, f: &Parts, card: &SharedString) -> AnyElement {
@@ -862,6 +910,7 @@ fn card_body(
     let running = run.running();
     let hue = if c.seen { None } else { p.hue(run) };
     let diffs = p.online.then(|| diffs_button(p, c, ui, f, group));
+    let rename = p.online.then(|| rename_button(p, c, ui, f, group));
 
     let repo = part(
         SharedString::from(format!("board-repo-{}", run.id)),
@@ -910,6 +959,7 @@ fn card_body(
                 .left(px(actions_offset(p.scale)))
                 .items_center()
                 .children(diffs)
+                .children(rename)
                 .child(star),
         );
 
@@ -1489,7 +1539,12 @@ mod tests {
         assert_eq!(part_opacity(CardPart::Main, true, false), 0.5);
         assert_eq!(part_opacity(CardPart::Tags, true, false), 0.5);
         assert!((part_opacity(CardPart::Elbow, true, false) - 0.3).abs() < 1e-6);
-        for part in [CardPart::Star, CardPart::Diffs, CardPart::Remove] {
+        for part in [
+            CardPart::Star,
+            CardPart::Diffs,
+            CardPart::Rename,
+            CardPart::Remove,
+        ] {
             assert_eq!(part_opacity(part, true, false), 1., "{part:?}");
         }
     }
@@ -1503,6 +1558,7 @@ mod tests {
                 CardPart::Tags,
                 CardPart::Star,
                 CardPart::Diffs,
+                CardPart::Rename,
                 CardPart::Remove,
             ] {
                 assert_eq!(part_opacity(part, seen, active), 1., "{part:?}");

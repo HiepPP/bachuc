@@ -76,3 +76,13 @@ test("renamed threads and failed lookups keep the host title", () => {
   store.end({ ...agent, title: "Renamed thread" }, "first", { kind: "completed" });
   assert.equal(store.snapshot().runs[0].title, "Renamed thread");
 });
+
+test("an owner rename replaces the prompt goal, even a command-like title", () => {
+  const store = createRunStore();
+  store.start(agent, "first");
+  store.setPromptTitle("demo", "$caveman ultra", "Goal");
+  store.end(agent, "first", { kind: "completed" });
+  store.setTitle("demo", "$my title");
+  assert.equal(store.snapshot().runs[0].title, "$my title");
+  assert.deepEqual(store.pendingPromptTitles(), []);
+});
