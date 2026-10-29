@@ -63,6 +63,7 @@ pub struct DiagramReady {
 }
 
 /// The logical size to show a `Ready` image at: its PNG size divided by the 2x snapshot scale.
+/// A Mermaid PNG already holds the content font size, so this size follows it.
 pub fn image_size(image: &Image) -> Size<Pixels> {
     let bytes = image.bytes();
     let read = |at: usize| {
@@ -164,7 +165,7 @@ impl DiagramRenderer {
             events,
             cache: RenderCache::default(),
             pele: PeleEngine::spawn(),
-            theme: pele_theme(&bachuc_theme::tokens(cx)),
+            theme: current_theme(cx),
             ready: false,
             dark: cx.theme().is_dark(),
             height: MIN_WEBVIEW_HEIGHT,
@@ -181,8 +182,9 @@ impl DiagramRenderer {
         cx: &mut Context<DiagramRenderer>,
     ) -> DiagramState {
         let dark = cx.theme().is_dark();
-        // KaTeX takes only the dark flag; Mermaid takes every theme color, custom themes too.
-        let theme = pele_theme(&bachuc_theme::tokens(cx));
+        // KaTeX takes only the dark flag. Mermaid takes every theme color, custom themes too, and
+        // the content size.
+        let theme = current_theme(cx);
         if dark != self.dark || theme != self.theme {
             self.dark = dark;
             self.theme = theme;
@@ -292,6 +294,13 @@ impl DiagramRenderer {
         }
         self.start_next(cx);
     }
+}
+
+fn current_theme(cx: &gpui_kit::App) -> PeleTheme {
+    pele_theme(
+        &bachuc_theme::tokens(cx),
+        f32::from(bachuc_theme::content_font_size(cx)),
+    )
 }
 
 /// Bounds left of the window, outside its visible content.

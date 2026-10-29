@@ -20,7 +20,10 @@ pub(crate) struct PeleTheme {
     pub accent: String,
     pub font: String,
     pub font_mono: String,
+    pub radius: String,
     pub series: [String; 8],
+    /// PNG pixels per SVG pixel. It holds the 2x snapshot scale and the content zoom.
+    pub scale: f32,
 }
 
 fn css_color(color: gpui_kit::Hsla) -> String {
@@ -35,7 +38,10 @@ fn css_color(color: gpui_kit::Hsla) -> String {
     }
 }
 
-pub(crate) fn pele_theme(tokens: &Tokens) -> PeleTheme {
+/// Pele lays text out at 16px. The diagram scales so that 16px shows at the content font size.
+const PELE_FONT_SIZE: f32 = 16.0;
+
+pub(crate) fn pele_theme(tokens: &Tokens, content_size: f32) -> PeleTheme {
     let ansi = |index: usize| css_color(tokens.ansi[index]);
     PeleTheme {
         bg: css_color(tokens.surface0),
@@ -46,9 +52,13 @@ pub(crate) fn pele_theme(tokens: &Tokens) -> PeleTheme {
         surface_alt: css_color(tokens.surface2),
         border: css_color(tokens.border),
         accent: css_color(tokens.accent),
+        // Pele has no canvas on QuickJS, so it measures text with Helvetica widths. A wider font,
+        // such as the UI font, would overflow the node and label boxes.
         font: "Helvetica Neue, Helvetica, Arial, sans-serif".into(),
         font_mono: "Menlo, monospace".into(),
+        radius: "6px".into(),
         series: [4, 2, 3, 1, 5, 6, 12, 10].map(ansi),
+        scale: crate::SCALE * content_size / PELE_FONT_SIZE,
     }
 }
 
@@ -65,6 +75,7 @@ impl PeleTheme {
             "--pele-accent" => &self.accent,
             "--pele-font" => &self.font,
             "--pele-font-mono" => &self.font_mono,
+            "--pele-radius" => &self.radius,
             _ => {
                 let number: usize = name.strip_prefix("--pele-series-")?.parse().ok()?;
                 self.series.get(number.checked_sub(1)?)?
@@ -133,7 +144,32 @@ fn resolve_text(
 /// A name with no value and no fallback becomes the theme foreground.
 pub(crate) fn resolve_vars(svg: &str, theme: &PeleTheme) -> String {
     let definitions = private_definitions(svg);
-    without_private_definitions(&resolve_text(svg, theme, &definitions, 0))
+    with_radius_attributes(&without_private_definitions(&resolve_text(
+        svg,
+        theme,
+        &definitions,
+        0,
+    )))
+}
+
+/// Turns Pele's `style="rx:6px"` into `rx` and `ry` attributes. usvg reads the corner radius only
+/// from attributes, so the node boxes lose their round corners otherwise.
+fn with_radius_attributes(svg: &str) -> String {
+    let mut out = String::with_capacity(svg.len());
+    let mut rest = svg;
+    while let Some(at) = rest.find("style=\"rx:") {
+        out.push_str(&rest[..at]);
+        let value = &rest[at + "style=\"rx:".len()..];
+        let Some(end) = value.find('"') else {
+            out.push_str(&rest[at..]);
+            return out;
+        };
+        let radius = value[..end].trim().trim_end_matches("px");
+        out.push_str(&format!("rx=\"{radius}\" ry=\"{radius}\""));
+        rest = &value[end + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Drops the `--_x:value;` declarations. usvg stops reading a `style` attribute at the first one,
@@ -173,14 +209,13 @@ pub(crate) fn load_fonts() {
     LazyLock::force(&FONTS);
 }
 
-/// Rasterizes an SVG with no `var()` left to a PNG at [`crate::SCALE`] times the SVG size.
-pub(crate) fn rasterize(svg: &str) -> Result<Vec<u8>, String> {
+/// Rasterizes an SVG with no `var()` left to a PNG at `scale` times the SVG size.
+pub(crate) fn rasterize(svg: &str, scale: f32) -> Result<Vec<u8>, String> {
     let options = usvg::Options {
         fontdb: FONTS.clone(),
         ..Default::default()
     };
     let tree = usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
-    let scale = crate::SCALE;
     let width = (tree.size().width() * scale).ceil() as u32;
     let height = (tree.size().height() * scale).ceil() as u32;
     let mut pixmap =
@@ -198,7 +233,7 @@ mod tests {
     use super::*;
 
     fn theme() -> PeleTheme {
-        let mut theme = pele_theme(&bachuc_theme::Tokens::claude_dark());
+        let mut theme = pele_theme(&bachuc_theme::Tokens::claude_dark(), 16.0);
         theme.fg = "#e6e6e6".into();
         theme.line = "#808080".into();
         theme
@@ -228,6 +263,7 @@ mod tests {
     fn rasterize_returns_a_png_at_twice_the_size() {
         let png = rasterize(
             r##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="5"><rect width="10" height="5" fill="#ff0000"/></svg>"##,
+            2.0,
         )
         .expect("png");
         let read = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
@@ -243,6 +279,17 @@ mod tests {
             &theme,
         );
         assert!(out.contains("rgba(255,0,0,0.5)"), "{out}");
-        assert!(rasterize(&out).is_ok());
+        assert!(rasterize(&out, 2.0).is_ok());
+    }
+
+    #[test]
+    fn node_radius_becomes_attributes_and_the_scale_follows_the_content_size() {
+        let out = resolve_vars(
+            r#"<svg style="--_r:var(--pele-radius,4px);color:red"><rect width="4" height="4" style="rx:var(--_r)"/></svg>"#,
+            &theme(),
+        );
+        assert!(out.contains(r#"rx="6" ry="6""#), "{out}");
+        assert!(!out.contains("style=\"rx"), "{out}");
+        assert_eq!(pele_theme(&bachuc_theme::Tokens::light(), 20.0).scale, 2.5);
     }
 }

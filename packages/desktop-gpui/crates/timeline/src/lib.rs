@@ -14,6 +14,7 @@ pub mod find;
 mod find_bar;
 pub mod grouping;
 mod image_view;
+mod lightbox;
 pub mod links;
 pub mod markdown;
 pub mod motion;
@@ -64,6 +65,7 @@ use grouping::{
     SharedRow, StepCounts, TurnGroup, TurnGrouper, TurnStep, entry_key, item_type, message_key,
 };
 use image_view::ImageLoad;
+use lightbox::Lightbox;
 use markdown::{Block, Segment};
 use outline::{JumpPlan, OutlineEvent, OutlineRail};
 use plugin_view::{PendingReveal, ResultCards, Selection};
@@ -392,7 +394,7 @@ pub struct TimelineView {
     images: HashMap<String, ImageLoad>,
     /// The images this client sent with a prompt, by message id, for the user bubble.
     sent_images: HashMap<String, Vec<Arc<Image>>>,
-    lightbox: Option<Arc<Image>>,
+    lightbox: Option<Lightbox>,
     finder: Option<FindState>,
     /// Syntax runs of open code sections, by text.
     syntax_cache: RefCell<HashMap<u64, LineRuns>>,
@@ -2414,14 +2416,35 @@ impl TimelineView {
                     &source,
                     cx,
                 ),
-                Block::Image { image, label } => {
+                Block::Image {
+                    image,
+                    label,
+                    source,
+                } => {
                     let size = image_size(&image);
-                    div()
-                        .id(("diagram", position))
-                        .role(Role::Image)
-                        .aria_label(label)
-                        .max_w_full()
-                        .child(img(image).w(size.width).max_w_full())
+                    let open = image.clone();
+                    // A wide diagram shrinks to the thread width, so the thread scrolls over
+                    // it. The image viewer zooms and pans it.
+                    h_flex()
+                        .w_full()
+                        .justify_center()
+                        .child(
+                            div()
+                                .id(("diagram", position))
+                                .role(Role::Button)
+                                .aria_label(format!("Open {}", label.to_lowercase()))
+                                .max_w_full()
+                                .cursor_pointer()
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.open_lightbox(
+                                        open.clone(),
+                                        Some(source.clone()),
+                                        window,
+                                        cx,
+                                    );
+                                }))
+                                .child(img(image).w(size.width).max_w_full()),
+                        )
                         .into_any_element()
                 }
                 Block::Pending { label } => div()
