@@ -50,7 +50,7 @@ impl PeleEngine {
         PeleEngine { jobs }
     }
 
-    /// Renders Mermaid `source` to a PNG at 2x. The reply holds Pele's error text on failure.
+    /// Renders Mermaid `source` to a PNG at `theme.scale`. The reply holds Pele's error text on failure.
     pub(crate) fn render_png(
         &self,
         source: String,
@@ -109,7 +109,7 @@ fn render(context: &Context, source: &str, theme: &PeleTheme) -> Result<Vec<u8>,
             (None, error) => Err(error.unwrap_or_else(|| "Pele returned no SVG".into())),
         }
     })?;
-    svg::rasterize(&svg::resolve_vars(&svg, theme))
+    svg::rasterize(&svg::resolve_vars(&svg, theme), theme.scale)
 }
 
 #[cfg(test)]
@@ -119,7 +119,7 @@ mod tests {
     use futures::executor::block_on;
 
     fn theme() -> crate::svg::PeleTheme {
-        pele_theme(&bachuc_theme::Tokens::light())
+        pele_theme(&bachuc_theme::Tokens::light(), 16.0)
     }
 
     #[test]

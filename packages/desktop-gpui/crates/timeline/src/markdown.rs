@@ -36,6 +36,8 @@ pub enum Block {
     Image {
         image: Arc<Image>,
         label: &'static str,
+        /// The Mermaid or math source, for Copy source in the image viewer.
+        source: String,
     },
     Pending {
         label: &'static str,
@@ -171,6 +173,7 @@ pub fn blocks(
                 DiagramState::Ready(image) => Block::Image {
                     image,
                     label: kind.label(),
+                    source: source.clone(),
                 },
                 DiagramState::Pending => Block::Pending {
                     label: kind.label(),

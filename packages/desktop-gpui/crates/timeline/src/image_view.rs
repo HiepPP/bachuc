@@ -11,7 +11,7 @@ use bachuc_icons::IconName;
 use bachuc_theme::metrics::{FONT_BASE, ICON_MD, RADIUS_MD, SPACE_1, SPACE_2, SPACE_4, SPACE_6};
 use bachuc_theme::{tokens, ui_font_size, zoom, zoomed};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Sizable as _, h_flex};
 use gpui_kit::*;
 
 use crate::TimelineView;
@@ -25,10 +25,6 @@ const RETRY_DELAYS_MS: [u64; 3] = [100, 400, 1_200];
 const IMAGE_MAX_WIDTH: f32 = 480.;
 const IMAGE_MAX_HEIGHT: f32 = 360.;
 const IMAGE_STATE_HEIGHT: f32 = 160.;
-/// `LIGHTBOX_FIT` and the backdrop alpha.
-const LIGHTBOX_MAX_WIDTH: f32 = 960.;
-const LIGHTBOX_MAX_HEIGHT: f32 = 640.;
-const BACKDROP_ALPHA: f32 = 0.9;
 const UNAVAILABLE: &str = "Image preview unavailable.";
 /// The side of an image thumbnail in a user bubble, as the composer chip.
 const SENT_THUMB: f32 = 48.;
@@ -183,7 +179,7 @@ impl TimelineView {
                 .rounded(zoomed(RADIUS_MD, cx))
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.lightbox = Some(open.clone());
+                    this.open_lightbox(open.clone(), None, window, cx);
                     this.focus.focus(window, cx);
                     cx.notify();
                 }))
@@ -350,7 +346,7 @@ impl TimelineView {
                     .overflow_hidden()
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.lightbox = Some(open.clone());
+                        this.open_lightbox(open.clone(), None, window, cx);
                         // Escape closes the view, so the pane takes the keys.
                         this.focus.focus(window, cx);
                         cx.notify();
@@ -359,61 +355,5 @@ impl TimelineView {
                     .into_any_element()
             }
         }
-    }
-
-    /// The larger view over the pane: the image fit in 960 by 640 on a dark backdrop. A click
-    /// anywhere or Escape closes it. It paints deferred and occludes, so the pane's corner pills,
-    /// drawn after the timeline, stay under it and take no clicks.
-    pub(crate) fn render_lightbox(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let image = self.lightbox.clone()?;
-        let t = tokens(cx);
-        let lightbox = div()
-            .id("lightbox")
-            .role(Role::Dialog)
-            .aria_label("Image")
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .p(zoomed(SPACE_4, cx))
-            .bg(black().opacity(BACKDROP_ALPHA))
-            .cursor_pointer()
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.lightbox = None;
-                cx.notify();
-            }))
-            .child(
-                v_flex()
-                    .size_full()
-                    .max_w(zoomed(LIGHTBOX_MAX_WIDTH, cx))
-                    .max_h(zoomed(LIGHTBOX_MAX_HEIGHT, cx))
-                    .child(img(image).size_full().object_fit(ObjectFit::Contain)),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .top(zoomed(SPACE_2, cx))
-                    .right(zoomed(SPACE_2, cx))
-                    .child(
-                        icon_button(
-                            "lightbox-close",
-                            "Dismiss image",
-                            IconName::X,
-                            t.foreground_muted,
-                            &t,
-                            cx,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.lightbox = None;
-                            cx.notify();
-                        })),
-                    ),
-            );
-        Some(
-            deferred(lightbox.occlude())
-                .with_priority(1)
-                .into_any_element(),
-        )
     }
 }
