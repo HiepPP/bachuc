@@ -18,6 +18,7 @@ import {
   closeRuntimeRpc,
   editDiffsModeRpc,
   removeRunRpc,
+  setTitleRpc,
   starRunRpc,
 } from "./shared/board";
 import { closeRuntimes } from "./server/runtime";
@@ -166,6 +167,13 @@ export default function contribute(server: PluginServerContext) {
     if (off) next.add(agentId);
     else next.delete(agentId);
     diffsOff = next;
+    return {};
+  });
+  server.handle(setTitleRpc, async ({ agentId, title }) => {
+    await ready;
+    ensureActive();
+    store.setTitle(agentId, title);
+    await persistence.save(store.exportState());
     return {};
   });
   server.handle(recapsRpc, async ({ days }, { paseo }) => {

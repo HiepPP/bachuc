@@ -168,6 +168,12 @@ pub(crate) fn remove_name(title: &str, count: usize) -> String {
     format!("Remove {title}{hint} from Board")
 }
 
+/// The rename dialog's answer: the trimmed title, or `None` when it is empty or unchanged.
+pub(crate) fn new_title(input: &str, current: &str) -> Option<String> {
+    let title = input.trim();
+    (!title.is_empty() && title != current).then(|| title.to_string())
+}
+
 pub(crate) fn subagent_count(count: usize) -> String {
     let subagents = count.saturating_sub(1);
     let noun = if count == 2 { "subagent" } else { "subagents" };
@@ -352,5 +358,16 @@ mod tests {
             column_name("Just finished", 4, 2),
             "Just finished, 4 conversations, 2 new"
         );
+    }
+
+    #[test]
+    fn rename_keeps_a_trimmed_new_title_and_skips_empty_or_unchanged_ones() {
+        assert_eq!(
+            new_title("  Port the Board ", "Old"),
+            Some("Port the Board".into())
+        );
+        assert_eq!(new_title("   ", "Old"), None);
+        assert_eq!(new_title("", "Old"), None);
+        assert_eq!(new_title(" Old ", "Old"), None);
     }
 }

@@ -50,6 +50,12 @@ export const editDiffsModeRpc = defineRpc({
   input: z.object({ agentId: z.string().min(1), off: z.boolean() }),
   output: z.object({}),
 });
+// Stores the owner's new thread title on the Board; the client renames the agent itself.
+export const setTitleRpc = defineRpc({
+  name: "board.set-title",
+  input: z.object({ agentId: z.string().min(1), title: z.string().min(1) }),
+  output: z.object({}),
+});
 export const boardRpc = defineRpc({
   name: "board.snapshot",
   input: z.object({}),

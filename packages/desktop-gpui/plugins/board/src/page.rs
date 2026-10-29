@@ -5,14 +5,17 @@ use crate::card::{CONTROL_RADIUS, CardAction, button, tabular};
 use crate::model::settings::{
     BOARD_SIZE_DEFAULT, BOARD_SIZE_MAX, BOARD_SIZE_MIN, BOARD_SIZE_STEP, board_scale,
 };
-use crate::model::text::now_ms;
+use crate::model::text::{new_title, now_ms};
 use crate::recaps::RecapsState;
 use crate::runs::RunsState;
 use crate::store::BoardStore;
 use crate::timeline::TimelineState;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::dialog::DialogButtonProps;
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use std::cell::Cell;
 
 /// The page's side gutter and toolbar padding, unscaled as in Electron.
 const GUTTER: f32 = 24.;
@@ -121,6 +124,7 @@ impl BoardPage {
                 })
                 .detach();
             }
+            CardAction::Rename { agent_id, title } => self.ask_title(agent_id, title, _window, cx),
             CardAction::Remove { run_id, agent_id } => {
                 let ui = self.runs.card(&run_id);
                 ui.removing = true;
@@ -156,6 +160,71 @@ impl BoardPage {
                 .detach();
             }
         }
+        cx.notify();
+    }
+
+    /// The rename dialog, as the tab menu's Rename agent. An empty or unchanged title does nothing.
+    fn ask_title(
+        &mut self,
+        agent_id: String,
+        current: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(current.clone()));
+        let page = cx.entity().downgrade();
+        let width = bachuc_theme::zoomed(420., cx);
+        // The builder runs again whenever the dialog layer is rebuilt; focus once.
+        let focus_once = Cell::new(true);
+        window.open_dialog(cx, move |dialog, window, cx| {
+            if focus_once.replace(false) {
+                input.update(cx, |input, cx| input.focus(window, cx));
+            }
+            let (page, field, agent_id, current) = (
+                page.clone(),
+                input.clone(),
+                agent_id.clone(),
+                current.clone(),
+            );
+            dialog
+                .title("Rename thread")
+                .w(width)
+                .child(Input::new(&input).aria_label("Thread title"))
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text("Rename")
+                        .show_cancel(true)
+                        .on_ok(move |_, _, cx| {
+                            if let Some(title) = new_title(&field.read(cx).value(), &current) {
+                                page.update(cx, |page, cx| page.rename(&agent_id, title, cx))
+                                    .ok();
+                            }
+                            true
+                        }),
+                )
+        });
+    }
+
+    fn rename(&mut self, agent_id: &str, title: String, cx: &mut Context<Self>) {
+        let Some(store) = self.store.upgrade() else {
+            return;
+        };
+        let run_id = self.run_id_of(&store, agent_id, cx);
+        let ui = self.runs.card(&run_id);
+        ui.renaming = true;
+        ui.rename_error = false;
+        let task = store.update(cx, |store, cx| store.rename(agent_id, &title, cx));
+        cx.spawn(async move |page, cx| {
+            let failed = task.await.is_err();
+            page.update(cx, |page, cx| {
+                let ui = page.runs.card(&run_id);
+                ui.renaming = false;
+                ui.rename_error = failed;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
         cx.notify();
     }
 
