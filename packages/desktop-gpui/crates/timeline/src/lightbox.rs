@@ -279,10 +279,25 @@ impl TimelineView {
         .detach();
     }
 
-    pub(crate) fn render_lightbox(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_lightbox(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let view = self.lightbox.as_ref()?;
         let t = tokens(cx);
         let zoom = view.zoom();
+        // A diagram rasterizes again at the size it shows, so its text stays sharp at any zoom.
+        let shown = view
+            .source
+            .as_ref()
+            .filter(|_| view.has_size())
+            .and_then(|source| {
+                let width = f32::from(view.natural.width) * zoom * window.scale_factor();
+                self.diagrams
+                    .update(cx, |renderer, cx| renderer.fitted(source, width, cx))
+            })
+            .unwrap_or_else(|| view.image.clone());
         let offset = view.shown_offset();
         let cursor = match (view.drag.is_some(), view.can_pan()) {
             (true, _) => CursorStyle::ClosedHand,
@@ -309,7 +324,7 @@ impl TimelineView {
                 .top(offset.y)
                 .w(view.natural.width * zoom)
                 .h(view.natural.height * zoom)
-                .child(img(view.image.clone()).size_full())
+                .child(img(shown).size_full())
         } else {
             // A format without a readable size fits the area and does not zoom.
             div().size_full().child(
@@ -389,22 +404,27 @@ impl TimelineView {
             .cursor_pointer()
             // The backdrop takes the moves and the release, so a drag may leave the image.
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                if let Some(view) = this.lightbox.as_mut()
-                    && view.drag_to(event.position)
+                let Some(view) = this.lightbox.as_mut() else {
+                    return;
+                };
+                // A release outside the window sends no mouse up; the next move ends the drag.
+                if event.pressed_button != Some(MouseButton::Left) {
+                    if view.drag.take().is_some() {
+                        cx.notify();
+                    }
+                } else if view.drag_to(event.position) {
+                    cx.notify();
+                }
+            }))
+            // Capture phase: the image's click handler stops the release from bubbling here.
+            .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, _, cx| {
+                if event.button == MouseButton::Left
+                    && let Some(view) = this.lightbox.as_mut()
+                    && view.drag.take().is_some()
                 {
                     cx.notify();
                 }
             }))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    if let Some(view) = this.lightbox.as_mut()
-                        && view.drag.take().is_some()
-                    {
-                        cx.notify();
-                    }
-                }),
-            )
             .on_click(cx.listener(|this, _, _, cx| {
                 if this.lightbox.as_ref().is_some_and(|view| view.dragged) {
                     return;

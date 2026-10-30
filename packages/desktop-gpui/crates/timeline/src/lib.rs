@@ -359,6 +359,9 @@ pub struct TimelineView {
     /// The agent folder: links resolve under it and images read from it.
     cwd: String,
     diagrams: Entity<DiagramRenderer>,
+    /// The device-pixel width each diagram showed at in the last frame, by source, to rasterize
+    /// a shrunk diagram at the size it shows.
+    diagram_widths: Rc<RefCell<HashMap<String, f32>>>,
     list: ListState,
     focus: FocusHandle,
     /// The entries the rows point into: a copy of the client's, so a sync between two
@@ -569,6 +572,8 @@ impl TimelineView {
                 }
                 cx.notify();
             }),
+            // A fitted diagram PNG is ready.
+            cx.observe(&diagrams, |_, _, cx| cx.notify()),
             cx.observe_global::<gpui_kit::component::theme::Theme>(|this, cx| {
                 // Syntax colors follow the scheme, and font sizes change row heights.
                 this.syntax_cache.borrow_mut().clear();
@@ -607,6 +612,7 @@ impl TimelineView {
             read_only,
             cwd: String::new(),
             diagrams,
+            diagram_widths: Rc::default(),
             list,
             focus: cx.focus_handle(),
             entries: Vec::new(),
@@ -2328,6 +2334,13 @@ impl TimelineView {
 
     /// The blocks of one assistant entry: markdown, images, diagram images, or diagram
     /// fallbacks.
+    /// The diagram `source` rasterized for the width it showed at in the last frame.
+    fn fitted_diagram(&self, source: &str, cx: &mut Context<Self>) -> Option<Arc<Image>> {
+        let width = *self.diagram_widths.borrow().get(source)?;
+        self.diagrams
+            .update(cx, |renderer, cx| renderer.fitted(source, width, cx))
+    }
+
     fn render_markdown(&self, key: u64, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let Some(message) = self.messages.get(&key) else {
             return Vec::new();
@@ -2423,6 +2436,21 @@ impl TimelineView {
                 } => {
                     let size = image_size(&image);
                     let open = image.clone();
+                    let shown = self.fitted_diagram(&source, cx).unwrap_or(image);
+                    let widths = self.diagram_widths.clone();
+                    let measured = source.clone();
+                    let measure = canvas(
+                        move |bounds, window, cx| {
+                            let width = f32::from(bounds.size.width) * window.scale_factor();
+                            let old = widths.borrow_mut().insert(measured, width);
+                            if old != Some(width) {
+                                window.defer(cx, |window, _| window.refresh());
+                            }
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .size_full();
                     // A wide diagram shrinks to the thread width, so the thread scrolls over
                     // it. The image viewer zooms and pans it.
                     h_flex()
@@ -2443,7 +2471,9 @@ impl TimelineView {
                                         cx,
                                     );
                                 }))
-                                .child(img(image).w(size.width).max_w_full()),
+                                .relative()
+                                .child(img(shown).w(size.width).max_w_full())
+                                .child(measure),
                         )
                         .into_any_element()
                 }
@@ -3478,7 +3508,7 @@ impl Render for TimelineView {
                 )
                 .into_any_element()
         };
-        let lightbox = self.render_lightbox(cx);
+        let lightbox = self.render_lightbox(window, cx);
         let bounds = self.bounds.clone();
         let outline_wide = self.outline_wide.clone();
         let outline = self.outline.downgrade();
