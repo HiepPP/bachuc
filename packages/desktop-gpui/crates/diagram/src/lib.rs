@@ -10,6 +10,7 @@ mod pele;
 mod snapshot;
 mod svg;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::StreamExt as _;
@@ -29,6 +30,12 @@ const SCALE: f32 = 2.0;
 /// Wide enough for a display formula, in CSS pixels.
 const WEBVIEW_WIDTH: f64 = 1000.0;
 const MIN_WEBVIEW_HEIGHT: f64 = 600.0;
+/// Fitted widths round up to this many pixels, so a resize or a zoom does not rasterize per pixel.
+const FIT_STEP: u32 = 32;
+/// The largest fitted PNG, in pixels. A larger view shows the cached PNG scaled up.
+const MAX_FIT_PIXELS: u64 = 32 * 1024 * 1024;
+/// Fitted PNGs kept at one time, over all diagrams.
+const MAX_FITTED: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DiagramKind {
@@ -65,14 +72,32 @@ pub struct DiagramReady {
 /// The logical size to show a `Ready` image at: its PNG size divided by the 2x snapshot scale.
 /// A Mermaid PNG already holds the content font size, so this size follows it.
 pub fn image_size(image: &Image) -> Size<Pixels> {
-    let bytes = image.bytes();
+    let (width, height) = png_size(image.bytes());
+    size(px(width as f32 / SCALE), px(height as f32 / SCALE))
+}
+
+/// A PNG's width and height in pixels, from its IHDR chunk at bytes 16 and 20.
+fn png_size(bytes: &[u8]) -> (u32, u32) {
     let read = |at: usize| {
         bytes
             .get(at..at + 4)
             .map_or(0, |b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
     };
-    // A PNG stores its width and height at bytes 16 and 20, in the IHDR chunk.
-    size(px(read(16) as f32 / SCALE), px(read(20) as f32 / SCALE))
+    (read(16), read(20))
+}
+
+/// The width to rasterize a diagram at, to show it `width` device pixels wide, or `None` when
+/// the cached PNG `png` pixels in size is close enough or the fitted PNG would be too large.
+fn fit_width(width: f32, png: (u32, u32)) -> Option<u32> {
+    if !width.is_finite() || width < 1.0 || png.0 == 0 {
+        return None;
+    }
+    let fitted = (width.ceil() as u32).div_ceil(FIT_STEP) * FIT_STEP;
+    let height = u64::from(fitted) * u64::from(png.1) / u64::from(png.0);
+    if fitted.abs_diff(png.0) <= FIT_STEP || u64::from(fitted) * height > MAX_FIT_PIXELS {
+        return None;
+    }
+    Some(fitted)
 }
 
 enum Event {
@@ -87,6 +112,17 @@ enum Event {
     },
     Snapshot {
         id: u64,
+        result: Result<Vec<u8>, String>,
+    },
+    Mermaid {
+        id: u64,
+        source: String,
+        result: Result<pele::Rendered, String>,
+    },
+    Fitted {
+        generation: u64,
+        source: String,
+        width: u32,
         result: Result<Vec<u8>, String>,
     },
 }
@@ -120,6 +156,13 @@ pub struct DiagramRenderer {
     pele: PeleEngine,
     /// The theme the cached Mermaid PNGs use.
     theme: PeleTheme,
+    /// The resolved SVG and the cached PNG size of each ready Mermaid diagram, by source.
+    svgs: HashMap<String, (Arc<str>, (u32, u32))>,
+    /// Mermaid PNGs rasterized for the width they show at, by source and width. `None` while
+    /// one rasterizes.
+    fitted: HashMap<(String, u32), Option<Arc<Image>>>,
+    /// Goes up when the cache clears, so a fitted PNG of the old theme is dropped.
+    generation: u64,
     ready: bool,
     dark: bool,
     height: f64,
@@ -166,6 +209,9 @@ impl DiagramRenderer {
             cache: RenderCache::default(),
             pele: PeleEngine::spawn(),
             theme: current_theme(cx),
+            svgs: HashMap::new(),
+            fitted: HashMap::new(),
+            generation: 0,
             ready: false,
             dark: cx.theme().is_dark(),
             height: MIN_WEBVIEW_HEIGHT,
@@ -189,12 +235,56 @@ impl DiagramRenderer {
             self.dark = dark;
             self.theme = theme;
             self.cache.clear();
+            self.svgs.clear();
+            self.fitted.clear();
+            self.generation += 1;
         }
         let state = self.cache.request(kind, source);
         if matches!(state, DiagramState::Pending) {
             self.start_next(cx);
         }
         state
+    }
+
+    /// The Mermaid diagram `source` rasterized to show `width` device pixels wide. `None` means
+    /// show the image from [`Self::render`]: it fits, it is not Mermaid, or the fitted PNG still
+    /// rasterizes. The GPU scales an image down without mipmaps, so a diagram shown smaller than
+    /// its PNG drops pixels of its text and lines, and the text looks thin.
+    pub fn fitted(
+        &mut self,
+        source: &str,
+        width: f32,
+        cx: &mut Context<DiagramRenderer>,
+    ) -> Option<Arc<Image>> {
+        let (svg, png) = self.svgs.get(source)?;
+        let width = fit_width(width, *png)?;
+        let key = (source.to_string(), width);
+        if let Some(image) = self.fitted.get(&key) {
+            return image.clone();
+        }
+        // One fitted PNG at a time per diagram. The next request after it asks for the latest width.
+        if self
+            .fitted
+            .iter()
+            .any(|((other, _), image)| other == source && image.is_none())
+        {
+            return None;
+        }
+        self.fitted.insert(key, None);
+        let (svg, events, generation) = (svg.clone(), self.events.clone(), self.generation);
+        let source = source.to_string();
+        cx.background_executor()
+            .spawn(async move {
+                let result = svg::rasterize_to_width(&svg, width);
+                let _ = events.unbounded_send(Event::Fitted {
+                    generation,
+                    source,
+                    width,
+                    result,
+                });
+            })
+            .detach();
+        None
     }
 
     fn start_next(&mut self, cx: &mut Context<Self>) {
@@ -219,14 +309,14 @@ impl DiagramRenderer {
 
     /// Sends the source to the Pele thread. The main thread only waits for the reply as an event.
     fn start_mermaid(&mut self, id: u64, source: String, cx: &mut Context<Self>) {
-        let reply = self.pele.render_png(source, self.theme.clone());
+        let reply = self.pele.render_png(source.clone(), self.theme.clone());
         let events = self.events.clone();
         cx.background_executor()
             .spawn(async move {
                 let result = reply
                     .await
                     .unwrap_or_else(|_| Err("the Pele engine stopped".into()));
-                let _ = events.unbounded_send(Event::Snapshot { id, result });
+                let _ = events.unbounded_send(Event::Mermaid { id, source, result });
             })
             .detach();
     }
@@ -242,6 +332,37 @@ impl DiagramRenderer {
             Event::Snapshot { id, result } => {
                 let image = result.map(|png| Arc::new(Image::from_bytes(ImageFormat::Png, png)));
                 self.finish(id, image, cx);
+            }
+            Event::Mermaid { id, source, result } => {
+                let image = result.map(|rendered| {
+                    if self.cache.running(id) {
+                        let png = png_size(&rendered.png);
+                        self.svgs.insert(source, (rendered.svg.into(), png));
+                    }
+                    Arc::new(Image::from_bytes(ImageFormat::Png, rendered.png))
+                });
+                self.finish(id, image, cx);
+            }
+            Event::Fitted {
+                generation,
+                source,
+                width,
+                result,
+            } => {
+                let key = (source, width);
+                if generation != self.generation || !self.fitted.contains_key(&key) {
+                    return;
+                }
+                // On an error the entry stays `None`, so the diagram does not rasterize again and
+                // shows the cached PNG.
+                if let Ok(png) = result {
+                    if self.fitted.len() > MAX_FITTED {
+                        self.fitted.retain(|_, image| image.is_none());
+                    }
+                    let image = Arc::new(Image::from_bytes(ImageFormat::Png, png));
+                    self.fitted.insert(key, Some(image));
+                }
+                cx.notify();
             }
         }
     }
@@ -323,6 +444,15 @@ mod tests {
         png.extend_from_slice(&120u32.to_be_bytes());
         let image = Image::from_bytes(ImageFormat::Png, png);
         assert_eq!(image_size(&image), size(px(200.), px(60.)));
+    }
+
+    #[test]
+    fn fit_width_rounds_up_and_skips_a_png_that_already_fits() {
+        assert_eq!(fit_width(963.0, (1926, 480)), Some(992));
+        assert_eq!(fit_width(1900.0, (1926, 480)), None);
+        assert_eq!(fit_width(3852.0, (1926, 480)), Some(3872));
+        assert_eq!(fit_width(40_000.0, (1926, 480)), None);
+        assert_eq!(fit_width(0.0, (1926, 480)), None);
     }
 
     #[test]

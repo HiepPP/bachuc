@@ -211,17 +211,31 @@ pub(crate) fn load_fonts() {
 
 /// Rasterizes an SVG with no `var()` left to a PNG at `scale` times the SVG size.
 pub(crate) fn rasterize(svg: &str, scale: f32) -> Result<Vec<u8>, String> {
+    render_tree(&parse(svg)?, scale)
+}
+
+/// Rasterizes an SVG with no `var()` left to a PNG `width` pixels wide.
+pub(crate) fn rasterize_to_width(svg: &str, width: u32) -> Result<Vec<u8>, String> {
+    let tree = parse(svg)?;
+    let scale = width as f32 / tree.size().width();
+    render_tree(&tree, scale)
+}
+
+fn parse(svg: &str) -> Result<usvg::Tree, String> {
     let options = usvg::Options {
         fontdb: FONTS.clone(),
         ..Default::default()
     };
-    let tree = usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())?;
+    usvg::Tree::from_str(svg, &options).map_err(|error| error.to_string())
+}
+
+fn render_tree(tree: &usvg::Tree, scale: f32) -> Result<Vec<u8>, String> {
     let width = (tree.size().width() * scale).ceil() as u32;
     let height = (tree.size().height() * scale).ceil() as u32;
     let mut pixmap =
         Pixmap::new(width, height).ok_or_else(|| "the diagram has no size".to_string())?;
     resvg::render(
-        &tree,
+        tree,
         Transform::from_scale(scale, scale),
         &mut pixmap.as_mut(),
     );
@@ -268,6 +282,17 @@ mod tests {
         .expect("png");
         let read = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
         assert_eq!((read(16), read(20)), (20, 10));
+    }
+
+    #[test]
+    fn rasterize_to_width_scales_the_svg_to_that_width() {
+        let png = rasterize_to_width(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="50"><rect width="200" height="50" fill="#ff0000"/></svg>"##,
+            50,
+        )
+        .expect("png");
+        let read = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
+        assert_eq!((read(16), read(20)), (50, 13));
     }
 
     #[test]
