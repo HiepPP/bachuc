@@ -99,19 +99,20 @@ pub(crate) fn board_columns(runs: &[Run]) -> Columns {
     Columns { running, finished }
 }
 
-/// The order of a column's cards (`RunColumn`): grouped by project in first-seen order, with
-/// the tree's star.
+/// The order of a column's cards (`RunColumn`): starred trees above all others, then grouped
+/// by project in first-seen order.
 pub(crate) fn column_order(trees: &[RunTree]) -> Vec<usize> {
     let indexed: Vec<(usize, &RunTree)> = trees.iter().enumerate().collect();
-    group_runs(
+    let mut order: Vec<(usize, &RunTree)> = group_runs(
         &indexed,
         |item: &(usize, &RunTree)| &item.1.run,
         |item| item.1.starred,
     )
     .into_iter()
     .flat_map(|group: ProjectGroup<(usize, &RunTree)>| group.runs)
-    .map(|(at, _)| at)
-    .collect()
+    .collect();
+    order.sort_by(|left, right| starred_first(left.1.starred, right.1.starred));
+    order.into_iter().map(|(at, _)| at).collect()
 }
 
 /// Conversations in the trees, subagents included.
@@ -346,6 +347,26 @@ mod tests {
         child.starred = true;
         let trees = build_run_trees(&[a, b, c, child]);
         assert_eq!(column_order(&trees), [2, 0, 1]);
+    }
+
+    #[test]
+    fn column_order_puts_starred_trees_above_unstarred_trees_of_other_projects() {
+        let rows: Vec<Run> = [
+            ("a", "one", true),
+            ("b", "one", false),
+            ("c", "two", true),
+            ("d", "two", false),
+        ]
+        .into_iter()
+        .map(|(id, project, starred)| {
+            let mut row = run(id, None);
+            row.project_key = project.into();
+            row.starred = starred;
+            row
+        })
+        .collect();
+        let trees = build_run_trees(&rows);
+        assert_eq!(column_order(&trees), [0, 2, 1, 3]);
     }
 
     #[test]
