@@ -27,6 +27,7 @@ export default function contribute(server: PluginServerContext) {
   // The last mode sent and the reminder turns since the last full ruleset, per agent. A
   // restart clears it, so the next turn sends the full ruleset again.
   const sent = new Map<string, { mode: PonytailMode; turns: number }>();
+  let missingWarned = false;
   server.handle(modeReadRpc, ({ agentId }) => modes.get(agentId));
   server.handle(modeWriteRpc, ({ agentId, mode }) => modes.set(agentId, mode));
   const sessionOpen = server.before("agent.session_open", ({ request }) =>
@@ -36,7 +37,12 @@ export default function contribute(server: PluginServerContext) {
     if (request.kind !== "turn") return;
     if (request.provider !== "claude" && request.provider !== "codex") return;
     const runtime = readRuntime(dataDir);
-    if (!runtime) return;
+    if (!runtime) {
+      // Warn once per process; a missing install would otherwise log on every turn.
+      if (!missingWarned) console.warn("[ponytail] no hook-runtime.json; run install-hooks.mjs");
+      missingWarned = true;
+      return;
+    }
     try {
       const command = parseCommand(promptText(request.prompt));
       if (command) await modes.set(request.agentId, command);

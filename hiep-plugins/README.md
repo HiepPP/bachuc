@@ -126,28 +126,29 @@ status alone does not prove every plugin action works.
 
 ## Pick your plugins
 
-| Plugin                                                           | Purpose                                                                                                                                |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| [claude-look](plugins/claude-look/README.md)                     | Claude Light theme, Claude desktop's 768px chat column, and its 1.5 reply line-height.                                                 |
-| [edit-diffs](plugins/edit-diffs/README.md)                       | Show edit tool calls as diffs with file line numbers, open by default like Claude Code.                                                |
-| [stop-orb](plugins/stop-orb/README.md)                           | Replace the composer stop button with the animated solving thinking orb on desktop.                                                    |
-| [next-prompt-actions](plugins/next-prompt-actions/README.md)     | Send next-step prompts inside their blocks on desktop, with optional bounded Jev auto-run.                                             |
-| [prompt-translate](plugins/prompt-translate/README.md)           | Show English translations under Vietnamese prompts, and rewrite drafts as English prompts with Cmd/Ctrl+Enter, on desktop.             |
-| [plugins-nav](plugins/plugins-nav/README.md)                     | Add a Plugins row to the sidebar that opens the active host's Plugins settings page.                                                   |
-| [skill-pins](plugins/skill-pins/README.md)                       | Pin skills such as watchtower in the desktop composer; each turn tells Claude or Codex to load them.                                   |
-| [thread-branch](plugins/thread-branch/README.md)                 | Show the current branch beside the composer and open its PR through a separate pill.                                                   |
-| [jev-orchestrator](plugins/jev-orchestrator/README.md)           | Direct Jev model/effort routing to one agent, plus optional scoped delegation with discovery, escalation, review, and ownership locks. |
-| [Board](plugins/board/README.md)                                 | Group conversations by project with pastel colors, avatars, parent/subagent clusters, stars, and UI scaling.                           |
-| [jev-evaluator](plugins/jev-evaluator/README.md)                 | Expose Jev evaluations as an MCP tool for Codex and Claude agents.                                                                     |
-| [watchtower-board](plugins/watchtower-board/README.md)           | Browse Watchtower plans and attach task briefs; Needs-you actions ask the workspace agent to edit the plan files.                      |
-| [workspace-spaces](plugins/workspace-spaces/README.md)           | Group projects with numbered Spaces in the desktop sidebar; standalone fallback on other clients.                                      |
-| [thread-janitor](plugins/thread-janitor/README.md)               | Close the runtimes of stale threads so their processes exit.                                                                           |
-| [idle-runtime-closer](plugins/idle-runtime-closer/README.md)     | Close the processes of idle threads automatically; the threads stay and resume on the next prompt.                                     |
-| [thread-context-attach](plugins/thread-context-attach/README.md) | Attach the last reply of another Paseo thread to your next message.                                                                    |
-| [pr-watch](plugins/pr-watch/README.md)                           | Let an agent watch its GitHub PR and wake it when checks fail or pass, someone comments, or a conflict appears.                        |
-| [assistant-cite](plugins/assistant-cite/README.md)               | Cite selected assistant text as a composer chip with an optional comment, and jump back to the quote from the chip.                    |
-| [html-reply](plugins/html-reply/README.md)                       | Let an agent publish a sandboxed, themed HTML page that renders inline in its thread.                                                  |
-| [selection-translate](plugins/selection-translate/README.md)     | Translate selected English text into Vietnamese through one server RPC; the GPUI client calls it.                                      |
+| Plugin                                                           | Purpose                                                                                                                                       |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| [claude-look](plugins/claude-look/README.md)                     | Claude Light theme, Claude desktop's 768px chat column, and its 1.5 reply line-height.                                                        |
+| [edit-diffs](plugins/edit-diffs/README.md)                       | Show edit tool calls as diffs with file line numbers, open by default like Claude Code.                                                       |
+| [stop-orb](plugins/stop-orb/README.md)                           | Replace the composer stop button with the animated solving thinking orb on desktop.                                                           |
+| [next-prompt-actions](plugins/next-prompt-actions/README.md)     | Send next-step prompts inside their blocks on desktop, with optional bounded Jev auto-run.                                                    |
+| [prompt-translate](plugins/prompt-translate/README.md)           | Show English translations under Vietnamese prompts, and rewrite drafts as English prompts with Cmd/Ctrl+Enter, on desktop.                    |
+| [ponytail](plugins/ponytail/README.md)                           | Ponytail mode per agent: the composer pill picks Off, Lite, Full, or Ultra, and the daemon adds the Ponytail rules to Claude and Codex turns. |
+| [plugins-nav](plugins/plugins-nav/README.md)                     | Add a Plugins row to the sidebar that opens the active host's Plugins settings page.                                                          |
+| [skill-pins](plugins/skill-pins/README.md)                       | Pin skills such as watchtower in the desktop composer; each turn tells Claude or Codex to load them.                                          |
+| [thread-branch](plugins/thread-branch/README.md)                 | Show the current branch beside the composer and open its PR through a separate pill.                                                          |
+| [jev-orchestrator](plugins/jev-orchestrator/README.md)           | Direct Jev model/effort routing to one agent, plus optional scoped delegation with discovery, escalation, review, and ownership locks.        |
+| [Board](plugins/board/README.md)                                 | Group conversations by project with pastel colors, avatars, parent/subagent clusters, stars, and UI scaling.                                  |
+| [jev-evaluator](plugins/jev-evaluator/README.md)                 | Expose Jev evaluations as an MCP tool for Codex and Claude agents.                                                                            |
+| [watchtower-board](plugins/watchtower-board/README.md)           | Browse Watchtower plans and attach task briefs; Needs-you actions ask the workspace agent to edit the plan files.                             |
+| [workspace-spaces](plugins/workspace-spaces/README.md)           | Group projects with numbered Spaces in the desktop sidebar; standalone fallback on other clients.                                             |
+| [thread-janitor](plugins/thread-janitor/README.md)               | Close the runtimes of stale threads so their processes exit.                                                                                  |
+| [idle-runtime-closer](plugins/idle-runtime-closer/README.md)     | Close the processes of idle threads automatically; the threads stay and resume on the next prompt.                                            |
+| [thread-context-attach](plugins/thread-context-attach/README.md) | Attach the last reply of another Paseo thread to your next message.                                                                           |
+| [pr-watch](plugins/pr-watch/README.md)                           | Let an agent watch its GitHub PR and wake it when checks fail or pass, someone comments, or a conflict appears.                               |
+| [assistant-cite](plugins/assistant-cite/README.md)               | Cite selected assistant text as a composer chip with an optional comment, and jump back to the quote from the chip.                           |
+| [html-reply](plugins/html-reply/README.md)                       | Let an agent publish a sandboxed, themed HTML page that renders inline in its thread.                                                         |
+| [selection-translate](plugins/selection-translate/README.md)     | Translate selected English text into Vietnamese through one server RPC; the GPUI client calls it.                                             |
 
 ## Install a plugin
 
