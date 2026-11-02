@@ -29,6 +29,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 
 ## Avoid
 
+- Avoid adding Ponytail to prompt-translate while Ponytail is its own plugin. Reason: [ADR-0079](watchtower/decisions/ADR-0079-ponytail-plugin-over-extending-prompt-translate.md).
+- Avoid enabling the native `ponytail@ponytail` Claude plugin, or skills-only Ponytail with no bridge, while Ponytail keeps one mode per repo. Reason: [ADR-0080](watchtower/decisions/ADR-0080-disabled-native-ponytail-with-bridge-hook.md).
 - Avoid adding Electron windows or a Dock icon back to the release `Bachuc.app` while GPUI is the daily app. Reason: [ADR-0074](watchtower/decisions/ADR-0074-menu-bar-daemon-host-over-electron-windows.md).
 - Avoid a Decider backend inside `jev-evaluator` and a Rust port of `tier0` while the Decider probe targets a GPUI `DecisionService`. Reason: [ADR-0066](watchtower/decisions/ADR-0066-standalone-rust-decider-probe-over-jev-evaluator-backend.md).
 - Avoid editing "Paseo" to "Bachuc" in the locale files while the fork merges upstream. Reason: [ADR-0006](watchtower/decisions/ADR-0006-brand-transform-over-locale-edits.md).
