@@ -4,7 +4,7 @@
 
 - Title: Ponytail mode pill and global Claude install
 - Slug: 20261102-ponytail-mode-pill
-- Status: ACTIVE
+- Status: DONE
 - Updated: 2026-11-02
 
 ## Tracker
@@ -13,9 +13,9 @@ One row per TASK. Group ties together items that ship as one transaction.
 
 | Order | TASK                                   | Group | Status | Spec                                                                                                             | Deps               | Context                                        | Notes                                                             |
 | ----- | -------------------------------------- | ----- | ------ | ---------------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------- | ----------------------------------------------------------------- |
-| 1     | TASK-325 Ponytail server plugin        | A     | TODO   | [watchtower/tasks/TASK-325-ponytail-server-plugin.md](watchtower/tasks/TASK-325-ponytail-server-plugin.md)       | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Mode store, RPCs, daemon hook, bridge hook, installer.            |
-| 2     | TASK-326 GPUI Ponytail pill            | B     | TODO   | [watchtower/tasks/TASK-326-gpui-ponytail-pill.md](watchtower/tasks/TASK-326-gpui-ponytail-pill.md)               | TASK-325           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Starts after TASK-325; its registry test needs the plugin folder. |
-| 3     | TASK-327 Global install and live check | C     | TODO   | [watchtower/tasks/TASK-327-global-install-live-check.md](watchtower/tasks/TASK-327-global-install-live-check.md) | TASK-325, TASK-326 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Writes `~/.claude` and both Paseo homes; no repo source.          |
+| 1     | TASK-325 Ponytail server plugin        | A     | DONE   | [watchtower/tasks/TASK-325-ponytail-server-plugin.md](watchtower/tasks/TASK-325-ponytail-server-plugin.md)       | -                  | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Mode store, RPCs, daemon hook, bridge hook, installer.            |
+| 2     | TASK-326 GPUI Ponytail pill            | B     | DONE   | [watchtower/tasks/TASK-326-gpui-ponytail-pill.md](watchtower/tasks/TASK-326-gpui-ponytail-pill.md)               | TASK-325           | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Starts after TASK-325; its registry test needs the plugin folder. |
+| 3     | TASK-327 Global install and live check | C     | DONE   | [watchtower/tasks/TASK-327-global-install-live-check.md](watchtower/tasks/TASK-327-global-install-live-check.md) | TASK-325, TASK-326 | [watchtower/CONTEXT.md](watchtower/CONTEXT.md) | Writes `~/.claude` and both Paseo homes; no repo source.          |
 
 TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
@@ -35,7 +35,7 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Handoff
 
-- Next action: run `/watchtower implement`.
+- Next action: Hiep installs the plugin on release (Q-201), then reviews and merges `feat/ponytail-mode-pill`.
 
 ## Archive
 
