@@ -752,6 +752,12 @@ impl Sidebar {
         self.refresh(cx);
     }
 
+    fn collapse_all_projects(&mut self, cx: &mut Context<Self>) {
+        let ids = self.client.read(cx).projects().iter().map(|p| p.id.clone());
+        self.prefs.view.collapsed_projects.extend(ids);
+        self.display_changed(cx);
+    }
+
     fn toggle_pinned(&mut self, cx: &mut Context<Self>) {
         self.prefs.view.pinned_collapsed = !self.prefs.view.pinned_collapsed;
         self.save_prefs();
@@ -2987,6 +2993,17 @@ fn display_menu(
             sub
         }
     });
+
+    if grouping == Grouping::Project && !snapshot.projects.is_empty() {
+        menu = menu.separator().item(display_option(
+            "Collapse all",
+            None,
+            false,
+            view,
+            cx,
+            |this, cx| this.collapse_all_projects(cx),
+        ));
+    }
 
     if project_filter_visible(snapshot.projects.len()) {
         let value = project_filter_value(&prefs.view.project_filter, &snapshot.projects);
