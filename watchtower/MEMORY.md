@@ -29,6 +29,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 
 ## Avoid
 
+- Avoid an Off default for the Ponytail pill while Hiep wants Ponytail on every agent. Reason: [ADR-0081](watchtower/decisions/ADR-0081-ponytail-full-default-over-off.md).
 - Avoid adding Ponytail to prompt-translate while Ponytail is its own plugin. Reason: [ADR-0079](watchtower/decisions/ADR-0079-ponytail-plugin-over-extending-prompt-translate.md).
 - Avoid enabling the native `ponytail@ponytail` Claude plugin, or skills-only Ponytail with no bridge, while Ponytail keeps one mode per repo. Reason: [ADR-0080](watchtower/decisions/ADR-0080-disabled-native-ponytail-with-bridge-hook.md).
 - Avoid adding Electron windows or a Dock icon back to the release `Bachuc.app` while GPUI is the daily app. Reason: [ADR-0074](watchtower/decisions/ADR-0074-menu-bar-daemon-host-over-electron-windows.md).

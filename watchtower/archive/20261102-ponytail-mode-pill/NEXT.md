@@ -4,7 +4,7 @@
 
 - Title: Ponytail mode pill and global Claude install
 - Slug: 20261102-ponytail-mode-pill
-- Status: DONE
+- Status: ARCHIVED
 - Updated: 2026-11-02
 
 ## Tracker
@@ -39,4 +39,4 @@ TASK Status labels: TODO, IN PROGRESS, BLOCKED, DONE.
 
 ## Archive
 
-- None.
+- Archived: 2026-11-02 -> watchtower/archive/20261102-ponytail-mode-pill/
