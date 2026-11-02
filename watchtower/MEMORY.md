@@ -29,6 +29,8 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 
 ## Avoid
 
+- Avoid adding Ponytail to prompt-translate while Ponytail is its own plugin. Reason: [ADR-0079](watchtower/decisions/ADR-0079-ponytail-plugin-over-extending-prompt-translate.md).
+- Avoid enabling the native `ponytail@ponytail` Claude plugin, or skills-only Ponytail with no bridge, while Ponytail keeps one mode per repo. Reason: [ADR-0080](watchtower/decisions/ADR-0080-disabled-native-ponytail-with-bridge-hook.md).
 - Avoid adding Electron windows or a Dock icon back to the release `Bachuc.app` while GPUI is the daily app. Reason: [ADR-0074](watchtower/decisions/ADR-0074-menu-bar-daemon-host-over-electron-windows.md).
 - Avoid a Decider backend inside `jev-evaluator` and a Rust port of `tier0` while the Decider probe targets a GPUI `DecisionService`. Reason: [ADR-0066](watchtower/decisions/ADR-0066-standalone-rust-decider-probe-over-jev-evaluator-backend.md).
 - Avoid editing "Paseo" to "Bachuc" in the locale files while the fork merges upstream. Reason: [ADR-0006](watchtower/decisions/ADR-0006-brand-transform-over-locale-edits.md).
@@ -470,3 +472,4 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Use next time: keep a vendor rule in a public pure function and test it from a workspace crate, as `match_lead_label` is tested in `crates/timeline/src/answer_labels.rs`.
 - Learned: in a check app, the AX tree and the screenshot lag one frame, so a click on an index read before the last action hits a shifted element (two clicks opened Board). A covered background window also stops drawing, and scroll events do not move the timeline.
 - Use next time: press `End`, then read the AX state, then click, one action per read. Plan long-answer screen checks as several short sample answers, and back up `sidebar.json` and `prompt-history.json` before the check app starts.
+- 2026-11-02: A GPUI composer pill exposes its title, not its label, as the AX name. With Stage Manager on, a background check app screenshots only as a thumbnail, so a UI checker cannot read pill label text by sight; cover labels with a unit test.

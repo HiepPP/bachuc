@@ -545,6 +545,7 @@ dependencies = [
  "bachuc-plugin-jev-orchestrator",
  "bachuc-plugin-next-prompt-actions",
  "bachuc-plugin-plugins-nav",
+ "bachuc-plugin-ponytail",
  "bachuc-plugin-prompt-translate",
  "bachuc-plugin-selection-translate",
  "bachuc-plugin-skill-pins",
@@ -801,6 +802,18 @@ dependencies = [
  "bachuc-icons",
  "bachuc-plugin-host",
  "gpui-kit",
+]
+
+[[package]]
+name = "bachuc-plugin-ponytail"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bachuc-client",
+ "bachuc-plugin-host",
+ "gpui-kit",
+ "log",
+ "serde_json",
 ]
 
 [[package]]

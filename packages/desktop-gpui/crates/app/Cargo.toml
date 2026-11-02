@@ -25,6 +25,7 @@ bachuc-plugin-idle-runtime-closer = { path = "../../plugins/idle-runtime-closer"
 bachuc-plugin-jev-orchestrator = { path = "../../plugins/jev-orchestrator" }
 bachuc-plugin-next-prompt-actions = { path = "../../plugins/next-prompt-actions" }
 bachuc-plugin-plugins-nav = { path = "../../plugins/plugins-nav" }
+bachuc-plugin-ponytail = { path = "../../plugins/ponytail" }
 bachuc-plugin-prompt-translate = { path = "../../plugins/prompt-translate" }
 bachuc-plugin-selection-translate = { path = "../../plugins/selection-translate" }
 bachuc-plugin-skill-pins = { path = "../../plugins/skill-pins" }
