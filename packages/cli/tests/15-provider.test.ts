@@ -63,9 +63,14 @@ const EXPECTED_CLAUDE_MODELS = [
     descriptionFragment: "Previous release",
   },
   {
+    id: "claude-fable-5-2",
+    model: "Fable 5.2",
+    descriptionFragment: "Most powerful",
+  },
+  {
     id: "claude-fable-5-1",
     model: "Fable 5.1",
-    descriptionFragment: "Most powerful",
+    descriptionFragment: "Previous release",
   },
   {
     id: "claude-fable-5",

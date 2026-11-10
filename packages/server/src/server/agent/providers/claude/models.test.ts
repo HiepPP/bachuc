@@ -39,7 +39,7 @@ async function createClaudeConfigDirWithRawSettings(settings: string): Promise<s
   return configDir;
 }
 
-function createCatalogClient(claudeCodeVersion = "2.1.293"): ClaudeAgentClient {
+function createCatalogClient(claudeCodeVersion = "2.1.321"): ClaudeAgentClient {
   return new ClaudeAgentClient({
     logger: createTestLogger(),
     resolveVersion: async () => claudeCodeVersion,
@@ -52,6 +52,7 @@ describe("getClaudeModels", () => {
     expect(models.map((m) => m.id)).toEqual([
       "claude-opus-5-5",
       "claude-opus-5",
+      "claude-fable-5-2",
       "claude-fable-5-1",
       "claude-fable-5",
       "claude-fable-5[1m]",
@@ -87,6 +88,7 @@ describe("getClaudeModels", () => {
       new Map([
         ["claude-opus-5-5", 1_000_000],
         ["claude-opus-5", 1_000_000],
+        ["claude-fable-5-2", 1_000_000],
         ["claude-fable-5-1", 1_000_000],
         ["claude-fable-5", 1_000_000],
         ["claude-fable-5[1m]", 1_000_000],
@@ -129,6 +131,12 @@ describe("getClaudeModels", () => {
     expect(getClaudeModels("2.1.292").map((model) => model.id)).not.toContain("claude-haiku-5-5");
     expect(getClaudeModels("2.1.293").map((model) => model.id)).toContain("claude-haiku-5-5");
     expect(getClaudeModels("2.1.293").find((model) => model.isDefault)?.id).toBe("claude-opus-5-5");
+  });
+
+  it("gates Fable 5.2 on Claude Code 2.1.321 without changing the default", () => {
+    expect(getClaudeModels("2.1.319").map((model) => model.id)).not.toContain("claude-fable-5-2");
+    expect(getClaudeModels("2.1.321").map((model) => model.id)).toContain("claude-fable-5-2");
+    expect(getClaudeModels("2.1.321").find((model) => model.isDefault)?.id).toBe("claude-opus-5-5");
   });
 
   it("derives thinking options from model effort capabilities", () => {
@@ -200,6 +208,7 @@ describe("getClaudeModels", () => {
     ["claude-sonnet-5-20260101", true, "high"],
     ["claude-fable-5", false, "high"],
     ["claude-fable-5-1", false, "high"],
+    ["claude-fable-5-2", false, "high"],
     ["claude-haiku-5-5", true, "medium"],
     ["claude-haiku-5-5-20261007", true, "medium"],
     ["claude-haiku-4-5", false, undefined],
@@ -592,6 +601,23 @@ describe("Claude Fable 5.1 catalog", () => {
   });
 });
 
+describe("Claude Fable 5.2 catalog", () => {
+  it("offers one Fable 5.2 entry with a 1M context window", () => {
+    const fable52Models = getClaudeModels()
+      .filter((model) => model.id.startsWith("claude-fable-5-2"))
+      .map(({ id, label, contextWindowMaxTokens }) => ({ id, label, contextWindowMaxTokens }));
+
+    expect(fable52Models).toEqual([
+      { id: "claude-fable-5-2", label: "Fable 5.2", contextWindowMaxTokens: 1_000_000 },
+    ]);
+  });
+
+  it("resolves suffixed and dated Fable 5.2 IDs to the catalog entry", () => {
+    expect(findClaudeModel("claude-fable-5-2[1m]")?.id).toBe("claude-fable-5-2");
+    expect(findClaudeModel("claude-fable-5-2-20261109")?.id).toBe("claude-fable-5-2");
+  });
+});
+
 describe("Claude Opus 5.5 catalog", () => {
   it("offers one Opus 5.5 entry with a 1M context window", () => {
     const opus55Models = getClaudeModels()
@@ -722,5 +748,6 @@ describe("claudeManifestModelSupportsFastMode", () => {
     expect(claudeManifestModelSupportsFastMode("claude-sonnet-5")).toBe(false);
     expect(claudeManifestModelSupportsFastMode("claude-fable-5")).toBe(false);
     expect(claudeManifestModelSupportsFastMode("claude-fable-5-1")).toBe(false);
+    expect(claudeManifestModelSupportsFastMode("claude-fable-5-2")).toBe(false);
   });
 });
