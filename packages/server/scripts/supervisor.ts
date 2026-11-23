@@ -358,9 +358,16 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
       requestRestart(reason);
     });
 
-    child.on("error", (error) => {
+    child.on("error", (error: NodeJS.ErrnoException) => {
       lifecycleFailed = true;
-      log(`Worker spawn failed: ${error.message}`);
+      // ENOENT here means the runtime binary is gone, usually because the app bundle was
+      // moved or deleted under a running daemon. Retrying cannot help, so say so and exit.
+      const message =
+        error.code === "ENOENT"
+          ? `Worker spawn failed: ${spawnSpec?.command ?? process.execPath} is missing. The app was moved or deleted; reinstall it. Supervisor exiting without retry.`
+          : `Worker spawn failed: ${error.message}`;
+      process.stderr.write(`[${options.name}] ${message}\n`);
+      writeLifecycleLog(message, { level: "error", code: error.code ?? null });
       exitSupervisor(1);
     });
 
