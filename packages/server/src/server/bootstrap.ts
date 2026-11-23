@@ -956,7 +956,8 @@ export async function createPaseoDaemon(
     agentStorage,
   );
   await agentStorage.initialize();
-  logger.info({ elapsed: elapsed() }, "Agent storage initialized");
+  const interruptedAgents = await agentStorage.resetInterruptedRuns();
+  logger.info({ elapsed: elapsed(), interruptedAgents }, "Agent storage initialized");
   await bootstrapWorkspaceRegistries({
     serverId,
     paseoHome: config.paseoHome,
