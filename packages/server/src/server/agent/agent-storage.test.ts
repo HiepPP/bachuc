@@ -177,6 +177,39 @@ describe("AgentStorage", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  test("resetInterruptedRuns marks runs cut off by a crash as idle on disk", async () => {
+    for (const [id, lastStatus] of [
+      ["agent-running", "running"],
+      ["agent-initializing", "initializing"],
+      ["agent-error", "error"],
+      ["agent-closed", "closed"],
+    ] as const) {
+      await writeJsonFileAtomic(path.join(storagePath, "tmp-project", `${id}.json`), {
+        id,
+        provider: "claude",
+        cwd: "/tmp/project",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+        lastStatus,
+      });
+    }
+
+    await storage.initialize();
+    expect(await storage.resetInterruptedRuns()).toBe(2);
+    await storage.flush();
+
+    const reloaded = new AgentStorage(storagePath, logger);
+    const statuses = Object.fromEntries(
+      (await reloaded.list()).map((record) => [record.id, record.lastStatus]),
+    );
+    expect(statuses).toEqual({
+      "agent-running": "idle",
+      "agent-initializing": "idle",
+      "agent-error": "error",
+      "agent-closed": "closed",
+    });
+  });
+
   test("applySnapshot persists configs and snapshot metadata", async () => {
     await storage.applySnapshot(
       createManagedAgent({

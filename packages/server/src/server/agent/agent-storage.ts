@@ -133,6 +133,18 @@ export class AgentStorage {
     await this.load();
   }
 
+  /**
+   * No turn survives a daemon restart, so a record still saved as running or initializing
+   * was cut off by a crash. Call once at startup, before any agent loads.
+   */
+  async resetInterruptedRuns(): Promise<number> {
+    const interrupted = (await this.load()).filter(
+      (record) => record.lastStatus === "running" || record.lastStatus === "initializing",
+    );
+    await Promise.all(interrupted.map((record) => this.upsert({ ...record, lastStatus: "idle" })));
+    return interrupted.length;
+  }
+
   async list(): Promise<StoredAgentRecord[]> {
     await this.load();
     return Array.from(this.cache.values());
