@@ -5,7 +5,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 
-async function runWorker(worker: string, publicationDelay = 0) {
+async function runWorker(
+  worker: string,
+  publicationDelay = 0,
+  resolveWorkerSpawnSpec = "undefined",
+) {
   const home = await mkdtemp(path.join(tmpdir(), "paseo-readiness-"));
   const workerPath = path.join(home, "worker.mjs");
   const runnerPath = path.join(home, "runner.mjs");
@@ -26,6 +30,7 @@ async function runWorker(worker: string, publicationDelay = 0) {
         await record(listen);
       },
       onWorkerExit: () => record(null),
+      resolveWorkerSpawnSpec: ${resolveWorkerSpawnSpec},
     });
   `,
   );
@@ -97,6 +102,23 @@ test("a replacement worker must independently reach ready", async () => {
   `);
   expect(result.code).toBe(1);
   expect(result.events, result.output).toEqual(["test-endpoint", null, null]);
+});
+
+test("a crash restart with a missing worker binary exits once with a clear error", async () => {
+  // The first spawn uses the normal fork; the restart points at a deleted app bundle.
+  const result = await runWorker(
+    `
+    process.send({ type: "paseo:ready", listen: "test-endpoint", serverId: "srv_test" }, () => process.exit(1));
+  `,
+    0,
+    `(() => { let spawns = 0; return () => (spawns++ === 0 ? null : { command: "/missing/Bachuc Helper", args: [] }); })()`,
+  );
+  expect(result.code).toBe(1);
+  expect(result.output).toContain("Worker crashed (code 1). Restarting worker...");
+  expect(result.output).toContain(
+    "Worker spawn failed: /missing/Bachuc Helper is missing. The app was moved or deleted; reinstall it. Supervisor exiting without retry.",
+  );
+  expect(result.output.match(/Worker spawn failed/g)).toHaveLength(1);
 });
 
 test("exit clears publication after an in-flight ready write", async () => {
