@@ -58,7 +58,9 @@ export class PluginSessionSocket {
     if (this.readyState === 3) return;
     this.readyState = 3;
     try {
-      this.child.send({ type: "paseo_close" });
+      // Without a callback, Node reports a failed send (EPIPE) as an "error" event on the child,
+      // which nothing handles, so a dead plugin process would crash the daemon worker.
+      this.child.send({ type: "paseo_close" }, () => {});
     } catch {
       // The child has already gone; local session cleanup still has to run.
     }
